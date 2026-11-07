@@ -12,9 +12,7 @@
     "supported": true
   },
   "ownership_complete": true,
-  "sources": [
-    "src/modules/runtime-web/module_adapter.c"
-  ],
+  "sources": [],
   "go_sources": [
     "server-go/modules/runtime-web/policy/status.go",
     "server-go/modules/runtime-web/runtime_web.go"

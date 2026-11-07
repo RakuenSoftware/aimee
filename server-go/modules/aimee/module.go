@@ -30,8 +30,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // This module's PrincipalRef is declared in serve.go, beside the store's
@@ -49,16 +49,16 @@ import (
 // the exchange.
 type Capability interface {
 	// Stages are the bus stages this capability serves.
-	Stages() []bus.ModuleStage
+	Stages() []ring.ModuleStage
 	// Handle serves one invocation for a stage this capability advertised.
-	Handle(bus.ModuleInvocation, []byte) ([]byte, bus.ModuleStatus)
+	Handle(ring.ModuleInvocation, []byte) ([]byte, ring.ModuleStatus)
 }
 
 // Module dispatches each bus invocation to the capability that advertised its
 // stage.
 type Module struct {
 	byStage map[uint32]Capability
-	stages  []bus.ModuleStage
+	stages  []ring.ModuleStage
 }
 
 // ErrStageConflict is two capabilities advertising one stage.
@@ -100,18 +100,18 @@ func New(capabilities ...Capability) (*Module, error) {
 // declared for `aimee` in src/modules/process-contracts.json exactly: a stage
 // declared there and not advertised here is never available, and every call to
 // it returns CAPABILITY_ABSENT while the module runs normally.
-func (m *Module) Stages() []bus.ModuleStage { return m.stages }
+func (m *Module) Stages() []ring.ModuleStage { return m.stages }
 
 // Handle routes one invocation to the capability owning its stage.
-func (m *Module) Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func (m *Module) Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	// Observe cancellation before dispatch, so a cancelled request for an
 	// unknown stage has the same outcome as a cancelled well-formed one.
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	capability, served := m.byStage[invocation.StageID]
 	if !served {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	return capability.Handle(invocation, request)
 }

@@ -3,7 +3,6 @@
 #define DEC_DELEGATE_DRIVER_H 1
 
 #include "agent_types.h"
-#include "agent_protocol.h"
 
 struct cJSON;
 
@@ -36,14 +35,10 @@ typedef struct
  *
  * Each driver implements:
  *   build_url        — construct the endpoint URL from the agent config
- *   build_request    — produce the JSON request body
- *   parse_response   — parse a JSON response body into parsed_response_t
- *   build_tools      — return a provider-specific tools JSON array (caller frees)
  *   get_caps         — fill capability metadata for this agent/model
  *
  * All functions may be NULL; if so, a fallback behaviour applies:
  *   build_url   NULL → use agent->endpoint + "/chat/completions"
- *   build_tools NULL → use build_tools_array() (OpenAI format)
  *   get_caps    NULL → DRIVER_CAP_TOOL_CALLS | DRIVER_CAP_STREAMING, DRIVER_CTX_LARGE
  */
 typedef struct delegate_driver
@@ -54,19 +49,10 @@ typedef struct delegate_driver
     * Returns 0 on success, -1 on error. */
    int (*build_url)(const agent_t *agent, char *url, size_t url_len);
 
-   /* Build the request JSON body.
-    * messages: conversation history (caller owns)
-    * tools:    tools array from build_tools() (caller owns)
-    * Returns a new cJSON object (caller must cJSON_Delete). */
-   struct cJSON *(*build_request)(const agent_t *agent, struct cJSON *messages, struct cJSON *tools,
-                                  const char *system_prompt, int max_tokens, double temperature);
-
-   /* Parse the response JSON (root) into out.
-    * body is the raw response string (may be needed for streaming formats). */
-   void (*parse_response)(struct cJSON *root, const char *body, parsed_response_t *out);
+   /* Requests and responses use the canonical translation boundaries. The
+    * provider profile cannot install a native JSON builder/parser bypass. */
 
    /* Return a new tools JSON array in provider format (caller must cJSON_Delete). */
-   struct cJSON *(*build_tools)(void);
 
    /* Fill capability metadata for agent/model. */
    void (*get_caps)(const agent_t *agent, driver_caps_t *caps);

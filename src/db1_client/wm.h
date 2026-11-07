@@ -5,8 +5,7 @@
  * The implementation used to be src/modules/db1/wm.c against SQLite. That went
  * with the C module: the family is served from
  * server-go/modules/aimee/families/conversation_wm.go against PostgreSQL, and
- * these declarations are the bus client for it. src/tests/support/wm_mock.c is
- * still the in-memory stand-in for tests.
+ * these declarations are the bus client for it.
  */
 #ifndef DEC_DB1_WM_H
 #define DEC_DB1_WM_H 1
@@ -46,18 +45,6 @@ extern "C"
 
    /* List entries for a session (optionally filtered by category). Returns count. */
    int db1_wm_list(const char *session_id, const char *category, wm_entry_t *out, int max);
-
-   /* Search working-memory keys/values and return distinct session IDs. */
-   int db1_wm_search_session_ids(const char *query, char out[][WM_SESSION_ID_LEN], int max);
-
-   /* Delete a specific key. Returns 0 on success. */
-   int db1_wm_delete(const char *session_id, const char *key);
-
-   /* Clear all working memory for a session. Returns 0 on success. */
-   int db1_wm_clear(const char *session_id);
-
-   /* Remove expired entries across all sessions. Returns count removed. */
-   int db1_wm_gc(void);
 
    /* Assemble working memory into a context string for the agent.
     * Returns malloc'd string (caller frees), or NULL if session has no entries. */

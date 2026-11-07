@@ -4,14 +4,19 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // DefaultTimeout bounds one operation's database work when the invocation
 // carries no deadline of its own.
 const DefaultTimeout = 2 * time.Second
+
+// CanonicalHistoryTimeout bounds source-complete history projections/imports.
+// Transport deadlines remain authoritative and may shorten this budget.
+const CanonicalHistoryTimeout = 30 * time.Second
 
 // OpFunc runs one operation. It returns the status the caller sees plus the
 // reply fields. A returned error is the module's own failure -- a broken query,
@@ -31,6 +36,8 @@ type OpDBFunc func(ctx context.Context, db DB, fields []string) (uint32, []strin
 
 // Op is one operation in a family.
 type Op struct {
+	// Timeout is an explicitly selected operation budget; zero uses DefaultTimeout.
+	Timeout time.Duration
 	// HostOnly restricts private state mutation to the authenticated C host bus principal.
 	HostOnly bool
 	// Name is the catalog's name for this op, used only in logs.
@@ -75,47 +82,80 @@ type Family struct {
 	// reads. It also wraps RunDB transactions, so independently hosted callers
 	// obey the same domain invariant. Read-only operations remain concurrent.
 	TransactionLockSQL string
+	// Changed, when set, is called with the operation's name after one of its
+	// transactions commits having written something. A transaction that matched
+	// no row wrote nothing and calls nothing, so a consumer's own housekeeping
+	// sweep that found nothing to do cannot wake that consumer again. The family
+	// announces its changes through this (ouroboros ring D14) instead of its
+	// consumers asking on a timer.
+	Changed func(op string)
+	// Noted, when set, receives each topic an operation passed to Note, once the
+	// operation succeeded and its writes committed. It announces a narrower
+	// event than Changed: one an operation decides it caused, such as a queued
+	// learning projection, rather than "this family wrote".
+	Noted func(topic string)
+}
+
+type notesKey struct{}
+
+type notes struct {
+	mu     sync.Mutex
+	topics map[string]struct{}
+}
+
+// Note records that the running operation caused topic, for its family's Noted
+// hook after it commits. Outside an operation with a hook it does nothing.
+func Note(ctx context.Context, topic string) {
+	if n, ok := ctx.Value(notesKey{}).(*notes); ok {
+		n.mu.Lock()
+		n.topics[topic] = struct{}{}
+		n.mu.Unlock()
+	}
 }
 
 // Handler builds the bus handler for this family against a database.
-func (f Family) Handler(db DB) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+func (f Family) Handler(db DB) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 		if invocation.StageID != f.Stage {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if db == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		op, fields, ok := DecodeRequest(frame)
 		if !ok {
 			// A malformed frame is not a question, so it is refused at the bus
 			// level. Everything the module can actually answer is answered
 			// in-band, below, with a status.
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		spec, known := f.Ops[op]
 		if !known || (spec.HostOnly && invocation.PrincipalRef != 0) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if !ValidFields(fields) {
-			return Status(StatusInvalid), bus.ModuleStatusOK
+			return Status(StatusInvalid), ring.ModuleStatusOK
 		}
 		if spec.Args >= 0 && len(fields) != spec.Args {
-			return Status(StatusInvalid), bus.ModuleStatusOK
+			return Status(StatusInvalid), ring.ModuleStatusOK
 		}
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
-		timeout := invocation.Remaining(DefaultTimeout)
+		limit := spec.Timeout
+		if limit <= 0 {
+			limit = DefaultTimeout
+		}
+		timeout := invocation.Remaining(limit)
 		if timeout <= 0 {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
 		status, reply, err := f.run(ctx, db, spec, fields)
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		if err != nil {
 			// The error text is for this process's log, never the wire: a driver
@@ -146,9 +186,9 @@ func (f Family) Handler(db DB) bus.ModuleHandler {
 			// -- and it costs C callers nothing, since call_stage returns -1
 			// for a transport failure and for a refused status alike.
 			if errors.Is(err, ErrStoreUnavailable) {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
-			return Status(StatusFailed), bus.ModuleStatusOK
+			return Status(StatusFailed), ring.ModuleStatusOK
 		}
 		// A reply that is not a whole number of rows is a contract break, and
 		// the client end of it is unreadable: call_stage treats an OK reply
@@ -161,9 +201,9 @@ func (f Family) Handler(db DB) bus.ModuleHandler {
 		if status == StatusOK && spec.Cells > 0 && len(reply)%spec.Cells != 0 {
 			log.Printf("aimee: %s/%s answered with %d cells, not a multiple of the %d it declares",
 				f.Name, spec.Name, len(reply), spec.Cells)
-			return Status(StatusFailed), bus.ModuleStatusOK
+			return Status(StatusFailed), ring.ModuleStatusOK
 		}
-		return EncodeReply(status, reply), bus.ModuleStatusOK
+		return EncodeReply(status, reply), ring.ModuleStatusOK
 	}
 }
 
@@ -176,6 +216,20 @@ type statementTagger interface {
 }
 
 func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint32, []string, error) {
+	if f.Noted == nil {
+		return f.runOp(ctx, db, spec, fields)
+	}
+	n := &notes{topics: map[string]struct{}{}}
+	status, reply, err := f.runOp(context.WithValue(ctx, notesKey{}, n), db, spec, fields)
+	if err == nil && status == StatusOK {
+		for topic := range n.topics {
+			f.Noted(topic)
+		}
+	}
+	return status, reply, err
+}
+
+func (f Family) runOp(ctx context.Context, db DB, spec Op, fields []string) (uint32, []string, error) {
 	// Everything this operation runs is attributed to it, including inside a
 	// transaction: the store sees "runtime_state_get did this", not "some
 	// connection did this".
@@ -184,6 +238,10 @@ func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint3
 	}
 	if f.TransactionLockSQL != "" {
 		db = transactionLockDB{DB: db, sql: f.TransactionLockSQL}
+	}
+	if f.Changed != nil {
+		name, changed := spec.Name, f.Changed
+		db = changeWatchDB{DB: db, changed: func() { changed(name) }}
 	}
 	if spec.RunDB != nil {
 		return spec.RunDB(ctx, db, fields)
@@ -221,6 +279,43 @@ func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint3
 		return 0, nil, err
 	}
 	return status, reply, nil
+}
+
+// wroteSQL asks whether the transaction has written anything. PostgreSQL
+// assigns a transaction id at its first write, and not for reads, advisory locks
+// or an UPDATE that matched no row.
+const wroteSQL = "SELECT pg_catalog.txid_current_if_assigned() IS NOT NULL"
+
+type changeWatchDB struct {
+	DB
+	changed func()
+}
+
+func (d changeWatchDB) Begin(ctx context.Context) (Tx, error) {
+	tx, err := d.DB.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &changeWatchTx{Tx: tx, changed: d.changed}, nil
+}
+
+type changeWatchTx struct {
+	Tx
+	changed func()
+}
+
+func (t *changeWatchTx) Commit(ctx context.Context) error {
+	wrote := true // a question that cannot be answered announces: one extra sweep is cheap
+	if row := t.Tx.QueryRow(ctx, wroteSQL); row == nil || row.Scan(&wrote) != nil {
+		wrote = true
+	}
+	if err := t.Tx.Commit(ctx); err != nil {
+		return err
+	}
+	if wrote {
+		t.changed()
+	}
+	return nil
 }
 
 type transactionLockDB struct {

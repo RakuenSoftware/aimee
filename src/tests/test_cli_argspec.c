@@ -1093,6 +1093,9 @@ static const sample_t SAMPLES[] = {
     {"trajectory.export", {"s1", "--max-result-bytes", "99", NULL}},
     {"trajectory.batch", {NULL}},
     {"trajectory.batch", {"--tasks", "c.jsonl", NULL}},
+    {"trajectory.batch", {"--tasks", "c.jsonl", "--session", "explicit", NULL}},
+    {"trajectory.batch", {"--tasks", "c.jsonl", "--session=explicit", NULL}},
+    {"trajectory.batch", {"--tasks", "c.jsonl", "--session", "", NULL}},
     {"trajectory.batch", {"--tasks", "c.jsonl", "--no-compress", NULL}},
     {"trajectory.batch", {"--tasks", "c.jsonl", "--out", "d", NULL}},
     {"trajectory.batch", {"--tasks", "c.jsonl", "--max-result-bytes", "0", NULL}},
@@ -2081,6 +2084,10 @@ static const sample_t SAMPLES[] = {
     {"provider.set", {"-x", NULL}},
     {"workspace.add", {NULL}},
     {"workspace.add", {"/p", NULL}},
+    {"workspace.add", {".", NULL}},
+    {"workspace.add", {"../sibling with spaces", "--no-scan", NULL}},
+    {"workspace.add", {"--provider", "mirror", ".", "--remote", "r", "--no-scan", NULL}},
+    {"workspace.add", {"C:\\virtual\\client", "--provider", "detached", NULL}},
     {"workspace.add", {"/p", "--provider", "mirror", NULL}},
     {"workspace.add", {"/p", "--no-scan", NULL}},
     {"workspace.add", {"/p", "--remote", "r", "--head", "h", NULL}},
@@ -2219,6 +2226,27 @@ static void check_same(const sample_t *s)
    cJSON_Delete(spec_doc);
 }
 
+static void test_trajectory_session_context(void)
+{
+   sample_t sample = {"trajectory.batch", {"--tasks", "c.jsonl", NULL}};
+   for (int mode = 0; mode < 3; mode++)
+   {
+      if (mode == 0)
+         unsetenv("AIMEE_SESSION_ID");
+      else
+         setenv("AIMEE_SESSION_ID", mode == 1 ? "" : "env-session-id", 1);
+      check_same(&sample);
+      char *argv[] = {"--tasks", "c.jsonl"};
+      cJSON *request = marshal_request(sample.method, 2, argv);
+      const char *session =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "session_id"));
+      if (!session || strcmp(session, mode == 2 ? "env-session-id" : "default"))
+         fail("trajectory.batch", "active/default session context was lost");
+      cJSON_Delete(request);
+   }
+   setenv("AIMEE_SESSION_ID", "env-session-id", 1);
+}
+
 /* ---- spec validation ---------------------------------------------------- */
 
 static void test_refuses_what_it_cannot_build(void)
@@ -2230,6 +2258,9 @@ static void test_refuses_what_it_cannot_build(void)
        "{\"fields\":[{\"json\":\"x\",\"from\":\"read_file\",\"path\":\"/etc/passwd\"}]}",
        "{\"fields\":[{\"json\":\"x\",\"from\":\"env\",\"var\":\"HOME\"}]}",
        "{\"fields\":[{\"json\":\"x\",\"from\":\"flag\",\"flag\":\"x\",\"type\":\"regex\"}]}",
+       "{\"fields\":[{\"json\":\"x\",\"from\":\"const\",\"value\":true}]}",
+       "{\"fields\":[{\"json\":\"x\",\"from\":\"const\",\"type\":\"const_bool\"}]}",
+       "{\"fields\":[{\"json\":\"x\",\"from\":\"const\",\"type\":\"const_value\",\"value\":7}]}",
        "{\"fields\":[{\"json\":\"x\",\"from\":\"flag\"}]}",       /* no flag named   */
        "{\"fields\":[{\"json\":\"x\",\"from\":\"positional\"}]}", /* no index        */
        "{\"fields\":[{\"from\":\"flag\",\"flag\":\"x\"}]}",       /* no json name    */
@@ -2238,6 +2269,36 @@ static void test_refuses_what_it_cannot_build(void)
        "{\"bool_flags\":\"json\"}",     /* bools not array */
        "{\"fields\":[{\"json\":\"x\",\"from\":\"positional\",\"index\":-1}]}",
        "{\"fields\":[{\"json\":\"x\",\"from\":\"positional\",\"index\":9999}]}",
+       "{\"fields\":[{\"json\":\"wrong\",\"from\":\"positional\",\"index\":0,\"type\":\"canonical_"
+       "request\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"flag\",\"flag\":\"prompt\",\"type\":"
+       "\"canonical_request\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"max_tokens_index\":-1}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"max_tokens_index\":16}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"max_tokens_index\":0.5}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"max_tokens_index\":\"1\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"temperature\":-1}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"temperature\":3}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"temperature\":\"0\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0.5,\"type\":"
+       "\"canonical_request\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"default\":7}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"prefix\":\"foreign\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"from_end\":true}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"temperature\":null}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"max_tokens_index\":null}]}",
        "[]",
        "\"none\"",
        NULL,
@@ -2399,6 +2460,7 @@ int main(void)
    test_every_shipped_spec_is_sampled();
    for (size_t i = 0; i < sizeof(SAMPLES) / sizeof(SAMPLES[0]); i++)
       check_same(&SAMPLES[i]);
+   test_trajectory_session_context();
    test_refuses_what_it_cannot_build();
    test_positional_join_is_not_truncated();
    test_number_is_refused_not_coerced();

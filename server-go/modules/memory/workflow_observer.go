@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Recognize literal invocations, without executing shell text. Quoted arguments
@@ -151,14 +151,14 @@ func workflowWorkspace(cwd string, roots []string) string {
 	return ""
 }
 
-func handleWorkflowObserver(operation string, args commandArgs) ([]byte, bus.ModuleStatus) {
-	fail := func(message string) ([]byte, bus.ModuleStatus) {
+func handleWorkflowObserver(operation string, args commandArgs) ([]byte, ring.ModuleStatus) {
+	fail := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(map[string]any{"status": "error", "output": "error: " + message})
 	}
 	if operation == "workflow-result" {
 		var request commandArgs
 		if json.Unmarshal(args["request"], &request) != nil || request.stringOr("workspace", "") == "" || request.stringOr("signal_type", "") == "" || request.stringOr("rule", "") == "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var receipt commandArgs
 		if json.Unmarshal([]byte(args.stringOr("receipt", "")), &receipt) != nil || receipt.stringOr("status", "") != "ok" {
@@ -173,19 +173,19 @@ func handleWorkflowObserver(operation string, args commandArgs) ([]byte, bus.Mod
 	}
 	mode := args.stringOr("mode", "")
 	if mode != "observe" && mode != "explicit" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	var roots []string
 	if json.Unmarshal(args["workspaces"], &roots) != nil || len(roots) > 256 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	cwd := args.stringOr("cwd", "")
 	if len(cwd) > 4096 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	for _, root := range roots {
 		if len(root) > 4096 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	var workspace, signal, rule, session string
@@ -193,7 +193,7 @@ func handleWorkflowObserver(operation string, args commandArgs) ([]byte, bus.Mod
 	if mode == "observe" {
 		command := args.stringOr("command", "")
 		if len(command) > 64*1024 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		signal, rule = parseWorkflowSignal(command)
 		session = "post_tool_update"

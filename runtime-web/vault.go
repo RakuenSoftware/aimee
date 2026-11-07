@@ -12,8 +12,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/JBailes/aimee/server-go/thinclient"
 	"io"
-	"net"
 	"net/http"
 	"time"
 )
@@ -44,12 +44,8 @@ func (s *server) v1RequestWebuserTCapability(ctx context.Context, username, meth
 	}
 	sock := s.aimeeHTTPSockPathFor(path)
 	client := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, "unix", sock)
-			},
-		},
+		Timeout:   timeout,
+		Transport: &thinclient.Transport{Endpoint: "unix:" + sock},
 	}
 	var rdr io.Reader
 	if body != nil {

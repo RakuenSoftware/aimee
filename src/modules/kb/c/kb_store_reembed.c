@@ -15,7 +15,7 @@
 #include "artifacts.h"        /* kb_store_curator_reembed_all */
 #include "evidence_vectors.h" /* kb_store_evidence_reembed_all */
 #include "kb_payload.h"       /* kb_store_kb_pdf_reembed_project */
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <stdarg.h>
 #include <stdlib.h>

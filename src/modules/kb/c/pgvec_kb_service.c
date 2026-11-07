@@ -10,11 +10,6 @@ int pgvec_kb_service_ensure_kb_collection(int dim)
    return pgvec_ensure_index(PGVEC_KB_TABLE, dim, 0);
 }
 
-int pgvec_kb_service_ensure_memory_collection(int dim)
-{
-   return pgvec_ensure_index(PGVEC_MEMORY_TABLE, dim, 0);
-}
-
 int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn mem_exists,
                                        pgvec_kb_service_record_exists_fn kb_exists, int dry_run,
                                        pgvec_kb_service_reconcile_result_t *out)
@@ -93,12 +88,6 @@ int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn mem_exi
 
    out->rc = 0;
    return 0;
-}
-
-int pgvec_kb_service_upsert_document_point(int64_t doc_id, const float *vec, int dim,
-                                           const char *payload_json)
-{
-   return pgvec_kb_upsert(doc_id, vec, dim, payload_json);
 }
 
 /* --- Phase 5: code embedding helpers --- */

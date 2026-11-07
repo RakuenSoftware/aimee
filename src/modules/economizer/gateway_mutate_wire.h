@@ -75,8 +75,8 @@ extern "C"
    } gw_post_action_t;
 
    /* Post-send: classify the upstream `http_status` for a mutated request. On ANY 4xx
-    * (400/413/422/…): restore the pristine array into container[key], run
-    * message_history_repair on it, disable the session, clear provenance, and return
+    * (400/413/422/…): restore the pristine canonical array into container[key],
+    * disable the session, clear provenance, and return
     * GW_POST_RESEND (the caller rebuilds the provider body from the now-restored
     * container and resends ONCE). On 5xx: disable the session, clear provenance, and
     * return GW_POST_NONE (no resend — forward the 5xx as the provider returned it).
@@ -106,18 +106,6 @@ extern "C"
     * disable ONLY on a payload-class 4xx — never on 401/403/404/429 (auth/rate-limit,
     * which the streaming contract forwards without disabling). */
    int gw_status_is_invalid_request(int http_status);
-
-   /* SHADOW (measure-only) gateway reduction: build the measure-only reduce_config and
-    * run context_reduce over `messages` so the ingress can record a forecast ledger
-    * row from `out`. NEVER mutates `messages` (measure_only is forced). The ONE place
-    * the gateway-seam measurement mechanics live — both ingresses (/v1/messages,
-    * /v1/responses) call this instead of open-coding the reduce_config. `out` is
-    * zeroed here; the caller records the ledger (server-layer telemetry) and frees it
-    * with context_reduce_result_free. Returns context_reduce's rc (0 on success incl.
-    * a deliberate no-op; non-zero => hard bypass, out->messages NULL). No-op rc=1 when
-    * `messages` is not a cJSON array or `out` is NULL. */
-   int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char *model,
-                             int retained_msgs, gw_reduce_report_t *out);
 
 #ifdef __cplusplus
 }

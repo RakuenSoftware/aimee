@@ -1,40 +1,42 @@
 CC      = gcc
+.DEFAULT_GOAL := all
+
+# aimee proper (server, KB, ring host, module processes) is Linux-only. macOS and
+# Windows get only the thin client, built with CMake: cmake -B build && cmake
+# --build build --target aimee.
+ifneq ($(shell uname -s),Linux)
+$(error aimee proper builds only on Linux; build the macOS or Windows thin client with CMake (cmake -B build && cmake --build build --target aimee))
+endif
 AR      ?= ar
 OBJDIR  = build/obj
 
-ifeq ($(OS),Windows_NT)
-EXEEXT  = .exe
-NULLDEV = NUL
-RM      = del /Q
-else
-EXEEXT  =
 NULLDEV = /dev/null
 RM      = rm -rf
-endif
-BINARY  = ../aimee$(EXEEXT)
-SERVER  = ../aimee-server$(EXEEXT)
-MEMORY_EVAL = ../aimee-memory-eval$(EXEEXT)
-MEMORY_TRANSFER = ../aimee-memory-transfer$(EXEEXT)
-CONFIG_MODULE = $(OBJDIR)/aimee-module-config$(EXEEXT)
+BINARY  = ../aimee
+SERVER  = ../aimee-server
+MEMORY_EVAL = ../aimee-memory-eval
+MEMORY_TRANSFER = ../aimee-memory-transfer
+CONFIG_MODULE = $(OBJDIR)/aimee-module-config
 # Statically-linked TCP<->UDS bridge that runs INSIDE a delegate sandbox container.
-FORWARDER = ../aimee-forwarder$(EXEEXT)
-KB      = ../aimee-kb$(EXEEXT)
-KB_WORM = ../aimee-kb-worm$(EXEEXT)
-KB_RESOLVER = ../aimee-kb-resolver$(EXEEXT)
-KB_STATUS_PROVISIONER = ../aimee-kb-status-provision$(EXEEXT)
-KB_TOKEN_ROOTS_PROVISIONER = ../aimee-kb-token-roots-provision$(EXEEXT)
-KB_JWKS_PUBLISHER = ../aimee-kb-jwks-publish$(EXEEXT)
-KB_STATUS_AUTHORITY = ../aimee-kb-status-authority$(EXEEXT)
-KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority$(EXEEXT)
-RUNTIME_WEB = ../aimee-runtime-web$(EXEEXT)
-DELEGATE_EGRESS = ../aimee-delegate-egress$(EXEEXT)
-GATEWAY = ../aimee-gateway$(EXEEXT)
+FORWARDER = ../aimee-forwarder
+KB      = ../aimee-kb
+KB_WORM = ../aimee-kb-worm
+KB_RESOLVER = ../aimee-kb-resolver
+KB_STATUS_PROVISIONER = ../aimee-kb-status-provision
+KB_TOKEN_ROOTS_PROVISIONER = ../aimee-kb-token-roots-provision
+KB_JWKS_PUBLISHER = ../aimee-kb-jwks-publish
+KB_STATUS_AUTHORITY = ../aimee-kb-status-authority
+KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority
+RUNTIME_WEB = ../aimee-runtime-web
+THINCLIENT_LIBRARY = ../libaimee-client.so
+THINCLIENT_PC = $(OBJDIR)/thinclient/pkgconfig/aimee-client.pc
+DELEGATE_EGRESS = ../aimee-delegate-egress
 # Binaries a rename left behind. `all` removes these first so a renamed artifact
 # does not sit in the repo root forever: aimee-webchat became aimee-runtime-web
 # and its 14MB predecessor was never retired, so it stayed untracked, unignored,
 # and large enough to push a workspace sync past the server's 4MB body cap.
-RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT) \
-                        ../aimee-webchat$(EXEEXT)
+RETIRED_ROOT_BINARIES = ../aimee-client ../aimee-worker \
+                        ../aimee-webchat ../aimee-gateway
 
 # aimee-runtime-web is the only Go artifact and needs the Go toolchain (go.mod pins a
 # newer Go than some distros package, e.g. Debian 13 ships 1.24). The C services
@@ -102,14 +104,18 @@ $(shell mkdir -p $(dir $(VERSION_FILE)) && echo "$(GIT_VERSION)" > $(VERSION_FIL
 endif
 
 # Eagerly create platform subdirectories at variable-expansion time so parallel
-# builds (-j) on macOS GNU make 3.81 don't race on directory creation. Order-only
-# prerequisites have edge cases in older make versions; $(shell) is bulletproof.
+# builds (-j) don't race on directory creation.
 # NOTE: must come AFTER the branch-switch block above, which deletes $(OBJDIR) on
 # branch changes — if this ran before, the directories would be wiped and gcc
 # would fail trying to write .d dependency files into non-existent subdirectories.
-_DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/modules/kb/c)
+_DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/modules/kb/c)
 
-C_FLAGS = -Os -g -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -Wall -Wextra -Werror -Wformat=2 -Wformat-security -Wno-unused-parameter -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1_client -Ipeer_client -Imodules/config -Imodules/kb/c -Imodules/economizer -Imodules/egress/include -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/connection/include -Icore/event_bus/include -Icore/turn_integrity/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+# GCC 15.2 IPA bit-CP proves a live int parameter constant zero across -Os
+# -flto (kb_insights_util.c group_array: n>0 arrives as 0, by_* come back
+# empty). Disable the pass for GCC at compile and LTO link; clang lacks it.
+IPA_BIT_CP_FIX := $(if $(findstring clang,$(shell $(CC) --version 2>/dev/null)),,-fno-ipa-bit-cp)
+
+C_FLAGS = -Os -g -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections -Wall -Wextra -Werror -Wformat=2 -Wformat-security -Wno-unused-parameter -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1_client -Ipeer_client -Imodules/config -Imodules/kb/c -Imodules/economizer -Imodules/egress/include -Imodules/learning/include -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/codec/include -Icore/types/include -Icore/connection/include -Icore/turn_integrity/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # KB_STORE client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -121,46 +127,26 @@ ifeq ($(strip $(PQ_LIB)),)
 endif
 C_FLAGS  += $(PQ_CFLAGS)
 
-ifeq ($(OS),Windows_NT)
-    C_FLAGS += -DAIMEE_WINDOWS -D_WIN32_WINNT=0x0A00
-endif
-
-UNAME_S := $(shell uname -s)
 CC_MACHINE := $(shell $(CC) -dumpmachine 2>$(NULLDEV))
 
 # Shipping Linux binaries carry an explicit, repository-owned hardening contract;
 # their exploit resistance must not vary with the runner distribution defaults.
-ifeq ($(UNAME_S),Linux)
-    HARDEN_C_FLAGS = -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE
-    # Intel CET is an x86 hardening facility. GCC rejects -fcf-protection on
-    # AArch64, so keeping it in the unconditional Linux set made the published
-    # arm64 thin client unbuildable even though the source is portable.
-    ifneq ($(filter x86_64% amd64% i386% i486% i586% i686%,$(CC_MACHINE)),)
-        HARDEN_C_FLAGS += -fcf-protection=full
-    endif
-    HARDEN_L_FLAGS = -pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack
-    C_FLAGS += $(HARDEN_C_FLAGS)
+HARDEN_C_FLAGS = -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE
+# Intel CET is an x86 hardening facility. GCC rejects -fcf-protection on
+# AArch64, so keeping it in the unconditional Linux set made the published
+# arm64 thin client unbuildable even though the source is portable.
+ifneq ($(filter x86_64% amd64% i386% i486% i586% i686%,$(CC_MACHINE)),)
+    HARDEN_C_FLAGS += -fcf-protection=full
 endif
-
-# Platform-specific HTTP library
-ifeq ($(OS),Windows_NT)
-    HTTP_LIB = -lwinhttp
-    WINDOWS_LIBS = -lws2_32 -lbcrypt -lwinhttp
-else
-    HTTP_LIB =
-    WINDOWS_LIBS =
-endif
+HARDEN_L_FLAGS = -pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack
+C_FLAGS += $(HARDEN_C_FLAGS)
 
 # PAM support (optional: set WITH_PAM=1 to enable, auto-detected if libpam-dev present)
-ifeq ($(OS),Windows_NT)
-WITH_PAM ?= 0
-else
 # Probe with -include rather than a piped '#include' line: inside $(shell ...) the
 # '\#' escape reached the compiler as a literal backslash, so this test failed
 # ALWAYS and PAM was silently never compiled in on Linux even with libpam-dev
 # installed. -include needs no '#' at all, so there is nothing left to mis-escape.
 WITH_PAM ?= $(shell : | $(CC) -xc -fsyntax-only -include security/pam_appl.h - 2>$(NULLDEV) && echo 1 || echo 0)
-endif
 ifeq ($(WITH_PAM),1)
     PAM_FLAGS = -DWITH_PAM
     PAM_LIBS  = -lpam
@@ -170,11 +156,7 @@ else
 endif
 
 # libsecret support (optional: set WITH_LIBSECRET=1 to enable, auto-detected if libsecret-1-dev present)
-ifeq ($(OS),Windows_NT)
-WITH_LIBSECRET ?= 0
-else
 WITH_LIBSECRET ?= $(shell pkg-config --exists libsecret-1 2>$(NULLDEV) && echo 1 || echo 0)
-endif
 ifeq ($(WITH_LIBSECRET),1)
     LIBSECRET_FLAGS = -DWITH_LIBSECRET $(shell pkg-config --cflags libsecret-1)
     LIBSECRET_LIBS  = $(shell pkg-config --libs libsecret-1)
@@ -183,14 +165,8 @@ else
     LIBSECRET_LIBS  =
 endif
 
-# In-client TLS for https:// remote servers (optional). OpenSSL-backed; enabled
-# on POSIX (server/kb already require OpenSSL), disabled on Windows where the
-# MinGW thin client has no OpenSSL and refuses https:// instead.
-ifeq ($(OS),Windows_NT)
-WITH_TLS ?= 0
-else
+# In-client TLS for https:// remote servers (optional, OpenSSL-backed).
 WITH_TLS ?= 1
-endif
 ifeq ($(WITH_TLS),1)
     TLS_FLAGS = -DWITH_TLS
     TLS_LIBS  = -lssl -lcrypto
@@ -199,33 +175,10 @@ else
     TLS_LIBS  =
 endif
 
-# dashboard.c is always compiled: provides api_metrics, api_delegations, and
-# the other JSON API functions used by the server RPC layer.  The browser UI
-# (aimee-runtime-web) is now the standalone Go binary and no longer embedded here.
-ifeq ($(OS),Windows_NT)
-    UI_PLATFORM_SRCS = windows/dashboard.c
-else
-    UI_PLATFORM_SRCS = posix/dashboard.c
-endif
-
 C_FLAGS += $(PAM_FLAGS) $(LIBSECRET_FLAGS)
 
-ifeq ($(UNAME_S),Darwin)
-    PLATFORM_FRAMEWORKS = -framework Security -framework CoreFoundation
-    LEAN_GC_FLAGS       = -Wl,-dead_strip
-else ifeq ($(OS),Windows_NT)
-    PLATFORM_FRAMEWORKS =
-    LEAN_GC_FLAGS       =
-else
-    PLATFORM_FRAMEWORKS =
-    LEAN_GC_FLAGS       = -Wl,--gc-sections
-endif
-
-ifeq ($(OS),Windows_NT)
-    PIC_FLAGS =
-else
-    PIC_FLAGS = -fPIC
-endif
+LEAN_GC_FLAGS = -Wl,--gc-sections
+PIC_FLAGS = -fPIC
 
 C_FLAGS += $(PIC_FLAGS)
 
@@ -234,84 +187,48 @@ C_FLAGS += $(PIC_FLAGS)
 CLIENT_C_FLAGS := $(filter-out -I. -Idb1_client -Imodules/kb/c $(PQ_CFLAGS),$(C_FLAGS)) $(TLS_FLAGS)
 
 # --- Lean build profile ---
-LEAN_BINARY = ../aimee-lean$(EXEEXT)
-LEAN_SERVER = ../aimee-server-lean$(EXEEXT)
-LEAN_KB = ../aimee-kb-lean$(EXEEXT)
+LEAN_BINARY = ../aimee-lean
+LEAN_SERVER = ../aimee-server-lean
+LEAN_KB = ../aimee-kb-lean
 LEAN_OBJDIR = build/obj-lean
 
+CORE_CODEC_SRCS = core/codec/base64.c
+CORE_CODEC_OBJS = $(CORE_CODEC_SRCS:%.c=$(OBJDIR)/%.o)
+CORE_CODEC_LIB = $(OBJDIR)/libaimee-core-codec.a
+
+$(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
+	$(AR) rcs $@ $^
+
 # Linker flag sets (layered -- each level adds to the previous)
-L_MINIMAL = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lpthread $(EXTRA_L_FLAGS)
-L_CORE    = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB)
-L_AGENT   = $(L_CORE) -lssl -lcrypto $(HTTP_LIB)
-L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
+L_MINIMAL = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lpthread $(EXTRA_L_FLAGS) $(CORE_CODEC_LIB)
+L_CORE    = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) $(CORE_CODEC_LIB)
+L_AGENT   = $(L_CORE) -lssl -lcrypto
+L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS)
 L_CLIENT  = $(L_MINIMAL) $(CORE_CONNECTION_LIB) $(TLS_LIBS) -lm -lz
-L_GATEWAY = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
+L_HTTP    = $(L_MINIMAL) -lssl -lcrypto
 # Server link flags. The daemon owns the store directly: it links libpq and the
 # same postgres + memory modules as aimee-kb, so it no longer routes every
 # store-bound call through the kb client socket. Keep the audit hardening flags
 # on this newer direct-store topology.
-L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
-L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
-ifeq ($(OS),Windows_NT)
-    L_FULL += -ladvapi32
-    L_KB += -ladvapi32
-endif
+L_SERVER  = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) $(LIBSECRET_LIBS) $(CORE_CODEC_LIB)
+L_KB      = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) $(LIBSECRET_LIBS) $(CORE_CODEC_LIB)
 
-# --- Platform-specific source selection ---
-# Each platform directory contributes implementations for platform_*.c, util, history,
-# webchat, dashboard, server_main, and secret_store backend.
-#
+# --- Platform sources (posix/ and linux/) ---
 # PLATFORM_AGENT_SRCS: agent-layer platform files that depend on LIB_AGENT functions
 # (agent_protocol, agent_tools, etc.) — must be part of LIB_AGENT, not LIB_CORE.
 
-ifeq ($(OS),Windows_NT)
-    PLATFORM_BASIC_SRCS = \
-        windows/platform_event.c windows/platform_ipc.c windows/platform_path.c \
-        windows/platform_process.c windows/platform_random.c \
-        windows/platform_net.c \
-        windows/secret_store.c windows/util.c posix/pam_auth.c
-    PLATFORM_EXTRA_SRCS = \
-        windows/history.c windows/server_main.c \
-        windows/cli_client.c windows/cli_main.c \
-        windows/events.c windows/cmd_infra.c \
-        windows/cmd_agent_delegate.c windows/cmd_describe.c \
-        windows/cmd_hooks.c windows/server_compute.c \
-        $(UI_PLATFORM_SRCS)
-    PLATFORM_AGENT_SRCS = \
-        windows/agent_runtime.c windows/agent_bridge.c windows/web_egress.c
-else ifeq ($(UNAME_S),Darwin)
-    PLATFORM_BASIC_SRCS = \
-        posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
-        posix/platform_random.c posix/platform_net.c \
-        mac/platform_event.c mac/platform_ipc.c mac/platform_process.c \
-        mac/secret_store.c posix/util.c posix/pam_auth.c
-    PLATFORM_EXTRA_SRCS = \
-        posix/history.c posix/server_main.c \
-        posix/cli_client.c posix/cli_main.c \
-        posix/events.c posix/cmd_infra.c \
-        posix/cmd_agent_delegate.c posix/cmd_describe.c \
-        posix/cmd_hooks.c posix/server_compute.c \
-        posix/agent_shell_claude.c posix/agent_shell_claude_pty.c posix/agent_shell_codex.c  \
-        $(UI_PLATFORM_SRCS)
-    PLATFORM_AGENT_SRCS = \
-        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_runtime_tmux.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
-else
-    PLATFORM_BASIC_SRCS = \
-        posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
-        posix/platform_random.c posix/platform_net.c \
-        linux/platform_event.c linux/platform_ipc.c linux/platform_process.c \
-        linux/secret_store.c posix/util.c posix/pam_auth.c
-    PLATFORM_EXTRA_SRCS = \
-        posix/history.c posix/server_main.c \
-        posix/cli_client.c posix/cli_main.c \
-        posix/events.c posix/cmd_infra.c \
-        posix/cmd_agent_delegate.c posix/cmd_describe.c \
-        posix/cmd_hooks.c posix/server_compute.c \
-        posix/agent_shell_claude.c posix/agent_shell_claude_pty.c posix/agent_shell_codex.c  \
-        $(UI_PLATFORM_SRCS)
-    PLATFORM_AGENT_SRCS = \
-        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_runtime_tmux.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
-endif
+PLATFORM_BASIC_SRCS = \
+    posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
+    posix/platform_random.c shared/platform_net.c \
+    linux/platform_event.c linux/platform_ipc.c linux/platform_process.c \
+    linux/secret_store.c posix/util.c posix/pam_auth.c
+PLATFORM_EXTRA_SRCS = \
+    posix/server_main.c \
+    posix/cli_client.c posix/cli_main.c \
+    posix/events.c \
+    posix/cmd_hooks.c posix/server_compute.c
+PLATFORM_AGENT_SRCS = \
+    posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
 
 PLATFORM_SRCS       = $(PLATFORM_BASIC_SRCS) $(PLATFORM_EXTRA_SRCS) $(PLATFORM_AGENT_SRCS)
 PLATFORM_BASIC_OBJS = $(PLATFORM_BASIC_SRCS:%.c=$(OBJDIR)/%.o)
@@ -327,19 +244,23 @@ MCP_GIT_SRCS = modules/git/mcp_git_query.c modules/git/mcp_git_write.c modules/g
 MCP_GIT_OBJS = $(MCP_GIT_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0: Foundation (db, config, util, text, render, log, platform, cJSON) ---
-CONFIG_CLIENT_SRCS = config_client.c config_client_contract.c \
-                     config_client_accessors_0.c config_client_accessors_1.c \
-                     config_client_accessors_2.c config_client_accessors_3.c \
-                     config_client_accessors_4.c config_client_accessors_5.c \
-                     config_client_accessors_6.c config_client_accessors_7.c
+CONFIG_CLIENT_SRCS = config_client.c config_client_contract.c config_client_accessors.c
 CONFIG_CLIENT_OBJS = $(CONFIG_CLIENT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/module_json_call.o \
 	$(OBJDIR)/session_id.o
 
-CORE_SRCS = interaction_event_names.c diagnose_render.c clarify_render.c ensemble_render.c ensemble_view.c execution_plan_list.c remote_client_claim.c jti_replay_consume.c wfe_store_lists.c db1_store_ready.c command_registry.c module_commands.c $(CONFIG_CLIENT_SRCS) client_config.c session_id.c toolset.c util.c util_url.c aimee_sha256.c module_json_call.c providers_client.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
+IR_BASE_SRCS = modules/ir/aimee_ir.c
+HOOK_IR_SRCS = modules/translation/hook_ir.c
+IR_CONTRACT_SRCS = $(HOOK_IR_SRCS) $(IR_BASE_SRCS) modules/ir/response_codec.c modules/ir/request_codec.c modules/ir/session_event.c modules/translation/aimee_frontend_openai.c modules/translation/aimee_backend_openai.c
+# Full pure translation boundary for provider clients that render any supported wire.
+MODEL_WIRE_SRCS = modules/translation/aimee_frontend_anthropic.c modules/translation/aimee_frontend_responses.c \
+                  modules/translation/aimee_backend_anthropic.c modules/translation/aimee_backend_responses.c \
+                  modules/translation/wire_codec.c modules/translation/aimee_ir_stream.c
+
+CORE_SRCS = interaction_event_names.c diagnose_render.c clarify_render.c ensemble_render.c ensemble_view.c remote_client_claim.c jti_replay_consume.c wfe_store_lists.c db1_store_ready.c command_registry.c module_commands.c $(CONFIG_CLIENT_SRCS) client_config.c session_id.c toolset.c util.c util_url.c aimee_sha256.c module_json_call.c providers_client.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
-            compact.c wire_fence.c modules/economizer/economizer_module_client.c platform_random.c artifact_trust.c hook_session_token.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
+            wire_fence.c modules/economizer/economizer_module_client.c platform_random.c artifact_trust.c hook_session_token.c slop_detect.c proxy_bootstrap.c \
             client_integrations.c modules/protocols/mcp/mcp_group_tool.c modules/protocols/mcp/mcp_tools.c modules/protocols/mcp/mcp_tool_profile.c modules/protocols/mcp/mcp_tools_extended.c modules/protocols/mcp/mcp_skill_tools.c modules/protocols/mcp/mcp_tools_gateway.c events.c \
-            model_registry.c models_dev.c models_dev_cache.c modules/lsp/lsp_client.c modules/lsp/lsp_manager.c modules/lsp/lsp_context.c \
+            model_registry.c modules/lsp/lsp_client.c modules/lsp/lsp_manager.c modules/lsp/lsp_context.c \
             modules/module-runtime/pre_llm_hook.c code_collect.c codex_auth.c \
             modules/workflows/wfe_iface.c modules/workflows/wfe_def.c modules/workflows/wfe_validate.c modules/workflows/wfe_canonical.c modules/workflows/wfe_custom.c modules/workflows/wfe_manager_artifacts.c modules/workflows/wfe_externalization.c modules/workflows/tool_egress.c modules/workflows/wfe_native_gate.c modules/workflows/wfe_enforce.c modules/workflows/wfe_deliver.c modules/workflows/wfe_advance.c modules/workflows/wfe_advance_exec.c modules/workflows/wfe_block_resolve.c modules/workflows/wfe_bind_ingress.c modules/workflows/wfe_router.c modules/workflows/wfe_router_catalog.c modules/workflows/wfe_autonomous_route.c \
             harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c
@@ -368,7 +289,7 @@ DB1_OBJS = $(DB1_SRCS:%.c=$(OBJDIR)/%.o)
 # client rather than the domain. The domain itself still builds -- the module
 # process compiles it from the descriptor -- it just no longer sits inside this
 # binary. See src/db1_client/git_ownership.c.
-DB1_CLIENT_SRCS = db1_client/checkpoints.c db1_client/jti_replay.c db1_client/lifecycle.c db1_client/mgmt_jwks.c db1_client/mgmt_nonce.c db1_client/pki.c db1_client/git_ownership.c db1_client/conversation.c db1_client/agent_work.c db1_client/delegation.c db1_client/sessions.c db1_client/runtime.c db1_client/telemetry.c db1_client/guardrail_state.c db1_client/ensemble.c db1_client/workflow.c db1_client/roundtable.c db1_client/identity.c
+DB1_CLIENT_SRCS = db1_client/transport.c db1_client/jti_replay.c db1_client/lifecycle.c db1_client/mgmt_jwks.c db1_client/mgmt_nonce.c db1_client/pki.c db1_client/git_ownership.c db1_client/conversation.c db1_client/agent_work.c db1_client/delegation.c db1_client/sessions.c db1_client/runtime.c db1_client/telemetry.c db1_client/guardrail_state.c db1_client/ensemble.c db1_client/workflow.c db1_client/roundtable.c db1_client/identity.c
 
 DB1_CLIENT_OBJS = $(DB1_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
 
@@ -383,7 +304,7 @@ $(OBJDIR)/postgres-local/session.o: modules/postgres/client/session.c
 	$(CC) $(C_FLAGS) -DAIMEE_POSTGRES_LOCAL_ONLY=1 -c -o $@ $<
 KB_STORE_PG_SRCS = modules/kb/c/db_postgres.c
 KB_STORE_PG_OBJS = $(KB_STORE_PG_SRCS:modules/kb/c/%.c=$(OBJDIR)/kb_store/%.o) $(POSTGRES_CLIENT_OBJS)
-KB_STORE_SRCS = modules/kb/c/kb_store_init.c modules/kb/c/kb_store_reembed.c modules/kb/c/agent_hints.c modules/kb/c/agent_outcomes.c modules/kb/c/canonical_index.c modules/kb/c/canonical_index_query.c modules/kb/c/anti_patterns.c modules/kb/c/workflow_patterns.c modules/kb/c/evidence_vectors.c modules/kb/c/learning_synth_ops.c modules/kb/c/collab_rules.c modules/kb/c/curiosity.c modules/kb/c/decision_log.c modules/kb/c/kb_audit_worm.c modules/kb/c/enrollments.c modules/kb/c/kb_store_tenant.c modules/kb/c/kb_store_hardening.c modules/kb/c/team.c modules/kb/c/project.c modules/kb/c/membership.c modules/kb/c/admin_grant.c modules/kb/c/write_tier_grant.c modules/kb/c/oidc_jwks.c modules/kb/c/entity_edges.c modules/kb/c/fact_identity.c modules/kb/c/fact_identity_unicode.c modules/kb/c/fact_mutation.c modules/kb/c/evidence_lifecycle.c modules/kb/c/entity_nodes.c modules/kb/c/code_projection.c modules/kb/c/lessons.c modules/kb/c/shadow_delta.c modules/kb/c/entity_profiles.c modules/kb/c/failed_queries.c modules/kb/c/feedback.c modules/kb/c/notes.c modules/kb/c/rules.c modules/kb/c/stopwords.c modules/kb/c/tasks.c modules/kb/c/tool_registry.c modules/kb/c/kind_lifecycle.c modules/kb/c/kb_payload.c modules/kb/c/kb_runtime_state.c modules/kb/c/kb_service_backend.c modules/kb/c/kb_service_backend_ingest.c modules/kb/c/vector_index_ops.c modules/kb/c/code_index_ops.c modules/kb/c/learning.c modules/kb/c/code_index.c modules/kb/c/code_project_lifecycle.c modules/kb/c/css_graph.c modules/kb/c/css_migration.c modules/kb/c/css_render.c modules/kb/c/css_insights.c modules/kb/c/db_schema.c modules/kb/c/sketch.c modules/kb/c/artifacts.c modules/kb/c/corpus_structural.c modules/kb/c/corpus_jobs.c modules/kb/c/mining.c modules/kb/c/calibration.c modules/kb/c/demotion.c modules/kb/c/feature_rows.c modules/kb/c/report_enrichments.c modules/kb/c/bandit.c modules/kb/c/kb_maintenance.c modules/kb/c/kb_docs.c modules/kb/c/kb_releases.c modules/kb/c/code_audit.c \
+KB_STORE_SRCS = modules/kb/c/kb_store_init.c modules/kb/c/kb_store_reembed.c modules/kb/c/agent_hints.c modules/kb/c/agent_outcomes.c modules/kb/c/canonical_index.c modules/kb/c/canonical_index_query.c modules/kb/c/anti_patterns.c modules/kb/c/evidence_vectors.c modules/kb/c/learning_synth_ops.c modules/kb/c/collab_rules.c modules/kb/c/curiosity.c modules/kb/c/decision_log.c modules/kb/c/kb_audit_worm.c modules/kb/c/enrollments.c modules/kb/c/kb_store_tenant.c modules/kb/c/kb_store_hardening.c modules/kb/c/team.c modules/kb/c/project.c modules/kb/c/membership.c modules/kb/c/write_tier_grant.c modules/kb/c/oidc_jwks.c modules/kb/c/entity_edges.c modules/kb/c/fact_identity.c modules/kb/c/fact_identity_unicode.c modules/kb/c/fact_mutation.c modules/kb/c/evidence_lifecycle.c modules/kb/c/entity_nodes.c modules/kb/c/code_projection.c modules/kb/c/lessons.c modules/kb/c/feedback.c modules/kb/c/notes.c modules/kb/c/rules.c modules/kb/c/tasks.c modules/kb/c/tool_registry.c modules/kb/c/kb_payload.c modules/kb/c/kb_runtime_state.c modules/kb/c/kb_service_backend.c modules/kb/c/kb_service_backend_ingest.c modules/kb/c/vector_index_ops.c modules/kb/c/code_index_ops.c modules/kb/c/learning.c modules/kb/c/code_index.c modules/kb/c/code_project_lifecycle.c modules/kb/c/css_graph.c modules/kb/c/css_migration.c modules/kb/c/css_render.c modules/kb/c/css_insights.c modules/kb/c/db_schema.c modules/kb/c/sketch.c modules/kb/c/artifacts.c modules/kb/c/corpus_structural.c modules/kb/c/corpus_jobs.c modules/kb/c/mining.c modules/kb/c/calibration.c modules/kb/c/demotion.c modules/kb/c/feature_rows.c modules/kb/c/bandit.c modules/kb/c/kb_maintenance.c modules/kb/c/kb_docs.c modules/kb/c/kb_releases.c modules/kb/c/code_audit.c \
            modules/kb/c/pgvec_transport.c modules/kb/c/kb_vectors.c modules/kb/c/vector_status.c modules/kb/c/pgvec_kb_service.c \
            modules/kb/c/curator_terms.c modules/kb/c/curator_gaps.c \
            modules/kb/c/cross_repo_resolver.c modules/kb/c/cross_repo_classify.c modules/kb/c/cross_repo_stats.c \
@@ -399,7 +320,7 @@ KB_STORE_HOST_ADAPTER_SRCS = kb/kb_store_adapters/kb_service_backend_agent.c \
                         kb/kb_store_adapters/kb_service_backend_context.c \
                         kb/kb_store_adapters/kb_service_backend_export.c \
                         kb/kb_store_adapters/kb_service_backend_memory.c \
-                        kb/kb_store_adapters/kb_service_backend_runtime.c
+                        
 KB_STORE_HOST_ADAPTER_TEST_OBJS = $(KB_STORE_HOST_ADAPTER_SRCS:kb/kb_store_adapters/%.c=$(OBJDIR)/kb_store/%.o)
 # Preserve the established test object namespace while all sources live under
 # the module boundary. tests/Rules.mk names these objects directly and relies on
@@ -449,23 +370,52 @@ endif
 
 # --- Layer 1: Data & policy (index, rules, guardrails, workspace) ---
 # Memory policy and persistence live in server-go/modules/memory. C retains only
-# the event-bus connection adapters compiled with the server/KB products.
+# the ring connection adapters compiled with the server/KB products.
 DATA_SRCS = code_match.c rel_types.c \
-            index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
-            context_discover.c tasks.c modules/learning/learning_router.c modules/learning/learning_implicit.c modules/learning/learning_endogeneity.c modules/learning/learning_regret.c modules/learning/learning_approach_memory.c modules/learning/learning_attribution.c modules/learning/learning_policy_arms.c modules/learning/learning_eval_synthesis.c eval_synthesis.c approach_store.c dogfood.c working_profile.c modules/guardrails/guardrails.c modules/guardrails/guardrails_orchestrator.c modules/guardrails/guardrails_action_audit.c modules/guardrails/guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c modules/guardrails/guardrails_semantic.c modules/guardrails/guardrails_blast_radius.c modules/gateway/gateway_policy.c modules/gateway/gateway_pipeline.c modules/gateway/gateway_delegate.c \
-            modules/workspace/workspace.c modules/workspace/workspace_session_lookup.c session_worktree_key.c worktree_gc.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/routing/agent_config.c modules/vault/agent_credentials.c modules/routing/agent_registry.c modules/routing/routing.c agent_tier_lint.c cmd_describe.c \
-            history.c role_templates.c modules/skills/skill.c modules/skills/skill_rollback.c conversation.c \
+            index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
+            context_discover.c modules/learning/learning_router.c modules/learning/learning_implicit.c modules/learning/learning_endogeneity.c modules/learning/learning_regret.c modules/learning/learning_approach_memory.c modules/learning/learning_attribution.c modules/learning/learning_policy_arms.c modules/learning/learning_eval_synthesis.c eval_synthesis.c approach_store.c dogfood.c working_profile.c modules/guardrails/guardrails.c modules/guardrails/guardrails_orchestrator.c modules/guardrails/guardrails_action_audit.c modules/guardrails/guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c modules/guardrails/guardrails_semantic.c modules/guardrails/guardrails_blast_radius.c modules/gateway/gateway_policy.c modules/gateway/gateway_delegate.c \
+            modules/workspace/workspace.c modules/workspace/workspace_identity.c modules/workspace/workspace_session_lookup.c session_worktree_key.c worktree_gc.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/routing/agent_config.c modules/vault/agent_credentials.c modules/routing/agent_registry.c modules/routing/routing.c cmd_describe.c \
+            role_templates.c modules/skills/skill.c \
             trajectory_export.c trajectory_batch.c \
-            wiki_render.c \
             kb/kb.c kb/kb_fusion.c kb/kb_neardup.c sketch.c modules/learning/learning_evidence.c kb/kb_calibrate.c kb/kb_features.c kb/kb_ranker.c kb/kb_ranker_fit.c kb/kb_detect.c \
-            kb/kb_reasoning.c kb/kb_bandit.c kb/kb_planner.c kb/roadmap.c modules/roadmap/roadmap_decompose.c modules/roadmap/roadmap_auto.c modules/roadmap/roadmap_milestone.c modules/roadmap/roadmap_reassess.c modules/roadmap/roadmap_report.c kb/kb_mdl.c
+            kb/kb_reasoning.c kb/kb_bandit.c kb/roadmap.c kb/kb_mdl.c
 DATA_SRCS += integrity_ingress.c
 DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 
-# --- Shared C connection and local event-bus libraries ---
-# Every networked C product links libaimee-core-connection. The event bus is a
+# --- Shared C connection library and the ouroboros ring ---
+# Every networked C product links libaimee-core-connection. The ring is a
 # separate local shared-memory facility linked only by aimee-server and
 # aimee-kb; it never provides transport between machines.
+#
+# The ring is not in this repository and aimee does not build it. aimee depends
+# on the ring's contract through the release range in
+# dependencies/ouroboros-ring.json and links an installed ring through its own
+# package (pkg-config ouroboros-ring). scripts/provide_ouroboros_ring.py names
+# that installation before anything compiles: OURO_RING_PREFIX=/path uses an
+# installed ring, OURO_RING_SOURCE=/path builds a ring checkout, and otherwise
+# the named release is fetched, content-checked and built with the ring's own
+# build, with this build's compiler and extra flags. Compiler workarounds the
+# ring's own code needs are the ring build's business, not this Makefile's.
+# A dry run (-n, -q; also the -p database queries tools read the link graph
+# with) provides nothing and names the last-provided installation instead.
+# Only the first word of MAKEFLAGS carries single-letter flags, and only when it
+# is not itself a long option such as --no-print-directory.
+OURO_RING_MAKE_LETTERS := $(filter-out -%,$(firstword $(MAKEFLAGS)))
+OURO_RING_DRY_RUN := $(findstring n,$(OURO_RING_MAKE_LETTERS))$(findstring q,$(OURO_RING_MAKE_LETTERS))
+ifneq ($(filter clean distclean,$(MAKECMDGOALS)),)
+else ifneq ($(OURO_RING_DRY_RUN),)
+C_FLAGS += -Ibuild/deps/ouroboros-ring/current/include
+OURO_RING_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-ring.a
+else
+OURO_RING_PKGCONFIG := $(shell OURO_RING_CC='$(CC)' OURO_RING_CFLAGS='$(PIC_FLAGS) $(EXTRA_C_FLAGS)' \
+                         python3 ../scripts/provide_ouroboros_ring.py build/deps/ouroboros-ring)
+ifeq ($(strip $(OURO_RING_PKGCONFIG)),)
+$(error could not provide an ouroboros ring in the range dependencies/ouroboros-ring.json names; see the message above)
+endif
+OURO_RING_PC = PKG_CONFIG_PATH='$(OURO_RING_PKGCONFIG)' pkg-config
+C_FLAGS += $(shell $(OURO_RING_PC) --cflags ouroboros-ring)
+OURO_RING_LIB := $(shell $(OURO_RING_PC) --variable=libdir ouroboros-ring)/libouroboros-ring.a
+endif
 export AIMEE_CORE_REQUIRED_VERSION := $(strip $(shell sed -n '1p' core/VERSION))
 AIMEE_CORE_PREFIX ?=
 ifneq ($(strip $(AIMEE_CORE_PREFIX)),)
@@ -477,100 +427,48 @@ C_FLAGS += -I$(AIMEE_CORE_PREFIX)/include
 CORE_CONNECTION_SRCS :=
 CORE_CONNECTION_OBJS :=
 CORE_CONNECTION_LIB := $(AIMEE_CORE_PREFIX)/lib/libaimee-core-connection.a
-CORE_EVENT_BUS_SRCS :=
-CORE_EVENT_BUS_OBJS :=
-CORE_EVENT_BUS_LIB := $(AIMEE_CORE_PREFIX)/lib/libaimee-core-event-bus.a
 else
 CORE_CONNECTION_SRCS = core/connection/auth.c core/connection/control.c \
                   core/connection/endpoint.c core/connection/http1.c \
                   core/connection/socket.c
-ifneq ($(OS),Windows_NT)
 CORE_CONNECTION_SRCS += core/connection/tls_openssl.c
-endif
 ifeq ($(WITH_TLS),1)
 CORE_CONNECTION_SRCS += core/connection/native_tls_identity.c core/connection/native_tls_path.c
-ifeq ($(OS),Windows_NT)
-CORE_CONNECTION_SRCS += core/connection/native_tls_schannel.c
-else ifeq ($(shell uname -s),Darwin)
-CORE_CONNECTION_SRCS += core/connection/native_tls_securetransport.c
-else
 CORE_CONNECTION_SRCS += core/connection/native_tls_openssl.c
-endif
 endif
 CORE_CONNECTION_OBJS = $(CORE_CONNECTION_SRCS:%.c=$(OBJDIR)/%.o)
 CORE_CONNECTION_LIB = $(OBJDIR)/libaimee-core-connection.a
-
-CORE_EVENT_BUS_SRCS = core/event_bus/bus_attach.c core/event_bus/bus_wire.c core/event_bus/module_client.c core/event_bus/module_protocol.c core/event_bus/module_runtime.c core/event_bus/bus_ring.c core/event_bus/bus_region.c core/event_bus/bus_region_host.c core/event_bus/bus_arena.c core/event_bus/bus_route.c core/event_bus/bus_runtime.c core/event_bus/bus_host.c core/event_bus/bus_client.c core/event_bus/bus_capture.c core/event_bus/bus_endpoint.c
-CORE_EVENT_BUS_OBJS = $(CORE_EVENT_BUS_SRCS:%.c=$(OBJDIR)/%.o)
-CORE_EVENT_BUS_LIB = $(OBJDIR)/libaimee-core-event-bus.a
 
 $(CORE_CONNECTION_LIB): $(CORE_CONNECTION_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
-$(CORE_EVENT_BUS_LIB): $(CORE_EVENT_BUS_OBJS)
-	@mkdir -p $(dir $@)
-	$(AR) rcs $@ $^
 endif
-OBS_BUS_RUNTIME_OBJ = $(OBJDIR)/modules/audit/obs_bus.o
+OBS_BUS_RUNTIME_OBJ = $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/instance_identity.o
 AUDIT_REPLAY_OBJ = $(OBJDIR)/modules/audit/audit_replay.o
 
-$(OBJDIR)/core/event_bus/%.o: C_FLAGS += -Icore/event_bus/include
-$(OBJDIR)/modules/audit/obs_bus.o: C_FLAGS += -Icore/event_bus/include
-$(OBJDIR)/modules/audit/audit_replay.o: C_FLAGS += -Icore/event_bus/include
 $(OBJDIR)/server/execution_policy_bus.o: C_FLAGS += -Imodules/execution-policy/include
 
 # --- Layer 2: Agent execution (agent loop, tools, HTTP, policy) ---
-AGENT_SRCS = core/turn_integrity/turn_integrity.c agent_job_release.c delegate_exit_classify.c primary_session_release.c model_catalog_release.c server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/tool_call_args.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/execution_policy_bus.c modules/benchmarks/agent_eval.c modules/benchmarks/agent_eval_memory_support.c modules/benchmarks/agent_eval_baseline.c server/agent_coord.c \
-             server/agent_tasks.c server/agent_tools.c server/computer_use.c server/script_runner.c server/script_rpc.c toolset.c server/tool_args_coerce.c server/tool_schema_sanitizer.c server/osv_check.c server/http_retry.c server/failover.c \
+AGENT_SRCS = core/turn_integrity/turn_integrity.c agent_job_release.c delegate_exit_classify.c primary_session_release.c server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/execution_policy_bus.c modules/benchmarks/agent_eval.c modules/benchmarks/agent_eval_memory_support.c server/agent_coord.c \
+             server/agent_tasks.c server/agent_tools.c server/computer_use.c server/script_runner.c server/script_rpc.c server/script_tool_execution.c toolset.c server/tool_args_coerce.c server/tool_schema_sanitizer.c server/osv_check.c server/http_retry.c server/failover.c \
              server/web_search.c server/web_search_fuse.c server/web_search_breaker.c server/token_tracker.c server/token_tracker_registry.c server/token_tracker_db1.c server/middleware.c server/agent_pipeline.c \
-             server/process_mgr.c server/agent_loop.c server/liveness.c server/cli_session.c server/cli_session_pty.c server/cli_codex.c server/provider_cli_adapter.c server/cli_claude.c  server/cli_mistral.c server/cli_acp.c server/session_compact.c server/rounds_to_resume.c server/compact_prune.c server/context_engine.c \
+             server/process_mgr.c server/liveness.c server/cli_session.c server/cli_session_pty.c server/cli_codex.c server/cli_codex_profile.c server/provider_cli_adapter.c server/cli_claude.c server/cli_claude_native.c server/claude_headless.c server/server_session_control.c server/server_session_capture.c server/server_session_question.c server/server_session_log.c server/agent_response_projection.c  server/cli_mistral.c server/session_compact.c server/rounds_to_resume.c \
              modules/delegates/delegate_backend.c modules/delegates/delegate_backend_docker.c modules/delegates/delegate_launch_args.c modules/delegates/delegate_driver.c modules/delegates/delegate_openai.c  modules/delegates/delegate_xml_fallback.c modules/delegates/delegate_verify.c \
              server/model_provider.c server/model_sampling.c  server/aux_router.c \
-             server/otel.c server/oauth_pkce.c server/oauth_tokens.c modules/protocols/mcp/mcp_client.c modules/protocols/mcp/mcp_client_registry.c modules/protocols/mcp/mcp_osv_gate.c \
-             server/agent_shell.c server/agent_cli_shell.c
+             server/otel.c server/oauth_pkce.c server/oauth_tokens.c modules/protocols/mcp/mcp_client.c modules/protocols/mcp/mcp_client_registry.c modules/protocols/mcp/mcp_osv_gate.c
 AGENT_OBJS = $(AGENT_SRCS:%.c=$(OBJDIR)/%.o) $(PLATFORM_AGENT_OBJS)
 
-# --- Layer 3: Commands + UI (cmd_*, webchat, dashboard) ---
-CMD_SRCS = prompts.c persona.c hardware_probe.c curator_profile.c modules/delegates/delegate_source_authority.c \
-           cmd_core.c cmd_init.c cmd_data.c cmd_infra.c cmd_session_history.c cmd_wiki.c cmd_index.c cmd_graph.c cmd_rules.c cmd_roadmap.c cmd_auto.c cmd_learning.c cmd_review.c cmd_dogfood.c cmd_identity.c cmd_onboard.c cmd_diagnose.c \
-           cmd_hooks.c cmd_hooks_scope.c cmd_capabilities.c cmd_session_lifecycle.c cmd_agent.c cmd_agent_setup.c cmd_agent_trace.c cmd_agent_delegate.c cmd_agent_delegate_toolset.c cmd_agent_delegate_status.c modules/delegates/delegate_checkout.c \
-           cmd_wm.c cmd_sweep.c cmd_cancel.c cmd_rewind.c cmd_branch.c cmd_mcp.c cmd_util.c cmd_table.c cmd_doctor.c cmd_toolset.c \
-           \
-           cmd_trajectory.c \
-           cmd_slop.c cmd_job.c cmd_roles.c cmd_skill.c cmd_autopilot.c cmd_trigger.c cmd_run.c cmd_kb.c cmd_kb_export.c kb_export_json.c kb_export_obsidian.c kb/kb_lab.c modules/kb_client/kb_client.c modules/kb_client/kb_client_cache.c modules/kb_client/kb_client_ws.c modules/kb_client/kb_client_docs.c kb/kb_doc_hash.c modules/kb_client/kb_client_index.c modules/kb_client/kb_client_index_parse.c modules/kb_client/kb_client_pdf.c modules/kb_client/kb_client_code_embed.c modules/kb_client/kb_client_memory.c modules/kb_client/kb_client_memory_mutations.c modules/kb_client/kb_client_pii.c modules/kb_client/kb_client_agent.c modules/kb_client/kb_client_dashboard.c modules/kb_client/kb_client_tasks.c modules/kb_client/kb_client_tool_registry.c modules/kb_client/kb_client_roadmap.c hud.c modules/delegates/delegate_depth.c modules/delegates/delegate_role.c modules/delegates/delegate_prompt.c modules/delegates/delegate_routing.c modules/delegates/delegate_plan.c modules/delegates/delegate_launch.c modules/delegates/delegate_economics.c modules/delegates/delegate_patch_coordinator.c modules/roundtable/delegate_ensemble.c modules/roundtable/delegate_ensemble_review.c server/evidence_replay.c modules/roundtable/roundtable_activation.c modules/roundtable/roundtable_verify.c server/sweep_exclude.c server/sweep_score.c server/sweep_scope.c server/sweep_parse.c \
-           turn_narration.c dashboard.c dashboard_kb.c trace_analysis.c cmd_ensemble.c \
-           cmd_provider.c cmd_aux.c cmd_audit.c
-CMD_OBJS = $(CMD_SRCS:%.c=$(OBJDIR)/%.o)
-
-# Sources no binary and no test links, so nothing would otherwise compile them.
-# panel_roster.c has had no build rule since it landed in #1845; panel_provider.c
-# is reached only by unit-test-panel-provider. Compiled here so they cannot rot
-# unnoticed the way four CMD_SRCS files did.
-#
-# Generated DB1 clients are here for a different reason: the generator emits one
-# as soon as a family activates, but the daemon only links it at cutover, when
-# the whole domain source moves. Between those two points nothing would compile
-# it, and the generator's newest output is exactly the code least exercised
-# elsewhere. Every client under db1_client/ is therefore either linked
-# (DB1_CLIENT_SRCS) or compiled here -- there is no third state.
-ORPHAN_SRCS = $(filter-out $(DB1_CLIENT_SRCS),$(wildcard db1_client/*.c))
-ORPHAN_OBJS = $(ORPHAN_SRCS:%.c=$(OBJDIR)/%.o)
-
-# CMD_SRCS is linked into NO shipping binary and no test target, so nothing ever
-# compiled it. Five files had rotted on the mainline -- an uninitialised legacy_config_record,
-# a stale db1_coord_job_add_task arity, a `/*` inside a block comment, a `scope`
-# declared in a block that does not reach its use, and a legacy_config_record field read with
-# no legacy_config_record in scope. This target compiles them so that cannot recur silently.
-cmd-srcs-compile-check: $(CMD_OBJS) $(ORPHAN_OBJS)
-	@echo "cmd-srcs-compile-check: ok ($(words $(CMD_SRCS)) cmd + $(words $(ORPHAN_SRCS)) orphan file(s))"
+CORE_SRCS += $(IR_CONTRACT_SRCS)
 
 # --- Pure client (aimee) ---
-CLI_SRCS = cli_kb_smoke.c cli_argspec.c cli_v1_routes.c cli_v1_routes_d.c cli_v1_routes_e.c cli_v1_routes_f.c cli_v1_routes_c.c cli_v1_routes_b.c cli_index_bootstrap.c cli_main.c cli_agent_setup.c cli_session_start.c hook_session_token.c session_degraded_notice.c cmd_self_update.c self_update_util.c harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c cli_attention_guard.c client_session_worktree.c session_worktree_key.c cli_code_audit.c cli_css.c cli_chat_stream.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c client_config.c modules/delegates/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c modules/protocols/acp/acp_server.c modules/workspace/cli_workspace_serve.c modules/workspace/workspace_client_diff.c cli_agent_keys.c cmd_workflow.c
-CLI_SRCS += http_content_encoding.c
-CLI_SRCS += cli_proxy.c
+CLIENT_TRANSPORT_SRCS = cli_client.c
+CLIENT_TRANSPORT_OBJS = $(CLIENT_TRANSPORT_SRCS:%.c=$(OBJDIR)/%.o)
+CLI_SRCS = cli_kb_smoke.c cli_argspec.c cli_v1_routes.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c cli_v1_routes_c.c cli_v1_routes_b.c cli_index_bootstrap.c cli_main.c cli_agent_setup.c cli_session_start.c hook_session_token.c session_degraded_notice.c cmd_self_update.c self_update_util.c harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c cli_attention_guard.c client_session_worktree.c session_worktree_key.c cli_code_audit.c cli_css.c cli_chat_stream.c $(CLIENT_TRANSPORT_SRCS) cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c client_config.c modules/delegates/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c modules/protocols/acp/acp_server.c modules/workspace/cli_workspace_serve.c modules/workspace/workspace_client_diff.c cli_agent_keys.c cmd_workflow.c
+CLI_SRCS += http_content_encoding.c $(HOOK_IR_SRCS) $(IR_BASE_SRCS) modules/ir/session_event.c modules/ir/request_codec.c
+CLI_SRCS += cli_proxy.c cli_proxy_cmd.c
 CLI_OBJS = $(CLI_SRCS:%.c=$(OBJDIR)/%.o)
-CLIENT_PLATFORM_OBJS = $(filter %/platform_ipc.o %/platform_net.o %/platform_path.o %/platform_process.o %/platform_random.o %/history.o %/cli_client.o %/cli_main.o,$(PLATFORM_OBJS))
+CLIENT_PLATFORM_OBJS = $(filter %/platform_ipc.o %/platform_net.o %/platform_path.o %/platform_process.o %/platform_random.o %/cli_client.o %/cli_main.o,$(PLATFORM_OBJS))
 # Detached-workspace runner: the serve loop executes file/exec ops locally, so
 # the thin client links the runner + shared provider + exec helpers (compiled
 # with full flags; --gc-sections trims the unused remainder). util.o supplies
@@ -580,24 +478,30 @@ CLIENT_RUNNER_OBJS = $(OBJDIR)/modules/workspace/workspace_provider_detached.o $
 # way out to its MCP consumer. It is in CORE_SRCS, but the client links an explicit
 # object set rather than all of CORE_OBJS, and it appears in no other list this
 # binary consumes -- so this is an addition, not a second definition.
-CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o $(OBJDIR)/code_collect.o $(OBJDIR)/codex_auth.o $(OBJDIR)/yaml.o $(OBJDIR)/artifact_trust.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o $(CLIENT_PLATFORM_OBJS) $(CLIENT_RUNNER_OBJS)
-CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o
+CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o $(OBJDIR)/code_collect.o $(OBJDIR)/codex_auth.o $(OBJDIR)/yaml.o $(OBJDIR)/artifact_trust.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o $(CLIENT_PLATFORM_OBJS) $(CLIENT_RUNNER_OBJS)
+# Canonical identity is filesystem/Git-only; the thin client never links the
+# workspace discovery/context or server store graph.
+WORKSPACE_IDENTITY_OBJS = $(OBJDIR)/modules/workspace/workspace_identity.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/util_url.o $(OBJDIR)/yaml.o
+CLIENT_SUPPORT_OBJS += $(WORKSPACE_IDENTITY_OBJS)
+CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o
 $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 
 # --- Server ---
-SERVER_SRCS = peer_client/peer_client.c db1_store_probe.c server/embedder_catalog.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_v1_routes_e.c cli_v1_routes_f.c server/server_main.c server/vault_bootstrap_privilege.c server/server.c server/server_kb_heartbeat.c server/s2_native_gate_hook.c server_provider.c server_insights.c server_eval.c server/server_api_status.c server/server_error_kind.c server/server_bearer_auth.c server/server_seed_config.c server/server_http.c server/delegate_egress_adapter.c server/server_http_surfaces.c server/server_http_management.c server/server_http_routes.c server/server_http_mgmt_read_routes.c server/server_http_routes_git.c server/server_http_routes_workspace.c server/server_dev_submit.c server/server_ci_route.c server/appliance_admin.c server/server_http_config_routes.c server/server_http_response.c server/server_http_sse.c server/server_http_conn_worker.c server/server_conn_io.c server/server_tls.c server/server_http_reqctx.c server/server_http_identity.c server/server_http_authz.c server/request_context.c server/response_dedup.c server/anthropic_shape.c server/anthropic_ingress.c server/anthropic_http.c server/openai_shape.c server/openai_chat.c server/msg_session_key.c modules/economizer/gateway_mutate.c server/ingress_preinject.c server/retrieval_outcome_bridge.c server/code_span.c modules/ir/aimee_ir_module_plan.c server/ir_host_bindings.c pipeline/gw_stage_registry.c pipeline/gw_response_registry.c modules/governance/gw_stage_governance.c modules/governance/gw_stage_completion.c pipeline/gw_orchestration_seam.c modules/delegates/gw_orch_delegates.c modules/workflows/gw_orch_workflows.c server/fidelity_check.c server/openai_responses_store.c server/openai_runs_store.c server/server_api.c server/server_native_primitive.c server/server_ready.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_memory.c server/server_task_projection.c server/server_state_freshness.c server/server_memory_review.c server/server_facts.c server/server_audit_replay_routes.c server/server_runner_endpoints.c server/workspace_register_args.c server/server_state_audit.c server/server_css_query.c server/server_runner_endpoints.c server/server_workspace_scan.c server/server_state_audit.c server/server_css_query.c server/server_state.c server/server_state_index.c server/server_active_project.c server/server_state_vectors.c server/server_memory_benchmark.c server/roundtable_review_bus.c modules/roundtable/roundtable_review_panel.c server/workflow_control_bus.c modules/workspace/workspace_provider_detached.c modules/workspace/workspace_provider_container.c modules/workspace/workspace_runner_queue.c modules/workspace/workspace_runner_registry.c modules/workspace/workspace_turn.c modules/workspace/workspace_scope.c modules/delegates/delegate_sandbox_image.c modules/sandbox/sandbox_learned.c modules/roundtable/roundtable_chair.c modules/webuser/webuser_runtime.c \
-              server/server_delegate_monitor.c server/server_coord_dispatcher.c server/server_session_pools.c server/presence.c server/turn_registry.c server/wfe_live_delegate.c modules/workflows/wfe_live_forge.c modules/workflows/wfe_live_foreach.c modules/workflows/wfe_live_panel.c modules/workflows/wfe_panel_roundtable.c modules/workflows/wfe_replay_worktree.c modules/workflows/wfe_scheduler.c \
-              server/server_agent.c server/server_cli_oauth.c server/server_compute.c server/server_compute_roundtable.c server/server_compute_mailbox.c server_compute_episodes.c server/router_advise.c modules/ir/aimee_ir.c modules/ir/aimee_ir_session.c modules/ir/aimee_ir_metrics.c modules/translation/aimee_frontend_anthropic.c modules/translation/aimee_frontend_openai.c modules/translation/aimee_frontend_responses.c modules/translation/aimee_backend_anthropic.c modules/translation/aimee_backend_openai.c modules/translation/aimee_backend_responses.c modules/translation/aimee_backend_bedrock.c server/aimee_ir_shadow.c server/aimee_ir_serve.c modules/translation/aimee_ir_stream.c modules/delegates/aimee_ir_rescue.c server/shadow_mirror.c server/server_delegate_ondemand.c server/server_skill_jobs.c server/server_delegate_status.c server/server_delegate_reservation.c server/server_compute_async.c server/server_jobs_aux.c server/server_skill.c server/server_mcp.c server/server_mcp_roundtable.c server/server_mcp_surface.c server/server_mcp_call_table.c server/server_mcp_memory_gate.c server/server_mcp_ast_grep.c server/server_mcp_tools.c server/server_mcp_delegate.c server/server_mcp_process.c server/server_mcp_skill.c server/server_mcp_learning.c server/server_mcp_ensemble.c server/server_mcp_gateway.c server/session_search_tool.c server/compute_pool.c cli_client.c \
+SERVER_SRCS = peer_client/peer_client.c db1_store_probe.c server/embedder_catalog.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c server/server_main.c server/vault_bootstrap_privilege.c server/server.c server/server_kb_heartbeat.c server/s2_native_gate_hook.c server_provider.c server_insights.c server_eval.c server/server_api_status.c server/server_error_kind.c server/server_bearer_auth.c server/server_seed_config.c server/server_http.c server/delegate_egress_adapter.c server/server_http_surfaces.c server/server_http_management.c server/server_http_routes.c server/server_http_op_runs.c server/server_compute_owner.c server/server_learning_outcome.c server/server_learning_recovery.c server/server_verification.c server/server_learning_application.c server/server_learning_approaches.c server/server_http_mgmt_read_routes.c server/server_http_routes_git.c server/server_http_routes_workspace.c server/server_dev_submit.c server/server_ci_route.c server/appliance_admin.c server/server_http_config_routes.c server/server_http_response.c server/server_http_sse.c server/server_http_conn_worker.c server/server_conn_io.c server/server_tls.c server/server_http_reqctx.c server/server_http_identity.c server/server_http_authz.c server/request_context.c server/response_dedup.c server/anthropic_ingress.c server/anthropic_http.c server/server_model_execution.c server/openai_shape.c server/openai_chat.c server/msg_session_key.c modules/economizer/gateway_mutate.c server/ingress_preinject.c server/retrieval_outcome_bridge.c server/code_span.c modules/ir/aimee_ir_module_plan.c server/ir_host_bindings.c pipeline/gw_response_registry.c modules/governance/gw_stage_governance.c modules/governance/gw_stage_completion.c pipeline/gw_orchestration_seam.c modules/delegates/gw_orch_delegates.c modules/workflows/gw_orch_workflows.c server/openai_runs_store.c server/server_api.c server/server_native_primitive.c server/server_ready.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_memory.c server/server_task_projection.c server/server_state_freshness.c server/server_memory_review.c server/server_facts.c server/server_audit_replay_routes.c server/server_runner_endpoints.c server/workspace_register_args.c server/server_state_audit.c server/server_css_query.c server/server_workspace_scan.c server/server_state_index.c server/server_active_project.c server/server_state_vectors.c server/server_memory_benchmark.c server/roundtable_review_bus.c modules/roundtable/roundtable_review_panel.c server/workflow_control_bus.c modules/workspace/workspace_provider_detached.c modules/workspace/workspace_provider_container.c modules/workspace/workspace_runner_queue.c modules/workspace/workspace_runner_registry.c modules/workspace/workspace_turn.c modules/workspace/workspace_scope.c modules/delegates/delegate_sandbox_image.c modules/sandbox/sandbox_learned.c modules/webuser/webuser_runtime.c \
+              server/server_delegate_monitor.c server/server_coord_dispatcher.c server/server_session_pools.c server/presence.c server/turn_registry.c modules/workflows/wfe_scheduler.c \
+              server/server_agent.c server/server_cli_oauth.c server/server_compute.c server/server_delegate_input.c server/server_chat_ir.c server/server_compute_mailbox.c server_compute_episodes.c server/router_advise.c modules/ir/aimee_ir_session.c modules/ir/aimee_ir_metrics.c modules/translation/aimee_backend_bedrock.c server/aimee_ir_serve.c modules/translation/aimee_responses_frontend_stream.c server/server_responses_stream.c server/server_native_cache.c modules/translation/harness_ir.c modules/translation/history_ir.c modules/translation/codec_stdio.c modules/delegates/aimee_ir_rescue.c server/shadow_mirror.c server/server_delegate_ondemand.c server/server_skill_jobs.c server/server_delegate_status.c server/server_delegate_reservation.c server/server_compute_async.c server/server_jobs_aux.c server/server_skill.c server/server_mcp.c server/server_mcp_roundtable.c server/server_mcp_surface.c server/server_mcp_call_table.c server/server_mcp_memory_gate.c server/server_mcp_ast_grep.c server/server_mcp_tools.c server/server_mcp_delegate.c server/server_mcp_process.c server/server_mcp_skill.c server/server_mcp_learning.c server/server_mcp_ensemble.c server/server_mcp_gateway.c server/session_search_tool.c server/compute_pool.c $(CLIENT_TRANSPORT_SRCS) \
               modules/roundtable/roundtable_pipeline_eval.c modules/roundtable/roundtable_pipeline_capture.c modules/roundtable/roundtable_pipeline_chunk.c server/server_pipeline.c server/server_pipeline_merge.c \
               server/agent_admission.c server/provider_catalog.c \
               server/dashboard_server.c hud.c cmd_identity.c prompts.c persona.c modules/roundtable/roundtable_preset.c modules/roundtable/roundtable_seat_resolve.c working_profile.c \
-              modules/delegates/delegate_role.c modules/delegates/delegate_depth.c modules/delegates/delegate_prompt.c modules/delegates/delegate_run_phases.c modules/delegates/delegate_routing.c modules/delegates/delegate_launch.c modules/delegates/delegate_source_authority.c modules/delegates/delegate_economics.c modules/delegates/delegate_credentials.c modules/delegates/delegate_credential_retry.c modules/delegates/delegate_patch_coordinator.c modules/roundtable/delegate_ensemble.c modules/roundtable/delegate_ensemble_review.c server/evidence_replay.c modules/roundtable/roundtable_activation.c modules/roundtable/roundtable_verify.c server/sweep_exclude.c server/sweep_score.c server/sweep_scope.c server/sweep_parse.c server/server_sweep.c modules/delegates/delegate_checkout.c cmd_init.c \
+              modules/delegates/delegate_role.c modules/delegates/delegate_depth.c modules/delegates/delegate_prompt.c modules/delegates/delegate_run_phases.c modules/delegates/delegate_routing.c modules/delegates/delegate_launch.c modules/delegates/delegate_source_authority.c modules/delegates/delegate_economics.c modules/delegates/delegate_credentials.c modules/delegates/delegate_credential_retry.c modules/delegates/delegate_patch_coordinator.c modules/roundtable/delegate_ensemble.c modules/roundtable/ensemble_request.c modules/roundtable/roundtable_activation.c server/sweep_exclude.c server/sweep_score.c server/sweep_scope.c server/sweep_parse.c server/server_sweep.c modules/delegates/delegate_checkout.c cmd_init.c \
               server/trigger_scheduler.c server/server_trigger.c server/server_cron.c server/server_trajectory.c server/server_config.c modules/vault/vault_principal.c modules/vault/vault_crypto.c modules/vault/vault_kek_check.c modules/vault/vault_kek_cache.c modules/vault/vault_server_key.c modules/vault/vault_store.c modules/vault/vault_service.c modules/vault/vault_env_bootstrap.c modules/vault/vault_config_bootstrap.c egress_credential_envelope.c modules/git/git_forge_vault.c modules/git/git_cred_inject.c modules/git/git_host_resolve.c modules/git/git_ssh_agent.c modules/git/git_project.c server/ws_registry.c modules/git/git_ops.c modules/git/git_host_cred.c modules/git/git_org_repos.c modules/git/git_oauth_github.c modules/git/git_oauth_gh.c modules/git/git_oauth_device.c server/deploy_apply.c modules/git/git_pr_api.c modules/git/git_pr_ci_grade.c modules/webuser/webuser_editor.c modules/vault/vault_capability.c server/server_vault.c server/server_vault_bootstrap.c server/server_vault_agent_migration.c server/pki.c server/server_cert.c \
-              modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
-              modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
+              modules/workflows/wfe_engine.c modules/workflows/wfe_approval.c \
+              modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
+SERVER_SRCS += server/agent_result_cache.c
 SERVER_SRCS += server/server_governed_action.c server/server_clean_retry.c
 SERVER_SRCS += server/server_code_index.c
+SERVER_SRCS += server/server_mcp_project.c
 SERVER_SRCS += server/server_runtime_identity.c
 # The command catalogue the thin client renders (served via /v1/cli/manifest).
 SERVER_SRCS += server/cli_command_defs.c
@@ -606,11 +510,11 @@ SERVER_SRCS += server/cli_dispatch_defs.c
 # Methods whose request body is empty, served so a new no-arg command is usable.
 SERVER_SRCS += server/cli_marshal_defs.c server/cli_argspec_defs.c
 SERVER_SRCS += server/ingress_project_scope.c
-SERVER_SRCS += server/server_write_tier.c server/server_write_tier_db1.c shared/auth_token_verify.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_jwks_cache.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c shared/management_read.c server/server_mgmt_read_endpoint.c server/server_mgmt_read_source.c server/server_mgmt_status.c server/server_mgmt_checkpoint_client.c kb/kb_mgmt_status.c kb/kb_mgmt_client.c kb/kb_mgmt_endpoint.c
+SERVER_SRCS += server/server_write_tier.c server/server_write_tier_db1.c shared/auth_token_verify.c kb/auth_oidc.c server/server_mgmt_jwks_cache.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c shared/management_read.c server/server_mgmt_read_endpoint.c server/server_mgmt_read_source.c server/server_mgmt_status.c server/server_mgmt_checkpoint_client.c kb/kb_mgmt_status.c kb/kb_mgmt_client.c kb/kb_mgmt_endpoint.c
 SERVER_SRCS += http_content_encoding.c server/server_http_keepalive.c server/server_http_body.c
 SERVER_SRCS += modules/economizer/gateway_mutate_wire.c
 # The one object that links vault_service to the (D7-confined) audit bus, keeping
-# vault_service.o itself bus-free; server-only, co-linked with $(CORE_EVENT_BUS_LIB).
+# vault_service.o itself bus-free; server-only, co-linked with $(OURO_RING_LIB).
 SERVER_SRCS += server/vault_audit_bridge.c
 # Likewise, the sole object linking sandbox.c to the audit bus (sandbox.o stays
 # bus-free). Server-only.
@@ -628,10 +532,11 @@ SERVER_SRCS += server/turn_integrity_audit_bridge.c
 SERVER_SRCS += server/obs_bus_adapter.c
 # Pure policy: which provider names may be persisted as the durable primary
 # (unit tested standalone, so it stays out of the server_provider.c handler TU).
-SERVER_SRCS += server/provider_settable.c
+SERVER_SRCS += 
 SERVER_SRCS += server/module_routing_adapter.c
 SERVER_SRCS += server/module_stage_adapters.c
-SERVER_SRCS += modules/benchmarks/agent_eval_memory_transport.c
+SERVER_SRCS += server/server_native_delegate.c server/server_native_history.c server/server_unknown_effect_policy.c server/server_native_execution.c server/server_native_cache_lease.c server/server_native_containment.c server/server_native_launch.c cli_proxy.c server/server_native_runtime.c server/server_native_cli.c server/server_native_tool_source.c server/server_native_replay.c server/server_native_tool_admission.c
+SERVER_SRCS += $(MODEL_WIRE_SRCS)
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \
@@ -655,8 +560,7 @@ KB_CLIENT_OBJS = $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_cl
 SERVER_KB_CLIENT_OBJS = $(KB_CLIENT_OBJS)
 
 # --- KB Service ---
-KB_SRCS = kb/kb_main.c kb/kb_module_stage_adapters.c kb/kb_vault_policy.c kb/kb_witness_cadence.c kb/kb_witness_gate_state.c kb/kb_background.c kb/kb_service.c kb/kb_service_workers.c kb/kb_ingest_workers.c kb/kb_service_kb.c kb/kb_service_memory.c kb/kb_service_css.c kb/kb_service_agent.c kb/kb_service_graph.c kb/kb_graph_analytics.c kb/lessons_cite_tracker.c kb/lessons_capture.c kb/lessons_reflect.c kb/lessons_actuate.c kb/lessons_session_capture.c kb/prompt_sanitizer.c kb/kb_surprising_judge.c kb/kb_service_artifacts.c kb/kb_service_roadmap.c kb/kb_intel_payload.c kb/kb_bandit_registry.c kb/kb_reflection.c curiosity_resolve.c kb/kb_evidence_embed.c kb/kb_learning_synth.c kb/kb_learning_version.c kb/kb_mining.c kb/http/kb_http.c kb/http/kb_http_json.c kb/http/kb_http_listener.c kb/http/kb_http_client.c kb/http/kb_tls.c kb/http/kb_tls_serve.c kb/http/kb_http_conn.c kb/http/kb_http_ws.c kb/http/kb_http_search.c kb/http/kb_route_acl.c kb/http/kb_ingress.c kb/http/kb_http_team.c kb/http/kb_http_models.c kb/http/kb_models_validate.c kb/http/kb_http_insights.c kb/http/kb_insights_util.c kb/http/kb_http_budget.c kb/http/kb_http_rate.c kb/http/kb_http_telemetry.c kb/http/kb_http_console.c kb/http/kb_http_accounts.c kb/http/kb_http_bootstrap.c kb/http/kb_http_identity_login.c kb/http/kb_http_grants.c kb/http/kb_http_governance.c kb/kb_scope.c kb/kb_identity_resolve.c kb/kb_oidc_jwks_fleet.c kb/kb_reqctx.c kb/http/kb_http_code.c kb/http/kb_http_code_graphfb.c kb/http/kb_http_pdf.c kb/http/kb_http_ingest.c kb/http/kb_http_jobs.c kb/kb_doc_hash.c kb/kb_doc_pdf.c kb/kb_tsr_sidecar.c kb/kb_blob_store.c kb/kb_blob_reconcile.c kb/kb_ocr_sidecar.c kb/http/kb_http_releases.c kb/http/kb_http_reflections.c kb/kb_ingest_normalize.c kb/kb_service_code_embed.c kb/kb_memory_facts.c kb/fact_grounding.c kb/enroll.c kb/verifier.c kb/auth_oidc.c kb/kb_oidc_login.c kb/kb_oidc_login_store.c kb/kb_oidc_token_exchange.c kb/kb_oidc_token_exchange_post.c kb/pki.c kb/kb_sidecar_identity.c modules/aws/aws_sigv4.c modules/aws/aws_sts.c modules/aws/bedrock_policy.c modules/aws/sts_cache.c modules/aws/aws_eventstream.c
-KB_SRCS := $(filter-out kb/fact_grounding.c,$(KB_SRCS))
+KB_SRCS = kb/kb_main.c kb/kb_module_stage_adapters.c kb/kb_vault_policy.c kb/kb_witness_cadence.c kb/kb_witness_gate_state.c kb/kb_background.c kb/kb_service.c kb/kb_service_workers.c kb/kb_ingest_workers.c kb/kb_service_kb.c kb/kb_service_memory.c kb/kb_service_css.c kb/kb_service_agent.c kb/kb_service_graph.c kb/kb_graph_analytics.c kb/lessons_cite_tracker.c kb/lessons_reflect.c kb/lessons_session_capture.c kb/prompt_sanitizer.c kb/kb_surprising_judge.c kb/kb_service_artifacts.c kb/kb_service_roadmap.c kb/kb_intel_payload.c kb/kb_bandit_registry.c kb/kb_reflection.c curiosity_resolve.c kb/kb_evidence_embed.c kb/kb_learning_synth.c kb/kb_learning_version.c kb/kb_mining.c kb/http/kb_http.c kb/http/kb_http_json.c kb/http/kb_http_common.c kb/http/kb_http_listener.c kb/http/kb_http_client.c kb/http/kb_tls.c kb/http/kb_tls_serve.c kb/http/kb_http_conn.c kb/http/kb_http_ws.c kb/http/kb_http_search.c kb/http/kb_route_acl.c kb/http/kb_ingress.c kb/http/kb_http_team.c kb/http/kb_http_models.c kb/http/kb_models_validate.c kb/http/kb_http_insights.c kb/http/kb_insights_util.c kb/http/kb_http_budget.c kb/http/kb_http_rate.c kb/http/kb_http_telemetry.c kb/http/kb_http_console.c kb/http/kb_http_accounts.c kb/http/kb_http_bootstrap.c kb/http/kb_http_identity_login.c kb/http/kb_http_grants.c kb/http/kb_http_governance.c kb/kb_scope.c kb/kb_identity_resolve.c kb/kb_oidc_jwks_fleet.c kb/kb_reqctx.c kb/http/kb_http_code.c kb/http/kb_http_code_graphfb.c kb/http/kb_http_pdf.c kb/http/kb_http_ingest.c kb/http/kb_http_jobs.c kb/kb_doc_hash.c kb/kb_doc_pdf.c kb/kb_tsr_sidecar.c kb/kb_blob_store.c kb/kb_blob_reconcile.c kb/kb_ocr_sidecar.c kb/http/kb_http_releases.c kb/http/kb_http_reflections.c kb/kb_ingest_normalize.c kb/kb_service_code_embed.c kb/kb_memory_facts.c kb/enroll.c kb/verifier.c kb/auth_oidc.c kb/kb_oidc_login.c kb/kb_oidc_login_store.c kb/kb_oidc_token_exchange.c kb/kb_oidc_token_exchange_post.c kb/pki.c kb/kb_sidecar_identity.c modules/aws/aws_sigv4.c modules/aws/aws_sts.c modules/aws/bedrock_policy.c modules/aws/aws_eventstream.c
 KB_SRCS += kb/kb_obs_bus_adapter.c
 KB_SRCS += kb/http/kb_metrics_listener.c
 KB_SRCS += kb/http/kb_http_code_scan_phase.c
@@ -671,7 +575,7 @@ KB_STORE_GRAPH_KIND_UNITS = index rel_types \
 KB_STORE_GRAPH_KIND_OBJS = $(foreach prefix,$(OBJDIR) $(OBJDIR)/kb $(OBJDIR)/server,\
     $(addprefix $(prefix)/,$(addsuffix .o,$(KB_STORE_GRAPH_KIND_UNITS)))) \
     $(addprefix $(OBJDIR)/kb_store/,canonical_index.o code_projection.o entity_edges.o fact_identity.o fact_mutation.o) \
-    $(addprefix $(OBJDIR)/tests/,test_fact_lifecycle.o test_memory_advanced.o test_rel_types.o test_kb_store_rel_type_support.o test_kb_store_rel_seed_support.o kb_store_rel_type_monolith.o \
+    $(addprefix $(OBJDIR)/tests/,test_fact_lifecycle.o test_rel_types.o test_kb_store_rel_type_support.o test_kb_store_rel_seed_support.o kb_store_rel_type_monolith.o \
         kb_store-rel-type-support-sanitize/test.o kb_store-rel-type-support-sanitize/monolith.o \
         kb_store-rel-seed-support-sanitize/test.o)
 $(KB_STORE_GRAPH_KIND_OBJS): C_FLAGS += -Imodules/kb/include
@@ -682,7 +586,7 @@ KB_SRCS += kb/kb_document_inspector.c
 KB_SRCS += kb/http/kb_http_code_context.c
 KB_SRCS += kb/http/kb_http_code_lifecycle.c
 KB_SRCS += kb/kb_tenancy_cli.c
-KB_SRCS += kb/kb_bedrock_egress.c kb/kb_egress_admission.c kb/kb_vault_key_use.c kb/kb_vault_protected_use.c kb/kb_vault_rewrap.c kb/kb_vault_rotation.c kb/kb_vault_rotation_ops.c kb/kb_mgmt_endpoint.c kb/kb_mgmt_client.c kb/kb_mgmt_token.c kb/kb_identity_token.c kb/kb_mgmt_status.c kb/http/kb_http_servers.c kb/http/kb_http_egress.c modules/kb/c/org_token_audit.c
+KB_SRCS += kb/kb_bedrock_egress.c kb/kb_vault_key_use.c kb/kb_vault_protected_use.c kb/kb_vault_rotation.c kb/kb_vault_rotation_ops.c kb/kb_vault_rotation_aws.c kb/kb_vault_rotation_worker.c kb/kb_vault_rotation_cli.c kb/kb_mgmt_endpoint.c kb/kb_mgmt_client.c kb/kb_mgmt_token.c kb/kb_identity_token.c kb/kb_mgmt_status.c kb/http/kb_http_servers.c kb/http/kb_http_egress.c 
 KB_SRCS += kb/kb_workload_provider.c kb/kb_workload_helper_posix.c kb/kb_workload_wire.c \
            kb/kb_workload_proof.c kb/kb_workload_jwt.c
 KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \
@@ -795,7 +699,7 @@ KB_MCP_OBJS = $(OBJDIR)/modules/protocols/mcp/mcp_client.o \
               $(OBJDIR)/server/http_retry.o \
               $(OBJDIR)/server/failover.o \
               $(OBJDIR)/kb/kb_mcp_osv_stub.o
-KB_SYNTHESIS_SRCS = modules/kb-synthesis/kb_curator_contradictions.c modules/kb-synthesis/kb_curator_custom.c modules/kb-synthesis/kb_curator_drain.c modules/kb-synthesis/kb_curator_extract.c modules/kb-synthesis/kb_curator_extract_code.c modules/kb-synthesis/kb_curator_grounding.c modules/kb-synthesis/kb_curator_index_claims.c modules/kb-synthesis/kb_curator_index_code_unit.c modules/kb-synthesis/kb_curator_index_narrative.c modules/kb-synthesis/kb_curator_judge.c modules/kb-synthesis/kb_curator_link_artifacts.c modules/kb-synthesis/kb_curator_llm.c modules/kb-synthesis/kb_curator_notify.c modules/kb-synthesis/kb_curator_pipeline.c modules/kb-synthesis/kb_curator_promote.c modules/kb-synthesis/kb_curator_queue.c modules/kb-synthesis/kb_curator_resolve_entities.c modules/kb-synthesis/kb_curator_serve.c modules/kb-synthesis/kb_curator_sidecar.c modules/kb-synthesis/kb_curator_synthesize.c modules/kb-synthesis/kb_curator_version.c
+KB_SYNTHESIS_SRCS = modules/kb-synthesis/kb_curator_contradictions.c modules/kb-synthesis/kb_curator_custom.c modules/kb-synthesis/kb_curator_drain.c modules/kb-synthesis/kb_curator_extract.c modules/kb-synthesis/kb_curator_extract_code.c modules/kb-synthesis/kb_curator_grounding.c modules/kb-synthesis/kb_curator_index_claims.c modules/kb-synthesis/kb_curator_index_code_unit.c modules/kb-synthesis/kb_curator_index_narrative.c modules/kb-synthesis/kb_curator_judge.c modules/kb-synthesis/kb_curator_link_artifacts.c modules/kb-synthesis/kb_curator_llm.c modules/kb-synthesis/kb_curator_llm_contract.c modules/kb-synthesis/kb_curator_notify.c modules/kb-synthesis/kb_curator_pipeline.c modules/kb-synthesis/kb_curator_promote.c modules/kb-synthesis/kb_curator_queue.c modules/kb-synthesis/kb_curator_resolve_entities.c modules/kb-synthesis/kb_curator_serve.c modules/kb-synthesis/kb_curator_sidecar.c modules/kb-synthesis/kb_curator_synthesize.c modules/kb-synthesis/kb_curator_version.c
 KB_SYNTHESIS_OBJS = $(KB_SYNTHESIS_SRCS:%.c=$(OBJDIR)/kb/%.o)
 
 $(OBJDIR)/kb/modules/kb-synthesis/%.o: modules/kb-synthesis/%.c
@@ -806,9 +710,7 @@ $(OBJDIR)/kb/modules/kb-synthesis/%.o: modules/kb-synthesis/%.c
 # into aimee-kb now; otherwise LTO can hide their unresolved references until
 # P2b adds the first production caller.
 KB_BEDROCK_IR_OBJS = $(OBJDIR)/modules/translation/aimee_backend_bedrock.o \
-                     $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
-                     $(OBJDIR)/modules/translation/aimee_ir_stream.o \
-                     $(OBJDIR)/modules/ir/aimee_ir.o
+                     $(MODEL_WIRE_SRCS:%.c=$(OBJDIR)/%.o)
 # The main aimee-kb service stays SQLite-free. Its producer adapter only writes
 # KB_STORE outbox intents. The separately linked KB_WORM target below owns the same
 # modules/audit/audit_worm.c SQLite implementation as aimee-server.
@@ -831,11 +733,11 @@ SERVER_MEMORY_OBJS =
 
 KB_MEMORY_SPLIT_SRCS =
 KB_DATA_SRCS = code_match.c rel_types.c \
-               index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
-               dogfood.c modules/learning/learning_router.c modules/learning/learning_implicit.c modules/learning/learning_endogeneity.c modules/learning/learning_regret.c modules/learning/learning_approach_memory.c modules/learning/learning_attribution.c modules/learning/learning_policy_arms.c integrity_gate.c session_briefing.c modules/workspace/workspace.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/workspace/workspace_scope.c wiki_render.c kb/kb.c kb/kb_fusion.c kb/kb_neardup.c sketch.c modules/learning/learning_evidence.c modules/learning/learning_bundle.c kb/kb_calibrate.c kb/kb_features.c kb/kb_ranker.c kb/kb_ranker_fit.c kb/kb_detect.c kb/kb_reasoning.c kb/kb_bandit.c kb/kb_planner.c kb/roadmap.c kb/kb_mdl.c
+               index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
+               dogfood.c modules/learning/learning_router.c modules/learning/learning_implicit.c modules/learning/learning_endogeneity.c modules/learning/learning_regret.c modules/learning/learning_approach_memory.c modules/learning/learning_attribution.c modules/learning/learning_policy_arms.c integrity_gate.c session_briefing.c modules/workspace/workspace.c modules/workspace/workspace_identity.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/workspace/workspace_scope.c kb/kb.c kb/kb_fusion.c kb/kb_neardup.c sketch.c modules/learning/learning_evidence.c modules/learning/learning_bundle.c kb/kb_calibrate.c kb/kb_features.c kb/kb_ranker.c kb/kb_ranker_fit.c kb/kb_detect.c kb/kb_reasoning.c kb/kb_bandit.c kb/roadmap.c kb/kb_mdl.c
 KB_DATA_SRCS += integrity_ingress.c
 KB_DATA_OBJS = $(KB_DATA_SRCS:%.c=$(OBJDIR)/kb/%.o)
-KB_PLATFORM_OBJS = $(PLATFORM_BASIC_OBJS) $(filter %/agent_bridge.o %/cli_client.o %/memory.o,$(PLATFORM_EXTRA_OBJS) $(PLATFORM_AGENT_OBJS))
+KB_PLATFORM_OBJS = $(CLIENT_TRANSPORT_OBJS) $(PLATFORM_BASIC_OBJS) $(filter %/agent_bridge.o %/cli_client.o %/memory.o,$(PLATFORM_EXTRA_OBJS) $(PLATFORM_AGENT_OBJS))
 
 # --- §2 tree-sitter extraction front-end (opt-in: `make AIMEE_TREESITTER=1`) ---
 # Default build: code_treesitter.c compiles to a stub (no tree-sitter), so nothing is
@@ -957,28 +859,14 @@ $(eval $(call ts_obj,powershell,tree-sitter-powershell/src,parser.c))
 $(eval $(call ts_obj,powershell_scan,tree-sitter-powershell/src,scanner.c))
 endif
 
-# --- Gateway ---
-
-GATEWAY_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_v1_routes_e.c cli_v1_routes_f.c gateway/gateway_main.c gateway/gateway_ctx.c gateway/platform_registry.c \
-               gateway/delivery_router.c gateway/session_key.c \
-               gateway/platform_telegram.c gateway/platform_ntfy.c gateway/platform_webhook.c \
-               gateway/stt.c gateway/tts.c gateway/pairing.c gateway/gateway_pairing.c gateway/mirror.c \
-               posix/agent_bridge.c posix/cli_client.c proxy_bootstrap.c \
-               delivery_target.c aimee_home.c log.c platform_random.c \
-               shutdown_forensics.c
-GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o %/platform_random.o, $(PLATFORM_BASIC_OBJS))
-# cJSON uses a special build rule (strips -Werror); reference it separately.
-GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o \
-               $(OBJDIR)/modules/vault/runtime_secret.o $(GATEWAY_PLATFORM_OBJS)
-
 # All source files for linting (excluding vendored cJSON)
-ALL_SRCS = $(sort $(POSTGRES_CLIENT_SRCS) $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(KB_STORE_PG_SRCS) $(KB_STORE_SRCS) $(KB_STORE_HOST_ADAPTER_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/kb/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/kb/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/kb/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
-           $(CORE_CONNECTION_SRCS) $(CORE_EVENT_BUS_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
+ALL_SRCS = $(sort $(CORE_CODEC_SRCS) $(POSTGRES_CLIENT_SRCS) $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(KB_STORE_PG_SRCS) $(KB_STORE_SRCS) $(KB_STORE_HOST_ADAPTER_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/kb/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/kb/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/kb/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) \
+           $(CORE_CONNECTION_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
 # All object files for dependency tracking
-ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(KB_STORE_PG_OBJS) $(KB_STORE_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) $(CMD_OBJS) \
-           $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(GATEWAY_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
+ALL_OBJS = $(CORE_CODEC_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(KB_STORE_PG_OBJS) $(KB_STORE_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) \
+           $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 # Header dependency tracking must cover EVERY object we compile, not just the ones
 # a hand-maintained *_OBJS variable happens to name. Objects reachable only as a
 # direct prerequisite of a test target (modules/memory/memory_core_search.o was one
@@ -993,9 +881,9 @@ ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(KB_STORE_PG_OBJS) $(KB_
 # nothing is stale when nothing exists.
 DEPS = $(ALL_OBJS:.o=.d) $(shell find $(OBJDIR) -name '*.d' 2>/dev/null)
 
-.PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check memory-c-boundary-check module-egress-check cleanup-ledger-check repository-lock-check postgres-provider-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check memory-store-degradation-check config-schema-drift-check config-uninitialized-check cmd-srcs-compile-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests configure-hooks-matrix-test go-unit-tests go-vulncheck verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke init-migrate-service-test postgres-store-bootstrap-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check learning-loop-evidence self-learning-efficacy virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check module-placement-check
+.PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check memory-c-boundary-check module-egress-check cleanup-ledger-check repository-lock-check postgres-provider-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check memory-store-degradation-check config-schema-drift-check config-uninitialized-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check help-topics-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests configure-hooks-matrix-test go-unit-tests go-vulncheck verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke init-migrate-service-test postgres-store-bootstrap-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check learning-loop-evidence self-learning-efficacy virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check module-placement-check
 
-all: retire-obsolete-binaries $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
+all: retire-obsolete-binaries $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(FORWARDER)
 
 # The forwarder is a standalone static binary (libc only, no aimee objects); it is
 # shipped in the aimee-server image and docker-cp'd into a delegate sandbox.
@@ -1055,13 +943,36 @@ CONFIG_TEST_DEFAULTS ?= $(shell cd ../server-go && $(GO) list -mod=mod -f '{{.Di
 # than naming three directories.
 SCRIPT_TESTS = $(sort $(wildcard ../scripts/tests/test_*.py))
 
+# Tests another CI job already runs, named by file name. Not a list of what
+# runs: discovery above still decides that, and each skipped name must match a
+# discovered test or the target fails, so a renamed or deleted test cannot leave
+# a stale skip that reads as coverage. CI skips the thin-client proxy suite here
+# because the `build` job runs it with the real pinned Codex required, which is
+# strictly stronger than this lane's run.
+SCRIPT_TESTS_SKIP ?=
+SCRIPT_TESTS_RUN = $(filter-out $(addprefix ../scripts/tests/,$(SCRIPT_TESTS_SKIP)),$(SCRIPT_TESTS))
+# Test files are independent processes; run them in parallel. Output is kept
+# per test and printed only for a failure, so a parallel run stays readable.
+SCRIPT_TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+
 script-tests:
 	@test -n "$(strip $(SCRIPT_TESTS))" || { echo "script-tests: ERROR no tests found"; exit 1; }
-	@set -e; for t in $(SCRIPT_TESTS); do \
-		echo "script-tests: $$t"; \
-		(cd .. && python3 -I "$${t#../}") >/dev/null; \
+	@for skip in $(SCRIPT_TESTS_SKIP); do \
+		test -f "../scripts/tests/$$skip" || { echo "script-tests: ERROR skip '$$skip' matches no test"; exit 1; }; \
 	done
-	@echo "script-tests: ok ($(words $(SCRIPT_TESTS)) tests)"
+	@logs=$$(mktemp -d); trap 'rm -rf "$$logs"' EXIT; \
+	printf '%s\n' $(SCRIPT_TESTS_RUN) | sed 's|^\.\./||' | \
+	  (cd .. && xargs -P "$(SCRIPT_TEST_JOBS)" -I{} sh -c \
+	    'log="$$1/$$(basename "$$2").log"; if python3 -I "$$2" >"$$log" 2>&1; then echo "script-tests: ok   $$2"; else echo "script-tests: FAIL $$2"; cat "$$log"; exit 1; fi' \
+	    _ "$$logs" {}) || { echo "script-tests: FAILED"; exit 1; }
+	@echo "script-tests: ok ($(words $(SCRIPT_TESTS_RUN)) tests, $(words $(SCRIPT_TESTS_SKIP)) run by another job)"
+
+# CGo consumers use the same SDK as the browser product, including from a clean
+# CI checkout. Keep existing caller-supplied dependency and loader paths.
+go-unit-tests go-vulncheck: $(THINCLIENT_PC)
+go-unit-tests go-vulncheck: export PKG_CONFIG_PATH := $(abspath $(dir $(THINCLIENT_PC))):$(PKG_CONFIG_PATH)
+go-unit-tests go-vulncheck: export LD_LIBRARY_PATH := $(abspath $(dir $(THINCLIENT_LIBRARY))):$(LD_LIBRARY_PATH)
+go-unit-tests go-vulncheck: export CGO_ENABLED := 1
 
 go-unit-tests:
 	@test -n "$(GO)" || { echo "go-unit-tests: ERROR go is required"; exit 1; }
@@ -1071,8 +982,10 @@ go-unit-tests:
 		(unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET; \
 		 cd "$$module" && "$(GO)" test ./...); \
 	done
-	@echo "go-unit-tests: cross-language bus conformance"
-	@cd .. && bash scripts/test_bus_conformance.sh
+	@cd .. && python3 -I scripts/check_go_module_runtime_bundle.py
+	@# The Go ring module must be a tagged release in the contract range, like the
+	@# C ring; the ring's own cross-language conformance runs in its repository.
+	@cd .. && python3 -I scripts/provide_ouroboros_ring.py --check-go
 	@echo "go-unit-tests: ok"
 
 go-vulncheck:
@@ -1135,7 +1048,7 @@ wizard-bootstrap-e2e: $(BINARY) $(SERVER)
 kb: $(KB) $(KB_RESOLVER)
 
 # aimee-witness-verify: standalone OFFLINE witness verifier (no kb, no db, no net).
-WITNESS_VERIFY = ../aimee-witness-verify$(EXEEXT)
+WITNESS_VERIFY = ../aimee-witness-verify
 WITNESS_VERIFY_OBJS = $(OBJDIR)/tools/witness_verify.o \
   $(OBJDIR)/modules/vault/vault_witness_offline.o $(OBJDIR)/modules/vault/vault_witness_verify.o \
   $(OBJDIR)/modules/vault/vault_witness_record.o $(OBJDIR)/modules/vault/vault_witness_merkle.o \
@@ -1172,86 +1085,10 @@ lean:
 # Dynamic linking policy check: enforce DB ownership boundaries and verify
 # daemon system libraries are dynamically linked. Daemons link with -s, so the
 # only symbol table left is .dynsym: assert on IMPORTED (UND) library symbols
-# such as PQ*, never on internal definitions, which a stripped binary drops. Only runs on Linux (ldd) and
-# macOS (otool). Skipped on Windows where MinGW runtime is intentionally static.
-check-linking: $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY)
-ifeq ($(OS),Windows_NT)
-	@echo "check-linking: skipped on Windows (MinGW runtime is intentionally static)"
-else ifeq ($(UNAME_S),Darwin)
+# such as PQ*, never on internal definitions, which a stripped binary drops.
+check-linking: $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB)
 	@fail=0; \
-	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
-		echo "check-linking: $$bin"; \
-		deps=$$(otool -L "$$bin" | tail -n+2); \
-		if [ "$$bin" = "$(BINARY)" ]; then \
-			for lib in libsqlite3 libpq; do \
-				if echo "$$deps" | grep -q "$$lib"; then \
-					echo "  ERROR: $$lib linked into DB-free client"; \
-					fail=1; \
-				else \
-					echo "  $$lib: not found (client boundary ok)"; \
-				fi; \
-			done; \
-			continue; \
-		fi; \
-		if [ "$$bin" = "$(RUNTIME_WEB)" ]; then \
-			if echo "$$deps" | grep -q libpq; then \
-				echo "  ERROR: libpq linked into webchat (no database access)"; \
-				fail=1; \
-			else \
-				echo "  libpq: not found (webchat boundary ok)"; \
-			fi; \
-			continue; \
-		fi; \
-		case "$$bin" in \
-			*aimee-server*) \
-				if echo "$$deps" | grep -q libpq; then \
-					echo "  ERROR: PostgreSQL driver linked into native server"; \
-					fail=1; \
-				fi; \
-				if command -v readelf >/dev/null 2>&1 && readelf -Ws "$$bin" | awk '$$7 == "UND" && $$8 ~ /^PQ/ { found=1 } END { exit !found }'; then \
-					echo "  ERROR: native server imports PostgreSQL driver symbols"; \
-					fail=1; \
-				fi ;; \
-			*aimee-kb*) \
-				if echo "$$deps" | grep -q libsqlite3; then \
-					echo "  ERROR: libsqlite3 linked into knowledge host"; \
-					fail=1; \
-				else \
-					echo "  libsqlite3: not found (kb boundary ok)"; \
-				fi; \
-				if echo "$$deps" | grep -q libpq; then \
-					echo "  ERROR: PostgreSQL driver linked into native KB"; \
-					fail=1; \
-				fi; \
-				if command -v readelf >/dev/null 2>&1 && readelf -Ws "$$bin" | grep -Eq 'db1_|sqlite3_'; then \
-					echo "  ERROR: DB1/sqlite symbols present in knowledge host"; \
-					fail=1; \
-				else \
-					echo "  DB1/sqlite symbols: not found (kb boundary ok)"; \
-				fi; \
-				continue ;; \
-		esac; \
-		for lib in libsqlite3 libssl libcrypto; do \
-			case "$$bin" in \
-				*aimee-server*) ;; \
-				*) [ "$$lib" = "libssl" ] || [ "$$lib" = "libcrypto" ] && continue ;; \
-			esac; \
-			if echo "$$deps" | grep -q "$$lib"; then \
-				echo "  $$lib: dynamic (ok)"; \
-			else \
-				echo "  $$lib: not found (ok if unused by this binary)"; \
-			fi; \
-		done; \
-		if echo "$$deps" | grep -q '/usr/local/lib.*\.a'; then \
-			echo "  WARNING: static library detected in $$bin"; \
-			fail=1; \
-		fi; \
-	done; \
-	if [ "$$fail" = "1" ]; then exit 1; fi; \
-	echo "check-linking: ok"
-else
-	@fail=0; \
-	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
+	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB); do \
 		echo "check-linking: $$bin"; \
 		deps=$$(ldd "$$bin"); \
 		if [ "$$bin" = "$(BINARY)" ]; then \
@@ -1321,12 +1158,11 @@ else
 	done; \
 	if [ "$$fail" = "1" ]; then exit 1; fi; \
 	echo "check-linking: ok"
-endif
 
 # The harness starts the DB1 module the way a container's supervisor does, so
 # the module is a prerequisite: without it every migrated operation answers
 # "capability absent" and the failure reads as a broken store.
-integration-tests: $(BINARY) $(SERVER) $(OBJDIR)/aimee-module $(CONFIG_MODULE)
+integration-tests: $(BINARY) $(SERVER) $(OBJDIR)/aimee-module $(CONFIG_MODULE) $(DELEGATE_EGRESS)
 	AIMEE_TEST_MODULE_BIN="$(abspath $(OBJDIR)/aimee-module)" ./tests/test_integration.sh
 	python3 ../scripts/test-thin-client-remote-exclusive.py $(BINARY)
 	python3 ../scripts/test-served-argspec-e2e.py $(BINARY)
@@ -1403,9 +1239,9 @@ BENCH_OBJS = $(OBJDIR)/tests/bench_perf.o $(OBJDIR)/modules/guardrails/guardrail
              $(OBJDIR)/tests/support/kb_client_test_stub.o $(OBJDIR)/tests/support/mock_agent_http.o $(OBJDIR)/tests/support/bench_perf_stubs.o \
              $(OBJDIR)/tests/support/model_provider_stub.o $(OBJDIR)/tests/support/provider_cli_adapter_stub.o \
              $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/tests/support/vault_service_stub.o \
-             $(OBJDIR)/tests/support/git_ownership_stub.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o
+             $(OBJDIR)/tests/support/git_ownership_stub.o 
 
-tests/bench-perf: $(BENCH_OBJS) $(TEST_DATA_OBJS) | $(CORE_CONNECTION_LIB)
+tests/bench-perf: $(BENCH_OBJS) $(TEST_DATA_OBJS) $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 	$(CC) -o $@ $^ $(TEST_L_FLAGS)
 
 bench: tests/bench-perf
@@ -1448,10 +1284,25 @@ memory-owner-replay-check:
 	@test -n "$$AIMEE_KB_STORE_REPLAY_URL" || (echo "memory-owner-replay-check requires AIMEE_KB_STORE_REPLAY_URL for a disposable PostgreSQL database" >&2; exit 2)
 	@test -n "$$AIMEE_MEMORY_EVAL_URL" || (echo "memory-owner-replay-check requires AIMEE_MEMORY_EVAL_URL for a separate disposable scratch database" >&2; exit 2)
 	@test -n "$$AIMEE_DB_TEST_URL" || (echo "memory-owner-replay-check requires AIMEE_DB_TEST_URL for isolated evaluator provisioning" >&2; exit 2)
+ifeq ($(strip $(MEMORY_OWNER_REPLAY_JSON)),)
 	cd ../server-go && \
 	  AIMEE_MEMORY_REPLAY_REQUIRED=1 AIMEE_MEMORY_EVAL_REQUIRED=1 \
 	  AIMEE_DB_TEST_REQUIRED=1 go test -race -count=1 -timeout=30m -v \
 	  ./modules/memory ./modules/memory/cmd/aimee-memory-eval ./cmd/aimee-module
+else
+	@# Same run, also recorded as `go test -json` so the frozen reliability
+	@# check (scripts/check_memory_reliability_release.py --go-events) can verify
+	@# its required cases from THIS execution instead of running them again. The
+	@# log shows the same text -v prints.
+	@mkdir -p "$(dir $(abspath $(MEMORY_OWNER_REPLAY_JSON)))"
+	cd ../server-go || exit 1; status=0; \
+	  AIMEE_MEMORY_REPLAY_REQUIRED=1 AIMEE_MEMORY_EVAL_REQUIRED=1 \
+	  AIMEE_DB_TEST_REQUIRED=1 go test -race -count=1 -timeout=30m -json \
+	  ./modules/memory ./modules/memory/cmd/aimee-memory-eval ./cmd/aimee-module \
+	  > "$(abspath $(MEMORY_OWNER_REPLAY_JSON))" || status=$$?; \
+	  python3 -I -S ../scripts/go-test-json-output.py "$(abspath $(MEMORY_OWNER_REPLAY_JSON))"; \
+	  exit $$status
+endif
 
 memory-retrieval-eval-check:
 	cd ../server-go && AIMEE_MEMORY_EVAL_REQUIRED=1 go test -race -count=1 -v ./modules/memory -run '^(TestRetrievalCorpus|TestPersonalMemoryPrivacyRegression|TestContentGateEmitsCleanVerdict|TestPrivateCode.*|TestKBGraphFusionUsesInstancePolicyAndVisibility|TestCodeVectorsRejectStaleContentAndModel)$$'
@@ -1495,17 +1346,29 @@ $(MEMORY_EVAL): $(MEMORY_EVAL_GO_SRCS)
 	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../aimee-memory-eval ./modules/memory/cmd/aimee-memory-eval
 
 # Go webchat server: serves the browser UI, handles PAM auth, proxies chat to aimee-server.
-RUNTIME_WEB_GO_SRCS := $(wildcard ../runtime-web/*.go) ../runtime-web/go.mod ../runtime-web/go.sum \
-	$(wildcard ../server-go/modules/runtime-web/policy/*.go)
-$(RUNTIME_WEB): $(RUNTIME_WEB_GO_SRCS)
-	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	cd ../runtime-web && go build -buildvcs=false -o "$(CURDIR)/$@" .
+# The SDK compiles the same client and connection owners as the CLI, with only
+# its CLI-global convenience entrypoint excluded. No alternate HTTP implementation.
+THINCLIENT_LIBRARY_INPUTS = $(filter cli_client.c cli_chat_stream.c %/session_event.c,$(CLI_SRCS)) $(IR_BASE_SRCS) aimee_home.c aimee_sha256.c vendor/cJSON.c $(CORE_CONNECTION_SRCS)
+$(THINCLIENT_LIBRARY): Makefile $(THINCLIENT_LIBRARY_INPUTS) $(wildcard headers/*.h modules/ir/include/aimee/ir/*.h core/connection/*.h core/connection/include/aimee/core/connection/*.h vendor/headers/*.h) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB))
+	@mkdir -p $(dir $@)
+	$(CC) $(CLIENT_C_FLAGS) -fPIC -shared -DAIMEE_CLIENT_LIBRARY -o $@ $(THINCLIENT_LIBRARY_INPUTS) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB)) $(TLS_LIBS) -lcrypto -lpthread $(EXTRA_L_FLAGS)
+$(THINCLIENT_PC): $(THINCLIENT_LIBRARY) Makefile
+	@mkdir -p $(dir $@)
+	@printf '%s\n' 'prefix=$(abspath $(dir $(THINCLIENT_LIBRARY)))' 'libdir=$${prefix}' 'includedir=$(abspath headers)' '' 'Name: aimee-client' 'Description: Shared Aimee thinclient transport' 'Version: 1.0.0' 'Libs: -L$${libdir} -laimee-client' 'Cflags: -I$${includedir}' > $@
+.PHONY: thinclient-library
+thinclient-library: $(THINCLIENT_LIBRARY) $(THINCLIENT_PC)
 
-DELEGATE_EGRESS_GO_SRCS := $(shell find ../server-go/modules/delegates ../server-go/modules/sandbox -name '*.go' -type f 2>$(NULLDEV)) ../server-go/go.mod ../server-go/go.sum
+RUNTIME_WEB_GO_SRCS := $(wildcard ../runtime-web/*.go) ../runtime-web/go.mod ../runtime-web/go.sum \
+	$(wildcard ../server-go/modules/runtime-web/policy/*.go) $(wildcard ../server-go/thinclient/*.go)
+$(RUNTIME_WEB): $(RUNTIME_WEB_GO_SRCS) $(THINCLIENT_PC)
+	$(AIMEE_RUNTIME_MUTATION_GUARD)
+	cd ../runtime-web && PKG_CONFIG_PATH="$(abspath $(OBJDIR)/thinclient/pkgconfig):$$PKG_CONFIG_PATH" CGO_LDFLAGS='-Wl,-rpath,$$ORIGIN -Wl,-rpath,$$ORIGIN/../lib' CGO_ENABLED=1 go build -buildvcs=false -o "$(abspath $@)" .
+
+DELEGATE_EGRESS_GO_SRCS := $(shell find ../server-go/modules/delegates ../server-go/modules/sandbox ../server-go/modules/egress -name '*.go' -type f 2>$(NULLDEV)) ../server-go/go.mod ../server-go/go.sum
 $(DELEGATE_EGRESS): $(DELEGATE_EGRESS_GO_SRCS)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	@test -n "$(GO)" || { echo "aimee-delegate-egress: ERROR Go is required"; exit 1; }
-	cd ../server-go && CGO_ENABLED=0 "$(GO)" build -trimpath -o "$(CURDIR)/$@" ./modules/delegates/cmd/aimee-delegate-egress
+	cd ../server-go && CGO_ENABLED=0 "$(GO)" build -trimpath -o "$(abspath $@)" ./modules/delegates/cmd/aimee-delegate-egress
 
 # Server (daemon). KB_STORE-bound work routes through kb_client to aimee-kb;
 # keep this target free of KB_STORE_OBJS and libpq.
@@ -1515,7 +1378,7 @@ $(DELEGATE_EGRESS): $(DELEGATE_EGRESS_GO_SRCS)
 # synthesize a tcp: endpoint from a --server / AIMEE_SERVER_URL / remote.conf
 # target. --gc-sections drops the rest of aimee_client (the actual TCP/TLS
 # transport), so no extra net/tls/uds objects are needed here.
-$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_KB_STORE_OBJS) $(SERVER_KB_STORE_PG_OBJS) $(SERVER_MEMORY_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
+$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_KB_STORE_OBJS) $(SERVER_KB_STORE_PG_OBJS) $(SERVER_MEMORY_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(OURO_RING_LIB) $(CORE_CONNECTION_LIB)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_SERVER)
 
@@ -1529,7 +1392,7 @@ $(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_O
 # oauth_pkce.o provides the base64url encoder kb/enroll.c uses to mint
 # enrollment tokens (now reachable from `aimee-kb enroll`). It is a leaf crypto
 # util (openssl + platform_random only), so the kb sidecar links it directly.
-$(KB): $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_BEDROCK_IR_OBJS) $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(KB_KB_STORE_HOST_ADAPTER_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(KB_MCP_OBJS) $(TS_VENDOR_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(OBJDIR)/kb/kb_mcp_audit_bridge.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB) | $(KB_RESOLVER)
+$(KB): $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_BEDROCK_IR_OBJS) $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(KB_KB_STORE_HOST_ADAPTER_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(KB_MCP_OBJS) $(TS_VENDOR_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(OBJDIR)/kb/kb_mcp_audit_bridge.o $(OURO_RING_LIB) $(CORE_CONNECTION_LIB) | $(KB_RESOLVER)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS) $(KB_PKCS11_LDLIBS)
 
@@ -1567,8 +1430,8 @@ token-roots-provisioner-core: token-roots-provisioner-isolation-check $(KB_TOKEN
 
 # THESE LINK THE CORE ARCHIVE THROUGH L_KB BUT ARE NOT IN THE PRODUCT LIST.
 #
-# $(BINARY)/$(SERVER)/$(GATEWAY) name $(CORE_CONNECTION_LIB) as a real
-# prerequisite, and tests get it from `$(TEST_TARGETS): | $(CORE_CONNECTION_LIB)`
+# $(BINARY)/$(SERVER) name $(CORE_CONNECTION_LIB) as a real
+# prerequisite, and tests get it from `$(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)`
 # in tests/Rules.mk. These auxiliary drivers got neither, so on a clean tree they
 # reached the link step before the archive existed and died with
 # "cannot find build/obj/libaimee-core-connection.a" -- which is what kept
@@ -1583,7 +1446,7 @@ token-roots-provisioner-core: token-roots-provisioner-isolation-check $(KB_TOKEN
 # prove a minted token reaches a live server could not itself be built without
 # first building something else that happened to create the archive.
 $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) ../oidc-login-live \
-../identity-mint-live ../write-tier-enforce-live: | $(CORE_CONNECTION_LIB)
+../identity-mint-live ../write-tier-enforce-live: $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 
 $(KB_TOKEN_ROOTS_PROVISIONER): $(TOKEN_ROOTS_PROVISIONER_OBJS) \
                                $(TOKEN_ROOTS_PROVISIONER_VAULT_OBJS) \
@@ -1693,7 +1556,7 @@ oidc-login-live: ../oidc-login-live
                             $(OBJDIR)/config_client_contract.o $(OBJDIR)/aimee_home.o \
                             $(PLATFORM_BASIC_OBJS) \
                             $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/aimee_sha256.o \
-                            $(OBS_BUS_RUNTIME_OBJ) $(CORE_EVENT_BUS_LIB)
+                            $(OBS_BUS_RUNTIME_OBJ) $(OURO_RING_LIB)
 	$(CC) -o $@ $^ $(L_SERVER) $(PQ_LIB)
 
 .PHONY: write-tier-enforce-live
@@ -1709,12 +1572,6 @@ write-tier-enforce-live: ../write-tier-enforce-live
 # disposable-run plan and retirement gate.
 #
 # Memory datasets use the shared Go module with injected evaluation storage.
-
-# aimee_client.o for the same reason as $(SERVER): cli_v1_client_endpoint calls
-# the dependency-free remote-target accessors; --gc-sections drops the transport.
-$(GATEWAY): $(GATEWAY_OBJS) $(OBJDIR)/aimee_client.o $(CORE_CONNECTION_LIB)
-	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(CC) -o $@ $^ $(L_GATEWAY)
 
 # --- Compilation ---
 
@@ -1778,7 +1635,7 @@ $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
-$(OBJDIR)/models_dev.o: models_dev.c
+: 
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) $(CFLAGS_DATADIR) -o $@ $<
 
@@ -1787,19 +1644,7 @@ $(OBJDIR)/linux/%.o: linux/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
-$(OBJDIR)/mac/%.o: mac/%.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -o $@ $<
-
-$(OBJDIR)/windows/%.o: windows/%.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -o $@ $<
-
 $(OBJDIR)/posix/%.o: posix/%.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -o $@ $<
-
-$(OBJDIR)/gateway/%.o: gateway/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
@@ -1824,7 +1669,7 @@ $(OBJDIR)/server/server.o: server/server.c server_provider.c server_insights.c s
 
 $(OBJDIR)/cJSON.o: vendor/cJSON.c
 	@mkdir -p $(OBJDIR)
-	$(CC) -c -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -w -Ivendor/headers -o $@ $<
+	$(CC) -c -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections -s -w -Ivendor/headers -o $@ $<
 
 PREFIX ?= /usr/local
 DATADIR ?= $(PREFIX)/share/aimee
@@ -1833,19 +1678,20 @@ CFLAGS_DATADIR = -DAIMEE_DATADIR='"$(DATADIR)"'
 install:
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	@mkdir -p build && date +%s > $(BUILD_ID_FILE)
-	$(MAKE) $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY)
+	$(MAKE) $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER)
 	rm -f $(PREFIX)/bin/aimee-client $(PREFIX)/bin/aimee-worker
 	install -m 755 $(MEMORY_EVAL) $(PREFIX)/bin/aimee-memory-eval
 	install -m 755 $(MEMORY_TRANSFER) $(PREFIX)/bin/aimee-memory-transfer
 	install -m 755 $(BINARY) $(PREFIX)/bin/aimee
 	install -m 755 $(RUNTIME_WEB) $(PREFIX)/bin/aimee-runtime-web
+	@mkdir -p $(PREFIX)/lib
+	install -m 755 $(THINCLIENT_LIBRARY) $(PREFIX)/lib/libaimee-client.so
 	install -m 755 $(DELEGATE_EGRESS) $(PREFIX)/bin/aimee-delegate-egress
 	install -m 755 $(SERVER) $(PREFIX)/bin/aimee-server
 	install -m 755 $(FORWARDER) $(PREFIX)/bin/aimee-forwarder
 	install -m 755 $(KB) $(PREFIX)/bin/aimee-kb
 	install -m 755 $(KB_WORM) $(PREFIX)/bin/aimee-kb-worm
 	install -m 755 $(KB_RESOLVER) $(PREFIX)/bin/aimee-kb-resolver
-	install -m 755 $(GATEWAY) $(PREFIX)/bin/aimee-gateway
 	@mkdir -p $(DATADIR)
 	install -m 644 modules/kb/c/schema.sql $(DATADIR)/memory-eval-schema.sql
 	install -m 644 ../data/models_dev_snapshot.json $(DATADIR)/models_dev_snapshot.json
@@ -1871,16 +1717,6 @@ $(OBJDIR)/server/server_mcp.o: server/server_mcp.c server/server_mcp_surface.c s
 # the dependency explicit so a clean parallel build cannot compile them before
 # agent_help_data.h has been atomically generated.
 $(OBJDIR)/server/server_mcp_call_table.o $(OBJDIR)/server/server_mcp_ast_grep.o: agent_help_data.h
-
-TOOL_PROMPT_FILES := $(sort $(wildcard tool_prompts/*.md))
-
-tool_prompts_data.h: $(TOOL_PROMPT_FILES) gen_tool_prompts.py
-	@tmp='$@.$$$$.tmp'; \
-	python3 gen_tool_prompts.py "$$tmp" && mv "$$tmp" $@
-
-$(OBJDIR)/server/agent_policy.o: server/agent_policy.c tool_prompts_data.h
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -o $@ $<
 
 SCHEMA_FILES := modules/kb/c/schema.sql modules/kb/c/schema_sqlite.sql
 
@@ -2046,13 +1882,10 @@ proposal-reconcile-check:
 dev-accept-check:
 	@python3 -m unittest discover -s ../scripts/tests -p test_dev_accept.py
 
-# curator sidecar response parsing: strip_fences() decides whether a model's
-# answer is usable at all. It silently ate any response that MENTIONED
-# "</think>" (splitting on the last tag anywhere, not just a leading preamble),
-# which killed every job whose symbol was itself about stripping think blocks.
-# Cheap, pure-string, no model — keep it gated.
-curator-sidecar-parse-check:
-	@python3 -m unittest discover -s ../scripts/tests -p test_curator_strip_fences.py
+# Every topic `aimee get-help` advertises must resolve to a docs/agent.md
+# section; the usage once promised a git topic that answered "unknown topic".
+help-topics-check:
+	@python3 -m unittest discover -s ../scripts/tests -p test_help_topics.py
 
 # CI gate: every git/forge credential resolution routes through the ONE policy
 # (git_cred_inject); no downstream caller hand-rolls the credential ladder.
@@ -2073,12 +1906,6 @@ gen-sdks:
 sdk-parity-check:
 	@python3 ../scripts/check-sdk-parity.py
 	@python3 ../scripts/check-sdk-parity.py --plant-test
-
-# Novel-mode AC5: the story curator extraction sidecar contract — a scene must
-# yield a character entity + edge + canon fact, and malformed input must fail
-# gracefully. Runs offline via the CURATOR_LLM_STUB_FILE seam (no LLM/network).
-curator-story-check:
-	@python3 ../scripts/check-curator-story.py
 
 $(OBJDIR)/modules/kb/c/db_schema.o: modules/kb/c/db_schema.c schema_data.h
 	@mkdir -p $(OBJDIR)/modules/kb/c
@@ -2117,7 +1944,7 @@ frontend:
 
 clean:
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(RM) build $(BINARY) $(SERVER) $(RUNTIME_WEB) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(GATEWAY) $(FORWARDER) $(RETIRED_ROOT_BINARIES) \
+	$(RM) build $(BINARY) $(SERVER) $(RUNTIME_WEB) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(FORWARDER) $(RETIRED_ROOT_BINARIES) \
 	       $(BINARY)-asan $(SERVER)-asan \
 	       $(LEAN_BINARY) $(LEAN_SERVER) $(LEAN_KB) \
 	       tests/unit-test-* tests/bench-perf tests/fuzz_extractors tests/fuzz_json_parse \
@@ -2127,7 +1954,7 @@ clean:
 	       tests/fuzz_kb_mgmt_jwks_publication \
 	       tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
 	       tests/fuzz_server_mgmt_action tests/fuzz_server_mgmt_read_config \
-	       coverage.info coverage-report agent_help_data.h tool_prompts_data.h
+	       coverage.info coverage-report agent_help_data.h
 
 # Pinned clang-format version. Must match what CI installs so `make lint`
 # produces identical results everywhere. Override with CLANG_FORMAT=... if
@@ -2161,7 +1988,7 @@ lint: BUS_BLAST_RADIUS_FLAGS := --allow-unbuilt
 # repository-lock-check verifies independent repository releases, so it is not
 # part of application lint. The application source snapshot is a promotion gate
 # in c-repository-pins; integration work may run ahead of that reviewed snapshot.
-LINT_CHECKS= module-placement-check provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check subject-corpus-check native-tool-parity-check guidance-tool-parity-check optional-tool-ownership-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check memory-c-boundary-check module-egress-check cleanup-ledger-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check postgres-provider-check background-skill-curator-absence-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check config-encapsulation-check deployed-image-check memory-store-degradation-check
+LINT_CHECKS= ir-bypass-check module-placement-check provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check subject-corpus-check native-tool-parity-check guidance-tool-parity-check optional-tool-ownership-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check memory-c-boundary-check module-egress-check cleanup-ledger-check inc-check line-check help-topics-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check postgres-provider-check background-skill-curator-absence-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check aimee-home-check code-vector-graph-corpus-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check config-encapsulation-check deployed-image-check memory-store-degradation-check
 
 lint:
 	@fail=""; n=0; \
@@ -2328,7 +2155,6 @@ event-durability-check:
 postgres-provider-check:
 	@cd .. && python3 -I -S scripts/check_postgres_provider_boundary.py
 	@cd .. && python3 -m unittest scripts.tests.test_check_postgres_provider_boundary
-	@cd .. && python3 -I -S scripts/gen_kb_store_extractor_support.py --check
 
 published-compose-images-check:
 	@python3 -I -S ../scripts/check-published-compose-images.py
@@ -2400,6 +2226,7 @@ models-dev-snapshot-check:
 # A test target defined but named in no run list is not coverage: it cannot fail.
 tests-are-run-check:
 	@python3 -I -S ../scripts/check_tests_are_run.py
+	@python3 -m unittest discover -s ../scripts/tests -p test_check_tests_are_run.py
 
 test-tmpdir-check:
 	@python3 -I -S ../scripts/check_test_tmpdir.py
@@ -2546,7 +2373,6 @@ deploy-env-consumed-check:
 
 sidecar-clients-check:
 	@python3 ../scripts/check-sidecar-clients.py
-	@python3 ../scripts/test-llm-chat-mtls.py
 
 # The drift check drives a 15-minute timer on a production host, so its verdicts
 # are worth a test. It named the expected repository after the SERVICE, which made
@@ -2657,7 +2483,7 @@ FUZZ_TARGETS = tests/fuzz_extractors tests/fuzz_json_parse \
 print-fuzz-targets:
 	@for target in $(FUZZ_TARGETS); do printf '%s\n' "$$target"; done
 
-$(FUZZ_TARGETS): | $(CORE_CONNECTION_LIB)
+$(FUZZ_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 
 $(OBJDIR)/tests/fuzz_extractors.o: tests/fuzz_extractors.c
 	@mkdir -p $(OBJDIR)/tests
@@ -2787,10 +2613,8 @@ coverage:
 coverage-check: coverage
 	@echo "Checking coverage floors for high-risk modules..."
 	@fail=0; \
-	for spec in server.c:80 server/server_auth.c:90 modules/memory/memory_core.c:70; do \
+	for spec in server/server.c:80 server/server_auth.c:90; do \
 		file=$${spec%%:*}; floor=$${spec##*:}; \
-		pct=$$(lcov --summary coverage.info --quiet 2>&1 \
-			| grep -oP '[\d.]+(?=%)' | head -1); \
 		file_pct=$$(lcov --extract coverage.info "*/$${file}" --quiet \
 			--ignore-errors inconsistent 2>&1 \
 			| lcov --summary /dev/stdin --quiet 2>&1 \
@@ -2880,3 +2704,10 @@ build-variants:
 	./tests/test_build_integrity.sh --build-variants
 
 -include $(DEPS)
+
+# Every native link may use the shared utility wrappers, including authorities.
+$(BINARY) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_STATUS_PROVISIONER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(KB_STATUS_AUTHORITY) $(KB_TOKEN_AUTHORITY): $(CORE_CODEC_LIB)
+
+.PHONY: ir-bypass-check
+ir-bypass-check:
+	@python3 -I -S ../scripts/check_ir_bypass.py

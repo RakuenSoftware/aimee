@@ -54,6 +54,9 @@ KB_STORE_SHIM_ONLY_LEXICAL_INDEX_TABLES = {
 # DB1-local user/session/runtime tables. These belong only in the DB1 schema;
 # the KB_STORE schemas (sqlite shim and postgres) must not create them.
 DB1_ONLY_TABLES = {
+    # Server-local immutable procedure experience and payload-free erasure intent.
+    "local_procedure_events",
+    "local_procedure_erasure_intents",
     "user_memory_erasure_epoch",
     "user_memory_erasure_intents",
     "user_memory_erasure_sessions",
@@ -119,6 +122,17 @@ DB1_ONLY_TABLES = {
     "remote_client_grants",
     "project_clones",
     "server_sessions",
+    # Ordered canonical transcript, owned and retained with its DB1 session.
+    "session_ir_events",
+    # Source-pointer delivery metadata and explicit cutover belong to DB1 only.
+    "learning_projection_coverage",
+    "learning_projection_outbox",
+    "session_harness_handles",
+    # Host-only cache custody and recovered-source writer fences; never KB data.
+    "session_native_cache_owners",
+    "session_native_recovery_fences",
+    "session_native_cache_epochs",
+    "session_native_reservations",
     # Cross-store subject-erasure retry journal. It retains only an irreversible
     # subject digest and the committed DB1 deletion count.
     "db1_subject_erasure_request",

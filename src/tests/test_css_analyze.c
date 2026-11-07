@@ -6,40 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 
-static void spec(const char *sel, int a, int b, int c, int uncertain)
-{
-   int ra, rb, rc, ru;
-   css_selector_specificity(sel, &ra, &rb, &rc, &ru);
-   if (ra != a || rb != b || rc != c || ru != uncertain)
-      fprintf(stderr, "spec('%s') = (%d,%d,%d) u=%d, expected (%d,%d,%d) u=%d\n", sel, ra, rb, rc,
-              ru, a, b, c, uncertain);
-   assert(ra == a && rb == b && rc == c && ru == uncertain);
-}
-
-static void test_specificity(void)
-{
-   spec("#id", 1, 0, 0, 0);
-   spec(".cls", 0, 1, 0, 0);
-   spec("div", 0, 0, 1, 0);
-   spec("*", 0, 0, 0, 0);
-   spec("#a .b div", 1, 1, 1, 0);
-   spec("ul li", 0, 0, 2, 0);
-   spec("a:hover", 0, 1, 1, 0);           /* type + pseudo-class */
-   spec("div::before", 0, 0, 2, 0);       /* type + pseudo-element */
-   spec("[data-x]", 0, 1, 0, 0);          /* attribute */
-   spec("a[href='x']", 0, 1, 1, 0);       /* type + attr (quoted, contains no specials) */
-   spec(".a > .b + .c ~ .d", 0, 4, 0, 0); /* combinators don't add */
-   spec(".a.b.c", 0, 3, 0, 0);            /* compound */
-   /* functional pseudo-classes */
-   spec(":where(#x, .y)", 0, 0, 0, 0);                /* :where contributes 0 */
-   spec(":is(#x, .y)", 1, 0, 0, 0);                   /* :is = max of args = #x */
-   spec(":not(.a, #b)", 1, 0, 0, 0);                  /* :not = max of args = #b */
-   spec("a:is(.x):hover", 0, 2, 1, 0);                /* type + :is(.x)=class + :hover=class */
-   spec(":nth-child(2n+1)", 0, 1, 0, 0);              /* nth-* is one pseudo-class */
-   spec("li:nth-child(odd of .visible)", 0, 1, 1, 1); /* "of S" → uncertain */
-   spec("&.x", 0, 1, 0, 1);                           /* nesting selector → uncertain */
-}
-
 static const css_rule_t *find_rule(const css_stylesheet_t *ss, const char *sel)
 {
    for (int i = 0; i < ss->rule_count; i++)
@@ -219,7 +185,6 @@ static void test_class_token_extraction(void)
 
 int main(void)
 {
-   test_specificity();
    test_basic_parse();
    test_at_context();
    test_malformed_resilience();

@@ -213,15 +213,6 @@ int kb_store_kb_doc_set_state(int64_t id, const char *state, int clear_review_ne
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int kb_store_kb_doc_delete(int64_t id)
-{
-   /* Retained as an ABI compatibility symbol only.  Physical removal must go
-    * through document_lifecycle_preview/apply so the evidence, derived-memory,
-    * trace and receipt changes are atomic. */
-   (void)id;
-   return -1;
-}
-
 int kb_store_kb_doc_list_review(int limit, int64_t cursor_id, kb_store_kb_doc_t *out, int max_out)
 {
    void *conn = kb_store_conn();

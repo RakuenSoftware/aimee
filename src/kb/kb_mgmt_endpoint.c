@@ -265,9 +265,3 @@ int kb_mgmt_endpoint_connect_deadline(const kb_mgmt_endpoint_t *ep, uint64_t dea
    freeaddrinfo(res);
    return fd;
 }
-
-int kb_mgmt_endpoint_connect(const kb_mgmt_endpoint_t *ep)
-{
-   uint64_t now = monotonic_ms();
-   return now == UINT64_MAX ? -1 : kb_mgmt_endpoint_connect_deadline(ep, now + 30000, 0);
-}

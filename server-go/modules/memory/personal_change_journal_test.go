@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -257,11 +257,11 @@ func TestPersonalMemoryChangeJournal(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementServer, data))
 	read := func(after *MemoryChangeCursor, limit int) MemoryChangePage {
 		t.Helper()
-		body, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+		body, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
 			Operation: "change-feed", Changes: &MemoryChangesRequest{SchemaVersion: 1, After: after, Limit: limit},
 		}))
 		var response DataResponse
-		if status != bus.ModuleStatusOK || json.Unmarshal(body, &response) != nil || response.Changes == nil {
+		if status != ring.ModuleStatusOK || json.Unmarshal(body, &response) != nil || response.Changes == nil {
 			t.Fatalf("change feed status=%v response=%s", status, body)
 		}
 		return *response.Changes
@@ -295,10 +295,10 @@ func TestPersonalMemoryChangeJournal(t *testing.T) {
 		}
 	}
 	for _, peer := range []uint32{7, 23, 73} {
-		body, status := handler(bus.ModuleInvocation{StageID: StageData, PrincipalRef: peer}, dataRequest(t, DataRequest{
+		body, status := handler(ring.ModuleInvocation{StageID: StageData, PrincipalRef: peer}, dataRequest(t, DataRequest{
 			Operation: "change-feed", Changes: &MemoryChangesRequest{SchemaVersion: 1},
 		}))
-		if status != bus.ModuleStatusInvalidRequest || len(body) != 0 {
+		if status != ring.ModuleStatusInvalidRequest || len(body) != 0 {
 			t.Fatal("non-host consumed private record identities", peer, status, string(body))
 		}
 	}
@@ -307,8 +307,8 @@ func TestPersonalMemoryChangeJournal(t *testing.T) {
 		{SchemaVersion: 1, After: &MemoryChangeCursor{OwnerID: cursor.OwnerID, Generation: -1}},
 		{SchemaVersion: 1, After: &MemoryChangeCursor{}},
 	} {
-		body, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{Operation: "change-feed", Changes: &invalid}))
-		if status != bus.ModuleStatusInvalidRequest || len(body) != 0 {
+		body, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{Operation: "change-feed", Changes: &invalid}))
+		if status != ring.ModuleStatusInvalidRequest || len(body) != 0 {
 			t.Fatal("unbounded or unsupported feed request accepted", invalid, status)
 		}
 	}
@@ -338,11 +338,11 @@ func TestPersonalMemoryChangeJournal(t *testing.T) {
 	confidence := 0.8
 	put := func(content string) int64 {
 		t.Helper()
-		body, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+		body, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
 			Operation: "store", Key: "upsert-journal", Kind: "fact", Tier: "L2", Content: content, Confidence: &confidence,
 		}))
 		var response DataResponse
-		if status != bus.ModuleStatusOK || json.Unmarshal(body, &response) != nil || len(response.Records) != 1 {
+		if status != ring.ModuleStatusOK || json.Unmarshal(body, &response) != nil || len(response.Records) != 1 {
 			t.Fatalf("canonical upsert status=%v response=%s", status, body)
 		}
 		return response.Records[0].ID

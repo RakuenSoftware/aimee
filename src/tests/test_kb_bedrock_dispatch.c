@@ -225,33 +225,29 @@ static void request_tests(void)
    kb_bedrock_wire_request_clear(&q);
    block.text = "hello";
    cJSON *schema = cJSON_CreateObject();
-   cJSON *bad_choice_type = cJSON_CreateString("auto");
-   cJSON *bad_choice = cJSON_CreateObject();
-   assert(schema && bad_choice_type && bad_choice);
-   free(bad_choice_type->valuestring);
-   bad_choice_type->valuestring = NULL;
-   cJSON_AddItemToObject(bad_choice, "type", bad_choice_type);
+   assert(schema);
    aimee_tool_t one_tool = {.name = "tool", .schema = schema};
    ir.tools = &one_tool;
    ir.n_tools = 1;
-   ir.tool_choice = bad_choice;
+   /* A forced tool the request does not declare cannot be dispatched. */
+   ir.tool_choice = AIMEE_TOOL_CHOICE_TOOL;
+   ir.tool_choice_name = "missing";
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
-   cJSON *bad_key_choice = cJSON_Parse("{\"type\":\"auto\"}");
-   assert(bad_key_choice && bad_key_choice->child);
-   free(bad_key_choice->child->string);
-   bad_key_choice->child->string = NULL;
-   ir.tool_choice = bad_key_choice;
+   ir.tool_choice_name = NULL;
+   /* Converse has no "none" choice and no parallel-tool-use control. */
+   ir.tool_choice = AIMEE_TOOL_CHOICE_NONE;
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
-   ir.tool_choice = NULL;
+   ir.tool_choice = AIMEE_TOOL_CHOICE_AUTO;
+   ir.has_parallel_tool_calls = 1;
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   ir.has_parallel_tool_calls = 0;
+   ir.tool_choice = AIMEE_TOOL_CHOICE_UNSET;
    assert(cJSON_AddNumberToObject(schema, "x", 1) != NULL && schema->child);
    free(schema->child->string);
    schema->child->string = NULL;
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
    ir.tools = NULL;
    ir.n_tools = 0;
-   ir.tool_choice = NULL;
-   cJSON_Delete(bad_choice);
-   cJSON_Delete(bad_key_choice);
    cJSON_Delete(schema);
    ir.has_top_k = 1;
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
@@ -347,10 +343,10 @@ static void request_tests(void)
    message.n_blocks = 0;
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
    message.n_blocks = 1;
-   ir.tool_choice = cJSON_Parse("{\"type\":\"auto\"}");
-   assert(ir.tool_choice != NULL);
+   /* A tool choice with no tools to choose from is refused. */
+   ir.tool_choice = AIMEE_TOOL_CHOICE_AUTO;
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
-   cJSON_Delete(ir.tool_choice);
+   ir.tool_choice = AIMEE_TOOL_CHOICE_UNSET;
 }
 
 static void response_tests(void)

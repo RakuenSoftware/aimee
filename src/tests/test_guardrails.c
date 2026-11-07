@@ -22,6 +22,7 @@
 #include "platform_test_util.h"
 #include "modules/git/git_verify.h"
 #include "support/git_module_fixture.h"
+#include "support/config_test_setters.h"
 
 /* Per-case in-memory KB_STORE backing for test bodies that round-trip
  * memory-subsystem state. The shim helper owns the sqlite handle and
@@ -568,368 +569,13 @@ static void test_worktree_sibling_path(void)
    assert(strcmp(other, expect) != 0);
 }
 
-static void test_worktree_detect_base_branch_active(void)
-{
-   /* A new worktree must be rooted on the repository's DEFAULT branch
-    * (origin/HEAD), NOT on whatever feature branch is currently checked out. */
-   char tmpdir[256];
-   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_branch_XXXXXX", platform_tmpdir());
-   if (mkdtemp(tmpdir) == NULL)
-   {
-      fprintf(stderr, "test_worktree_detect_base_branch_active: mkdtemp failed, skipping\n");
-      return;
-   }
-
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' config user.email 'test@test.com' 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' config user.name 'Test' 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd),
-            "touch '%s/x' && git -C '%s' add x && git -C '%s' commit -qm 'init' 2>/dev/null",
-            tmpdir, tmpdir, tmpdir);
-   (void)system(cmd);
-   /* Normalize the default branch name and simulate a configured remote default
-    * (origin/HEAD -> origin/main) without needing a network remote. */
-   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -m main 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' update-ref refs/remotes/origin/main HEAD 2>/dev/null",
-            tmpdir);
-   (void)system(cmd);
-   snprintf(
-       cmd, sizeof(cmd),
-       "git -C '%s' symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main 2>/dev/null",
-       tmpdir);
-   (void)system(cmd);
-   /* Check out a distinct feature branch — detection must ignore it. */
-   snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -qb 'feat/test-branch' 2>/dev/null", tmpdir);
-   (void)system(cmd);
-
-   char branch[64];
-   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "origin/main") == 0);
-
-   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
-   (void)system(cmd);
-}
-
-static void test_worktree_detect_base_branch_local_default(void)
-{
-   /* No remote default set. The old behaviour fell back to the local "main"; that
-    * fallback is REMOVED -- a stale or unrelated local branch is exactly how a session
-    * inherited work it did not author. Default is now a hard failure, and the local
-    * branch is reachable only by explicitly opting in. */
-   char tmpdir[256];
-   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_localdef_XXXXXX", platform_tmpdir());
-   if (mkdtemp(tmpdir) == NULL)
-   {
-      fprintf(stderr, "test_worktree_detect_base_branch_local_default: mkdtemp failed, skipping\n");
-      return;
-   }
-
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' config user.email 'test@test.com' 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' config user.name 'Test' 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd),
-            "touch '%s/x' && git -C '%s' add x && git -C '%s' commit -qm 'init' 2>/dev/null",
-            tmpdir, tmpdir, tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -m main 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -qb 'feat/test-branch' 2>/dev/null", tmpdir);
-   (void)system(cmd);
-
-   char branch[64];
-   /* No remote default -> the chain falls through to "main". Crucially NOT to the
-    * checked-out feat/test-branch: main is a dumb fallback but a stable one. */
-   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
-   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "main") == 0);
-
-   setenv("AIMEE_SESSION_WORKTREE_BASE", "local_default", 1);
-   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "main") == 0);
-
-   /* An explicit ref is honoured verbatim; a bogus one is refused rather than guessed. */
-   setenv("AIMEE_SESSION_WORKTREE_BASE", "main", 1);
-   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "main") == 0);
-   setenv("AIMEE_SESSION_WORKTREE_BASE", "no/such/ref", 1);
-   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == -1);
-   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
-
-   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
-   (void)system(cmd);
-}
-
-static void test_worktree_detect_base_branch_fallback(void)
-{
-   /* Non-existent path: no remote default, no main, no master -> refuse. The old code
-    * fell back to "HEAD", i.e. whatever the caller happened to be sitting on. */
-   char branch[64];
-   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
-   assert(worktree_detect_base_branch("/tmp/__nonexistent_aimee_test_repo__", branch,
-                                      sizeof(branch)) == -1);
-   assert(branch[0] == '\0');
-}
-
 /* Gap tests for the base-ref chain: configured -> remote default -> main -> master.
  * The existing three tests cover "remote default wins over the checked-out branch",
  * "no remote -> main", and "nothing -> refuse". These cover the rungs between. */
 
-static void wt_fixture_init(const char *dir)
-{
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q 2>/dev/null", dir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' config user.email 'test@test.com' 2>/dev/null", dir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' config user.name 'Test' 2>/dev/null", dir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd),
-            "touch '%s/x' && git -C '%s' add x && git -C '%s' commit -qm 'init' 2>/dev/null", dir,
-            dir, dir);
-   (void)system(cmd);
-}
-
-static void test_worktree_detect_base_branch_master_fallback(void)
-{
-   /* No remote default and no "main" -- the chain's last rung is "master". A repo
-    * predating the main rename must still resolve rather than refuse. */
-   char tmpdir[256];
-   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_master_XXXXXX", platform_tmpdir());
-   if (mkdtemp(tmpdir) == NULL)
-   {
-      fprintf(stderr, "test_worktree_detect_base_branch_master_fallback: mkdtemp failed, "
-                      "skipping\n");
-      return;
-   }
-   wt_fixture_init(tmpdir);
-
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -m master 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -qb 'feat/x' 2>/dev/null", tmpdir);
-   (void)system(cmd);
-
-   char branch[64];
-   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
-   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "master") == 0);
-
-   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
-   (void)system(cmd);
-}
-
-static void test_worktree_detect_base_branch_main_precedes_master(void)
-{
-   /* Both main and master exist, no remote default. Order is main THEN master, so a
-    * repo carrying a legacy master branch alongside main must still pick main. */
-   char tmpdir[256];
-   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_bothdef_XXXXXX", platform_tmpdir());
-   if (mkdtemp(tmpdir) == NULL)
-   {
-      fprintf(stderr, "test_worktree_detect_base_branch_main_precedes_master: mkdtemp failed, "
-                      "skipping\n");
-      return;
-   }
-   wt_fixture_init(tmpdir);
-
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -m main 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' branch master 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -qb 'feat/x' 2>/dev/null", tmpdir);
-   (void)system(cmd);
-
-   char branch[64];
-   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
-   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "main") == 0);
-
-   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
-   (void)system(cmd);
-}
-
-static void test_worktree_detect_base_branch_configured_beats_remote(void)
-{
-   /* The configured value is rung ONE: it must win even when a remote default exists.
-    * The existing configured-value assertions run in a remote-less fixture, so they
-    * cannot distinguish "configured won" from "fell through to the same name". */
-   char tmpdir[256];
-   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_cfgwins_XXXXXX", platform_tmpdir());
-   if (mkdtemp(tmpdir) == NULL)
-   {
-      fprintf(stderr, "test_worktree_detect_base_branch_configured_beats_remote: mkdtemp failed, "
-                      "skipping\n");
-      return;
-   }
-   wt_fixture_init(tmpdir);
-
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -m main 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' update-ref refs/remotes/origin/main HEAD 2>/dev/null",
-            tmpdir);
-   (void)system(cmd);
-   snprintf(
-       cmd, sizeof(cmd),
-       "git -C '%s' symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main 2>/dev/null",
-       tmpdir);
-   (void)system(cmd);
-   /* A branch that is neither the remote default nor a fallback name. */
-   snprintf(cmd, sizeof(cmd), "git -C '%s' branch release/v1 2>/dev/null", tmpdir);
-   (void)system(cmd);
-
-   char branch[64];
-   setenv("AIMEE_SESSION_WORKTREE_BASE", "release/v1", 1);
-   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "release/v1") == 0);
-
-   /* And with the override cleared the same repo resolves to the remote default --
-    * proving the assertion above measured the override, not the fixture. */
-   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
-   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "origin/main") == 0);
-
-   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
-   (void)system(cmd);
-}
-
-static void test_worktree_detect_base_branch_remote_preference_scope(void)
-{
-   /* "Local default DOES NOT MATTER. Only the remote default matters." That rule binds
-    * the DERIVED rungs -- the advertised default, then main, then master -- which all
-    * resolve through origin/<name> first, because a local branch of the same name may
-    * sit at a different commit and that is exactly how a session inherits unmerged work.
-    *
-    * An operator's explicit ref is deliberately NOT rewritten: they named a ref, and if
-    * they want the remote one they write "origin/main". This test pins both halves so
-    * the asymmetry is a decision on record rather than an accident. */
-   char tmpdir[256];
-   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_remotepref_XXXXXX", platform_tmpdir());
-   if (mkdtemp(tmpdir) == NULL)
-   {
-      fprintf(stderr, "test_worktree_detect_base_branch_prefers_remote_ref: mkdtemp failed, "
-                      "skipping\n");
-      return;
-   }
-   wt_fixture_init(tmpdir);
-
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -m main 2>/dev/null", tmpdir);
-   (void)system(cmd);
-   /* Advance local main one commit so it and origin/main differ. */
-   snprintf(cmd, sizeof(cmd), "git -C '%s' update-ref refs/remotes/origin/main HEAD 2>/dev/null",
-            tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd),
-            "touch '%s/y' && git -C '%s' add y && git -C '%s' commit -qm 'local only' 2>/dev/null",
-            tmpdir, tmpdir, tmpdir);
-   (void)system(cmd);
-   snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -qb 'feat/x' 2>/dev/null", tmpdir);
-   (void)system(cmd);
-
-   char branch[64];
-   /* Derived rung: no override, no advertised default -> falls to "main", and that
-    * candidate resolves to the remote-tracking ref even though a LOCAL main exists at
-    * a different commit. This is the assertion the isolation rule actually rests on. */
-   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
-   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "origin/main") == 0);
-
-   /* Explicit rung: honoured verbatim, NOT rewritten to origin/main. */
-   setenv("AIMEE_SESSION_WORKTREE_BASE", "main", 1);
-   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "main") == 0);
-   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
-
-   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
-   (void)system(cmd);
-}
-
 /* --- feature-branch targeting: a session's PRs base on aimee/feat/<slug> so a
  * feature's slices accumulate on one branch instead of each aiming at the
  * repository's default branch. */
-
-static void feature_fixture_registry(const char *root, const char *sid, const char *work_name,
-                                     char *wt_out, size_t wt_out_len)
-{
-   char dir[512], path[600], wt[600], cmd[700];
-   snprintf(dir, sizeof(dir), "%s/.aimee/worktrees", root);
-   snprintf(wt, sizeof(wt), "%s/%s/main", dir, sid);
-   snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", wt);
-   (void)system(cmd);
-   snprintf(path, sizeof(path), "%s/registry.tsv", dir);
-   FILE *f = fopen(path, "a");
-   assert(f != NULL);
-   /* repo, worktree, branch, sid, work_name, base */
-   fprintf(f, "%s\t%s\taimee/session/%s\t%s\t%s\torigin/main\n", root, wt, sid, sid, work_name);
-   fclose(f);
-   if (wt_out && wt_out_len)
-      snprintf(wt_out, wt_out_len, "%s", wt);
-}
-
-static void test_feature_branch_suggest_from_work_name(void)
-{
-   char tmpdir[256];
-   snprintf(tmpdir, sizeof tmpdir, "%s/test_feat_derive_XXXXXX", platform_tmpdir());
-   if (mkdtemp(tmpdir) == NULL)
-   {
-      fprintf(stderr, "test_feature_branch_suggest_from_work_name: mkdtemp failed, skipping\n");
-      return;
-   }
-
-   char branch[128], wt[600];
-   /* A path with no registry row -> no suggestion. The caller then leaves the base to
-    * the server rather than inventing one. */
-   assert(feature_branch_suggest(tmpdir, branch, sizeof(branch)) == -1);
-   assert(branch[0] == '\0');
-
-   feature_fixture_registry(tmpdir, "sid1", "Human Trigger Workflows", wt, sizeof(wt));
-   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "aimee/feat/human-trigger-workflows") == 0);
-
-   /* Resolvable from a path INSIDE the worktree, not only its root -- that is what a
-    * tool's cwd actually looks like. */
-   char inner[700];
-   snprintf(inner, sizeof(inner), "%s/src/modules", wt);
-   assert(feature_branch_suggest(inner, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "aimee/feat/human-trigger-workflows") == 0);
-
-   /* Punctuation and repeated separators collapse to a single dash; case folds. */
-   feature_fixture_registry(tmpdir, "sid2", "Fix:  vault__audit (v2)!!", wt, sizeof(wt));
-   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == 0);
-   assert(strcmp(branch, "aimee/feat/fix-vault-audit-v2") == 0);
-
-   /* Longer than the 40-char slug cap -> truncated, still a valid branch. */
-   feature_fixture_registry(tmpdir, "sid3", "an extremely long feature name that runs well past",
-                            wt, sizeof(wt));
-   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == 0);
-   assert(strncmp(branch, "aimee/feat/", 11) == 0);
-   assert(strlen(branch + 11) <= 40);
-   assert(branch[strlen(branch) - 1] != '-');
-
-   /* Nothing usable survives slugging -> unresolvable, NOT a branch named after
-    * the punctuation. */
-   feature_fixture_registry(tmpdir, "sid4", "!!! ---", wt, sizeof(wt));
-   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == -1);
-
-   /* Non-ASCII with no ASCII alnum: same rule, no guess. */
-   feature_fixture_registry(tmpdir, "sid5", "日本語", wt, sizeof(wt));
-   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == -1);
-
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
-   (void)system(cmd);
-}
 
 /* --- session_isolation_target: catches the regression where concurrent
  * claude sessions share a main checkout because the SessionStart hook
@@ -1684,6 +1330,29 @@ static void test_known_subagent_tools_blocked(void)
    guardrails_close_test_sqlite();
 }
 
+static void test_registered_aimee_delegation(void)
+{
+   guardrails_open_test_sqlite();
+   session_state_t state = {0};
+   strcpy(state.session_mode, MODE_IMPLEMENT);
+   char message[512];
+   const char *arguments = "{\"role\":\"diagnose\",\"prompt\":\"Inspect the source\"}";
+   int rc =
+       pre_tool_check("delegate", arguments, &state, MODE_APPROVE, "/tmp", message, sizeof message);
+   assert(rc == 2 && strstr(message, "aimee delegate"));
+   rc = pre_tool_check_registered_tool("delegate", arguments, &state, MODE_APPROVE, "/tmp", message,
+                                       sizeof message);
+   assert(rc == 0);
+   const char *external[] = {"Task", "Agent", "spawn_agent", "launch_remote_agent"};
+   for (size_t i = 0; i < sizeof external / sizeof external[0]; i++)
+   {
+      rc = pre_tool_check_registered_tool(external[i], arguments, &state, MODE_APPROVE, "/tmp",
+                                          message, sizeof message);
+      assert(rc == 2 && strstr(message, "aimee delegate"));
+   }
+   guardrails_close_test_sqlite();
+}
+
 static void test_unknown_subagent_surface_blocked(void)
 {
    guardrails_open_test_sqlite();
@@ -2074,6 +1743,35 @@ static void test_shell_in_main_checkout_forced_to_worktree(void)
    system(cmd);
 }
 
+static void test_read_file_in_arbitrary_linked_worktree(void)
+{
+   char root[256], command[2048], checkout[512], input[1024], message[1024] = {0};
+   snprintf(root, sizeof root, "%s/aimee-linked-read-XXXXXX", platform_tmpdir());
+   char *created = mkdtemp(root);
+   assert(created);
+   snprintf(checkout, sizeof checkout, "%s/checkout", root);
+   snprintf(command, sizeof command,
+            "git init -q '%s/source' && git -C '%s/source' config user.email t@t && "
+            "git -C '%s/source' config user.name t && echo x > '%s/source/f' && "
+            "git -C '%s/source' add f && git -C '%s/source' commit -q -m fixture && "
+            "git clone -q --bare '%s/source' '%s/mirror' && "
+            "git --git-dir='%s/mirror' worktree add -q '%s' HEAD",
+            root, root, root, root, root, root, root, root, root, checkout);
+   int rc = system(command);
+   assert(!rc);
+   guardrails_open_test_sqlite();
+   session_state_t state = {0};
+   strcpy(state.session_mode, MODE_IMPLEMENT);
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+   snprintf(input, sizeof input, "{\"file_path\":\"%s/f\"}", checkout);
+   rc = pre_tool_check("Read", input, &state, MODE_APPROVE, checkout, message, sizeof message);
+   assert(!rc);
+   guardrails_close_test_sqlite();
+   snprintf(command, sizeof command, "rm -rf '%s'", root);
+   rc = system(command);
+   assert(!rc);
+}
+
 static void test_path_tool_redirect_is_cwd_independent(void)
 {
    /* Regression: a path tool carries an absolute, cwd-independent target, so its
@@ -2310,82 +2008,6 @@ static void test_bash_command_guard_warns(void)
    guardrails_close_test_sqlite();
 }
 
-static void write_skill_dispatch_advisory_config(int enabled)
-{
-   assert(config_set_skills_dispatch_advisory(enabled) == 0);
-}
-
-static void test_skill_dispatch_find_symbols_advisory(void)
-{
-   guardrails_open_test_sqlite();
-   write_skill_dispatch_advisory_config(1);
-
-   session_state_t state;
-   memset(&state, 0, sizeof(state));
-   strcpy(state.session_mode, MODE_IMPLEMENT);
-   strcpy(state.guardrail_mode, MODE_APPROVE);
-   for (int i = 0; i < MAX_SEEN_PATHS; i++)
-      snprintf(state.seen_paths[i], MAX_SEEN_LEN, "/tmp/seen-%d", i);
-   state.seen_count = MAX_SEEN_PATHS;
-
-   char msg[512] = "";
-   int rc = pre_tool_check("Bash", "{\"command\":\"rg delegate_credentials_acquire src\"}", &state,
-                           MODE_APPROVE, "/tmp", msg, sizeof(msg));
-   assert(rc == 0);
-   assert(strstr(msg, "ADVISORY") != NULL);
-   assert(strstr(msg, "find-symbols") != NULL);
-   assert(strstr(msg, "aimee index find") != NULL);
-   assert(state.skill_find_symbols_advisory_sent == 1);
-
-   /* Per-session dedupe suppresses the capability reminder after the first hit;
-    * the older generic grep advisory can still surface, and this must keep
-    * working even when seen_paths is full. */
-   msg[0] = '\0';
-   rc = pre_tool_check("Bash", "{\"command\":\"grep -R delegate_credentials_acquire src\"}", &state,
-                       MODE_APPROVE, "/tmp", msg, sizeof(msg));
-   assert(rc == 0);
-   assert(strstr(msg, "find-symbols") == NULL);
-
-   write_skill_dispatch_advisory_config(0);
-   guardrails_close_test_sqlite();
-}
-
-static void test_skill_dispatch_trigger_advisories(void)
-{
-   guardrails_open_test_sqlite();
-   write_skill_dispatch_advisory_config(1);
-
-   session_state_t state;
-   memset(&state, 0, sizeof(state));
-   strcpy(state.session_mode, MODE_IMPLEMENT);
-   strcpy(state.guardrail_mode, MODE_APPROVE);
-
-   char msg[512] = "";
-   int rc = pre_tool_check("Bash", "{\"command\":\"sleep 5\"}", &state, MODE_APPROVE, "/tmp", msg,
-                           sizeof(msg));
-   assert(rc == 0);
-   assert(strstr(msg, "ADVISORY") != NULL);
-   assert(strstr(msg, "condition-based-waiting") != NULL);
-   assert(state.skill_condition_waiting_advisory_sent == 1);
-
-   msg[0] = '\0';
-   rc = pre_tool_check("Bash", "{\"command\":\"echo ok\"}", &state, MODE_APPROVE, "/tmp", msg,
-                       sizeof(msg));
-   assert(rc == 0);
-   assert(strstr(msg, "condition-based-waiting") == NULL);
-
-   msg[0] = '\0';
-   rc = pre_tool_check("Write", "{\"file_path\":\"src/foo_test.c\",\"content\":\"x\"}", &state,
-                       MODE_APPROVE, guardrails_test_worktree_cwd, msg, sizeof(msg));
-   assert(rc == 0);
-   assert(strstr(msg, "ADVISORY") != NULL);
-   assert(strstr(msg, "test-driven-development") != NULL);
-   assert(state.skill_tdd_advisory_sent == 1);
-
-   write_skill_dispatch_advisory_config(0);
-   guardrails_close_test_sqlite();
-}
-
 static void test_bash_command_guard_no_warn_pipelines(void)
 {
    guardrails_open_test_sqlite();
@@ -2593,115 +2215,6 @@ static void test_orch_discipline_state_roundtrip(void)
    assert(loaded.is_delegate == 0); /* not persisted */
 
    unlink(test_path);
-}
-
-static void test_semantic_advisory_pre_tool_check(void)
-{
-   char tmpdir[512];
-   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-gsem-XXXXXX", platform_tmpdir());
-   assert(platform_mkdtemp(tmpdir) != NULL);
-
-   char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
-   char *old_aimee_home = getenv("AIMEE_HOME") ? strdup(getenv("AIMEE_HOME")) : NULL;
-   char *old_no_cache = getenv("AIMEE_NO_CACHE") ? strdup(getenv("AIMEE_NO_CACHE")) : NULL;
-   char *old_bypass =
-       getenv("AIMEE_ANTIPATTERNS_BYPASS") ? strdup(getenv("AIMEE_ANTIPATTERNS_BYPASS")) : NULL;
-   platform_setenv("HOME", tmpdir);
-   platform_unsetenv("AIMEE_HOME");
-   char audit_home[640];
-   snprintf(audit_home, sizeof(audit_home), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(audit_home, 0700) == 0);
-   platform_setenv("AIMEE_NO_CACHE", "1");
-   platform_setenv("AIMEE_ANTIPATTERNS_BYPASS", "1");
-
-   assert(config_set("guardrails_semantic_mode", "advisory") == 0);
-   assert(config_set("guardrails_semantic_command",
-                     "printf '%s' '{\"outputs\":{\"risk\":{\"overall\":0.83},"
-                     "\"labels\":[\"verification_bypass\"],\"recommendation\":\"prompt\"},"
-                     "\"evidence\":{\"explanation\":\"test\"}}'") == 0);
-
-   session_state_t state;
-   memset(&state, 0, sizeof(state));
-   strcpy(state.session_mode, MODE_IMPLEMENT);
-   strcpy(state.guardrail_mode, MODE_APPROVE);
-
-   /* gsem_record now records over the event bus (async); flush so the count
-    * baseline and the post-check counts reflect the writes deterministically. */
-   obs_bus_flush();
-   guardrail_event_counts_t before_counts;
-   assert(db1_guardrail_event_counts_7d(&before_counts) == 0);
-
-   char msg[512] = {0};
-   char payload[256];
-   snprintf(payload, sizeof(payload),
-            "{\"file_path\":\"/tmp/test_gsem_advisory_%d.txt\",\"content\":\"hello\"}",
-            (int)getpid());
-   int rc = pre_tool_check("Write", payload, &state, MODE_APPROVE, guardrails_test_worktree_cwd,
-                           msg, sizeof(msg));
-   assert(rc == 0);
-   assert(strstr(msg, "semantic guardrail: high risk") != NULL);
-   assert(strstr(msg, "advisory mode") != NULL);
-
-   /* Still advisory mode: a "block" recommendation must be downgraded to a prompt. */
-   assert(config_set("guardrails_semantic_command",
-                     "printf '%s' '{\"outputs\":{\"risk\":{\"overall\":0.95},"
-                     "\"labels\":[\"destructive_change\"],\"recommendation\":\"block\"},"
-                     "\"evidence\":{\"explanation\":\"test\"}}'") == 0);
-
-   msg[0] = '\0';
-   snprintf(payload, sizeof(payload),
-            "{\"file_path\":\"/tmp/test_gsem_block_advisory_%d.txt\",\"content\":\"hello\"}",
-            (int)getpid());
-   rc = pre_tool_check("Write", payload, &state, MODE_APPROVE, guardrails_test_worktree_cwd, msg,
-                       sizeof(msg));
-   assert(rc == 0);
-   assert(strstr(msg, "semantic guardrail: high risk") != NULL);
-
-   obs_bus_flush(); /* drain the two async guardrail events into db1 before counting */
-   guardrail_event_counts_t counts;
-   assert(db1_guardrail_event_counts_7d(&counts) == 0);
-   assert(counts.warn == before_counts.warn);
-   assert(counts.prompt == before_counts.prompt + 2);
-   assert(counts.block == before_counts.block);
-   assert(counts.dry_run == before_counts.dry_run);
-
-   if (old_home)
-   {
-      platform_setenv("HOME", old_home);
-      free(old_home);
-   }
-   else
-   {
-      platform_unsetenv("HOME");
-   }
-   if (old_aimee_home)
-   {
-      platform_setenv("AIMEE_HOME", old_aimee_home);
-      free(old_aimee_home);
-   }
-   else
-   {
-      platform_unsetenv("AIMEE_HOME");
-   }
-   if (old_no_cache)
-   {
-      platform_setenv("AIMEE_NO_CACHE", old_no_cache);
-      free(old_no_cache);
-   }
-   else
-   {
-      platform_unsetenv("AIMEE_NO_CACHE");
-   }
-   if (old_bypass)
-   {
-      platform_setenv("AIMEE_ANTIPATTERNS_BYPASS", old_bypass);
-      free(old_bypass);
-   }
-   else
-   {
-      platform_unsetenv("AIMEE_ANTIPATTERNS_BYPASS");
-   }
-   platform_test_rmrf(tmpdir);
 }
 
 /* --- Read-before-write and stale-edit tests --- */
@@ -4015,14 +3528,6 @@ int main(void)
    test_worktree_for_cwd();
    test_worktree_prefers_specific_git_root();
    test_worktree_sibling_path();
-   test_worktree_detect_base_branch_active();
-   test_worktree_detect_base_branch_local_default();
-   test_worktree_detect_base_branch_fallback();
-   test_worktree_detect_base_branch_master_fallback();
-   test_worktree_detect_base_branch_main_precedes_master();
-   test_worktree_detect_base_branch_configured_beats_remote();
-   test_worktree_detect_base_branch_remote_preference_scope();
-   test_feature_branch_suggest_from_work_name();
    test_session_isolation_creates_and_returns_worktree();
    test_session_isolation_sanitizes_malicious_sid();
    test_session_isolation_skips_when_already_in_same_session_worktree();
@@ -4040,6 +3545,7 @@ int main(void)
    test_anti_pattern_no_match_no_warning();
    test_known_subagent_tools_blocked();
    test_unknown_subagent_surface_blocked();
+   test_registered_aimee_delegation();
    test_hook_call_count_increments();
    test_unknown_workspace_blocks_writes();
    test_container_delegate_exempt_from_worktree_guard();
@@ -4049,20 +3555,18 @@ int main(void)
    test_external_default_checkout_blocks_writes();
    test_non_git_work_and_worktree_opt_out();
    test_shell_in_main_checkout_forced_to_worktree();
+   test_read_file_in_arbitrary_linked_worktree();
    test_path_tool_redirect_is_cwd_independent();
    test_git_commands_allowed_by_default();
    test_c_source_has_bare_string_newline();
    test_write_c_file_bare_newline_blocked();
    test_bash_command_guard_warns();
-   test_skill_dispatch_find_symbols_advisory();
-   test_skill_dispatch_trigger_advisories();
    test_bash_command_guard_no_warn_pipelines();
    test_orch_discipline_source_edit_warns();
    test_orch_discipline_exempt_paths_no_warn();
    test_orch_discipline_delegate_no_warn();
    test_orch_discipline_nudge_threshold();
    test_orch_discipline_state_roundtrip();
-   test_semantic_advisory_pre_tool_check();
    test_write_before_read_blocked();
    test_write_new_file_allowed();
    test_write_after_read_allowed();

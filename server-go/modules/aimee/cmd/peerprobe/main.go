@@ -19,10 +19,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -65,13 +65,13 @@ func main() {
 	}
 	ctx := context.Background()
 
-	client, err := bus.ConnectClient(ctx, socket, principalClass, principalRef)
+	client, err := ring.ConnectClient(ctx, socket, principalClass, principalRef)
 	if err != nil {
 		fmt.Printf("attach as principal %d failed: %v\n", principalRef, err)
 		os.Exit(2)
 	}
 	defer client.Detach()
-	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, client)
 	if err != nil {
 		fmt.Printf("caller: %v\n", err)
 		os.Exit(2)
@@ -349,7 +349,7 @@ const (
 // module's directory reads them from the same store this probe wrote them to --
 // which is the point. Nothing here registers a session with the peer module; it
 // learns of them entirely through the session family.
-func deliveryChecks(ctx context.Context, caller *bus.ConcurrentModuleCaller,
+func deliveryChecks(ctx context.Context, caller *ring.ConcurrentModuleCaller,
 	call func(stage, op uint32, cells []string) (peerwire.Status, []string, error)) {
 
 	// Unique per run: this module holds inboxes in memory and the store keeps

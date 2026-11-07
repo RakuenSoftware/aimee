@@ -1,3 +1,4 @@
+#include <aimee/core/codec/base64.h>
 /* util.c: core utilities (normalization, option parsing, security, path helpers) */
 #include "aimee.h"
 #include "headers/util.h"
@@ -16,6 +17,50 @@ extern char **environ;
 #endif
 
 /* --- Shared utilities (used by all modules including tests) --- */
+
+char *read_stream_limited(FILE *stream, size_t maximum, size_t *length)
+{
+   if (length)
+      *length = 0;
+   if (!stream || !maximum || maximum == (size_t)-1)
+      return NULL;
+   size_t capacity = maximum < 16384 ? maximum + 1 : 16384;
+   size_t used = 0;
+   char *buffer = malloc(capacity);
+   if (!buffer)
+      return NULL;
+   for (;;)
+   {
+      if (used == maximum)
+      {
+         if (fgetc(stream) != EOF || ferror(stream))
+            goto fail;
+         break;
+      }
+      if (used == capacity - 1)
+      {
+         size_t next = capacity > (maximum + 1) / 2 ? maximum + 1 : capacity * 2;
+         char *grown = realloc(buffer, next);
+         if (!grown)
+            goto fail;
+         buffer = grown;
+         capacity = next;
+      }
+      size_t n = fread(buffer + used, 1, capacity - used - 1, stream);
+      used += n;
+      if (ferror(stream))
+         goto fail;
+      if (feof(stream))
+         break;
+   }
+   buffer[used] = 0;
+   if (length)
+      *length = used;
+   return buffer;
+fail:
+   free(buffer);
+   return NULL;
+}
 
 char *safe_strdup(const char *s)
 {
@@ -72,26 +117,107 @@ char *strip_llm_private_scaffold(const char *text)
    return out;
 }
 
-/* A line carries AI attribution if, after leading whitespace, it starts with a
- * "co-authored-by:" trailer, or it contains the markdown-link attribution
- * "generated with [claude"/"generated with [codex" anywhere. Case-insensitive.
- * Mirrors the anchored regex in .github/workflows/ci.yml (ai-attribution gate)
- * so Aimee never emits what CI rejects. `end` bounds the line (exclusive). */
-static int line_is_ai_attribution(const char *line, const char *end)
+/* Case-insensitive prefix match of `word` at p, bounded by end. Returns the
+ * position after it, or NULL. */
+static const char *attr_word(const char *p, const char *end, const char *word)
 {
-   const char *p = line;
+   size_t n = strlen(word);
+   if ((size_t)(end - p) < n || strncasecmp(p, word, n) != 0)
+      return NULL;
+   return p + n;
+}
+
+static const char *attr_spaces(const char *p, const char *end)
+{
    while (p < end && (*p == ' ' || *p == '\t'))
       p++;
-   if (end - p >= 15 && strncasecmp(p, "co-authored-by:", 15) == 0)
+   return p;
+}
+
+static int attr_ascii_alnum(char c)
+{
+   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+}
+
+/* "<word> :" with optional spaces before the colon. */
+static int attr_trailer(const char *p, const char *end, const char *word)
+{
+   const char *q = attr_word(p, end, word);
+   if (!q)
+      return 0;
+   q = attr_spaces(q, end);
+   return q < end && *q == ':';
+}
+
+/* A line carries AI attribution if, after any run of non-alphanumeric bytes
+ * (whitespace, quote and markdown markers, or an emoji such as the standard
+ * "🤖 Generated with [Claude Code](...)" footer), it starts with a
+ * "co-authored-by:" trailer, an assistant "<name>-session:" trailer, or a
+ * "generated with|by <assistant>" footer; or if it contains an assistant session
+ * link or "generated with [claude|codex" anywhere. Case-insensitive.
+ *
+ * This is the emitting side of the no-coauthor-trailers gate
+ * (server-go/modules/git/attribution): it must strip at least what that gate
+ * refuses, so Aimee never emits what CI rejects. `end` bounds the line
+ * (exclusive). */
+static int line_is_ai_attribution(const char *line, const char *end)
+{
+   static const char *const assistants[] = {"github copilot", "claude", "codex", "chatgpt",
+                                            "copilot"};
+   const char *p = line;
+   while (p < end && !attr_ascii_alnum(*p))
+      p++;
+   if (attr_trailer(p, end, "co-authored-by"))
       return 1;
-   for (const char *q = line; end - q >= 16 + 5; q++)
+   for (size_t i = 1; i < sizeof(assistants) / sizeof(assistants[0]); i++)
    {
-      if (strncasecmp(q, "generated with [", 16) != 0)
-         continue;
-      const char *r = q + 16;
-      if ((end - r >= 6 && strncasecmp(r, "claude", 6) == 0) ||
-          (end - r >= 5 && strncasecmp(r, "codex", 5) == 0))
+      const char *q = attr_word(p, end, assistants[i]);
+      if (q && attr_trailer(q, end, "-session"))
          return 1;
+   }
+   const char *g = attr_word(p, end, "generated");
+   if (g && g < end && (*g == ' ' || *g == '\t'))
+   {
+      g = attr_spaces(g, end);
+      const char *h = attr_word(g, end, "with");
+      if (!h)
+         h = attr_word(g, end, "by");
+      if (h && h < end && (*h == ' ' || *h == '\t'))
+      {
+         h = attr_spaces(h, end);
+         if (h < end && *h == '[')
+            h++;
+         for (size_t i = 0; i < sizeof(assistants) / sizeof(assistants[0]); i++)
+         {
+            const char *a = attr_word(h, end, assistants[i]);
+            if (a && (a == end || !attr_ascii_alnum(*a)))
+               return 1;
+         }
+      }
+   }
+   for (const char *q = line; q < end; q++)
+   {
+      const char *r = attr_word(q, end, "generated with [");
+      if (r && (attr_word(r, end, "claude") || attr_word(r, end, "codex")))
+         return 1;
+      /* A session link anywhere: http(s)://<non-space>/[code/]session[_/-] */
+      const char *u = attr_word(q, end, "http://");
+      if (!u)
+         u = attr_word(q, end, "https://");
+      if (!u)
+         continue;
+      const char *stop = u;
+      while (stop < end && *stop != ' ' && *stop != '\t' && *stop != '\r')
+         stop++;
+      for (const char *s = u; s < stop; s++)
+      {
+         if (*s != '/')
+            continue;
+         const char *t = attr_word(s + 1, stop, "code/");
+         t = attr_word(t ? t : s + 1, stop, "session");
+         if (t && t < stop && (*t == '_' || *t == '/' || *t == '-'))
+            return 1;
+      }
    }
    return 0;
 }
@@ -1055,9 +1181,6 @@ int delegation_error_guidance(const char *error, char *buf, size_t len)
         "\nFix: Use a valid role: code, review, explain, refactor, draft, summarize, deploy, "
         "validate, test, diagnose, execute. If using a custom role, ensure an agent is "
         "configured for it in agents.json."},
-       {"missing delegation_id or content",
-        "\nFix: Both 'delegation_id' and 'content' are required — add them to the "
-        "delegate_reply call."},
        {"delegate creation denied",
         "\nFix: Only the primary agent may create delegates. A delegate should return its "
         "finding to the parent instead of spawning more delegates."},
@@ -1082,99 +1205,27 @@ int delegation_error_guidance(const char *error, char *buf, size_t len)
    return 0;
 }
 
-/* ── Standard base64 (RFC 4648, with '=' padding) ───────────────────────────
- * Shared codec for binary-safe framing over text channels (e.g. raw PTY bytes
- * over an SSE/NDJSON stream). Linked into both the client and server binaries. */
-static const char B64_ENC[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
+/* Compatibility entry points retain the public framing API. */
 size_t aimee_base64_encoded_len(size_t in_len)
 {
-   return ((in_len + 2) / 3) * 4 + 1; /* incl. NUL */
+   return aimee_codec_base64_capacity(in_len, AIMEE_BASE64_STANDARD);
 }
 
 size_t aimee_base64_encode(const unsigned char *in, size_t in_len, char *out, size_t out_cap)
 {
-   if (!out || out_cap == 0)
-      return 0;
-   if (aimee_base64_encoded_len(in_len) > out_cap)
-   {
-      out[0] = '\0';
-      return 0;
-   }
-   size_t o = 0;
-   size_t i = 0;
-   for (; i + 3 <= in_len; i += 3)
-   {
-      unsigned v = (unsigned)in[i] << 16 | (unsigned)in[i + 1] << 8 | in[i + 2];
-      out[o++] = B64_ENC[(v >> 18) & 0x3f];
-      out[o++] = B64_ENC[(v >> 12) & 0x3f];
-      out[o++] = B64_ENC[(v >> 6) & 0x3f];
-      out[o++] = B64_ENC[v & 0x3f];
-   }
-   if (in_len - i == 1)
-   {
-      unsigned v = (unsigned)in[i] << 16;
-      out[o++] = B64_ENC[(v >> 18) & 0x3f];
-      out[o++] = B64_ENC[(v >> 12) & 0x3f];
-      out[o++] = '=';
-      out[o++] = '=';
-   }
-   else if (in_len - i == 2)
-   {
-      unsigned v = (unsigned)in[i] << 16 | (unsigned)in[i + 1] << 8;
-      out[o++] = B64_ENC[(v >> 18) & 0x3f];
-      out[o++] = B64_ENC[(v >> 12) & 0x3f];
-      out[o++] = B64_ENC[(v >> 6) & 0x3f];
-      out[o++] = '=';
-   }
-   out[o] = '\0';
-   return o;
+   size_t written = 0;
+   return aimee_codec_base64_encode(in, in_len, out, out_cap, AIMEE_BASE64_STANDARD, &written)
+              ? written
+              : 0;
 }
 
-static int b64_val(int c)
-{
-   if (c >= 'A' && c <= 'Z')
-      return c - 'A';
-   if (c >= 'a' && c <= 'z')
-      return c - 'a' + 26;
-   if (c >= '0' && c <= '9')
-      return c - '0' + 52;
-   if (c == '+')
-      return 62;
-   if (c == '/')
-      return 63;
-   return -1;
-}
-
-/* Decode base64 `in` (NUL-terminated). Skips ASCII whitespace. Returns the
- * number of decoded bytes, or (size_t)-1 on a malformed character. */
 size_t aimee_base64_decode(const char *in, unsigned char *out, size_t out_cap)
 {
-   if (!in || !out)
-      return (size_t)-1;
-   unsigned acc = 0;
-   int bits = 0;
-   size_t o = 0;
-   for (const char *p = in; *p; p++)
-   {
-      if (*p == '=')
-         break;
-      if (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t')
-         continue;
-      int v = b64_val((unsigned char)*p);
-      if (v < 0)
-         return (size_t)-1;
-      acc = (acc << 6) | (unsigned)v;
-      bits += 6;
-      if (bits >= 8)
-      {
-         bits -= 8;
-         if (o >= out_cap)
-            return (size_t)-1;
-         out[o++] = (unsigned char)((acc >> bits) & 0xff);
-      }
-   }
-   return o;
+   size_t written = 0;
+   return in && aimee_codec_base64_decode(in, strlen(in), out, out_cap,
+                                          AIMEE_BASE64_STANDARD_TEXT_COMPAT, &written)
+              ? written
+              : (size_t)-1;
 }
 
 /* --- Worktree isolation helpers (see headers/util.h) --- */

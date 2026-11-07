@@ -109,7 +109,11 @@ WHERE t.path<>r.path`
 func (s *postgresDataStore) searchCode(ctx context.Context, project, query string, limit int) (json.RawMessage, error) {
 	vector, serving := "", ""
 	if s.personal != nil && query != "" {
-		budget := 1500 * time.Millisecond
+		// The local CPU embedder may already be encoding a long document.
+		// Allow its bounded queue to drain while reserving at least half the
+		// caller's deadline for SQL. A 1.5s cap caused routine lexical fallback
+		// throughout otherwise healthy background rebuilds.
+		budget := 10 * time.Second
 		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline)/2 < budget {
 			budget = time.Until(deadline) / 2
 		}

@@ -54,8 +54,8 @@ patching N copies is a process nobody runs N times correctly.
 
 ## The two answers
 
-**Copy it, as DB2 already does.** `src/modules/kb/support/cjson.c` is a full
-vendored copy, so the precedent exists and the change is mechanical: add
+**Copy it, as DB2 did at the time.** The retired KB support directory contained
+a full vendored cJSON copy. That historical alternative was mechanical: add
 `src/modules/db1/support/cjson.c` and the header beside it. It is consistent,
 it is reviewable, and it unblocks all nine immediately.
 

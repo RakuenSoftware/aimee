@@ -8,8 +8,8 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 var errIdempotencyConflict = errors.New("memory: idempotency key was already used for a different mutation")
@@ -39,7 +39,7 @@ func validIdempotencyKey(key string) bool {
 	return true
 }
 
-func verifiedRetryCaller(c *bus.CommandContext) bool {
+func verifiedRetryCaller(c *ring.CommandContext) bool {
 	return c != nil && c.Authenticated && c.Principal != "" && len(c.Principal) <= 1024
 }
 
@@ -75,7 +75,7 @@ func correctionDigest(r DataRequest, authority int) (string, error) {
 // failure: the audit commit, mutation, extraction job and receipt are atomic.
 // A correctionProposedError is a committed proposal outcome, not a failed write.
 // Only keyed corrections pay for the additional lock and receipt queries.
-func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataRequest, authority int, caller *bus.CommandContext, correlation string) (record Record, receipt *MemoryMutationReceipt, err error) {
+func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataRequest, authority int, caller *ring.CommandContext, correlation string) (record Record, receipt *MemoryMutationReceipt, err error) {
 	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.ValidFor(r.ID) || !versionedCorrectionOperation(r.Operation) || (r.Operation == "supersede" && r.Confidence == nil) || (r.Operation == "update-as" && r.Confidence != nil) {
 		return Record{}, nil, errors.New("memory: invalid idempotent correction")
 	}
@@ -206,7 +206,7 @@ func versionedCorrectionOperation(operation string) bool {
 	return operation == "supersede" || operation == "update-as"
 }
 
-func commandCorrectionOptions(args commandArgs, id int64, caller *bus.CommandContext) (*MemoryRecordVersion, string, map[string]any) {
+func commandCorrectionOptions(args commandArgs, id int64, caller *ring.CommandContext) (*MemoryRecordVersion, string, map[string]any) {
 	expected, valid := commandExpectedVersion(args, id)
 	if !valid {
 		return nil, "", commandError("invalid_argument", "expected_version must identify the owner, target and positive revision using schema_version=1")

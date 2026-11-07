@@ -125,10 +125,6 @@ int kb_store_vault_operator_runtime_open_with_vtable(kb_store_vault_operator_run
                                                      size_t errlen);
 void kb_store_vault_operator_runtime_close(kb_store_vault_operator_runtime_t *);
 
-/* One complete transaction-owned database snapshot. */
-int kb_store_vault_operator_runtime_snapshot(kb_store_vault_operator_runtime_t *,
-                                             kb_store_vault_operator_snapshot_t *);
-
 /* Database snapshot, provider-local read, database snapshot.  Motion retries
  * at most three complete attempts and is reported as integrity failure. */
 int kb_store_vault_operator_runtime_status(kb_store_vault_operator_runtime_t *,

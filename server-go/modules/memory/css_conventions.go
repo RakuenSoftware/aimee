@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Compatibility ontology for previously persisted typed facts. All assertions
@@ -39,23 +39,23 @@ func typedFactAssertion(subject, subjectKind, relation, object, objectKind strin
 	}, ConfidenceClass: "B", Confidence: float64(max(0, min(confidence, 100))) / 100, Functional: true}, nil
 }
 
-func handleCSSConventions(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleCSSConventions(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if options.placement != PlacementKB {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	project, ok := args.stringValue("project")
 	if !ok || strings.TrimSpace(project) == "" || len(project) > 4096 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	request := DataRequest{Operation: args.stringOr("operation", ""), Project: project, Scope: Scope{Type: ScopeProject, Value: project}}
 	body, _ := json.Marshal(request)
 	raw, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(map[string]string{"json": string(response.Payload)})
 }

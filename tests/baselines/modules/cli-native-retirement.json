@@ -1,0 +1,111 @@
+{
+  "source_commit": "6600e422f93f95e20393afc6df27578267f198f3",
+  "files": {
+    "src/cmd_data.c": {
+      "disposition": "legacy-command",
+      "symbols": [
+        "kb_client_memory_insert",
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "b2c8b4057575463c42f72d8030f652c9001849ec34b490824ffe56c04bc8b7de"
+    },
+    "src/cmd_onboard.c": {
+      "disposition": "legacy-command",
+      "symbols": [
+        "kb_client_memory_get",
+        "kb_client_memory_insert",
+        "kb_client_memory_insert_as"
+      ],
+      "sha256": "86bdc71da0af618b9093eb73ff719f7db8541d69c573c14d05a43c269986dc95"
+    },
+    "src/tests/test_cmd_memory_data.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_insert",
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "3c9afa759a7fbf3ec050d9aff922c2698e984481cbd688a67d59293ea4a8446a"
+    },
+    "src/tests/test_cmd_config.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "AIMEE_MEMORY_BACKEND_TOKEN"
+      ],
+      "sha256": "d2b0ce06070dcfcf222159f892d70786585fdac417e5754aab42dc2c963314d4"
+    },
+    "src/tests/test_context_assembly.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "memory_assemble_context",
+        "memory_delete",
+        "memory_insert",
+        "memory_transition_lifecycle"
+      ],
+      "sha256": "d05eba4db3568aee572e8e0c64b04823a50bd1d5b62b779d4ef236d09d7b1f1e"
+    },
+    "src/tests/test_memory_advanced.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "add_provenance",
+        "memory_directive_counts",
+        "memory_directive_create",
+        "memory_directive_get",
+        "memory_directive_list",
+        "memory_directive_mark_surfaced",
+        "memory_directive_match",
+        "memory_directive_metrics",
+        "memory_directive_resolve",
+        "memory_directive_suppress",
+        "memory_directive_sweep_expired",
+        "memory_insert",
+        "memory_lifecycle_counts",
+        "memory_lifecycle_sweep_expired",
+        "memory_list_conflicts",
+        "memory_maintenance_run",
+        "memory_mark_pending",
+        "memory_prospective_complete",
+        "memory_prospective_create",
+        "memory_prospective_get",
+        "memory_prospective_list",
+        "memory_prospective_mark_triggered",
+        "memory_prospective_match",
+        "memory_prospective_sweep_expired",
+        "memory_query_health",
+        "memory_record_conflict",
+        "memory_resolve_conflict",
+        "memory_transition_lifecycle"
+      ],
+      "sha256": "3b2bc0c6de11985aa452d30112429f830c237b8a3c908ca3617f6e923749044d"
+    },
+    "src/tests/test_pgvec_neardup.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "pgvec_memory_vector_collection_recreate"
+      ],
+      "sha256": "098bd0b7d5845b4164b4f30a7ad33789fa1ddcdd67eb14bf9b11c6658912b15b"
+    },
+    "src/tests/test_session_briefing.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "memory_directive_create",
+        "memory_directive_resolve",
+        "memory_prospective_complete",
+        "memory_prospective_create",
+        "memory_prospective_list"
+      ],
+      "sha256": "73a13a4492983f3e130375381412a8d8af2dc8b6d4ece7a88c339e2fa58b7b23"
+    },
+    "src/tests/test_workspace_memory.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "memory_assemble_context_ws",
+        "memory_insert",
+        "memory_insert_ex",
+        "memory_link_create",
+        "memory_tag_global",
+        "memory_tag_project"
+      ],
+      "sha256": "59ad08a618e76d2bc5bde969d0b563fb17bb04228779c7782fce4f7a7eff1a48"
+    }
+  }
+}

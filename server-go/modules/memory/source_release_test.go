@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -22,10 +22,10 @@ func sourceReleaseArgs(value map[string]any) commandArgs {
 func sourceReleaseCall(t *testing.T, s *sourceReleaseState, args commandArgs) map[string]any {
 	t.Helper()
 	raw, status := handleSourceRelease(s, args)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
-	body, err := bus.DecodeCommandResult(raw)
+	body, err := ring.DecodeCommandResult(raw)
 	var result map[string]any
 	if err != nil || json.Unmarshal(body, &result) != nil {
 		t.Fatal(err, string(body))
@@ -266,8 +266,8 @@ func exerciseSourceRevalidationReplay(t *testing.T, ctx context.Context, tx pgx.
 	// Exercise the authenticated command and scoped data dispatcher, not only SQL.
 	args := map[string]any{"scope_context": true, "project": "current-fact-project", "revalidation": request}
 	raw, _ := json.Marshal(args)
-	result, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementKB, backend)), 0, bus.CommandContext{}, "revalidate_sources", string(raw))
-	if status != bus.ModuleStatusOK || result["eligible"] != true || result["sources_digest"] != releaseDigest(refs) {
+	result, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementKB, backend)), 0, ring.CommandContext{}, "revalidate_sources", string(raw))
+	if status != ring.ModuleStatusOK || result["eligible"] != true || result["sources_digest"] != releaseDigest(refs) {
 		t.Fatal(result, status)
 	}
 	// Episode roots and parents participate in the same statement as assertions.
@@ -310,9 +310,9 @@ func TestNativeMixedOwnerReleaseRequiresBothAnswers(t *testing.T) {
 			p.SelectionDigest = releaseDigest(p.Sources)
 			args["native_projection"], _ = json.Marshal(p)
 			encoded, status := handleNativeSourceRelease(state, args)
-			raw, err := bus.DecodeCommandResult(encoded)
+			raw, err := ring.DecodeCommandResult(encoded)
 			var accepted map[string]any
-			if status != bus.ModuleStatusOK || err != nil || json.Unmarshal(raw, &accepted) != nil || accepted["status"] != "ok" {
+			if status != ring.ModuleStatusOK || err != nil || json.Unmarshal(raw, &accepted) != nil || accepted["status"] != "ok" {
 				t.Fatal(string(raw), status, err)
 			}
 			args["source_release_ticket"], _ = json.Marshal(accepted["source_release_ticket"])
@@ -370,7 +370,7 @@ func TestNativeMixedOwnerReleaseRequiresBothAnswers(t *testing.T) {
 			p.SelectionDigest = "changed"
 			args["native_projection"], _ = json.Marshal(p)
 			encoded, _ = handleNativeSourceRelease(state, args)
-			raw, _ = bus.DecodeCommandResult(encoded)
+			raw, _ = ring.DecodeCommandResult(encoded)
 			if strings.Contains(string(raw), `"status":"ok"`) {
 				t.Fatal("changed selection accepted", string(raw))
 			}
@@ -719,16 +719,16 @@ func TestSourceReleaseSendGuardAcknowledgement(t *testing.T) {
 
 func TestSourceSendGuardRequiresHostAuthority(t *testing.T) {
 	for _, row := range []struct {
-		caller *bus.CommandContext
+		caller *ring.CommandContext
 		want   bool
 	}{
-		{nil, false}, {&bus.CommandContext{Principal: "caller"}, false},
-		{&bus.CommandContext{Authenticated: true, Principal: "caller"}, false},
-		{&bus.CommandContext{Authenticated: true, Principal: "owner", UserAuthority: true}, true},
-		{&bus.CommandContext{Authenticated: true, Principal: "host", ScopeKind: "service", ScopeID: "server"}, true},
-		{&bus.CommandContext{Authenticated: true, Principal: "host", ScopeKind: "service"}, false},
-		{&bus.CommandContext{Authenticated: true, Principal: "user", UserAuthority: true, ScopeKind: "project", ScopeID: "app"}, false},
-		{&bus.CommandContext{Authenticated: true, Principal: "user", UserAuthority: true, ScopeKind: "workspace", ScopeID: "team"}, false},
+		{nil, false}, {&ring.CommandContext{Principal: "caller"}, false},
+		{&ring.CommandContext{Authenticated: true, Principal: "caller"}, false},
+		{&ring.CommandContext{Authenticated: true, Principal: "owner", UserAuthority: true}, true},
+		{&ring.CommandContext{Authenticated: true, Principal: "host", ScopeKind: "service", ScopeID: "server"}, true},
+		{&ring.CommandContext{Authenticated: true, Principal: "host", ScopeKind: "service"}, false},
+		{&ring.CommandContext{Authenticated: true, Principal: "user", UserAuthority: true, ScopeKind: "project", ScopeID: "app"}, false},
+		{&ring.CommandContext{Authenticated: true, Principal: "user", UserAuthority: true, ScopeKind: "workspace", ScopeID: "team"}, false},
 	} {
 		if sourceSendGuardAllowed(row.caller) != row.want {
 			t.Fatal(row)
@@ -738,9 +738,9 @@ func TestSourceSendGuardRequiresHostAuthority(t *testing.T) {
 		}
 		for _, mode := range []string{"acquire", "release"} {
 			args := sourceReleaseArgs(map[string]any{"principal": "forged-owner", "scope_kind": "service", "scope_id": "server", "scope_context": true, "project": "app", "revalidation": sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("a", 32), SendGuard: mode, Sources: []typedProjectionRef{releaseTestRef()}}})
-			encoded, status := handleSourceRevalidation(handlerOptions{placement: PlacementKB, commandContext: row.caller}, bus.ModuleInvocation{}, "revalidate_sources", args)
-			body, err := bus.DecodeCommandResult(encoded)
-			if status != bus.ModuleStatusOK || err != nil || !strings.Contains(string(body), `"unauthorized"`) {
+			encoded, status := handleSourceRevalidation(handlerOptions{placement: PlacementKB, commandContext: row.caller}, ring.ModuleInvocation{}, "revalidate_sources", args)
+			body, err := ring.DecodeCommandResult(encoded)
+			if status != ring.ModuleStatusOK || err != nil || !strings.Contains(string(body), `"unauthorized"`) {
 				t.Fatal(status, err, string(body))
 			}
 		}

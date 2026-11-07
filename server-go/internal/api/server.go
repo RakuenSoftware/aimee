@@ -25,6 +25,7 @@ type Server struct {
 	config          appconfig.Service
 	mux             *http.ServeMux
 	notify          func()
+	triggersChanged func()
 	cancel          func(string)
 	cleanupWorktree func(context.Context, workflowstore.WorkItem) error
 	triggerMu       sync.Mutex
@@ -74,7 +75,15 @@ func New(db *workflowstore.Store, artifacts *wfe.ArtifactStore, workflowDir ...s
 	return s, nil
 }
 
-func (s *Server) SetSchedulerNotify(notify func())       { s.notify = notify }
+func (s *Server) SetSchedulerNotify(notify func()) { s.notify = notify }
+
+// SetTriggersChanged installs what to call when a saved workflow may have
+// changed which triggers exist, so the trigger scan does not wait for a timer.
+func (s *Server) SetTriggersChanged(changed func()) { s.triggersChanged = changed }
+
+// TriggersWatched reports whether any trigger is defined, so a scan loop with
+// nothing to watch can sleep until that changes instead of rescanning.
+func (s *Server) TriggersWatched() bool                  { return len(s.triggerRequests()) > 0 }
 func (s *Server) SetSchedulerCancel(cancel func(string)) { s.cancel = cancel }
 func (s *Server) SetWorktreeCleanup(cleanup func(context.Context, workflowstore.WorkItem) error) {
 	s.cleanupWorktree = cleanup

@@ -157,3 +157,25 @@ func TestContainerRefusalExplainsNetworkBypass(t *testing.T) {
 		t.Fatalf("bad refusal: result=%+v err=%v", result, err)
 	}
 }
+
+func TestFreshContainerReceiptPinsStartAndPostureToCreatedID(t *testing.T) {
+	req := startReq(t)
+	fake := fakeFor(req)
+	id := strings.Repeat("a", 64)
+	runner := func(ctx context.Context, binary string, args ...string) (string, error) {
+		if args[0] == "create" {
+			return id + "\n", nil
+		}
+		if args[0] == "start" && args[1] != id {
+			t.Fatal("fresh start selected a mutable name", args)
+		}
+		if args[0] == "inspect" && args[len(args)-1] != id {
+			t.Fatal("posture selected a mutable name", args)
+		}
+		return fake.run(ctx, binary, args...)
+	}
+	result, err := (ContainerRunner{Run: runner}).Start(context.Background(), req)
+	if err != nil || result.Refused || result.ID != id || result.Name != req.ContainerName {
+		t.Fatal("lost creation receipt or display identity", result, err)
+	}
+}

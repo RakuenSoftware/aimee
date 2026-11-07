@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type labelCase struct {
@@ -123,7 +123,7 @@ func calibrateAudit(ctx context.Context, cases []labelCase, limit, rounds int) (
 // Labelled analysis uses only the owner-returned candidate pool. Gold IDs never
 // enter candidate generation; absent labels remain misses. Calibration is an
 // offline diagnostic experiment, not a deployment setting for the Go ranker.
-func handleLabelAudit(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleLabelAudit(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	format := args.stringOr("format", "text")
 	if format != "json" && format != "text" {
 		return commandResult(commandError("invalid_argument", "format must be json or text"))
@@ -145,20 +145,20 @@ func handleLabelAudit(options handlerOptions, invocation bus.ModuleInvocation, v
 	}
 	for i := range cases {
 		response, status := benchmarkRead(options, invocation, args, DataRequest{Operation: "diagnose", Query: cases[i].query, Limit: pool})
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
 		if len(response.Diagnostics) > pool {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		seen := map[int64]bool{}
 		for _, row := range response.Diagnostics {
 			if row.Memory.ID <= 0 || seen[row.Memory.ID] {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			seen[row.Memory.ID] = true
 			if value := auditRescore(row.Parts, auditMultipliers{1, 1, 1, 1, 1, 1, 1, 1, 1}); math.IsNaN(value) || math.IsInf(value, 0) {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 		}
 		cases[i].rows = response.Diagnostics
@@ -186,7 +186,7 @@ func handleLabelAudit(options handlerOptions, invocation bus.ModuleInvocation, v
 		}
 		weights, trial, trialHits, err := calibrateAudit(ctx, cases, limit, rounds)
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		multipliers := map[string]float64{}
 		for i, name := range auditFeatureNames {
@@ -203,7 +203,7 @@ func handleLabelAudit(options handlerOptions, invocation bus.ModuleInvocation, v
 	// The host only transports/render bytes, including any requested artifact.
 	profile, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	var output []byte
 	if format == "json" {

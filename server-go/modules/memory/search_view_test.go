@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -51,7 +51,7 @@ func TestMemorySearchText(t *testing.T) {
 	}
 }
 
-func exerciseSearchViewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseSearchViewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -83,12 +83,12 @@ func exerciseSearchViewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 		if err != nil {
 			t.Fatal(err)
 		}
-		frame, _ := bus.EncodeCommand("find_facts_visible", raw)
-		encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status != bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand("find_facts_visible", raw)
+		encoded, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status)
 		}
-		body, err := bus.DecodeCommandResult(encoded)
+		body, err := ring.DecodeCommandResult(encoded)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,26 +167,26 @@ func TestFusionProbe(t *testing.T) {
 			t.Fatal(got, backend)
 		}
 	}
-	frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"fusion-probe","query":"needle"}`))
+	frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"fusion-probe","query":"needle"}`))
 	backend.failure = errors.New("retrieval unavailable")
-	if raw, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK || len(raw) != 0 {
+	if raw, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK || len(raw) != 0 {
 		t.Fatal(status, string(raw))
 	}
 	backend.failure = nil
 	t.Setenv("AIMEE_GRAPH_FUSION", "invalid")
-	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK {
 		t.Fatal("invalid setting reported as off")
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal(status)
 	}
 	server := NewHandler(nil, WithDataStore(PlacementServer, backend))
-	if _, status := server(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := server(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatal(status)
 	}
 	for _, args := range []string{`{"operation":"fusion-probe"}`, `{"operation":"fusion-probe","query":" "}`, `{"operation":"fusion-probe","query":false}`} {
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(args))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(args))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 	}

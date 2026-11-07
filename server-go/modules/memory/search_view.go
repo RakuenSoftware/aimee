@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Preserve the canonical MCP filter priority while keeping memory scope policy
@@ -44,32 +44,32 @@ func memorySearchText(query string, records []publicMemoryRecord, missing bool) 
 
 // The local operator probe uses the same Go retrieval owner and deployment
 // setting as the serving instance. It never overrides fusion policy.
-func handleFusionProbe(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleFusionProbe(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if options.placement != PlacementKB {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	query, ok := args.stringValue("query")
 	if !ok || strings.TrimSpace(query) == "" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	state, status := handleData(options, invocation, []byte(`{"operation":"fusion-state-get"}`))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var configured DataResponse
 	if json.Unmarshal(state, &configured) != nil || configured.Allowed == nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	// The former local data-stage request had no active scope context. Preserve
 	// that visibility; an operator probe must not turn on include_all implicitly.
 	request, _ := json.Marshal(DataRequest{Operation: "search", Query: query, Limit: 20})
 	encoded, status := handleData(options, invocation, request)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(encoded, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	mode := "off"
 	if *configured.Allowed {

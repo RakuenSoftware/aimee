@@ -12,10 +12,10 @@ uint64_t aimee_module_call_deadline_ns(int ms)
    (void)ms;
    return 0;
 }
-aimee_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, uint64_t trace,
-                                               uint64_t deadline, const void *body, uint32_t size,
-                                               void *reply, uint32_t capacity, uint32_t *length,
-                                               aimee_module_cancelled_fn cancelled, void *context)
+ouro_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, uint64_t trace,
+                                              uint64_t deadline, const void *body, uint32_t size,
+                                              void *reply, uint32_t capacity, uint32_t *length,
+                                              ouro_module_cancelled_fn cancelled, void *context)
 {
    (void)event;
    (void)stage;
@@ -29,7 +29,7 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, u
    (void)cancelled;
    (void)context;
    assert(!"private authority must never use runtime bus");
-   return AIMEE_MODULE_CALL_INTERNAL;
+   return OURO_MODULE_CALL_INTERNAL;
 }
 static int64_t now_ms(void)
 {

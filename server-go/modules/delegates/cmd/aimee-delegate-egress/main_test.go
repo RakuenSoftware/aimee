@@ -55,3 +55,30 @@ func TestAcquireRejectsPlainFileAndMissingWorkspace(t *testing.T) {
 		t.Fatal("plain file or empty workspace was accepted")
 	}
 }
+
+func TestMachineRunnerSeparatesSuccessfulStdoutFromWarnings(t *testing.T) {
+	output, err := commandRunner(context.Background(), "/bin/sh", "-c", "printf machine-receipt; printf warning >&2")
+	if err != nil || output != "machine-receipt" {
+		t.Fatal("warnings corrupted the successful machine receipt", output, err)
+	}
+	output, err = commandRunner(context.Background(), "/bin/sh", "-c", "printf 'No such container' >&2; exit 1")
+	if err == nil || !strings.Contains(output, "No such container") {
+		t.Fatal("failed cleanup lost its diagnostic", output, err)
+	}
+}
+
+func TestVerifierRequiresLaunchingParentIdentity(t *testing.T) {
+	for _, expected := range []int{0, -1, os.Getpid()} {
+		if _, _, err := verifierParentContext(context.Background(), expected); err == nil {
+			t.Fatalf("unowned parent %d accepted", expected)
+		}
+	}
+	owned, join, err := verifierParentContext(context.Background(), os.Getppid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	join()
+	if owned.Err() != context.Canceled {
+		t.Fatal("parent watcher was not joined")
+	}
+}

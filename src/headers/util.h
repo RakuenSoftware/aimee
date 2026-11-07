@@ -2,11 +2,18 @@
 #define DEC_UTIL_H 1
 
 #include <ctype.h>
+#include <limits.h>
+#include <aimee/core/codec/base64.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* Read one complete bounded binary stream, including embedded NUL bytes.
+ * Returns owned NUL-terminated storage plus its actual byte length; over-limit
+ * or read failure returns NULL and clears length instead of returning a prefix. */
+char *read_stream_limited(FILE *stream, size_t maximum, size_t *length);
 
 /* Free the `count` strings in a shlex_split() token array (not the array). */
 static inline void util_free_tokens(char **tokens, int count)
@@ -48,26 +55,14 @@ time_t timegm(struct tm *tm);
  * NUL-terminated). Returns the encoded length, or -1 if it wouldn't fit. */
 static inline int util_b64_encode(const char *in, size_t in_len, char *out, size_t out_cap)
 {
-   static const char b64_alphabet[] =
-       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-   size_t out_len = ((in_len + 2) / 3) * 4;
-   if (out_len + 1 > out_cap)
+   size_t written = 0, need = aimee_codec_base64_capacity(in_len, AIMEE_BASE64_STANDARD);
+   if (!need || out_cap < need || need - 1 > INT_MAX)
       return -1;
-   size_t o = 0;
-   for (size_t i = 0; i < in_len; i += 3)
-   {
-      unsigned int v = ((unsigned char)in[i]) << 16;
-      if (i + 1 < in_len)
-         v |= ((unsigned char)in[i + 1]) << 8;
-      if (i + 2 < in_len)
-         v |= (unsigned char)in[i + 2];
-      out[o++] = b64_alphabet[(v >> 18) & 0x3f];
-      out[o++] = b64_alphabet[(v >> 12) & 0x3f];
-      out[o++] = (i + 1 < in_len) ? b64_alphabet[(v >> 6) & 0x3f] : '=';
-      out[o++] = (i + 2 < in_len) ? b64_alphabet[v & 0x3f] : '=';
-   }
-   out[o] = '\0';
-   return (int)o;
+   if (!aimee_codec_base64_encode((const unsigned char *)in, in_len, out, out_cap,
+                                  AIMEE_BASE64_STANDARD, &written) ||
+       written > INT_MAX)
+      return -1;
+   return (int)written;
 }
 
 /* Lowercase-copy `src` into `dst` (<= dst_len, always NUL-terminated). */
@@ -149,9 +144,6 @@ static inline int str_contains_ci(const char *haystack, const char *needle)
  * Result written to buf (max buf_len). Returns buf. */
 char *normalize_key(const char *key, char *buf, size_t buf_len);
 
-/* Trigram Jaccard similarity between two strings. Returns 0.0-1.0. */
-double trigram_similarity(const char *a, const char *b);
-
 /* Split a reasoning PREAMBLE off the front of a model response.
  *
  * Reasoning models PREPEND <think>...</think> when the server is not configured
@@ -193,18 +185,6 @@ size_t text_sanitize_utf8(char *s);
  * modifies the input. */
 int text_is_valid_utf8(const char *s);
 
-/* Basic Porter-like stemming. Result written to buf. Returns buf. */
-char *stem_word(const char *word, char *buf, size_t buf_len);
-
-/* Canonical fingerprint: normalize + stem + sort words. */
-char *canonical_fingerprint(const char *text, char *buf, size_t buf_len);
-
-/* Word-set Jaccard similarity. */
-double word_similarity(const char *a, const char *b);
-
-/* Check if two strings are likely contradictions. */
-int is_contradiction(const char *a, const char *b);
-
 /* POSIX-like shell token splitting. Returns token count.
  * Tokens written to out array (max max_tokens). Caller frees each token. */
 int shlex_split(const char *command, char **out, int max_tokens);
@@ -222,9 +202,6 @@ int tokenize_for_search(const char *text, char **out, int max_tokens);
 
 /* Conservative detector for low-information acknowledgement chatter. */
 int is_noise_utterance(const char *text);
-
-/* Expand terms for lexical indexing (includes camelCase/snake_case splits). */
-char *expand_terms_for_search(char **terms, int count, char *buf, size_t buf_len);
 
 /* Split camelCase into parts. Returns part count. */
 int split_camel_case(const char *s, char **out, int max_parts);

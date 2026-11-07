@@ -3,8 +3,8 @@ import { Button, useToast } from '@rakuensoftware/smoothgui';
 import { loadConfig, saveConfigValue, type ConfigMap } from '../setup/configApi';
 import { visibleSteps, isRestartKey, helpFor, ownsPrimaryAction, APPLIANCE_HIDDEN_STEPS, type WizardKbMode } from '../setup/wizardSteps';
 import { completedSteps, computeReadiness, type StepId } from '../setup/readiness';
-import { fetchAppliance, fetchGitIdentityReady, fetchHostCount, fetchProjectCount, fetchSetupAccountReady } from '../setup/setupSignals';
-import { setDismissed, notifySetupUpdated } from '../setup/setupState';
+import { fetchAppliance, fetchGitIdentityReady, fetchHostCount, fetchProjectCount, fetchSetupAccountStatus } from '../setup/setupSignals';
+import { setDismissed, rememberSetupDismissal, notifySetupUpdated } from '../setup/setupState';
 import CreateAccount from '../setup/CreateAccount';
 import PrimaryChooser from '../setup/PrimaryChooser';
 import DeployTopology from '../setup/DeployTopology';
@@ -55,6 +55,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   const [hostsConnected, setHostsConnected] = useState(0);
   const [projectCount, setProjectCount] = useState(0);
   const [accountReady, setAccountReady] = useState(false);
+  const [dismissalScope, setDismissalScope] = useState<string>();
   const [gitIdentityReady, setGitIdentityReady] = useState(false);
   // Appliance packaging is separate from the optional shared KB connection.
   // infra steps. Detected from a webchat signal (AIMEE_WIZARD_APPLIANCE).
@@ -85,15 +86,17 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     setShowSummary(false);
     setPendingRestart([]);
     setBooted(false);
+    setDismissalScope(undefined);
     setDoneAtOpen(new Set());
     Promise.all([
-      loadConfig(), fetchHostCount(), fetchProjectCount(), fetchSetupAccountReady(), fetchAppliance(),
+      loadConfig(), fetchHostCount(), fetchProjectCount(), fetchSetupAccountStatus(), fetchAppliance(),
       fetchGitIdentityReady(),
     ]).then(([c, hosts, projects, account, appl, identity]) => {
       setCfg(c);
       setHostsConnected(hosts);
       setProjectCount(projects);
-      setAccountReady(account);
+      setAccountReady(account.complete);
+      setDismissalScope(account.dismissal_scope);
       setGitIdentityReady(identity);
       setAppliance(appl);
       const d: Record<string, string> = {};
@@ -104,13 +107,17 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
         }
       }
       setDraft(d);
-      const done = completedSteps(c, { accountReady: account, projectCount: projects, hostsConnected: hosts, gitIdentityReady: identity });
+      const done = completedSteps(c, { accountReady: account.complete, projectCount: projects, hostsConnected: hosts, gitIdentityReady: identity });
       setDoneAtOpen(done);
       setBooted(true);
     });
   }, [open]);
 
-  const close = useCallback(() => { onClose(); }, [onClose]);
+  const close = useCallback(() => {
+    setDismissed(true);
+    rememberSetupDismissal(dismissalScope);
+    onClose();
+  }, [onClose, dismissalScope]);
 
   // Esc closes the wizard (non-blocking).
   useEffect(() => {

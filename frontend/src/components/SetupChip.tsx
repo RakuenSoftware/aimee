@@ -1,29 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadConfig, type ConfigMap } from '../setup/configApi';
 import { computeReadiness, stepsRemaining } from '../setup/readiness';
-import { fetchGitIdentityReady, fetchHostCount, fetchProjectCount, fetchSetupAccountReady } from '../setup/setupSignals';
-import { requestOpenWizard, isDismissed, SETUP_UPDATED_EVENT } from '../setup/setupState';
+import { fetchGitIdentityReady, fetchHostCount, fetchProjectCount, fetchSetupAccountStatus } from '../setup/setupSignals';
+import { requestOpenWizard, isDismissed, isSetupDismissed, SETUP_UPDATED_EVENT } from '../setup/setupState';
 
 /* Header chip: "Setup — N left". Reads GET /api/config once (and again whenever
  * the wizard reports a change or the window regains focus), computes readiness
  * against the cloned project inventory, and shows how many required steps remain.
  * Hidden entirely once ready. Clicking it opens the wizard. On first load, if the
  * instance is not ready and the wizard hasn't been dismissed, it auto-opens the
- * wizard once. Pending first-boot account setup overrides browser dismissal,
- * which can survive reinstalling the server at the same address. */
+ * wizard once. Pending first-boot account setup ignores the old unscoped Finish flag; a normal
+ * close is remembered only for its authenticated instance/account scope,
+ * which changes after reinstalling the server at the same address. */
 
 export default function SetupChip() {
   const [cfg, setCfg] = useState<ConfigMap | null>(null);
   const [accountReady, setAccountReady] = useState(false);
+  const [dismissalScope, setDismissalScope] = useState<string>();
   const [projectCount, setProjectCount] = useState(0);
   const [hostsConnected, setHostsConnected] = useState(0);
   const [gitIdentityReady, setGitIdentityReady] = useState(false);
 
   const load = useCallback(() => {
-    Promise.all([loadConfig(), fetchSetupAccountReady(), fetchProjectCount(), fetchHostCount(), fetchGitIdentityReady()])
+    Promise.all([loadConfig(), fetchSetupAccountStatus(), fetchProjectCount(), fetchHostCount(), fetchGitIdentityReady()])
       .then(([config, account, projects, hosts, identity]) => {
         setCfg(config);
-        setAccountReady(account);
+        setAccountReady(account.complete);
+        setDismissalScope(account.dismissal_scope);
         setProjectCount(projects);
         setHostsConnected(hosts);
         setGitIdentityReady(identity);
@@ -50,11 +53,11 @@ export default function SetupChip() {
   // A browser's old Finish flag cannot complete a fresh server's account setup.
   const autoOpened = useRef(false);
   useEffect(() => {
-    if (readiness && !readiness.ready && (!accountReady || !isDismissed()) && !autoOpened.current) {
+    if (readiness && !readiness.ready && !(isSetupDismissed(dismissalScope) || (accountReady && isDismissed())) && !autoOpened.current) {
       autoOpened.current = true;
       requestOpenWizard();
     }
-  }, [readiness, accountReady]);
+  }, [readiness, accountReady, dismissalScope]);
 
   if (!readiness || readiness.ready) return null;
 

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/audit"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -86,9 +86,9 @@ func exerciseCognifyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend
 	call := func(verb string, id int64, project string) map[string]any {
 		t.Helper()
 		args := fmt.Sprintf(`{"unit":%d,"scope_context":true,"project":%q}`, id, project)
-		result, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, verb, args)
+		result, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, verb, args)
 		t.Logf("cognify call %s %d %s: %v %v", verb, id, project, result["status"], result["kind"])
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(result, status)
 		}
 		return result

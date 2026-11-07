@@ -14,10 +14,6 @@ int kb_curator_queue_docs_for_project(const char *project);
  * extract_docs_enabled is 0; per-project dedup makes it idempotent. */
 void kb_curator_queue_docs_all_projects(int extract_docs_enabled);
 
-/* Queue one extract_code_unit job when the curator code gate is enabled. */
-int kb_curator_queue_code_unit(const char *project, const char *file_path, const char *symbol,
-                               int line);
-
 /* Bulk-enqueue extract_code_unit jobs for indexed terms in a project. */
 int kb_curator_queue_code_units_for_project(const char *project, const char *root_path);
 

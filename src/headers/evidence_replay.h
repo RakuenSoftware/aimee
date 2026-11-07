@@ -54,32 +54,6 @@ extern "C"
       int (*project_count)(void);
    } replay_backend_t;
 
-   /* Register the process-wide replay backend (a weak seam). The server installs
-    * a kb_client-backed backend at startup; contexts without a code index (CLI,
-    * gateway, tests that don't set one) leave it NULL, so evidence_replay()
-    * DEGRADES (INDEX_UNAVAILABLE) rather than referencing any index symbol. `be`
-    * must outlive its use (pass a static). */
-   void evidence_replay_set_backend(const replay_backend_t *be);
-
-   /* The currently-registered backend, or NULL. */
-   const replay_backend_t *evidence_replay_active_backend(void);
-
-   /* Replay `ev` against the registered backend (NULL backend => degrade). */
-   replay_status_t evidence_replay(const review_evidence_t *ev, reduced_record_t *out);
-
-   /* Replay against an explicit backend (for tests). A NULL `be` degrades
-    * (INDEX_UNAVAILABLE) — there is no index to ground against. */
-   replay_status_t evidence_replay_with(const replay_backend_t *be, const review_evidence_t *ev,
-                                        reduced_record_t *out);
-
-   /* Stable lowercase token for a status (for audit logs / reason codes). */
-   const char *replay_status_str(replay_status_t s);
-
-   /* sha256-hex of `n` "file:line" strings, sorted ascending, joined by '\n'.
-    * Writes into out[REPLAY_IDKEY_HEX]. Exposed for tests (determinism). */
-   void evidence_idkey(const char (*files)[MAX_PATH_LEN], const int *lines, int n,
-                       char out[REPLAY_IDKEY_HEX]);
-
 #ifdef __cplusplus
 }
 #endif

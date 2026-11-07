@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -363,6 +365,14 @@ func TestSetupAccountIsCompleteForOperatorConfiguredLogin(t *testing.T) {
 	if status["complete"] != true || status["required"] != false || status["username"] != "operator" {
 		t.Fatalf("status = %#v", status)
 	}
+	if !s.isAdmin(withUser(httptest.NewRequest(http.MethodGet, "/", nil), "operator")) {
+		t.Fatal("explicit seed owner was not admitted as appliance administrator")
+	}
+	for _, other := range []string{"admin", "another-managed-user", ""} {
+		if s.isAdmin(withUser(httptest.NewRequest(http.MethodGet, "/", nil), other)) {
+			t.Fatalf("explicit seed marker granted administrator to %q", other)
+		}
+	}
 }
 
 // The roundtable admin gate lives in the C server, which runs as `aimee`, while
@@ -378,6 +388,11 @@ func TestSetupAccountIsCompleteForOperatorConfiguredLogin(t *testing.T) {
 func TestReplacementMarkerIsReadableByTheServerProcess(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "webchat", "bootstrap-replaced")
+	// An earlier restrictive umask can leave this shared metadata directory
+	// private even though each marker's file mode is readable.
+	if err := os.Mkdir(filepath.Dir(marker), 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	rollback, err := writeReplacementMarker(marker, "virant")
 	if err != nil {
@@ -449,5 +464,118 @@ func TestSetupAccountPasswordMinimumBoundary(t *testing.T) {
 	s2.handleSetupAccount(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("exactly %d characters must be accepted: code=%d body=%s", len(exact), rr.Code, rr.Body.String())
+	}
+}
+
+func TestSetupDismissalScopeSurvivesReloadButNotReinstall(t *testing.T) {
+	s, _ := newSetupAccountTestServer(t)
+	read := func(s *server) string {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		s.handleSetupAccount(rr, withUser(httptest.NewRequest(http.MethodGet, "/api/setup/account", nil), defaultBootstrapUsername))
+		var status map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status["complete"] != false || status["required"] != true {
+			t.Fatalf("dismissal changed account readiness: %v", status)
+		}
+		scope, ok := status["dismissal_scope"].(string)
+		if !ok || len(scope) != 64 {
+			t.Fatalf("missing opaque install scope: %v", status)
+		}
+		return scope
+	}
+	first := read(s)
+	if got := read(s); got != first {
+		t.Fatal("scope changed on reload")
+	}
+	restarted := &server{cfg: s.cfg, accounts: s.accounts}
+	if got := read(restarted); got != first {
+		t.Fatal("scope changed on process restart")
+	}
+	other, _ := newSetupAccountTestServer(t)
+	if got := read(other); got == first {
+		t.Fatal("same bootstrap username hid a fresh installation")
+	}
+}
+
+func TestSetupDismissalScopeConcurrentFirstReads(t *testing.T) {
+	s, _ := newSetupAccountTestServer(t)
+	const count = 16
+	scopes := make(chan string, count)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			value, _ := s.setupAccountStatus(defaultBootstrapUsername)["dismissal_scope"].(string)
+			scopes <- value
+		}()
+	}
+	wg.Wait()
+	close(scopes)
+	first := ""
+	for scope := range scopes {
+		if len(scope) != 64 {
+			t.Fatal("scope unavailable during concurrent first reads")
+		}
+		if first == "" {
+			first = scope
+		} else if scope != first {
+			t.Fatal("concurrent first reads published different scopes")
+		}
+	}
+}
+
+func TestSetupDismissalInvalidStateDoesNotBlockAccountStatus(t *testing.T) {
+	for _, kind := range []string{"malformed", "oversized", "directory", "symlink", "fifo"} {
+		t.Run(kind, func(t *testing.T) {
+			s, _ := newSetupAccountTestServer(t)
+			path := filepath.Join(s.setupAccountDir(), "setup-dismissal-id")
+			switch kind {
+			case "malformed":
+				if err := os.WriteFile(path, []byte(strings.Repeat("x", 64)), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "oversized":
+				if err := os.WriteFile(path, []byte(strings.Repeat("a", 65)), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "directory":
+				if err := os.Mkdir(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink":
+				target := filepath.Join(t.TempDir(), "other-install")
+				if err := os.WriteFile(target, []byte(strings.Repeat("a", 64)), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			case "fifo":
+				mkfifo, err := exec.LookPath("mkfifo")
+				if err != nil {
+					t.Skip("Unix FIFO utility unavailable")
+				}
+				if err := exec.Command(mkfifo, path).Run(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			done := make(chan map[string]any, 1)
+			go func() { done <- s.setupAccountStatus(defaultBootstrapUsername) }()
+			select {
+			case status := <-done:
+				if _, ok := status["dismissal_scope"]; ok {
+					t.Fatal("invalid local state acquired a dismissal scope")
+				}
+				if status["complete"] != false || status["required"] != true {
+					t.Fatal("invalid local state changed readiness")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("optional local preference blocked account status")
+			}
+		})
 	}
 }

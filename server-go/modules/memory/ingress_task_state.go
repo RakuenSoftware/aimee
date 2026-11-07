@@ -5,7 +5,7 @@ import (
 	"math/bits"
 	"sync"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type ingressTaskSession struct {
@@ -96,7 +96,7 @@ func (s *ingressTaskState) rearm(session, project string) {
 	}
 }
 
-func handleIngressTaskState(state *ingressTaskState, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleIngressTaskState(state *ingressTaskState, args commandArgs) ([]byte, ring.ModuleStatus) {
 	operation := args.stringOr("operation", "")
 	if operation == "ingress-task-reset" {
 		state.mu.Lock()
@@ -108,14 +108,14 @@ func handleIngressTaskState(state *ingressTaskState, args commandArgs) ([]byte, 
 	var session, project, query *string
 	if json.Unmarshal(args["session"], &session) != nil || session == nil ||
 		json.Unmarshal(args["project"], &project) != nil || project == nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if operation == "ingress-task-rearm" {
 		state.rearm(*session, *project)
 		return commandResult(map[string]any{"status": "ok"})
 	}
 	if json.Unmarshal(args["query"], &query) != nil || query == nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	return commandResult(map[string]any{"status": "ok", "fetch": state.claim(*session, *project, *query)})
 }

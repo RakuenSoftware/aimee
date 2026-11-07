@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -188,8 +188,8 @@ has_table_privilege(current_user,'memory_rejection_tombstones','TRUNCATE') OR
 	exerciseReflectionReplay(t, ctx, tx, backend.(*postgresDataStore))
 	call := func(request DataRequest) DataResponse {
 		t.Helper()
-		reply, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request))
-		if status != bus.ModuleStatusOK {
+		reply, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, request))
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("%s (%s): status %d", request.Operation, request.Project, status)
 		}
 		var response DataResponse
@@ -254,15 +254,15 @@ has_table_privilege(current_user,'memory_rejection_tombstones','TRUNCATE') OR
 
 	// Exercise public writes with the packaged audit triggers and the real
 	// restricted store role, not only the minimal command fixtures.
-	caller := bus.CommandContext{Authenticated: true, Principal: "user:runtime-probe", TransportIdentity: "cert:runtime-probe", UserAuthority: true}
+	caller := ring.CommandContext{Authenticated: true, Principal: "user:runtime-probe", TransportIdentity: "cert:runtime-probe", UserAuthority: true}
 	command := func(verb, args string, verified bool) map[string]any {
 		t.Helper()
-		context := bus.CommandContext{}
+		context := ring.CommandContext{}
 		if verified {
 			context = caller
 		}
 		r, status := invokeContextCommand(t, handler, 0, context, verb, args)
-		if status != bus.ModuleStatusOK || r["status"] != "ok" {
+		if status != ring.ModuleStatusOK || r["status"] != "ok" {
 			t.Fatalf("%s: %v status=%d", verb, r, status)
 		}
 		return r

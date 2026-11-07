@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type ingressBeginRequest struct {
@@ -124,30 +124,30 @@ func ingressTaskResult(state *gatewayState, request ingressTaskResultRequest) ma
 	return result
 }
 
-func handleIngressPlan(state *gatewayState, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleIngressPlan(state *gatewayState, args commandArgs) ([]byte, ring.ModuleStatus) {
 	raw, err := json.Marshal(args)
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	switch args.stringOr("operation", "") {
 	case "ingress-begin":
 		var request ingressBeginRequest
 		_, limitsPresent := args["context_limits"]
 		if json.Unmarshal(raw, &request) != nil || (limitsPresent && request.ContextLimits == nil) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		return commandResult(ingressBegin(state, request))
 	case "ingress-task-result":
 		var request ingressTaskResultRequest
 		if json.Unmarshal(raw, &request) != nil || request.ElapsedMS < 0 || (request.Mode != "on" && request.Mode != "observe") {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		return commandResult(ingressTaskResult(state, request))
 	case "ingress-recall-result":
 		var unavailable *bool
 		count, ok := args.number("count")
 		if !ok || count < 0 || count > 5 || count != float64(int(count)) || json.Unmarshal(args["unavailable"], &unavailable) != nil || unavailable == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		result := map[string]any{"status": "ok"}
 		if count == 0 && *unavailable {
@@ -162,5 +162,5 @@ func handleIngressPlan(state *gatewayState, args commandArgs) ([]byte, bus.Modul
 	case "ingress-metrics":
 		return commandResult(map[string]any{"status": "ok", "recall_unavailable_total": state.recallUnavailable.Load()})
 	}
-	return nil, bus.ModuleStatusInvalidRequest
+	return nil, ring.ModuleStatusInvalidRequest
 }

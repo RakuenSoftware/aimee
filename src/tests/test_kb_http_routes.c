@@ -46,11 +46,11 @@ extern int handle_get_code_context(const char *query_string, char *out_buf, int 
 #include "runtime_secret.h"
 
 #include <aimee/control-web/module_api.h>
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 
-extern aimee_module_status_t aimee_control_web_module_handler(const aimee_module_invocation_t *,
-                                                              const uint8_t *, uint32_t, uint8_t *,
-                                                              uint32_t, uint32_t *, void *);
+extern ouro_module_status_t aimee_control_web_module_handler(const ouro_module_invocation_t *,
+                                                             const uint8_t *, uint32_t, uint8_t *,
+                                                             uint32_t, uint32_t *, void *);
 
 static int self_signed_ec_cert(char *out, size_t cap)
 {
@@ -84,7 +84,7 @@ static int self_signed_ec_cert(char *out, size_t cap)
    return ok ? 0 : -1;
 }
 
-int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+int ouro_module_invocation_cancelled(const ouro_module_invocation_t *invocation)
 {
    (void)invocation;
    return 0;
@@ -95,12 +95,12 @@ static int control_web_module_provider(const char *method, const char *path, int
    uint8_t request[AIMEE_CONTROL_WEB_REQUEST_LEN];
    uint8_t response[AIMEE_CONTROL_WEB_RESPONSE_LEN];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_CONTROL_WEB_STAGE_AUTHORIZE};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_CONTROL_WEB_STAGE_AUTHORIZE};
    if (aimee_control_web_request_encode(AIMEE_CONTROL_WEB_TARGET_CONSOLE_ADMIN, method, path,
                                         request, sizeof(request)) != 0 ||
        aimee_control_web_module_handler(&invocation, request, sizeof(request), response,
                                         sizeof(response), &response_len,
-                                        NULL) != AIMEE_MODULE_STATUS_OK)
+                                        NULL) != OURO_MODULE_STATUS_OK)
       return -1;
    return aimee_control_web_response_decode(response, response_len, allowed);
 }
@@ -1193,7 +1193,6 @@ static int g_complete_chunks;
 static int g_complete_embeddings;
 static int64_t g_fail_job_id;
 static char g_fail_error[256];
-static char g_snapshot_project[256];
 static char g_delete_project[256];
 static char g_delete_path[256];
 static int g_delete_ids_called;
@@ -1777,17 +1776,6 @@ int kb_store_kb_ingest_queue_fail(int64_t job_id, const char *error_message)
    return 0;
 }
 
-cJSON *kb_store_kb_file_index_snapshot_json(const char *project)
-{
-   snprintf(g_snapshot_project, sizeof(g_snapshot_project), "%s", project ? project : "");
-   cJSON *arr = cJSON_CreateArray();
-   cJSON *file = cJSON_CreateObject();
-   cJSON_AddStringToObject(file, "rel_path", "src/a.c");
-   cJSON_AddStringToObject(file, "hash", "hash-a");
-   cJSON_AddItemToArray(arr, file);
-   return arr;
-}
-
 int kb_store_kb_documents_list_chunk_ids_for_file(const char *project, const char *file_path,
                                                   int64_t *out, int max)
 {
@@ -2163,7 +2151,6 @@ static void test_capabilities(void)
  *    exercised without a live KB_STORE. ─────────────────────────────────────────── */
 #include "modules/kb/c/enrollments.h"
 #include "kb_identity.h"
-static int g_stub_revoked_calls = 0;
 static char g_stub_enrollment_expires_at[32];
 int kb_http_egress_route(const char *method, const char *path, const char *body, int body_len,
                          const kb_principal_t *transport, const char *fingerprint, char *out,
@@ -2238,19 +2225,13 @@ int kb_store_enrollment_revoke(int64_t id, kb_store_enrollment_row_t *out)
    }
    return 0;
 }
-int kb_store_enrollment_is_revoked(const char *fingerprint)
-{
-   g_stub_revoked_calls++;
-   return fingerprint && strcmp(fingerprint, "revoked-fp") == 0;
-}
+
 void kb_store_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
 {
    (void)fingerprint;
    (void)scope;
 }
-void kb_store_enrollment_cache_flush(void)
-{
-}
+
 static kb_store_console_oidc_t g_stub_oidc;
 int kb_store_console_oidc_get(kb_store_console_oidc_t *out)
 {
@@ -4813,9 +4794,15 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    *result = cJSON_CreateObject();
    int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
    cJSON_AddBoolToObject(*result, "unauthorized", g_vec_unauthorized);
-   if (!g_vec_enabled || max_dim < 2560)
+   if (g_vec_unauthorized || !g_vec_enabled || max_dim < 2560)
+   {
+      cJSON_AddNumberToObject(*result, "dim", 0);
+      cJSON_AddStringToObject(*result, "error",
+                              g_vec_unauthorized ? "embed: HTTP 403" : "embed: unavailable");
       return 1;
+   }
    int dim = 2560;
+   cJSON_AddNumberToObject(*result, "dim", dim);
    cJSON *vector = cJSON_AddArrayToObject(*result, "vector");
    for (int i = 0; i < dim; ++i)
       cJSON_AddItemToArray(vector, cJSON_CreateNumber(0.01f * (float)(i % 7)));

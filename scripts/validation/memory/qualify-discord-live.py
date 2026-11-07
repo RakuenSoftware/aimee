@@ -11,7 +11,6 @@ import discord
 ROOT=Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(ROOT/'integrations/discord'))
 from conversation_memory import ConversationMemory
-from prompt_budget import PromptBudget
 SSH=['ssh','-o','BatchMode=yes','root@192.168.1.253']
 def execute(command,body=None,timeout=150):
  result=subprocess.run(SSH+[command],input=None if body is None else json.dumps(body),text=True,capture_output=True,check=True,timeout=timeout)
@@ -51,7 +50,7 @@ async def main():
    context=await memory.context(query)
    packed=json.loads(context.split('\n',1)[1])
    response=await invoke('pct exec 9211 -- python3 /tmp/aimee-discord-gateway-request.py',dict(operation='reply',context=context,query=query,channel_id=channel_id))
-   receipt=response['budget'];assert response['usage_verified_by_bridge']
+   canonical=response['messages'];assert isinstance(canonical,list) and canonical and canonical[-1]['role']=='assistant'
    answer=response['answer'];assert answer.strip()
    await memory.guard('acquire')
    delivered=await thread.send(f'{backend} conversation-v2 qualification (historical source replay):\n'+answer,allowed_mentions=discord.AllowedMentions.none())
@@ -59,10 +58,10 @@ async def main():
    await output.response(trigger,answer,client.user.id,[delivered.id])
    observed=await thread.fetch_message(delivered.id);assert observed.author.id==client.user.id and observed.author.bot
    evidence['cases'].append({'backend':backend,'passed':True,'source_message_ids':[str(m.id) for m in humans+bots],
-    'human_sources':len(humans),'bot_sources':len(bots),'selected_records':packed['receipt']['selected_records'],'token_budget':receipt,
-    'usage_verified_by_bridge':True,'request_message_id':str(trigger_message.id),'delivered_message_id':str(delivered.id),'delivered_content_sha256':hashlib.sha256(observed.content.encode()).hexdigest(),
+    'human_sources':len(humans),'bot_sources':len(bots),'selected_records':packed['receipt']['selected_records'],'usage':canonical['usage'],
+    'request_message_id':str(trigger_message.id),'delivered_message_id':str(delivered.id),'delivered_content_sha256':hashlib.sha256(observed.content.encode()).hexdigest(),
     'guard':'acquired before send; released after receipt','response_capture':'actual bot message receipt retained by selected owner'})
-   print(json.dumps({'backend':backend,'passed':True,'message_id':str(delivered.id),'prompt_tokens':receipt['prompt_tokens']}),flush=True)
+   print(json.dumps({'backend':backend,'passed':True,'message_id':str(delivered.id),'usage':canonical['usage']}),flush=True)
   evidence['passed']=True
  finally:
   await thread.edit(archived=True,locked=True)

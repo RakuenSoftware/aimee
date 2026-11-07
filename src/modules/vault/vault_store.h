@@ -30,6 +30,32 @@ typedef struct
    char cred[64];
 } vault_store_entry_t;
 
+/* One credential in an immutable file snapshot. Buffers remain caller-owned;
+ * present is false for an absent entry. Any read/decrypt failure clears all
+ * buffers, so a caller can never use half of a credential pair. */
+typedef struct
+{
+   const char *credential;
+   char *value;
+   size_t capacity;
+   int present;
+} vault_store_read_t;
+#define VAULT_STORE_SNAPSHOT_UNSUPPORTED (-2)
+int vault_store_read_snapshot(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                              const char *agent, vault_store_read_t *reads, size_t count);
+
+/* All fields are staged under one write lock and committed by one atomic file
+ * replacement. NULL secret removes a field. Duplicate names and unsupported
+ * backends refuse; never emulate this contract with sequential mutations. */
+typedef struct
+{
+   const char *credential;
+   const char *secret;
+} vault_store_write_t;
+#define VAULT_STORE_BATCH_UNSUPPORTED (-2)
+int vault_store_write_batch(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                            const char *agent, const vault_store_write_t *writes, size_t count);
+
 /* VAULT_STORE_NO_ENTRY: returned by _get when the principal has no such
  * (agent,cred) — the caller falls back to the env/agents.json path (D15),
  * distinct from -1 (a real error: KEK can't unwrap, corrupt file, decrypt

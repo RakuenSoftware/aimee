@@ -24,11 +24,6 @@ extern "C"
     * Returns 0 on success, -1 on db error. */
    int kb_store_tool_registry_lookup(const char *name, tool_registry_entry_t *out);
 
-   /* Get the side_effect classification for a tool. Returns "read" if
-    * tool is missing or db is unavailable. The returned pointer references
-    * a thread-local buffer; copy if you need to retain it across calls. */
-   const char *kb_store_tool_registry_side_effect(const char *name);
-
    /* Visit each enabled (name, tool_prompt) pair.
     * cb receives raw tool_prompt from the table — empty when caller
     * should fall back to the embedded prompts table.

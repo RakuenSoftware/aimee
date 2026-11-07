@@ -2,11 +2,11 @@ package memory
 
 import (
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func handleLineageCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+func handleLineageCommand(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	var ok bool
@@ -65,12 +65,12 @@ func handleLineageCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	}
 	raw, _ := json.Marshal(request)
 	body, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return commandResult(commandError("unavailable", "evidence owner unavailable"))
 	}
 	var response DataResponse
 	if json.Unmarshal(body, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

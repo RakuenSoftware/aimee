@@ -37,8 +37,9 @@ type StageCaller interface {
 }
 
 // ErrStoreUnavailable is what every operation reports when the postgres module
-// is not answering. Distinct from a refusal: the store said nothing, rather
-// than saying no -- and only one of those is worth retrying.
+// is not answering, or answers that its database is unreachable (SQLSTATE
+// class 08). Distinct from a refusal on the merits: the store could not serve,
+// rather than saying no -- and only one of those is worth retrying.
 var ErrStoreUnavailable = errors.New("aimee: the postgres module is not answering")
 
 // WRAPPED, NOT REPLACED, at every site below. The three call sites used to
@@ -144,13 +145,21 @@ func (t *storeTx) QueryRow(ctx context.Context, sql string, args ...any) Row {
 func (t *storeTx) Commit(ctx context.Context) error { return t.finish(ctx, opStoreCommit, "commit") }
 
 func (t *storeTx) Rollback(ctx context.Context) error {
-	return t.finish(ctx, opStoreRollback, "rollback")
+	// The operation may already be cancelled between database statements. Its
+	// transaction still exists in the provider, so cleanup must have its own
+	// bounded reply window. Preserve context values and the exact owning bus
+	// client/handle; this grants neither a new operation nor a commit retry.
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), StoreDeadline)
+	defer cancel()
+	return t.finish(cleanup, opStoreRollback, "rollback")
 }
 
-// finish ends the transaction exactly once. The refusal path in Family.run
+// finish fences the requested finalization exactly once. The refusal path in Family.run
 // rolls back and the caller may roll back again through a defer, so a second
 // call reports ErrTxClosed rather than asking the store to end a transaction it
-// has already forgotten.
+// has already forgotten. done fences a finish attempt, not its acknowledgment:
+// a transport/rollback failure is returned unchanged and never reports cleanup
+// success. In particular, an ambiguous commit is never automatically retried.
 func (t *storeTx) finish(ctx context.Context, op uint32, name string) error {
 	t.mu.Lock()
 	if t.done {
@@ -160,6 +169,15 @@ func (t *storeTx) finish(ctx context.Context, op uint32, name string) error {
 	t.done = true
 	t.mu.Unlock()
 	_, err := t.db.call(ctx, op, name, t.handle, "", nil)
+	if op == opStoreCommit && err != nil && !errors.Is(err, ErrTxClosed) {
+		// Cancellation before dispatch and a lost acknowledgment both leave the
+		// caller unable to know whether commit ran. Never retry commit. Release
+		// only this existing handle, preserving its owner and the original error;
+		// rollback failure cannot turn the unknown commit outcome into success.
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), StoreDeadline)
+		defer cancel()
+		_, _ = t.db.call(cleanup, opStoreRollback, "rollback", t.handle, "", nil)
+	}
 	return err
 }
 

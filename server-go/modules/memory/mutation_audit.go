@@ -8,20 +8,20 @@ import (
 	"log"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/audit"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The wire contains no content, prose reason or raw memory identity. This is
 // operation telemetry alongside the KB's transactional SQL WORM record, not a
 // replacement for that durable write. Server composition hooks remain until
 // their pre-dispatch refusal policy also migrates.
-func mutationAudit(request DataRequest, response DataResponse, status bus.ModuleStatus) (audit.Action, bool) {
+func mutationAudit(request DataRequest, response DataResponse, status ring.ModuleStatus) (audit.Action, bool) {
 	if response.MutationReceipt != nil && response.MutationReceipt.Replayed {
 		return audit.Action{}, false
 	}
 	a := audit.Action{Actor: "memory", ArgsHash: "v1-", TaskID: request.ID, Verdict: "fail"}
-	success := status == bus.ModuleStatusOK
+	success := status == ring.ModuleStatusOK
 	switch request.Operation {
 	case "store", "insert-epistemic", "upsert-workflow", "supersede":
 		a.Tool = "memory.insert"
@@ -73,7 +73,7 @@ func mutationAudit(request DataRequest, response DataResponse, status bus.Module
 	return a, true
 }
 
-func publishMutationAudit(publish func(context.Context, audit.Action) error, request DataRequest, response DataResponse, status bus.ModuleStatus) {
+func publishMutationAudit(publish func(context.Context, audit.Action) error, request DataRequest, response DataResponse, status ring.ModuleStatus) {
 	action, ok := mutationAudit(request, response, status)
 	if !ok || publish == nil {
 		return

@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	configclient "github.com/JBailes/aimee/server-go/config"
 	store "github.com/JBailes/aimee/server-go/db"
 	contract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/audit"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // This outbound identity reaches only the same daemon's storage/configuration
@@ -30,7 +30,16 @@ type processResources struct {
 func (r processResources) MemoryAuditAction(ctx context.Context, action audit.Action) error {
 	return audit.PublishAction(ctx, r.auditPublisher, action)
 }
+
+// configStartupWait bounds how long a starting module waits for the config
+// module, which its supervisor starts at the same moment, to serve.
+const configStartupWait = 30 * time.Second
+
 func (r processResources) MemorySettings() (map[string]any, error) { return r.config.Snapshot() }
+
+// OnConfigChange has fn called after the configuration changes: the personal
+// indexer re-reads its model endpoint then instead of on a timer.
+func (r processResources) OnConfigChange(fn func()) { r.config.OnChange(fn) }
 func (r processResources) EmbeddingEndpoint() (string, error) {
 	values, err := r.config.Snapshot()
 	if err != nil {
@@ -46,11 +55,11 @@ func (r processResources) EmbeddingEndpoint() (string, error) {
 }
 
 func openProcessResources(ctx context.Context, socket string) (processResources, func(), error) {
-	client, err := bus.ConnectClient(ctx, socket, 1, processStorePrincipalRef)
+	client, err := ring.ConnectClient(ctx, socket, 1, processStorePrincipalRef)
 	if err != nil {
 		return processResources{}, nil, err
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, client)
 	if err != nil {
 		client.Detach()
 		return processResources{}, nil, err
@@ -66,16 +75,18 @@ func openProcessResources(ctx context.Context, socket string) (processResources,
 		closeConnection()
 		return processResources{}, nil, err
 	}
+	// Cache what is read and drop it when the config module announces a change.
+	config.Subscribe(caller)
 	return processResources{Store: db, config: config, auditPublisher: client}, closeConnection, nil
 }
 
 func processEgress(ctx context.Context, socket string) egress.Client {
-	client, err := bus.ConnectClient(ctx, socket, 1, egress.MemoryClientRef)
+	client, err := ring.ConnectClient(ctx, socket, 1, egress.MemoryClientRef)
 	if err != nil {
 		log.Printf("memory egress unavailable: %v", err)
 		return nil
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, client)
 	if err != nil {
 		client.Detach()
 		log.Printf("memory egress unavailable: %v", err)
@@ -96,7 +107,7 @@ func processEgress(ctx context.Context, socket string) egress.Client {
 // storage connection never silently becomes a handler without a store.
 // Outbound callers and index workers follow ctx. Their shared-memory mappings
 // remain valid for the process lifetime, including in-flight audit publication.
-func NewProcessHandler(ctx context.Context, socket, placementName string) (bus.ModuleHandler, error) {
+func NewProcessHandler(ctx context.Context, socket, placementName string) (ring.ModuleHandler, error) {
 	if ctx == nil || socket == "" {
 		return nil, errors.New("memory: module context and bus socket required")
 	}
@@ -108,7 +119,7 @@ func NewProcessHandler(ctx context.Context, socket, placementName string) (bus.M
 	if err != nil {
 		return nil, fmt.Errorf("memory: config/storage/audit bus connection: %w", err)
 	}
-	settings, err := resources.MemorySettings()
+	settings, err := resources.config.SnapshotWhenServed(ctx, configStartupWait)
 	if err != nil {
 		closeConnection()
 		return nil, fmt.Errorf("memory: backend configuration: %w", err)

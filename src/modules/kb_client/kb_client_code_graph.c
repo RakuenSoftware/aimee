@@ -115,13 +115,6 @@ char *kb_client_code_hybrid_scoped(const char *query, const char *symbol, const 
    return json;
 }
 
-char *kb_client_code_hybrid(const char *query, const char *symbol, const char *project,
-                            int max_results, int *status_out)
-{
-   return kb_client_code_hybrid_scoped(query, symbol, project, !project || !project[0], max_results,
-                                       status_out);
-}
-
 char *kb_client_code_graph_hubs(const char *project, int max_results, int *status_out)
 {
    if (status_out)

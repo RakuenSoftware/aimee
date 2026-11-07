@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -83,12 +83,12 @@ func TestDemotionPercentiles(t *testing.T) {
 func TestDemotionRuntimeAuthority(t *testing.T) {
 	for _, placement := range []Placement{PlacementServer, PlacementKB} {
 		handler := NewHandler(nil, WithDataStore(placement, nil))
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"demotion-run","config":{"enabled":0}}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"demotion-run","config":{"enabled":0}}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 		if placement == PlacementServer {
-			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+			if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 				t.Fatal(status)
 			}
 			continue
@@ -102,8 +102,8 @@ func TestDemotionRuntimeAuthority(t *testing.T) {
 			json.Unmarshal([]byte(raw), &args)
 			args["operation"] = "demotion-run"
 			encoded, _ := json.Marshal(args)
-			frame, _ := bus.EncodeCommand("runtime", encoded)
-			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+			frame, _ := ring.EncodeCommand("runtime", encoded)
+			if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 				t.Fatal(raw, status)
 			}
 		}
@@ -111,20 +111,20 @@ func TestDemotionRuntimeAuthority(t *testing.T) {
 }
 
 func TestDemotionPreviewAuthority(t *testing.T) {
-	frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"demotion-check","config":{"enabled":0}}`))
+	frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"demotion-check","config":{"enabled":0}}`))
 	for _, placement := range []Placement{PlacementServer, PlacementKB} {
 		handler := NewHandler(nil, WithDataStore(placement, nil))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 		// Preview needs the store even when live demotion is disabled.
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal(status)
 		}
 	}
 }
 
-func exerciseDemotionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseDemotionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	execSQL := func(sql string, args ...any) {
 		t.Helper()
@@ -226,8 +226,8 @@ func exerciseDemotionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handle
  CREATE TRIGGER reject_demotion_action BEFORE INSERT ON artifacts FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_demotion_action();
  SET LOCAL ROLE aimee_store_runtime`)
 	execSQL(`UPDATE artifacts SET last_accessed_at=NULL WHERE id LIKE 'demotion-replay-%'`)
-	frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"demotion-run","config":{"enabled":2,"n_min":3,"window":3}}`))
-	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInternal {
+	frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"demotion-run","config":{"enabled":2,"n_min":3,"window":3}}`))
+	if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInternal {
 		t.Fatal(status)
 	}
 	assertConfidence(.7)

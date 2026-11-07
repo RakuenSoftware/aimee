@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Public records retain the KB response shape, without the former native
@@ -115,10 +115,10 @@ func memoryIDsParameter(ids []int64) string {
 	return "{" + strings.Join(items, ",") + "}"
 }
 
-func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleRecordCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{IncludeAll: true, PublicView: true}
 	scoped := false
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	switch verb {
@@ -243,22 +243,22 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 		}
 		scoped = commandScope(args, &request)
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInternal || status == bus.ModuleStatusCapabilityAbsent {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInternal || status == ring.ModuleStatusCapabilityAbsent {
 			return commandResult(commandError("unavailable", "memory module unavailable"))
 		}
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if response.Failure != nil {
 		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
@@ -307,7 +307,7 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	}
 	if request.Operation == "wiki-bundle" {
 		if len(response.Payload) == 0 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return commandResult(response.Payload)
 	}
@@ -381,7 +381,7 @@ func consoleMemoryRecord(r publicMemoryRecord) map[string]any {
 	return result
 }
 
-func historyInspection(records []publicMemoryRecord, args commandArgs) ([]byte, bus.ModuleStatus) {
+func historyInspection(records []publicMemoryRecord, args commandArgs) ([]byte, ring.ModuleStatus) {
 	rows := make([]map[string]any, 0, len(records))
 	mcp := args.stringOr("format", "") == "mcp"
 	for _, r := range records {
@@ -398,7 +398,7 @@ func historyInspection(records []publicMemoryRecord, args commandArgs) ([]byte, 
 		}
 		raw, err := json.Marshal(map[string]any{"status": status, "count": len(rows), "history": rows})
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return commandResult(map[string]any{"status": "ok", "output": string(raw)})
 	}

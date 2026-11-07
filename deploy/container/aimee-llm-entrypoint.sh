@@ -160,6 +160,7 @@ stunnel_pid=$!
 # Either process dying takes the container with it. A half-up sidecar is worse than
 # a down one: the kb would either reach an unterminated port or hang against a
 # terminator with nothing behind it, and both look like "synthesis is slow".
+trap ':' CHLD
 while :; do
     if ! kill -0 "$llama_pid" 2>/dev/null; then
         log "llama-server exited; stopping"
@@ -173,5 +174,11 @@ while :; do
         wait "$stunnel_pid" 2>/dev/null || true
         exit 1
     fi
-    sleep 5
+    # A trapped SIGCHLD ends this wait as soon as either process exits; the
+    # timer only bounds an exit that lands between the checks and the wait.
+    sleep 60 &
+    _timer=$!
+    wait "$_timer" 2>/dev/null || true
+    kill "$_timer" 2>/dev/null || true
+    wait "$_timer" 2>/dev/null || true
 done

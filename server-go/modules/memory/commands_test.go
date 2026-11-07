@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func declareRequest() []byte {
@@ -21,8 +21,8 @@ func declareRequest() []byte {
 // does not fail loudly -- it simply is not there, which reads as "aimee cannot do
 // that" rather than as a fault.
 func TestDeclareCommandsRoundTrip(t *testing.T) {
-	out, status := handleDeclareCommands(bus.ModuleInvocation{StageID: StageDeclareCommands}, declareRequest())
-	if status != bus.ModuleStatusOK {
+	out, status := handleDeclareCommands(ring.ModuleInvocation{StageID: StageDeclareCommands}, declareRequest())
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	if len(out) < 12 {
@@ -97,14 +97,14 @@ func TestDeclareCommandsRejectsMalformed(t *testing.T) {
 		func() []byte { b := declareRequest(); binary.LittleEndian.PutUint32(b[0:4], 0xdeadbeef); return b }(),
 		func() []byte { b := declareRequest(); binary.LittleEndian.PutUint32(b[4:8], 99); return b }(),
 	} {
-		if _, status := handleDeclareCommands(bus.ModuleInvocation{}, bad); status == bus.ModuleStatusOK {
+		if _, status := handleDeclareCommands(ring.ModuleInvocation{}, bad); status == ring.ModuleStatusOK {
 			t.Fatalf("malformed request accepted: %v", bad)
 		}
 	}
 }
 
 func TestDeclareCommandsHonorsExpiredInvocation(t *testing.T) {
-	if _, status := handleDeclareCommands(bus.ModuleInvocation{StageID: StageDeclareCommands, DeadlineNS: 1}, declareRequest()); status != bus.ModuleStatusCancelled {
+	if _, status := handleDeclareCommands(ring.ModuleInvocation{StageID: StageDeclareCommands, DeadlineNS: 1}, declareRequest()); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired command declaration status = %v", status)
 	}
 }

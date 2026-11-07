@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // PersonalAuthorship describes verified creation or correction, never inferred
@@ -24,7 +24,7 @@ type personalActor struct {
 	principal, transport string
 }
 
-func personalCaller(caller *bus.CommandContext, requested int) personalActor {
+func personalCaller(caller *ring.CommandContext, requested int) personalActor {
 	actor := personalActor{authority: AuthorityModel, principal: "system:model-inference", transport: "internal"}
 	if caller != nil && caller.Authenticated && caller.Principal != "" {
 		actor.principal, actor.transport = caller.Principal, caller.TransportIdentity
@@ -39,6 +39,14 @@ func personalCaller(caller *bus.CommandContext, requested int) personalActor {
 // together. Store additionally serializes a missing (kind,key), so two callers
 // cannot bypass replacement admission by racing an insert.
 func (s *postgresDataStore) mutatePersonal(ctx context.Context, operation string, wanted Record, expected *MemoryRecordVersion) (Record, error) {
+	record, err := s.mutatePersonalRecord(ctx, operation, wanted, expected)
+	if err == nil {
+		s.personal.Wake() // a changed memory needs its embedding refreshed
+	}
+	return record, err
+}
+
+func (s *postgresDataStore) mutatePersonalRecord(ctx context.Context, operation string, wanted Record, expected *MemoryRecordVersion) (Record, error) {
 	if db, ok := s.db.(store.DB); ok {
 		tx, err := db.Begin(ctx)
 		if err != nil {

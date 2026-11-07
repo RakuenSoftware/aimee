@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestActionNativeWire(t *testing.T) {
@@ -64,7 +64,7 @@ func (p *testPublisher) Publish(kind uint32, body []byte) error {
 		return p.failure
 	}
 	if p.attempts < 3 {
-		return bus.ErrWouldBlock
+		return ring.ErrWouldBlock
 	}
 	p.bodies = append(p.bodies, append([]byte(nil), body...))
 	return nil
@@ -91,7 +91,7 @@ func TestActionBackpressure(t *testing.T) {
 	}
 	deadline, stop := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer stop()
-	p = &testPublisher{failure: bus.ErrWouldBlock}
+	p = &testPublisher{failure: ring.ErrWouldBlock}
 	if err := PublishAction(deadline, p, action); !errors.Is(err, context.DeadlineExceeded) || p.attempts == 0 {
 		t.Fatal(p, err)
 	}
@@ -123,7 +123,7 @@ func TestActionPublisherProcess(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	client, err := bus.ConnectClient(ctx, socket, 1, 73)
+	client, err := ring.ConnectClient(ctx, socket, 1, 73)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	configowner "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"
@@ -20,7 +19,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		events    []uint32
 	}{
 		{"memory", 7, []uint32{5889, 5890, 5891, 5892, 5893, 5894, 5895, 5896, 6143}},
-		{"learning", 8, []uint32{6145, 6146}},
+		{"learning", 8, []uint32{6145, 6146, 6147}},
 		{"routing", 9, []uint32{6401, 6402}},
 		{"providers", 33, []uint32{12545, 12546, 12547}},
 		{"delegates", 10, []uint32{6657, 6658, 6659, 6660, 6661, 6662, 6663, 6664, 6665, 6666, 6667, 6668, 6669, 6670, 6671, 6672, 6673, 6674, 6675, 6676, 6677, 6678}},
@@ -57,12 +56,10 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 			config.Handler == nil {
 			t.Fatalf("%s config = %#v, ok=%v", test.name, config, ok)
 		}
-		wantIdle := time.Duration(0)
-		if test.name == "economizer" {
-			wantIdle = time.Millisecond
-		}
-		if config.MaxIdlePollInterval != wantIdle {
-			t.Fatalf("%s idle poll ceiling = %v, want %v", test.name, config.MaxIdlePollInterval, wantIdle)
+		// No module trades idle wakeups for latency any more: the ring wakes
+		// each process for its requests (doorbell, ring D13).
+		if config.MaxIdlePollInterval != 0 {
+			t.Fatalf("%s idle poll ceiling = %v, want none", test.name, config.MaxIdlePollInterval)
 		}
 		// The stage id is derived from the event kind rather than the position:
 		// a module may declare a non-contiguous set when one of its stages is
@@ -108,6 +105,7 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 			Stages    []struct {
 				EventKind uint32 `json:"event_kind"`
 				Name      string `json:"name"`
+				HostedBy  string `json:"hosted_by"`
 			} `json:"stages"`
 		} `json:"components"`
 	}
@@ -166,6 +164,16 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 			advertised[s.EventKind] = true
 		}
 		for _, s := range declared.Stages {
+			if s.HostedBy != "" {
+				if declared.ID != "delegates" || s.EventKind != 6679 || s.HostedBy != "server-core" {
+					t.Fatal("unknown core stage ownership")
+				}
+				if advertised[s.EventKind] {
+					t.Fatal("Go process claimed core native execution stage")
+				}
+				continue
+			}
+
 			// roundtable-review is registered ONLY when this process can convene a
 			// panel (roundtableReviewer() succeeds), which it cannot under test.
 			// That conditionality is deliberate and documented above; every other

@@ -105,10 +105,8 @@ This is currently a prototype path with important limits:
   hash or document version, so freshness after a write is unproved;
 - diagnostics reads stored notifications only and does not start a provider, so zero diagnostics
   with zero active servers is not proof of a clean worktree;
-- failures are text shaped, and a crash and timeout can both appear as a request timeout;
-- definitions encoded as LSP `LocationLink` are not parsed by the current client; and
-- live providers are unsupported on Windows. Definition and reference calls say so, while the
-  diagnostic call currently returns an indistinguishable empty result.
+- failures are text shaped, and a crash and timeout can both appear as a request timeout; and
+- definitions encoded as LSP `LocationLink` are not parsed by the current client.
 
 The S0 real-provider baseline under `benchmarks/live-semantic-context` pins and checks these facts
 in pull requests. Do not describe this path as synchronized, sandboxed, detached-worktree safe, or

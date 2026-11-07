@@ -108,6 +108,9 @@ cJSON *marshal_learning_approaches(int argc, char **argv)
    cJSON *req = marshal_no_args("learning.approaches");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "goal", opts.positional[0]);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof cwd))
+      cJSON_AddStringToObject(req, "cwd", cwd);
    return req;
 }
 
@@ -117,21 +120,21 @@ void pt_print_learning_approaches(const char *method, cJSON *resp)
    cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, "approaches");
    if (!cJSON_IsArray(arr) || cJSON_GetArraySize(arr) == 0)
    {
-      printf("No approach has failed against a goal like this one.\n");
+      printf("No scoped configured-test approach observations are available.\n");
       return;
    }
    const char *advisory = json_str(resp, "advisory");
    if (advisory && advisory[0])
       printf("%s\n\n", advisory);
-   printf("%-6s %-9s %s\n", "SEEN", "SIMILAR", "APPROACH -> FAILURE");
    cJSON *it = NULL;
    cJSON_ArrayForEach(it, arr)
    {
-      cJSON *occ = cJSON_GetObjectItemCaseSensitive(it, "occurrences");
-      cJSON *sim = cJSON_GetObjectItemCaseSensitive(it, "similarity");
-      printf("%-6d %-9.2f %s -> %s\n", cJSON_IsNumber(occ) ? occ->valueint : 0,
-             cJSON_IsNumber(sim) ? sim->valuedouble : 0.0, json_str(it, "approach"),
-             json_str(it, "failure_mode"));
+      printf("Configured tests %s; observed tool calls:", json_str(it, "verdict"));
+      cJSON *action = NULL;
+      cJSON_ArrayForEach(action, cJSON_GetObjectItemCaseSensitive(it, "actions"))
+          printf(" %s%s%s", json_str(action, "namespace"),
+                 json_str(action, "namespace")[0] ? ":" : "", json_str(action, "name"));
+      printf("\n  Receipt: %s\n", json_str(it, "source_ref"));
    }
 }
 

@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The memory, its extraction authority, and its extraction job are one commit.
 // A capture or enqueue failure must never acknowledge a partially stored note.
-func (s *postgresDataStore) captureStoredFactActor(ctx context.Context, id int64, authority int, caller *bus.CommandContext, sourceOnly ...bool) error {
+func (s *postgresDataStore) captureStoredFactActor(ctx context.Context, id int64, authority int, caller *ring.CommandContext, sourceOnly ...bool) error {
 	actor := FactActor{Principal: "system:model-inference", Role: "model", Rank: 10, TransportIdentity: "internal"}
 	if authority == AuthorityUser {
 		if caller == nil || !caller.Authenticated || !caller.UserAuthority {
@@ -70,8 +70,8 @@ VALUES('memory_facts',$1,'memory','pending',pg_now_text()) ON CONFLICT(kind,docu
 	return err
 }
 
-func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+func handleStoreCommand(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	request := DataRequest{Operation: "insert-epistemic", PublicView: true, Key: args.stringOr("key", ""), Content: args.stringOr("content", ""),
@@ -125,18 +125,18 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	options.publicWrite = true
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInternal || status == bus.ModuleStatusCapabilityAbsent {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInternal || status == ring.ModuleStatusCapabilityAbsent {
 			return commandResult(commandError("unavailable", "failed to store memory"))
 		}
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if response.Failure != nil {
 		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
@@ -145,7 +145,7 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		return commandResult(refusal)
 	}
 	if len(response.PublicRecords) != 1 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	r := response.PublicRecords[0]
 	if args.stringOr("view", "") == "mcp" {
@@ -167,7 +167,7 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	return commandResult(result)
 }
 
-func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleSupersedeCommand(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	id, ok := args.decimalID("old_id")
 	content := args.stringOr("new_content", "")
 	if !ok || strings.TrimSpace(content) == "" {
@@ -192,18 +192,18 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 	options.publicWrite = true
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInternal || status == bus.ModuleStatusCapabilityAbsent {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInternal || status == ring.ModuleStatusCapabilityAbsent {
 			return commandResult(commandError("unavailable", "failed to supersede memory"))
 		}
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if response.Failure != nil {
 		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
@@ -218,13 +218,13 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 		if *response.Code == MutationRequiresReplacement {
 			return commandResult(commandError("conflict", errRequiresRevocation.Error()))
 		}
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if len(response.PublicRecords) == 0 {
 		return commandResult(commandError("not_found", "memory not found or replacement refused"))
 	}
 	if len(response.PublicRecords) != 1 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if args.stringOr("view", "") == "server" {
 		return commandResult(struct {

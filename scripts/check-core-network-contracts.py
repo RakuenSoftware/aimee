@@ -22,7 +22,7 @@ PRIMITIVES = {
     "dns": re.compile(r"\bgetaddrinfo\s*\("),
     "http": re.compile(
         r"\bagent_http_(?:get(?:_location|_pinned|_stream)?|"
-        r"post(?:_bytes|_content_type|_form)?|put|patch)\s*\("
+        r"post(?:_bytes|_content_type(?:_bytes)?|_form)?|put|patch)\s*\("
     ),
     "inet_socket": re.compile(r"\bsocket\s*\(\s*(?:AF_INET|AF_INET6)"),
     "postgres": re.compile(r"\bPQconnect(?:db|Start)\s*\("),
@@ -130,7 +130,13 @@ def main() -> int:
     args = parser.parse_args()
     actual = scan()
     if args.plant_test:
-        actual.add(("http", "src/planted/core_egress_bypass.c", 1))
+        # Exercise the new transport name through the scanner's actual pattern.
+        planted = "agent_http_post_content_type_bytes(url, NULL, type, body, n, &out, &len, 1, NULL);"
+        count = len(PRIMITIVES["http"].findall(planted))
+        if count != 1:
+            print("check-core-network-contracts: byte-counted HTTP bypass is invisible", file=sys.stderr)
+            return 1
+        actual.add(("http", "src/planted/core_egress_bypass.c", count))
         if not compare(actual):
             print("check-core-network-contracts: planted bypass was not detected", file=sys.stderr)
             return 1

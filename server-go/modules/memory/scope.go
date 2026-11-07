@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Placement is the data-ownership role of this instance of the shared memory
@@ -136,7 +136,7 @@ type EligibilityContext struct {
 	RevocationGenerations                   []MemoryRecordVersion
 }
 
-func eligibilityContext(request DataRequest, scope Scope, caller *bus.CommandContext) EligibilityContext {
+func eligibilityContext(request DataRequest, scope Scope, caller *ring.CommandContext) EligibilityContext {
 	c := EligibilityContext{Principal: "system:model-inference", TransportIdentity: "internal", Authority: "model",
 		Scope: scope, Workspace: request.Workspace, Project: request.Project, Purpose: request.Operation,
 		QueryMode: "current", PolicyVersion: currentEligibilityPolicy, IncludeAll: request.IncludeAll}

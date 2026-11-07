@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -22,15 +22,15 @@ func TestEntityAliasNormalization(t *testing.T) {
 func TestEntityConflictsHostBoundary(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementKB, nil))
 	args := `{"operation":"entity-conflicts","action":"count"}`
-	if _, status := invokeContextCommand(t, handler, 73, bus.CommandContext{}, "runtime", args); status != bus.ModuleStatusInvalidRequest {
+	if _, status := invokeContextCommand(t, handler, 73, ring.CommandContext{}, "runtime", args); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal(status)
 	}
-	if _, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementServer, nil)), 0, bus.CommandContext{}, "runtime", args); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementServer, nil)), 0, ring.CommandContext{}, "runtime", args); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatal(status)
 	}
 	for _, args := range []string{`{"operation":"entity-conflicts","action":"record","name":" "}`, `{"operation":"entity-conflicts","action":"status","id":1,"status":"approved"}`, `{"operation":"entity-conflicts","action":"status","id":1.5,"status":"open"}`, `{"operation":"entity-conflicts","action":"delete"}`} {
-		out, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "runtime", args)
-		if status != bus.ModuleStatusOK || out["kind"] != "invalid_argument" {
+		out, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "runtime", args)
+		if status != ring.ModuleStatusOK || out["kind"] != "invalid_argument" {
 			t.Fatal(out, status)
 		}
 	}
@@ -126,59 +126,59 @@ func exerciseEntityRegistryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		t.Fatal("failed registration leaked an entity", rows, before, err)
 	}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
-	call := func(action, name, status string, id int64, want bus.ModuleStatus) map[string]any {
+	call := func(action, name, status string, id int64, want ring.ModuleStatus) map[string]any {
 		t.Helper()
 		args, _ := json.Marshal(map[string]any{"operation": "entity-conflicts", "action": action, "name": name, "status": status, "id": strconv.FormatInt(id, 10)})
-		out, got := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "runtime", string(args))
+		out, got := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "runtime", string(args))
 		if got != want {
 			t.Fatal(action, out, got)
 		}
 		return out
 	}
-	record := call("record", "Registry Ambiguous Theo", "", 0, bus.ModuleStatusOK)
+	record := call("record", "Registry Ambiguous Theo", "", 0, ring.ModuleStatusOK)
 	conflict := int64(record["id"].(float64))
 	if conflict <= 0 {
 		t.Fatal(record)
 	}
-	if r := call("priority", "registry ambiguous theo", "", 0, bus.ModuleStatusOK); r["priority"] != float64(1) || r["found"] != true {
+	if r := call("priority", "registry ambiguous theo", "", 0, ring.ModuleStatusOK); r["priority"] != float64(1) || r["found"] != true {
 		t.Fatal(r)
 	}
-	if r := call("record", "  REGISTRY   Ambiguous Theo ", "", 0, bus.ModuleStatusOK); r["id"] != record["id"] {
+	if r := call("record", "  REGISTRY   Ambiguous Theo ", "", 0, ring.ModuleStatusOK); r["id"] != record["id"] {
 		t.Fatal(r)
 	}
-	if r := call("priority", "Registry Ambiguous Theo", "", 0, bus.ModuleStatusOK); r["priority"] != float64(2) {
+	if r := call("priority", "Registry Ambiguous Theo", "", 0, ring.ModuleStatusOK); r["priority"] != float64(2) {
 		t.Fatal(r)
 	}
-	if r := call("count", "", "open", 0, bus.ModuleStatusOK); r["count"] != float64(1) {
+	if r := call("count", "", "open", 0, ring.ModuleStatusOK); r["count"] != float64(1) {
 		t.Fatal(r)
 	}
-	if r := call("status", "", "resolved", conflict, bus.ModuleStatusOK); r["updated"] != true {
+	if r := call("status", "", "resolved", conflict, ring.ModuleStatusOK); r["updated"] != true {
 		t.Fatal(r)
 	}
-	if r := call("count", "", "open", 0, bus.ModuleStatusOK); r["count"] != float64(0) {
+	if r := call("count", "", "open", 0, ring.ModuleStatusOK); r["count"] != float64(0) {
 		t.Fatal(r)
 	}
-	if r := call("count", "", "", 0, bus.ModuleStatusOK); r["count"] != float64(1) {
+	if r := call("count", "", "", 0, ring.ModuleStatusOK); r["count"] != float64(1) {
 		t.Fatal(r)
 	}
-	call("record", "Registry Ambiguous Theo", "", 0, bus.ModuleStatusOK)
-	if r := call("priority", "Registry Ambiguous Theo", "", 0, bus.ModuleStatusOK); r["priority"] != float64(3) {
+	call("record", "Registry Ambiguous Theo", "", 0, ring.ModuleStatusOK)
+	if r := call("priority", "Registry Ambiguous Theo", "", 0, ring.ModuleStatusOK); r["priority"] != float64(3) {
 		t.Fatal(r)
 	}
-	if r := call("count", "", "resolved", 0, bus.ModuleStatusOK); r["count"] != float64(1) {
+	if r := call("count", "", "resolved", 0, ring.ModuleStatusOK); r["count"] != float64(1) {
 		t.Fatal("observation reopened decision", r)
 	}
-	call("status", "", "failed", conflict, bus.ModuleStatusOK)
-	if r := call("count", "", "failed", 0, bus.ModuleStatusOK); r["count"] != float64(1) {
+	call("status", "", "failed", conflict, ring.ModuleStatusOK)
+	if r := call("count", "", "failed", 0, ring.ModuleStatusOK); r["count"] != float64(1) {
 		t.Fatal(r)
 	}
-	if r := call("status", "", "open", 9223372036854775807, bus.ModuleStatusOK); r["updated"] != false {
+	if r := call("status", "", "open", 9223372036854775807, ring.ModuleStatusOK); r["updated"] != false {
 		t.Fatal(r)
 	}
-	if r := call("priority", "Registry never recorded", "", 0, bus.ModuleStatusOK); r["priority"] != float64(-1) || r["found"] != false {
+	if r := call("priority", "Registry never recorded", "", 0, ring.ModuleStatusOK); r["priority"] != float64(-1) || r["found"] != false {
 		t.Fatal(r)
 	}
-	if r := call("count", "", "arbitrary status", 0, bus.ModuleStatusOK); r["count"] != float64(0) {
+	if r := call("count", "", "arbitrary status", 0, ring.ModuleStatusOK); r["count"] != float64(0) {
 		t.Fatal(r)
 	}
 	var forbidden bool
@@ -186,10 +186,10 @@ func exerciseEntityRegistryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		t.Fatal(forbidden, err)
 	}
 	exec(`RESET ROLE; REVOKE UPDATE(priority) ON entity_name_conflicts FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
-	call("record", "Registry Ambiguous Theo", "", 0, bus.ModuleStatusInternal)
-	if r := call("priority", "Registry Ambiguous Theo", "", 0, bus.ModuleStatusOK); r["priority"] != float64(3) {
+	call("record", "Registry Ambiguous Theo", "", 0, ring.ModuleStatusInternal)
+	if r := call("priority", "Registry Ambiguous Theo", "", 0, ring.ModuleStatusOK); r["priority"] != float64(3) {
 		t.Fatal(r)
 	}
 	exec(`RESET ROLE; REVOKE SELECT(priority) ON entity_name_conflicts FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
-	call("priority", "Registry Ambiguous Theo", "", 0, bus.ModuleStatusInternal)
+	call("priority", "Registry Ambiguous Theo", "", 0, ring.ModuleStatusInternal)
 }

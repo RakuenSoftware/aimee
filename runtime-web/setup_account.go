@@ -1,14 +1,18 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/RakuenSoftware/smoothgui/auth"
@@ -158,7 +162,13 @@ func readReplacementUsername(marker string) (string, bool) {
 // name was sitting in the file — the exact lockout this marker exists to prevent.
 // 0644 leaks nothing: the account name is already visible in every audit line.
 func writeMarkerFile(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	// MkdirAll applies the process umask and leaves existing modes unchanged.
+	// This dedicated metadata directory must remain traversable by the C server.
+	if err := os.Chmod(dir, 0o755); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".setup-account-*")
@@ -240,12 +250,78 @@ func (s *server) setupAccountStatus(caller string) map[string]any {
 		_, username, _ := readBootstrapUser(s.setupAccountBootstrapUser())
 		return map[string]any{"complete": true, "required": false, "username": username}
 	}
-	return map[string]any{
+	status := map[string]any{
 		"complete": false, "required": true, "username": bootstrapUsername,
 		// The wizard renders either a create-account form or a retire-this-login
 		// confirmation from this, so it never offers an action POST will refuse.
 		"retire_only": s.retireOnly(caller, bootstrapUsername),
 	}
+	if scope := s.setupDismissalScope(bootstrapUsername); scope != "" {
+		status["dismissal_scope"] = scope
+	}
+	return status
+}
+
+// This public nonce identifies only this installation's onboarding preference.
+// It is unrelated to credentials and never changes account readiness. Publish
+// complete bytes with link's create-if-absent semantics so concurrent first
+// reads cannot observe a partial file or choose different installation IDs.
+func (s *server) setupDismissalScope(bootstrapUsername string) string {
+	path := filepath.Join(s.setupAccountDir(), "setup-dismissal-id")
+	read := func() string {
+		before, err := os.Lstat(path)
+		if err != nil || !before.Mode().IsRegular() || before.Size() != 64 {
+			return ""
+		}
+		// Nonblocking open also handles a regular-file-to-FIFO replacement.
+		// Never follow a preexisting symlink or read an unbounded local file.
+		file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+		if err != nil {
+			return ""
+		}
+		defer file.Close()
+		after, err := file.Stat()
+		if err != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) {
+			return ""
+		}
+		data, err := io.ReadAll(io.LimitReader(file, 65))
+		if err != nil || len(data) != 64 {
+			return ""
+		}
+		decoded, err := hex.DecodeString(string(data))
+		if err != nil || len(decoded) != 32 || string(data) != strings.ToLower(string(data)) {
+			return ""
+		}
+		digest := sha256.Sum256([]byte("aimee:setup-dismissal:v1\x00" + string(data) + "\x00" + bootstrapUsername))
+		return hex.EncodeToString(digest[:])
+	}
+	if scope := read(); scope != "" {
+		return scope
+	}
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return ""
+	}
+	if err := os.MkdirAll(s.setupAccountDir(), 0o755); err != nil {
+		return ""
+	}
+	tmp, err := os.CreateTemp(s.setupAccountDir(), ".setup-dismissal-*")
+	if err != nil {
+		return ""
+	}
+	defer os.Remove(tmp.Name())
+	_, writeErr := tmp.Write([]byte(hex.EncodeToString(nonce[:])))
+	if writeErr == nil {
+		writeErr = tmp.Sync()
+	}
+	closeErr := tmp.Close()
+	if writeErr != nil || closeErr != nil {
+		return ""
+	}
+	if err := os.Link(tmp.Name(), path); err != nil && !errors.Is(err, os.ErrExist) {
+		return ""
+	}
+	return read()
 }
 
 // GET reports whether the temporary generated/legacy login still needs replacement.

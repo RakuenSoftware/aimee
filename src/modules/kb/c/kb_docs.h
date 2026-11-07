@@ -47,10 +47,6 @@ extern "C"
    int kb_store_kb_doc_set_state(int64_t id, const char *state, int clear_review_needed,
                                  const char *review_reason);
 
-   /* Delete doc by id. Returns 0 on success, -1 on error / not found. */
-   /* Deprecated compatibility symbol; always refuses. Use P3 lifecycle apply. */
-   int kb_store_kb_doc_delete(int64_t id);
-
    /* List docs in review queue (state='staged', review_needed=true),
     * ordered by id ASC. cursor_id=0 means start from beginning;
     * cursor_id>0 means fetch rows with id > cursor_id.

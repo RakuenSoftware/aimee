@@ -74,6 +74,7 @@ func TestWorkflowBlocksAndWritesCarryAdministratorCapability(t *testing.T) {
 		req := withUser(httptest.NewRequest(tc.method, tc.target, strings.NewReader(tc.body)), tc.user)
 		rec := httptest.NewRecorder()
 		tc.handler(rec, req)
+		waitFakeV1(t)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s %s status=%d body=%s", tc.method, tc.target, rec.Code, rec.Body.String())
 		}
@@ -132,6 +133,7 @@ func TestWorkflowOperatorCapabilityCannotBeSpoofedByBrowserHeader(t *testing.T) 
 	req.Header.Set("X-Aimee-Workflow-Operator", "true")
 	rec := httptest.NewRecorder()
 	s.handleWorkflowItems(rec, req)
+	waitFakeV1(t)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -158,6 +160,7 @@ func TestWorkflowTriggersReadCarriesWebuserIdentity(t *testing.T) {
 	req := withUser(httptest.NewRequest(http.MethodGet, "/api/workflow/triggers", nil), "admin")
 	rr := httptest.NewRecorder()
 	s.handleWorkflowTriggers(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK || gotMethod != http.MethodGet || gotUser != "admin" || gotOperator != "true" {
 		t.Fatalf("code=%d method=%q user=%q operator=%q body=%s", rr.Code, gotMethod, gotUser, gotOperator, rr.Body.String())
 	}
@@ -201,22 +204,27 @@ func TestWorkflowPolicyMapsReplacementAdministratorToControlPlaneCapability(t *t
 	read := withUser(httptest.NewRequest(http.MethodGet, "/api/workflow/triggers", nil), "virant")
 	readRecorder := httptest.NewRecorder()
 	s.handleWorkflowTriggers(readRecorder, read)
+	waitFakeV1(t)
 	write := withUser(httptest.NewRequest(http.MethodPost, "/api/workflow/config/set",
 		strings.NewReader(`{"key":"trigger_rules","value":[],"previous_version":"v1"}`)), "virant")
 	writeRecorder := httptest.NewRecorder()
 	s.handleWorkflowConfigSet(writeRecorder, write)
+	waitFakeV1(t)
 	all := withUser(httptest.NewRequest(http.MethodGet, "/api/workflow/items/all", nil), "virant")
 	allRecorder := httptest.NewRecorder()
 	s.handleWorkflowItems(allRecorder, all)
+	waitFakeV1(t)
 	gate := withUser(httptest.NewRequest(http.MethodPost, "/api/workflow/items/wi1/gate",
 		strings.NewReader(`{"decision":"approve"}`)), "virant")
 	gateRecorder := httptest.NewRecorder()
 	s.handleWorkflowItems(gateRecorder, gate)
+	waitFakeV1(t)
 	// Once the bootstrap administrator is named virant, an unrelated literal
 	// "admin" identity must remain an ordinary workflow owner.
 	literalAdmin := withUser(httptest.NewRequest(http.MethodGet, "/api/workflow/items/wi1", nil), "admin")
 	literalAdminRecorder := httptest.NewRecorder()
 	s.handleWorkflowItems(literalAdminRecorder, literalAdmin)
+	waitFakeV1(t)
 
 	if readRecorder.Code != http.StatusOK || writeRecorder.Code != http.StatusOK || allRecorder.Code != http.StatusOK || gateRecorder.Code != http.StatusOK || literalAdminRecorder.Code != http.StatusOK {
 		t.Fatalf("read=%d %s write=%d %s all=%d %s gate=%d %s literal-admin=%d %s", readRecorder.Code, readRecorder.Body.String(), writeRecorder.Code, writeRecorder.Body.String(), allRecorder.Code, allRecorder.Body.String(), gateRecorder.Code, gateRecorder.Body.String(), literalAdminRecorder.Code, literalAdminRecorder.Body.String())
@@ -263,6 +271,7 @@ func TestWorkflowItemsLifecycleRouting(t *testing.T) {
 			req := withUser(httptest.NewRequest(tc.method, tc.apiPath, nil), "alice")
 			rr := httptest.NewRecorder()
 			s.handleWorkflowItems(rr, req)
+			waitFakeV1(t)
 
 			if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"status":"ok"`) {
 				t.Fatalf("%s: code=%d body=%q (regressed to bad path?)", tc.name, rr.Code, rr.Body.String())
@@ -317,6 +326,7 @@ func TestWorkflowItemsSliceIDRouting(t *testing.T) {
 			req := withUser(httptest.NewRequest(tc.method, tc.apiPath, strings.NewReader(string(body))), tc.user)
 			rr := httptest.NewRecorder()
 			s.handleWorkflowItems(rr, req)
+			waitFakeV1(t)
 			if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"status":"ok"`) {
 				t.Fatalf("%s: code=%d body=%q (slice id rejected as bad path?)", tc.name, rr.Code, rr.Body.String())
 			}

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func TestBusReviewerReusesExistingCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := roundtablecfg.ReviewRequest{OriginalRequest: "release review"}
+	request := roundtablecfg.ReviewRequest{Request: canonical.TaskRequest("", "release review")}
 	if _, err := reviewer.Review(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
@@ -43,8 +44,8 @@ func TestBusReviewerReusesExistingCaller(t *testing.T) {
 	if err := json.Unmarshal(caller.body, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.OriginalRequest != request.OriginalRequest {
-		t.Fatalf("original request = %q", got.OriginalRequest)
+	if got.Request == nil || got.OriginalRequest != "" || fixtureInputText(got.Request) != "release review" {
+		t.Fatal("internal review lost canonical task")
 	}
 }
 

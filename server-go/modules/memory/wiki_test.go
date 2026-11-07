@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -68,7 +68,7 @@ func TestWikiFailures(t *testing.T) {
 	}
 }
 
-func exerciseWikiReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseWikiReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()

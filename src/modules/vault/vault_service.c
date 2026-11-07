@@ -117,6 +117,41 @@ int vault_service_has_server_principal(const char *agent, const char *cred)
 /* Read (agent, cred) from the SERVER principal's vault under the server master KEK
  * — no client, no unlock. VAULT_OK / VAULT_NO_ENTRY (no file or no entry) /
  * VAULT_ERR_* (fail closed). */
+vault_status_t vault_service_read_server_snapshot(const char *agent, vault_store_read_t *reads,
+                                                  size_t count)
+{
+   if (!reads || !count || count > 16)
+      return VAULT_ERR_BADARG;
+   int valid = agent && agent[0];
+   for (size_t i = 0; i < count; i++)
+   {
+      reads[i].present = 0;
+      if (reads[i].value && reads[i].capacity)
+         OPENSSL_cleanse(reads[i].value, reads[i].capacity);
+      else
+         valid = 0;
+      if (!reads[i].credential || !reads[i].credential[0])
+         valid = 0;
+   }
+   if (!valid)
+      return VAULT_ERR_BADARG;
+   uint8_t kek[VAULT_KEK_LEN];
+   if (vault_server_kek(kek) != 0)
+   {
+      OPENSSL_cleanse(kek, sizeof kek);
+      return VAULT_ERR_CRYPTO;
+   }
+   int rc = vault_store_read_snapshot(VAULT_SERVER_PRINCIPAL, kek, agent, reads, count);
+   OPENSSL_cleanse(kek, sizeof(kek));
+   vault_status_t status = rc == 0                                  ? VAULT_OK
+                           : rc == VAULT_STORE_SNAPSHOT_UNSUPPORTED ? VAULT_ERR_UNSUPPORTED_OP
+                                                                    : VAULT_ERR_CRYPTO;
+   for (size_t i = 0; i < count; i++)
+      (void)vaudit("vault.get_server", VAULT_SERVER_PRINCIPAL, agent, reads[i].credential,
+                   ATTEST_NONE, status == VAULT_OK && !reads[i].present ? VAULT_NO_ENTRY : status);
+   return status;
+}
+
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t out_len)
 {
@@ -159,6 +194,39 @@ vault_status_t vault_service_set_server(const char *agent, const char *cred, con
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(salt, sizeof(salt));
    return st;
+}
+
+vault_status_t vault_service_write_server_batch(const char *agent,
+                                                const vault_store_write_t *writes, size_t count)
+{
+   if (!agent || !agent[0] || !writes || !count || count > 16)
+      return VAULT_ERR_BADARG;
+   for (size_t i = 0; i < count; i++)
+   {
+      if (!writes[i].credential || !writes[i].credential[0])
+         return VAULT_ERR_BADARG;
+      for (size_t j = 0; j < i; j++)
+         if (!strcmp(writes[i].credential, writes[j].credential))
+            return VAULT_ERR_BADARG;
+   }
+   uint8_t kek[VAULT_KEK_LEN] = {0}, salt[VAULT_SALT_LEN] = {0};
+   vault_status_t status = VAULT_ERR_CRYPTO;
+   if (vault_server_kek(kek))
+      goto done;
+   status = VAULT_ERR_IO;
+   if (vault_store_get_or_create_salt(VAULT_SERVER_PRINCIPAL, salt))
+      goto done;
+   int rc = vault_store_write_batch(VAULT_SERVER_PRINCIPAL, kek, agent, writes, count);
+   status = !rc                                   ? VAULT_OK
+            : rc == VAULT_STORE_BATCH_UNSUPPORTED ? VAULT_ERR_UNSUPPORTED_OP
+                                                  : VAULT_ERR_IO;
+done:
+   OPENSSL_cleanse(kek, sizeof kek);
+   OPENSSL_cleanse(salt, sizeof salt);
+   for (size_t i = 0; i < count; i++)
+      (void)vaudit(writes[i].secret ? "vault.set" : "vault.delete", VAULT_SERVER_PRINCIPAL, agent,
+                   writes[i].credential, ATTEST_NONE, status);
+   return status;
 }
 
 /* Import autonomous server-wrapped credentials from a historical actor vault.

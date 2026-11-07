@@ -6,11 +6,31 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func gatewayPlanForTest(t *testing.T, h bus.ModuleHandler, args map[string]any) []gatewayStep {
+func gatewayPolicyFixture(roles, names []string, text string) canonical.PolicyView {
+	view := canonical.PolicyView{Version: 1, View: "gateway_policy", Messages: []canonical.PolicyMessage{}, Tools: []canonical.PolicyTool{}, LastUserText: text}
+	for _, role := range roles {
+		view.Messages = append(view.Messages, canonical.PolicyMessage{Role: role})
+	}
+	for _, name := range names {
+		view.Tools = append(view.Tools, canonical.PolicyTool{Kind: "function", Name: name})
+	}
+	return view
+}
+
+func gatewayPlanForTest(t *testing.T, h ring.ModuleHandler, args map[string]any) []gatewayStep {
 	t.Helper()
+	if roles, exists := args["roles"]; exists {
+		names, _ := args["tools"].([]string)
+		text, _ := args["last_user_text"].(string)
+		args["request"] = gatewayPolicyFixture(roles.([]string), names, text)
+		delete(args, "roles")
+		delete(args, "tools")
+		delete(args, "last_user_text")
+	}
 	args["operation"] = "gateway-plan"
 	encoded, err := json.Marshal(args)
 	if err != nil {
@@ -52,22 +72,22 @@ func TestGatewayContextPlanAuthorityAndQuery(t *testing.T) {
 	}
 }
 
-func TestGatewayPlanQueryBoundAndTextMode(t *testing.T) {
+func TestGatewayPlanCanonicalQueryBound(t *testing.T) {
 	t.Setenv("AIMEE_MEMORY_RECALL_GATE", "off")
 	h := NewHandler(nil)
 	fallback := strings.Repeat("x", 16382) + "界 suffix"
-	steps := gatewayPlanForTest(t, h, map[string]any{"phase": "text", "last_user_text": fallback})
+	steps := gatewayPlanForTest(t, h, map[string]any{"phase": "context", "roles": []string{"assistant"}, "last_user_text": fallback})
 	query := steps[0].Args["query"].(string)
-	if len(steps) != 1 || len(query) != 16382 || !utf8.ValidString(query) {
+	if len(steps) != 3 || len(query) != 16382 || !utf8.ValidString(query) {
 		t.Fatal(len(steps), len(query))
 	}
 	provided := strings.Repeat("q", 17000)
-	steps = gatewayPlanForTest(t, h, map[string]any{"phase": "text", "provided_query": provided, "last_user_text": fallback})
-	if len(steps) != 1 || steps[0].Args["query"] != provided {
+	steps = gatewayPlanForTest(t, h, map[string]any{"phase": "context", "roles": []string{"assistant"}, "provided_query": provided, "last_user_text": fallback})
+	if len(steps) != 3 || steps[0].Args["query"] != provided {
 		t.Fatal("provided query truncated or guidance added")
 	}
-	steps = gatewayPlanForTest(t, h, map[string]any{"phase": "text"})
-	if len(steps) != 0 {
+	steps = gatewayPlanForTest(t, h, map[string]any{"phase": "context", "roles": []string{"assistant"}})
+	if len(steps) != 2 {
 		t.Fatal(steps)
 	}
 }
@@ -88,11 +108,18 @@ func TestGatewayPlanEnforcedGateAndValidation(t *testing.T) {
 		`{"operation":"gateway-plan","phase":"unknown"}`,
 		`{"operation":"gateway-plan","phase":null}`,
 		`{"operation":"gateway-plan","phase":1}`,
-		`{"operation":"gateway-plan","phase":"text","provided_query":null}`,
-		`{"operation":"gateway-plan","phase":"text","last_user_text":false}`,
+		`{"operation":"gateway-plan","phase":"text"}`,
+		`{"operation":"gateway-plan","phase":"context","provided_query":null}`,
+		`{"operation":"gateway-plan","phase":"context","last_user_text":false}`,
 	} {
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(raw))
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		var args map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &args); err != nil {
+			t.Fatal(err)
+		}
+		args["request"], _ = json.Marshal(gatewayPolicyFixture([]string{"user"}, nil, "query"))
+		encoded, _ := json.Marshal(args)
+		frame, _ := ring.EncodeCommand("runtime", encoded)
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}
 	}
@@ -146,8 +173,9 @@ func TestGatewayPlanUsesOnlyHostProvidedResourceFacts(t *testing.T) {
 		})
 	}
 	for _, raw := range []string{`null`, `true`, `"guidance"`, `[null]`, `[""]`} {
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"gateway-plan","phase":"text","provided_resources":`+raw+`}`))
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		request, _ := json.Marshal(gatewayPolicyFixture([]string{"user"}, nil, "query"))
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"gateway-plan","phase":"context","request":`+string(request)+`,"provided_resources":`+raw+`}`))
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}
 	}

@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Breaker defaults, matching DEPENDENCY_BREAKER_DEFAULT_* in C.
@@ -194,7 +194,7 @@ func Embed(ctx context.Context, traceID uint64, executor egress.Executor,
 			TargetURL: endpoint, Purpose: "embedding", Method: method,
 			RequestSHA256: egress.RequestDigest(method, endpoint, body, false)},
 			Headers: map[string]string{"Content-Type": "text/plain"}, Body: body,
-			MaxResponseBytes: int64(bus.ModuleMessageMaxBody) - 12, TimeoutMS: embedTimeout.Milliseconds()})
+			MaxResponseBytes: int64(ring.ModuleMessageMaxBody) - 12, TimeoutMS: embedTimeout.Milliseconds()})
 		if err != nil {
 			breaker.reportFailure(now)
 			return EmbedResponse{Error: "embed: " + err.Error()}
@@ -417,13 +417,13 @@ func RepairFailedEmbeddings(ctx context.Context, traceID uint64, executor egress
 }
 
 // handleEmbed serves memory:3 embedding.
-func handleEmbed(executor egress.Executor, options handlerOptions, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleEmbed(executor egress.Executor, options handlerOptions, invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var decoded EmbedRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(embedHTTPTimeout()))
 	defer cancel()
@@ -444,8 +444,8 @@ func handleEmbed(executor egress.Executor, options handlerOptions, invocation bu
 		response = Embed(ctx, invocation.TraceID, executor, decoded)
 	}
 	encoded, err := json.Marshal(response)
-	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-		return nil, bus.ModuleStatusInternal
+	if err != nil || uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }

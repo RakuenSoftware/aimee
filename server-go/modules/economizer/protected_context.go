@@ -11,7 +11,7 @@ func protectedMessage(message *JSONValue) bool {
 	case "system", "developer":
 		return true
 	case "user":
-		content := message.Get("content")
+		content := messageContent(message)
 		if content.IsArray() && content.Len() > 0 {
 			for _, block := range content.Items {
 				if block.GetString("type") != "tool_result" {

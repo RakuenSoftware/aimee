@@ -38,6 +38,10 @@ type ContainerRunner struct {
 type ContainerResult struct {
 	// Name is the container, whether or not it survived.
 	Name string
+	// ID is the immutable identity returned by a successful fresh creation.
+	// Legacy runners without that receipt retain their ordinary behavior, but
+	// cannot establish private verification custody.
+	ID string
 	// Refused is set when the container was destroyed rather than handed over.
 	Refused bool
 	// Reason explains a refusal or a warning, in operator-facing terms.
@@ -80,22 +84,29 @@ func (r ContainerRunner) Start(ctx context.Context, req DockerCreateRequest) (Co
 		return ContainerResult{Name: req.ContainerName}, err
 	}
 
-	if _, err := r.Run(ctx, r.docker(), args...); err != nil {
+	created, err := r.Run(ctx, r.docker(), args...)
+	if err != nil {
 		return ContainerResult{Name: req.ContainerName}, fmt.Errorf("create container: %w", err)
 	}
-	if _, err := r.Run(ctx, r.docker(), "start", req.ContainerName); err != nil {
+	id, resource := strings.TrimSpace(created), req.ContainerName
+	if immutableContainerID(id) {
+		resource = id
+	} else {
+		id = ""
+	}
+	if _, err := r.Run(ctx, r.docker(), "start", resource); err != nil {
 		// Nothing is running, but a created container still exists.
-		if cleanupErr := r.destroy(ctx, req.ContainerName); cleanupErr != nil {
+		if cleanupErr := r.destroy(ctx, resource); cleanupErr != nil {
 			return ContainerResult{Name: req.ContainerName, Refused: true},
 				fmt.Errorf("start container: %w; cleanup: %v", err, cleanupErr)
 		}
 		return ContainerResult{Name: req.ContainerName}, fmt.Errorf("start container: %w", err)
 	}
 
-	verdict := VerifyRuntimePosture(req.Spec, r.MountTable, r.probe(ctx, req.ContainerName))
+	verdict := VerifyRuntimePosture(req.Spec, r.MountTable, r.probe(ctx, resource))
 	if verdict.Refuse {
 		// A container that failed the isolation check must not be left running.
-		if err := r.destroy(ctx, req.ContainerName); err != nil {
+		if err := r.destroy(ctx, resource); err != nil {
 			return ContainerResult{Name: req.ContainerName, Refused: true, Reason: verdict.Reason},
 				fmt.Errorf("refused container cleanup: %w", err)
 		}
@@ -103,7 +114,7 @@ func (r ContainerRunner) Start(ctx context.Context, req DockerCreateRequest) (Co
 			Name: req.ContainerName, Refused: true, Reason: verdict.Reason,
 		}, nil
 	}
-	return ContainerResult{Name: req.ContainerName}, nil
+	return ContainerResult{Name: req.ContainerName, ID: id}, nil
 }
 
 // Acquire resumes a matching hibernated container when possible, otherwise

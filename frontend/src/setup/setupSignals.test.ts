@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchGitIdentityReady } from './setupSignals';
+import { fetchGitIdentityReady, fetchSetupAccountStatus } from './setupSignals';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -31,4 +31,15 @@ describe('Git identity readiness signal', () => {
     ]);
     expect(await fetchGitIdentityReady()).toBe(false);
   });
+});
+
+it('keeps authenticated account readiness independent of its dismissal scope', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ complete: false, dismissal_scope: 'a'.repeat(64) }) })));
+  expect(await fetchSetupAccountStatus()).toEqual({ complete: false, dismissal_scope: 'a'.repeat(64) });
+});
+it('ignores malformed or unauthenticated dismissal scopes without inventing completion', async () => {
+  for (const ok of [false, true]) for (const scope of ['a'.repeat(63), 'A'.repeat(64), 1, null]) {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok, json: async () => ({ complete: true, dismissal_scope: scope }) })));
+    expect(await fetchSetupAccountStatus()).toEqual({ complete: ok, dismissal_scope: undefined });
+  }
 });

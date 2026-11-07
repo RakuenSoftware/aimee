@@ -15,7 +15,7 @@
 #include <unistd.h>
 
 #include <aimee/audit/obs_bus.h> /* OBS_BUS_KIND_ACTION */
-#include <aimee/core/event_bus/bus_capture.h>
+#include <ouroboros/capture.h>
 #include "cJSON.h"
 
 #define AB_CAP_PREFIX "audit-bus-capture-"
@@ -106,10 +106,10 @@ struct text_sink
    uint64_t malformed;
 };
 
-static void on_record_text(void *ctx, const bus_capture_event_t *ev)
+static void on_record_text(void *ctx, const ouro_capture_event_t *ev)
 {
    struct text_sink *s = ctx;
-   if (ev->type != BUS_CAP_EVENT || ev->frame.event_kind != OBS_BUS_KIND_ACTION)
+   if (ev->type != OURO_CAP_EVENT || ev->frame.event_kind != OBS_BUS_KIND_ACTION)
       return;
    char actor[128], tool[256], hash[96], command[512], mode[64], reason[128], verdict[32];
    int64_t task_id;
@@ -158,22 +158,22 @@ int obs_bus_replay_print(const char *path, FILE *out)
       return -1;
    }
    struct text_sink s = {.out = out, .rows = 0, .malformed = 0};
-   bus_capture_report_t rep = bus_capture_read(buf, size, on_record_text, &s);
+   ouro_capture_report_t rep = ouro_capture_read(buf, size, on_record_text, &s);
    free(buf);
 
    if (out)
    {
       fprintf(out, "-- %s: stream %s, %llu governed-action row(s) replayed", path,
-              bus_capture_status_name(rep.status), (unsigned long long)s.rows);
+              ouro_capture_status_name(rep.status), (unsigned long long)s.rows);
       if (s.malformed)
          fprintf(out, ", %llu malformed skipped", (unsigned long long)s.malformed);
-      if (rep.status == BUS_CAPTURE_TRUNCATED || rep.status == BUS_CAPTURE_CORRUPT)
+      if (rep.status == OURO_CAPTURE_TRUNCATED || rep.status == OURO_CAPTURE_CORRUPT)
          fprintf(out, " (last good seq %llu at byte %zu)", (unsigned long long)rep.last_good_seq,
                  rep.offending_off);
       fprintf(out, "\n");
    }
 
-   if (rep.status == BUS_CAPTURE_TRUNCATED || rep.status == BUS_CAPTURE_CORRUPT)
+   if (rep.status == OURO_CAPTURE_TRUNCATED || rep.status == OURO_CAPTURE_CORRUPT)
       return -2;
    return 0;
 }
@@ -191,10 +191,10 @@ struct json_sink
    int truncated; /* set when the byte budget stopped materialization early */
 };
 
-static void on_record_json(void *ctx, const bus_capture_event_t *ev)
+static void on_record_json(void *ctx, const ouro_capture_event_t *ev)
 {
    struct json_sink *s = ctx;
-   if (ev->type != BUS_CAP_EVENT || ev->frame.event_kind != OBS_BUS_KIND_ACTION)
+   if (ev->type != OURO_CAP_EVENT || ev->frame.event_kind != OBS_BUS_KIND_ACTION)
       return;
    char actor[128], tool[256], hash[96], command[512], mode[64], reason[128], verdict[32];
    int64_t task_id;
@@ -255,12 +255,12 @@ cJSON *audit_replay_to_json(const char *path, long offset, long limit)
                          .limit = limit,
                          .bytes = 0,
                          .truncated = 0};
-   bus_capture_report_t rep = bus_capture_read(buf, size, on_record_json, &s);
+   ouro_capture_report_t rep = ouro_capture_read(buf, size, on_record_json, &s);
    free(buf);
 
    int returned = cJSON_GetArraySize(s.rows);
    cJSON *o = cJSON_CreateObject();
-   cJSON_AddStringToObject(o, "status", bus_capture_status_name(rep.status));
+   cJSON_AddStringToObject(o, "status", ouro_capture_status_name(rep.status));
    cJSON_AddNumberToObject(o, "total", (double)s.total);  /* all rows in the stream */
    cJSON_AddNumberToObject(o, "count", (double)returned); /* returned window */
    cJSON_AddNumberToObject(o, "offset", (double)offset);
@@ -274,7 +274,7 @@ cJSON *audit_replay_to_json(const char *path, long offset, long limit)
    }
    if (s.malformed)
       cJSON_AddNumberToObject(o, "malformed", (double)s.malformed);
-   if (rep.status == BUS_CAPTURE_TRUNCATED || rep.status == BUS_CAPTURE_CORRUPT)
+   if (rep.status == OURO_CAPTURE_TRUNCATED || rep.status == OURO_CAPTURE_CORRUPT)
    {
       cJSON_AddNumberToObject(o, "last_good_seq", (double)rep.last_good_seq);
       cJSON_AddNumberToObject(o, "offending_off", (double)rep.offending_off);

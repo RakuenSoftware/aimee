@@ -14,7 +14,7 @@ bounded deterministic stages. Its BIRQ/BIRS scoring contract accepts up to 32
 retrieved and relevant identifiers plus K, then returns the existing MRR, NDCG@K,
 and recall@K definitions. Its BLRQ/BLRS latency contract accepts up to 512
 non-negative finite measurements, then returns nearest-rank p50/p95/p99 plus the
-minimum and maximum. The C adapter is a wire-parity fixture. Dataset loading,
+minimum and maximum. Dataset loading,
 benchmark execution, providers, scratch databases, raw timing capture, baselines,
 reporting, and result persistence remain in their current C and script owners
 while those boundaries are migrated. The production server's live
@@ -28,8 +28,7 @@ requiring a daemon bus.
 
 The native module retains `agent_eval.c` (agent harness and live scoring transport),
 `agent_eval_baseline.c` (baseline files), `agent_eval_memory_support.c` (external
-host support), `agent_eval_memory_transport.c` (memory bus transport), and
-`module_adapter.c` (wire-parity fixture). `agent_eval.h` and
+host support), and `agent_eval_memory_transport.c` (memory bus transport). `agent_eval.h` and
 `agent_eval_internal.h` expose retained host contracts. Native dataset runners,
 QA orchestration and scratch-store hooks are retired. Memory dataset adapters
 use the [shared Go module evaluation setup](../MEMORY.md#isolated-go-evaluation-transport), with isolated storage and
@@ -127,10 +126,11 @@ legacy dataset runners' scratch-store isolation: their C connection cannot
 redirect the Go owner. Use the explicit disposable store in `aimee-memory-eval`
 for the supported Go corpus path.
 
-The separate native `bench-perf` harness keeps retired memory case names as
-`unavailable` with null timings and exits 2 without saving or certifying a
-baseline. Its deleted in-process memory calls are not a valid benchmark of the
-Go service.
+The separate native `bench-perf` harness times only native paths
+(`pre_tool_check`, `delegate_dispatch`). Its memory, `db_open` and startup cases
+left with the in-process memory engine and native database; Go memory latency is
+measured by `aimee-memory-eval`. `--check` refuses a baseline that names a case
+the harness does not run, so an old baseline cannot pass unmeasured.
 
 ## Extension and removal
 

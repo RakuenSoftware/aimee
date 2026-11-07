@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -106,10 +106,10 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	model := &sharedRecallExecutor{vector: encoded, identity: "test-model"}
 	handler := NewHandler(model, WithDataStore(PlacementKB, backend))
 	request := DataRequest{Operation: "search", Query: "utterly unrelated request", Project: "shared-recall-local", Kind: "fact", Limit: 20}
-	call := func() (DataResponse, bus.ModuleStatus) {
+	call := func() (DataResponse, ring.ModuleStatus) {
 		t.Helper()
 		raw, _ := json.Marshal(request)
-		body, status := handler(bus.ModuleInvocation{StageID: StageData}, raw)
+		body, status := handler(ring.ModuleInvocation{StageID: StageData}, raw)
 		var result DataResponse
 		if len(body) > 0 && json.Unmarshal(body, &result) != nil {
 			t.Fatal(string(body))
@@ -123,12 +123,12 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 		afterLanes["memory.query.lane.lexical.served"] != beforeLanes["memory.query.lane.lexical.served"] {
 		t.Fatal("semantic-only result attribution lost", beforeLanes, afterLanes)
 	}
-	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
+	if status != ring.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
 		t.Fatal("semantic-only recall failed or leaked hidden/stale rows", got, status)
 	}
 	request.Operation = "diagnose"
 	traced, tracedStatus := call()
-	if tracedStatus != bus.ModuleStatusOK || traced.RankingTrace == nil || len(traced.RankingTrace.Candidates) != 1 {
+	if tracedStatus != ring.ModuleStatusOK || traced.RankingTrace == nil || len(traced.RankingTrace.Candidates) != 1 {
 		t.Fatal("dense diagnostic trace", traced, tracedStatus)
 	}
 	candidate := traced.RankingTrace.Candidates[0]
@@ -158,24 +158,24 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 		return map[string]any{"memory_semantic_floor_scale": floorScale}, nil
 	}
 	got, status = call()
-	if status != bus.ModuleStatusOK || len(got.Records) != 1 || settingsReads != 1 {
+	if status != ring.ModuleStatusOK || len(got.Records) != 1 || settingsReads != 1 {
 		t.Fatal("retrieval did not share one policy snapshot", got, status, settingsReads)
 	}
 	floorScale = 2
 	got, status = call()
 	backend.settings = originalSettings
-	if status != bus.ModuleStatusOK || len(got.Records) != 0 || settingsReads != 2 {
+	if status != ring.ModuleStatusOK || len(got.Records) != 0 || settingsReads != 2 {
 		t.Fatal("next request did not observe the changed policy", got, status, settingsReads)
 	}
 	request.Limit = 1
 	got, status = call()
-	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
+	if status != ring.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
 		t.Fatal("invisible or stale vectors consumed the candidate cap", got, status)
 	}
 	request.Scope = Scope{Type: ScopeProject, Value: "shared-recall-private"}
 	request.IncludeAll = true
 	got, status = call()
-	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["private"] {
+	if status != ring.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["private"] {
 		t.Fatal("explicit scope was widened", got, status)
 	}
 	request.Scope = Scope{}
@@ -183,7 +183,7 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	exerciseUnitRecallReplay(t, ctx, tx, backend, model, dimension)
 	model.vector = []byte(`[1,0]`)
 	got, status = call()
-	if status != bus.ModuleStatusOK || len(got.Records) != 0 {
+	if status != ring.ModuleStatusOK || len(got.Records) != 0 {
 		t.Fatal("wrong query dimension accepted", got, status)
 	}
 	model.vector = encoded
@@ -191,14 +191,14 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	model.changed = true
 	model.health = 0
 	got, status = call()
-	if status != bus.ModuleStatusOK || len(got.Records) != 0 {
+	if status != ring.ModuleStatusOK || len(got.Records) != 0 {
 		t.Fatal("mixed serving identity accepted", got, status)
 	}
 	model.changed = false
 	model.fail = true
 	request.Query = "shared-recall-visible"
 	got, status = call()
-	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
+	if status != ring.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
 		t.Fatal("dependency outage lost lexical recall", got, status)
 	}
 	// Suppression applies to lexical candidates before LIMIT, including when
@@ -212,7 +212,7 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	for _, scope := range []Scope{{}, {Type: ScopeProject, Value: "shared-recall-local"}} {
 		request.Scope = scope
 		got, status = call()
-		if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
+		if status != ring.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
 			t.Fatal("suppressed lexical match displaced visible memory", scope, got, status)
 		}
 	}
@@ -221,7 +221,7 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	request.Query = "utterly unrelated request"
 	exec(`RESET ROLE; REVOKE SELECT ON memory_embedding_versions FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	_, status = call()
-	if status != bus.ModuleStatusInternal {
+	if status != ring.ModuleStatusInternal {
 		t.Fatal("required vector SQL failure became healthy empty recall", status)
 	}
 }

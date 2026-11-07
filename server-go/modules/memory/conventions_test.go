@@ -8,7 +8,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -44,17 +44,17 @@ func TestConventionText(t *testing.T) {
 func TestConventionHostBoundary(t *testing.T) {
 	for _, p := range []Placement{PlacementKB, PlacementServer} {
 		handler := NewHandler(nil, WithDataStore(p, nil))
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"convention-extract"}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"convention-extract"}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(p, status)
 		}
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal(p, status)
 		}
 	}
 }
 
-func exerciseConventionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseConventionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -83,14 +83,14 @@ func exerciseConventionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 	firstKey := conventionKey(conventionSource{project: "convention-fixture", path: paths[0], heading: "Rule 0"}, "")
 	exec(`INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES('L4','fact',$1,'Operator-approved content','project','convention-fixture')`, derivedNormalize(firstKey))
 	exec(`SET LOCAL ROLE aimee_store_runtime`)
-	run := func() (map[string]any, bus.ModuleStatus) {
+	run := func() (map[string]any, ring.ModuleStatus) {
 		t.Helper()
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"convention-extract","scope_context":true,"project":"convention-fixture"}`))
-		out, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status != bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"convention-extract","scope_context":true,"project":"convention-fixture"}`))
+		out, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
-		body, err := bus.DecodeCommandResult(out)
+		body, err := ring.DecodeCommandResult(out)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,11 +101,11 @@ func exerciseConventionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 		return result, status
 	}
 	got, status := run()
-	if status != bus.ModuleStatusOK || got["emitted"] != float64(len(paths)-1) {
+	if status != ring.ModuleStatusOK || got["emitted"] != float64(len(paths)-1) {
 		t.Fatal(got, status)
 	}
 	got, status = run()
-	if status != bus.ModuleStatusOK || got["emitted"] != float64(0) {
+	if status != ring.ModuleStatusOK || got["emitted"] != float64(0) {
 		t.Fatal("non-idempotent", got, status)
 	}
 	var count int
@@ -126,7 +126,7 @@ func exerciseConventionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 	insert("convention-fixture", "000/AGENTS.md", "New first", "First new candidate must roll back.", "", 2)
 	insert("convention-fixture", "001/AGENTS.md", "Failure", "Later candidate forces transaction rollback.", "", 2)
 	exec(`ALTER TABLE memories ADD CONSTRAINT convention_failure CHECK(key NOT LIKE '%_Failure') NOT VALID; SET LOCAL ROLE aimee_store_runtime`)
-	if _, status := run(); status != bus.ModuleStatusInternal {
+	if _, status := run(); status != ring.ModuleStatusInternal {
 		t.Fatal("failed batch acknowledged", status)
 	}
 	exec(`RESET ROLE; ALTER TABLE memories DROP CONSTRAINT convention_failure; SET LOCAL ROLE aimee_store_runtime; SELECT set_config('aimee.memory_scope_all','1',true)`)
@@ -134,7 +134,7 @@ func exerciseConventionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 		t.Fatal("partial convention batch", count, err)
 	}
 	got, status = run()
-	if status != bus.ModuleStatusOK || got["emitted"] != float64(2) {
+	if status != ring.ModuleStatusOK || got["emitted"] != float64(2) {
 		t.Fatal("retry lost candidates", got, status)
 	}
 }

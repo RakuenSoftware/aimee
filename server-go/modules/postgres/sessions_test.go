@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -29,8 +29,8 @@ func sessionFrame(op uint32, id uint64, sql string, args ...any) []byte {
 }
 func sessionReply(t *testing.T, h *sessionHandler, op uint32, id uint64, sql string, args ...any) *reader {
 	t.Helper()
-	body, status := h.handle(bus.ModuleInvocation{StageID: StageSession}, sessionFrame(op, id, sql, args...))
-	if status != bus.ModuleStatusOK {
+	body, status := h.handle(ring.ModuleInvocation{StageID: StageSession}, sessionFrame(op, id, sql, args...))
+	if status != ring.ModuleStatusOK {
 		t.Fatal("session bus status", status)
 	}
 	r := &reader{buf: body}
@@ -100,13 +100,13 @@ func sessionTextRows(t *testing.T, r *reader) [][]*string {
 }
 func TestSessionAdmissionBeforeDatabase(t *testing.T) {
 	h := &sessionHandler{ctx: context.Background(), poolFn: func(context.Context) (*pgxpool.Pool, error) { t.Fatal("invalid caller reached pool"); return nil, nil }}
-	for _, inv := range []bus.ModuleInvocation{{StageID: StageSession, PrincipalRef: 7}, {StageID: StageSQL}} {
-		if _, status := h.handle(inv, sessionFrame(sessionAcquire, 0, "")); status != bus.ModuleStatusInvalidRequest {
+	for _, inv := range []ring.ModuleInvocation{{StageID: StageSession, PrincipalRef: 7}, {StageID: StageSQL}} {
+		if _, status := h.handle(inv, sessionFrame(sessionAcquire, 0, "")); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 	}
 	for _, frame := range [][]byte{nil, sessionFrame(99, 0, ""), sessionFrame(sessionRelease, 0, ""), sessionFrame(sessionAcquire, 1, ""), append(sessionFrame(sessionAcquire, 0, ""), 0), sessionFrame(sessionQuery, 1, "")} {
-		if _, status := h.handle(bus.ModuleInvocation{StageID: StageSession}, frame); status != bus.ModuleStatusInvalidRequest {
+		if _, status := h.handle(ring.ModuleInvocation{StageID: StageSession}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 	}
@@ -114,7 +114,7 @@ func TestSessionAdmissionBeforeDatabase(t *testing.T) {
 func TestSessionRejectsOversizedSchemaBeforeDatabase(t *testing.T) {
 	h := &sessionHandler{ctx: context.Background(), poolFn: func(context.Context) (*pgxpool.Pool, error) { t.Fatal("oversized SQL reached pool"); return nil, nil }}
 	body := sessionFrame(sessionExec, 1, strings.Repeat(" ", maxSessionStatementBytes+1))
-	if _, status := h.handle(bus.ModuleInvocation{StageID: StageSession}, body); status != bus.ModuleStatusInvalidRequest {
+	if _, status := h.handle(ring.ModuleInvocation{StageID: StageSession}, body); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("oversized schema accepted")
 	}
 }
@@ -170,22 +170,22 @@ func TestPostgresSessionScopeAndTransactionReset(t *testing.T) {
 		t.Fatal("session state leaked across release")
 	}
 	sessionReply(t, h, sessionRelease, next, "")
-	body, status := h.handle(bus.ModuleInvocation{StageID: StageSession}, sessionFrame(sessionState, id, ""))
-	if status != bus.ModuleStatusOK || binary.LittleEndian.Uint32(body) != statusFailed || !strings.Contains(string(body), "08003") {
+	body, status := h.handle(ring.ModuleInvocation{StageID: StageSession}, sessionFrame(sessionState, id, ""))
+	if status != ring.ModuleStatusOK || binary.LittleEndian.Uint32(body) != statusFailed || !strings.Contains(string(body), "08003") {
 		t.Fatal("closed session usable")
 	}
 }
 func TestPostgresSessionCapacityReapingAndRefusals(t *testing.T) {
 	h := sessionTestHandler(t)
 	first, second := sessionID(t, h), sessionID(t, h)
-	body, status := h.handle(bus.ModuleInvocation{StageID: StageSession}, sessionFrame(sessionAcquire, 0, ""))
-	if status != bus.ModuleStatusOK || binary.LittleEndian.Uint32(body) != statusLimitExceeded {
+	body, status := h.handle(ring.ModuleInvocation{StageID: StageSession}, sessionFrame(sessionAcquire, 0, ""))
+	if status != ring.ModuleStatusOK || binary.LittleEndian.Uint32(body) != statusLimitExceeded {
 		t.Fatal("unbounded connection acquisition")
 	}
 	h.reap(time.Now().Add(2 * time.Minute))
 	for _, id := range []uint64{first, second} {
-		body, status := h.handle(bus.ModuleInvocation{StageID: StageSession}, sessionFrame(sessionState, id, ""))
-		if status != bus.ModuleStatusOK || binary.LittleEndian.Uint32(body) != statusFailed {
+		body, status := h.handle(ring.ModuleInvocation{StageID: StageSession}, sessionFrame(sessionState, id, ""))
+		if status != ring.ModuleStatusOK || binary.LittleEndian.Uint32(body) != statusFailed {
 			t.Fatal("expired session alive")
 		}
 	}
@@ -199,8 +199,8 @@ func TestPostgresSessionCapacityReapingAndRefusals(t *testing.T) {
 		t.Fatal("continuation lost rows")
 	}
 	sessionReply(t, h, sessionExec, id, "BEGIN")
-	body, status = h.handle(bus.ModuleInvocation{StageID: StageSession}, sessionFrame(sessionExec, id, "SELECT 1/0"))
-	if status != bus.ModuleStatusOK || binary.LittleEndian.Uint32(body) != statusFailed || !strings.Contains(string(body), "22012") {
+	body, status = h.handle(ring.ModuleInvocation{StageID: StageSession}, sessionFrame(sessionExec, id, "SELECT 1/0"))
+	if status != ring.ModuleStatusOK || binary.LittleEndian.Uint32(body) != statusFailed || !strings.Contains(string(body), "22012") {
 		t.Fatal("SQLSTATE lost")
 	}
 	if state, _ := sessionReply(t, h, sessionState, id, "").byte1(); state != 'E' {

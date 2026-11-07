@@ -56,6 +56,7 @@ typedef struct
 
    /* turn arbitration */
    int turn_in_flight;
+   int turn_host_owned;
    /* When the live turn was acquired. Only ever read to answer "how long has
     * this been in flight", which is the one thing a bare in-flight flag cannot
     * say — and the difference between a turn that is slow and one whose worker
@@ -316,18 +317,21 @@ int presence_detach(const char *session_id, const char *attach_id)
    }
 
    /* If this attachment held the live turn, release it (promotes the queue). */
-   if (p->turn_in_flight && strcmp(p->turn_holder, attach_id) == 0)
+   if (p->turn_in_flight && !p->turn_host_owned && strcmp(p->turn_holder, attach_id) == 0)
    {
       release_holdings_locked(p, attach_id);
       char data[96];
       snprintf(data, sizeof(data), "{\"turn_id\":\"%s\"}", p->turn_id);
       publish_locked(p, PRESENCE_EV_TURN, "turn_done", data);
       p->turn_in_flight = 0;
+      p->turn_host_owned = 0;
       p->turn_started_at = 0;
       p->turn_id[0] = '\0';
       p->turn_holder[0] = '\0';
    }
-   release_holdings_locked(p, attach_id);
+   if (!p->turn_host_owned || strcmp(p->turn_holder, attach_id))
+      release_holdings_locked(p, attach_id);
+   queue_remove_locked(p, attach_id);
 
    slot->live = 0;
    /* A persistent delivery target keeps receiving routed events after its live
@@ -337,7 +341,7 @@ int presence_detach(const char *session_id, const char *attach_id)
    else
       slot->active = 0;
 
-   if (!has_any_attachment_locked(p))
+   if (!has_any_attachment_locked(p) && !p->turn_in_flight)
       teardown_locked(p);
    else
       pthread_cond_broadcast(&g_cond);
@@ -543,6 +547,7 @@ presence_turn_result_t presence_turn_acquire(const char *session_id, const char 
    snprintf(p->turn_id, sizeof(p->turn_id), "turn-%llu", (unsigned long long)++g_id_counter);
    snprintf(p->turn_holder, sizeof(p->turn_holder), "%s", attach_id);
    p->turn_in_flight = 1;
+   p->turn_host_owned = 0;
    p->turn_started_at = time(NULL);
    if (out_turn_id && id_n)
       snprintf(out_turn_id, id_n, "%s", p->turn_id);
@@ -608,6 +613,7 @@ presence_turn_result_t presence_turn_acquire_wait(const char *session_id, const 
          snprintf(p->turn_id, sizeof(p->turn_id), "turn-%llu", (unsigned long long)++g_id_counter);
          snprintf(p->turn_holder, sizeof(p->turn_holder), "%s", attach_id);
          p->turn_in_flight = 1;
+         p->turn_host_owned = 0;
          p->turn_started_at = time(NULL);
          if (out_turn_id && id_n)
             snprintf(out_turn_id, id_n, "%s", p->turn_id);
@@ -667,6 +673,42 @@ presence_turn_result_t presence_turn_acquire_wait(const char *session_id, const 
    }
 }
 
+/* A server worker owns this admitted turn beyond the subscriber lifetime. */
+presence_turn_result_t presence_turn_acquire_host(const char *session_id, const char *owner,
+                                                  char *turn_id, size_t turn_n, char *inflight,
+                                                  size_t inflight_n)
+{
+   char attachment[64];
+   if (!session_id || !session_id[0] || strlen(session_id) >= PRESENCE_SESSION_ID_MAX || !owner ||
+       !owner[0] || strlen(owner) >= PRESENCE_OWNER_MAX || !turn_id ||
+       turn_n < PRESENCE_TURN_ID_MAX ||
+       !presence_attach(session_id, owner, "host-chat", NULL, 0, 0, attachment, sizeof attachment))
+      return PRESENCE_TURN_ERR;
+   presence_turn_result_t result = presence_turn_acquire(session_id, attachment, 0, turn_id, turn_n,
+                                                         inflight, inflight_n, NULL);
+   if (result == PRESENCE_TURN_ACQUIRED && !presence_turn_host_own(session_id, turn_id))
+   {
+      presence_turn_release(session_id, turn_id);
+      result = PRESENCE_TURN_ERR;
+   }
+   /* Host ownership keeps the turn alive after the temporary attachment leaves.
+    * Failed/busy admission instead removes every temporary resource. */
+   presence_detach(session_id, attachment);
+   return result;
+}
+
+int presence_turn_host_own(const char *session_id, const char *turn_id)
+{
+   pthread_mutex_lock(&g_lock);
+   int idx = find_locked(session_id);
+   int ok =
+       idx >= 0 && g_pres[idx].turn_in_flight && turn_id && !strcmp(g_pres[idx].turn_id, turn_id);
+   if (ok)
+      g_pres[idx].turn_host_owned = 1;
+   pthread_mutex_unlock(&g_lock);
+   return ok;
+}
+
 int presence_turn_release(const char *session_id, const char *turn_id)
 {
    pthread_mutex_lock(&g_lock);
@@ -687,9 +729,12 @@ int presence_turn_release(const char *session_id, const char *turn_id)
    snprintf(data, sizeof(data), "{\"turn_id\":\"%s\"}", p->turn_id);
    publish_locked(p, PRESENCE_EV_TURN, "turn_done", data);
    p->turn_in_flight = 0;
+   p->turn_host_owned = 0;
    p->turn_started_at = 0;
    p->turn_id[0] = '\0';
    p->turn_holder[0] = '\0';
+   if (!has_any_attachment_locked(p))
+      teardown_locked(p);
    pthread_cond_broadcast(&g_cond); /* wake the queue head so it can acquire */
    pthread_mutex_unlock(&g_lock);
    return 1;
@@ -757,6 +802,7 @@ int presence_turn_reclaim(const char *session_id, const char *turn_id)
     * a new one to avoid hanging on a turn that is already gone. */
    publish_locked(p, PRESENCE_EV_TURN, "turn_done", data);
    p->turn_in_flight = 0;
+   p->turn_host_owned = 0;
    p->turn_started_at = 0;
    p->turn_id[0] = '\0';
    p->turn_holder[0] = '\0';

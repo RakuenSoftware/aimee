@@ -49,23 +49,25 @@ cJSON *kb_module_memory_data(const cJSON *request)
       return NULL;
    return cJSON_Parse(stale ? "{\"updated\":false}" : "{\"updated\":true}");
 }
-char *kb_curator_llm_run(kb_curator_stage_t stage, const char *prompt, const char *request,
-                         struct cJSON *schema, const char *fallback, int cap, char *error,
-                         size_t errorlen)
+int kb_curator_llm_run(kb_curator_stage_t stage, const aimee_request_t *request,
+                       aimee_response_t *out, char *error, size_t errorlen)
 {
    providers++;
-   assert(stage == KB_CURATOR_STAGE_EXTRACT_DOCS && !strcmp(prompt, "extract"));
-   assert(!schema && !fallback[0] && cap == 8192);
-   cJSON *input = cJSON_Parse(request);
+   assert(stage == KB_CURATOR_STAGE_EXTRACT_DOCS && !aimee_ir_request_admit(request));
+   assert(request->n_system == 1 && !strcmp(request->system[0].text, "extract"));
+   cJSON *input = cJSON_Parse(request->messages[0].blocks[0].text);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, "content")),
                   "original note"));
    cJSON_Delete(input);
    if (fail_provider)
    {
       snprintf(error, errorlen, "provider HTTP 503");
-      return NULL;
+      return -1;
    }
-   return strdup("provider response");
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "provider response"};
+   aimee_response_t response = {
+       .role = "assistant", .content = &block, .n_content = 1, .stop_reason = AIMEE_STOP_END_TURN};
+   return aimee_ir_response_clone(&response, out);
 }
 int main(void)
 {

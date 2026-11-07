@@ -238,9 +238,7 @@ func recallInject(reduced *JSONValue, out *ReduceResult) {
 		"out of this transcript. You referenced something that went with " +
 		"them; it is PAGEABLE, not lost:\n")
 	body.WriteString(out.RecallHint)
-	note := NewObject()
-	note.Set("role", NewString("assistant"))
-	note.Set("content", NewString(body.String()))
+	note := evidenceTextMessage(reduced, body.String())
 	insertEvidenceNotice(reduced, note, out.RetainedMsgs)
 }
 

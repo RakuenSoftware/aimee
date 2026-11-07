@@ -3,6 +3,7 @@ package families
 import (
 	"encoding/json"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -185,10 +186,10 @@ func expandAssignments(t *template, assignments map[string][]string) error {
 // --- context ---------------------------------------------------------------
 
 type contextMessage struct {
-	Sender string `json:"sender"`
-	Text   string `json:"text"`
-	Phase  int    `json:"phase"`
-	Turn   int    `json:"turn"`
+	Sender  string            `json:"sender"`
+	Message canonical.Message `json:"message"`
+	Phase   int               `json:"phase"`
+	Turn    int               `json:"turn"`
 }
 
 // contextExcerptTurns is how much of the conversation a prompt carries.
@@ -205,45 +206,42 @@ const dissentInstruction = "\nProvide your own independent analysis. Do not repe
 	"previous reviewers. If you agree on a point, acknowledge it briefly and " +
 	"focus on what others missed or where you disagree.\n"
 
-// buildPrompt is the turn prompt: who is speaking, in what role, and the tail
-// of the conversation so far.
-func buildPrompt(t template, ctx []contextMessage, phaseIdx, turnIdx int) string {
+// buildRequest retains each admitted contribution as canonical blocks. Only the
+// explicit MCP response boundary renders this next-turn preview as text.
+func buildRequest(t template, ctx []contextMessage, phaseIdx, turnIdx int) *canonical.Request {
 	name := t.phaseName(phaseIdx)
-	if name == "" {
-		name = "?"
-	}
 	agent, role := "?", "?"
 	if p := t.participantAt(phaseIdx, turnIdx); p != nil {
-		if p.Agent != "" {
-			agent = p.Agent
-		}
-		if p.Role != "" {
-			role = p.Role
-		}
+		agent, role = p.Agent, p.Role
 	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "Phase: %s\nAgent: %s\nRole: %s\n", name, agent, role)
+	instruction := fmt.Sprintf("Phase: %s\nAgent: %s\nRole: %s\n", name, agent, role)
 	if dissentRoles[role] {
-		b.WriteString(dissentInstruction)
+		instruction += dissentInstruction
 	}
-
+	request := canonical.TaskRequest(role, "Provide the next contribution for this phase.")
+	request.System = append(request.System, canonical.Block{Type: "text", Text: &instruction,
+		Context: &canonical.Context{Origin: 1, Authority: 3, Trust: 4, Sensitivity: 1, ModelVisible: true}})
 	start := len(ctx) - contextExcerptTurns
 	if start < 0 {
 		start = 0
 	}
-	var excerpt strings.Builder
-	for _, msg := range ctx[start:] {
-		if msg.Sender == "" || msg.Text == "" {
+	request.Messages = nil
+	for _, contribution := range ctx[start:] {
+		raw, _ := json.Marshal(contribution.Message)
+		var message canonical.Message
+		if !canonical.Decode(raw, &message) {
 			continue
 		}
-		fmt.Fprintf(&excerpt, "- %s: %s\n", msg.Sender, msg.Text)
+		label := "Speaker: " + contribution.Sender
+		message.ContentScalar = false
+		message.Blocks = append([]canonical.Block{{Type: "text", Text: &label,
+			Context: &canonical.Context{Origin: 3, Authority: 1, Trust: 1, Sensitivity: 1, ModelVisible: true}}}, message.Blocks...)
+		request.Messages = append(request.Messages, message)
 	}
-	if excerpt.Len() > 0 {
-		b.WriteString("\nRecent context:\n")
-		b.WriteString(excerpt.String())
-	}
-	return b.String()
+	next := "Provide the next contribution for this phase."
+	request.Messages = append(request.Messages, canonical.Message{Role: "user", Blocks: []canonical.Block{{Type: "text", Text: &next,
+		Context: &canonical.Context{Origin: 1, Authority: 2, Trust: 4, Sensitivity: 1, ModelVisible: true}}}})
+	return request
 }
 
 // --- the turn ---------------------------------------------------------------
@@ -292,7 +290,7 @@ const (
 // It returns the new state, the context to store, and what happened. It does
 // not decide whether to write: that belongs to the operation, which holds the
 // row lock that makes the read-modify-write safe.
-func advance(t template, s ensembleState, ctx []contextMessage, sender, text string) (
+func advance(t template, s ensembleState, ctx []contextMessage, sender string, message canonical.Message) (
 	ensembleState, []contextMessage, advanceOutcome) {
 
 	if sender != s.ExpectedAgent {
@@ -300,7 +298,7 @@ func advance(t template, s ensembleState, ctx []contextMessage, sender, text str
 			return s, ctx, advanceRefused
 		}
 		ctx = append(ctx, contextMessage{
-			Sender: sender, Text: text,
+			Sender: sender, Message: message,
 			Phase: s.CurrentPhase, Turn: s.CurrentTurn,
 		})
 		s.Status = "paused"
@@ -310,7 +308,7 @@ func advance(t template, s ensembleState, ctx []contextMessage, sender, text str
 	}
 
 	ctx = append(ctx, contextMessage{
-		Sender: sender, Text: text,
+		Sender: sender, Message: message,
 		Phase: s.CurrentPhase, Turn: s.CurrentTurn,
 	})
 
@@ -348,29 +346,59 @@ func parseTemplate(raw string) (template, error) {
 	return t, nil
 }
 
-// parseContext reads a stored transcript. An absent or empty document is an
-// empty conversation rather than an error: a run that has not started yet has
-// nothing in it.
-func parseContext(raw string) ([]contextMessage, error) {
-	if strings.TrimSpace(raw) == "" {
-		return nil, nil
-	}
-	var ctx []contextMessage
-	if err := json.Unmarshal([]byte(raw), &ctx); err != nil {
-		return nil, fmt.Errorf("ensemble context is not valid JSON: %w", err)
-	}
-	return ctx, nil
+const ensembleContextSchema = "aimee.ensemble-context.v1"
+
+type ensembleContext struct {
+	Schema   string           `json:"schema"`
+	Messages []contextMessage `json:"messages"`
 }
 
-// encodeContext renders the transcript for storage. An empty conversation is
-// "[]" rather than "null", which is what the column's default already says and
-// what every reader of it expects.
-func encodeContext(ctx []contextMessage) (string, error) {
-	if len(ctx) == 0 {
-		return "[]", nil
+// The old SQL array schema is an explicit historical text import. New writes
+// always use the marked envelope, even when empty; message content never selects
+// a codec or gets reinterpreted as JSON.
+func parseContext(raw string) ([]contextMessage, error) {
+	if strings.TrimSpace(raw) == "" || strings.TrimSpace(raw) == "null" {
+		return nil, nil
 	}
-	raw, err := json.Marshal(ctx)
+	var result ensembleContext
+	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
+		var legacy []struct {
+			Sender string `json:"sender"`
+			Text   string `json:"text"`
+			Phase  int    `json:"phase"`
+			Turn   int    `json:"turn"`
+		}
+		if !canonical.Decode([]byte(raw), &legacy) {
+			return nil, fmt.Errorf("invalid legacy ensemble context")
+		}
+		result.Messages = make([]contextMessage, 0, len(legacy))
+		for _, item := range legacy {
+			text := item.Text
+			message := canonical.Message{Role: "user", ContentScalar: true, Blocks: []canonical.Block{{Type: "text", Text: &text,
+				Context: &canonical.Context{Origin: 3, Authority: 1, Trust: 1, Sensitivity: 1, ModelVisible: true}}}}
+			result.Messages = append(result.Messages, contextMessage{Sender: item.Sender, Message: message, Phase: item.Phase, Turn: item.Turn})
+		}
+	} else if !canonical.Decode([]byte(raw), &result) || result.Schema != ensembleContextSchema || result.Messages == nil {
+		return nil, fmt.Errorf("invalid canonical ensemble context")
+	}
+	for _, item := range result.Messages {
+		encoded, _ := json.Marshal(item.Message)
+		if !canonical.ValidMessage(encoded) {
+			return nil, fmt.Errorf("invalid ensemble message")
+		}
+	}
+	return result.Messages, nil
+}
+
+func encodeContext(ctx []contextMessage) (string, error) {
+	if ctx == nil {
+		ctx = []contextMessage{}
+	}
+	raw, err := json.Marshal(ensembleContext{Schema: ensembleContextSchema, Messages: ctx})
 	if err != nil {
+		return "", err
+	}
+	if _, err = parseContext(string(raw)); err != nil {
 		return "", err
 	}
 	return string(raw), nil

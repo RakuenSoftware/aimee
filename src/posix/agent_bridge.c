@@ -7,6 +7,7 @@
 #include <aimee/core/connection/socket.h>
 #include <aimee/core/connection/tls_openssl.h>
 #include <string.h>
+#include <stdint.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <time.h>
@@ -490,22 +491,73 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
                         const char *extra_headers, const char *user_agent, const char *body,
                         size_t body_len)
 {
-   /* Build request into a dynamic buffer */
-   size_t cap = 4096 + body_len;
+   /* Preserve complete supported headers rather than silently truncating a
+    * caller's version/beta or scoped SDK transport metadata. */
+   size_t extra_size = extra_headers ? strlen(extra_headers) : 0;
+   if (extra_size > 8192 || (!body && body_len))
+      return -1;
+   int forwarded_user_agent = 0;
+   for (const char *line = extra_headers ? extra_headers : ""; *line;)
+   {
+      const char *next = strchr(line, '\n');
+      const char *end = next ? next : line + strlen(line);
+      while (end > line && (end[-1] == '\r' || end[-1] == ' '))
+         end--;
+      const char *colon = memchr(line, ':', (size_t)(end - line));
+      if (colon && colon - line == 10 && !strncasecmp(line, "User-Agent", 10))
+      {
+         const char *value = colon + 1;
+         while (value < end && (*value == ' ' || *value == '\t'))
+            value++;
+         if (forwarded_user_agent++ || value == end || end - value >= 256)
+            return -1;
+         for (const unsigned char *p = (const unsigned char *)value; p < (const unsigned char *)end;
+              p++)
+            if (*p < 32 || *p > 126)
+               return -1;
+      }
+      line = next ? next + 1 : line + strlen(line);
+   }
+   /* Fixed framing includes the terminator and decimal size_t Content-Length.
+    * Budget every caller-controlled field; newline normalization can expand
+    * extra headers from LF to CRLF, hence their doubled byte allowance. */
+   size_t cap = 4096;
+   const size_t lengths[] = {body_len,
+                             extra_size * 2,
+                             strlen(method),
+                             strlen(url->path),
+                             strlen(url->host),
+                             content_type ? strlen(content_type) : 0,
+                             auth_header ? strlen(auth_header) : 0,
+                             user_agent ? strlen(user_agent) : 0};
+   for (size_t i = 0; i < sizeof lengths / sizeof lengths[0]; i++)
+   {
+      if (lengths[i] > SIZE_MAX - cap)
+         return -1;
+      cap += lengths[i];
+   }
    char *req = malloc(cap);
    if (!req)
       return -1;
 
-   int off = snprintf(req, cap, "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n", method,
-                      url->path, url->host);
-   if (off < 0 || (size_t)off >= cap)
-      off = (int)(cap - 1);
+   int first = snprintf(req, cap, "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n", method,
+                        url->path, url->host);
+   if (first < 0 || (size_t)first >= cap)
+   {
+      free(req);
+      return -1;
+   }
+   size_t off = (size_t)first;
 
-   if (user_agent)
+   if (user_agent && !forwarded_user_agent)
    {
       int n = snprintf(req + off, cap - (size_t)off, "User-Agent: %s\r\n", user_agent);
-      if (n > 0 && (size_t)off + (size_t)n < cap)
-         off += n;
+      if (n < 0 || (size_t)n >= cap - off)
+      {
+         free(req);
+         return -1;
+      }
+      off += (size_t)n;
    }
 
    if (content_type && content_type[0])
@@ -517,15 +569,23 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
        * 400 before parsing the body. Prefix the field name when it is absent. */
       const char *prefix = strchr(content_type, ':') ? "" : "Content-Type: ";
       int n = snprintf(req + off, cap - (size_t)off, "%s%s\r\n", prefix, content_type);
-      if (n > 0 && (size_t)off + (size_t)n < cap)
-         off += n;
+      if (n < 0 || (size_t)n >= cap - off)
+      {
+         free(req);
+         return -1;
+      }
+      off += (size_t)n;
    }
 
    if (auth_header && auth_header[0])
    {
       int n = snprintf(req + off, cap - (size_t)off, "%s\r\n", auth_header);
-      if (n > 0 && (size_t)off + (size_t)n < cap)
-         off += n;
+      if (n < 0 || (size_t)n >= cap - off)
+      {
+         free(req);
+         return -1;
+      }
+      off += (size_t)n;
    }
 
    /* Append extra headers, one per line.
@@ -541,25 +601,27 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
     * why page reads failed against real sites while search (which happened to
     * use bare '\n') worked. Trim the CR so both conventions are accepted. */
    if (extra_headers && extra_headers[0])
-   {
-      char tmp[512];
-      snprintf(tmp, sizeof(tmp), "%s", extra_headers);
-      char *saveptr;
-      char *line = strtok_r(tmp, "\n", &saveptr);
-      while (line)
+      for (const char *line = extra_headers; *line;)
       {
-         size_t ll = strlen(line);
-         while (ll > 0 && (line[ll - 1] == '\r' || line[ll - 1] == ' '))
-            line[--ll] = '\0';
-         if (line[0])
+         const char *next = strchr(line, '\n');
+         const char *end = next ? next : line + strlen(line);
+         while (end > line && (end[-1] == '\r' || end[-1] == ' '))
+            end--;
+         size_t length = (size_t)(end - line);
+         if (length)
          {
-            int n = snprintf(req + off, cap - (size_t)off, "%s\r\n", line);
-            if (n > 0 && (size_t)off + (size_t)n < cap)
-               off += n;
+            if (length + 2 >= cap - (size_t)off)
+            {
+               free(req);
+               return -1;
+            }
+            memcpy(req + off, line, length);
+            off += length;
+            memcpy(req + off, "\r\n", 2);
+            off += 2;
          }
-         line = strtok_r(NULL, "\n", &saveptr);
+         line = next ? next + 1 : line + strlen(line);
       }
-   }
 
    {
       int n;
@@ -567,15 +629,24 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
          n = snprintf(req + off, cap - (size_t)off, "Content-Length: %zu\r\n\r\n", body_len);
       else
          n = snprintf(req + off, cap - (size_t)off, "\r\n");
-      if (n > 0 && (size_t)off + (size_t)n < cap)
-         off += n;
+      if (n < 0 || (size_t)n >= cap - off)
+      {
+         free(req);
+         return -1;
+      }
+      off += (size_t)n;
    }
 
    /* Append body */
-   if (body && body_len > 0 && (size_t)off + body_len <= cap)
+   if (body && body_len > 0)
    {
+      if (body_len > cap - off)
+      {
+         free(req);
+         return -1;
+      }
       memcpy(req + off, body, body_len);
-      off += (int)body_len;
+      off += body_len;
    }
 
    int rc;
@@ -613,8 +684,54 @@ int agent_http_last_retry_after(void)
    return g_last_retry_after;
 }
 
+/* Parse only actual Content-Length field lines. Identical repeated/list
+ * values are legal; conflicting, signed, empty or overflowing values are not. */
+static int http_response_length(const char *headers, size_t *length)
+{
+   int found = 0;
+   for (const char *line = headers; *line;)
+   {
+      const char *end = strstr(line, "\r\n");
+      if (!end)
+         end = line + strlen(line);
+      if (end - line >= 15 && !strncasecmp(line, "Content-Length:", 15))
+      {
+         const char *value = line + 15;
+         for (;;)
+         {
+            while (value < end && (*value == ' ' || *value == '\t'))
+               value++;
+            if (value == end || *value < '0' || *value > '9')
+               return -1;
+            size_t number = 0;
+            do
+            {
+               unsigned digit = (unsigned)(*value++ - '0');
+               if (number > (SIZE_MAX - digit) / 10)
+                  return -1;
+               number = number * 10 + digit;
+            } while (value < end && *value >= '0' && *value <= '9');
+            if (found && number != *length)
+               return -1;
+            *length = number;
+            found = 1;
+            while (value < end && (*value == ' ' || *value == '\t'))
+               value++;
+            if (value == end)
+               break;
+            if (*value++ != ',')
+               return -1;
+         }
+      }
+      if (!*end)
+         break;
+      line = end + 2;
+   }
+   return found;
+}
+
 static int parse_response_headers(char *buf, size_t len, size_t *header_end, int *chunked,
-                                  size_t *content_length)
+                                  size_t *content_length, int *has_content_length)
 {
    *chunked = 0;
    *content_length = 0;
@@ -640,29 +757,36 @@ static int parse_response_headers(char *buf, size_t len, size_t *header_end, int
    /* Null-terminate headers for easy searching */
    *hdr_end = '\0';
 
-   /* Check for Transfer-Encoding: chunked (case-insensitive scan) */
-   for (char *p = buf; *p; p++)
+   /* A header value mentioning another field must not select a decoder. Only
+    * the actual supported transfer-coding token, with optional OWS, is chunked. */
+   for (const char *line = buf; *line;)
    {
-      if ((*p == 'T' || *p == 't') && strncasecmp(p, "Transfer-Encoding:", 18) == 0)
+      const char *end = strstr(line, "\r\n");
+      if (!end)
+         end = line + strlen(line);
+      if (end - line >= 18 && !strncasecmp(line, "Transfer-Encoding:", 18))
       {
-         char *val = p + 18;
-         while (*val == ' ')
-            val++;
-         if (strncasecmp(val, "chunked", 7) == 0)
-            *chunked = 1;
+         const char *value = line + 18;
+         while (value < end && (*value == ' ' || *value == '\t'))
+            value++;
+         while (end > value && (end[-1] == ' ' || end[-1] == '\t'))
+            end--;
+         *chunked = end - value == 7 && !strncasecmp(value, "chunked", 7);
          break;
       }
+      if (!*end)
+         break;
+      line = end + 2;
    }
 
-   /* Check for Content-Length */
-   for (char *p = buf; *p; p++)
+   int has_length = http_response_length(buf, content_length);
+   if (has_length < 0)
    {
-      if ((*p == 'C' || *p == 'c') && strncasecmp(p, "Content-Length:", 15) == 0)
-      {
-         *content_length = (size_t)atoll(p + 15);
-         break;
-      }
+      *hdr_end = '\r';
+      return -1;
    }
+   if (has_content_length)
+      *has_content_length = has_length;
 
    /* Check for Retry-After (seconds; the provider APIs send a delta, not a date).
     * Match at a header-line start (line begin or just after a "\r\n") so it does
@@ -737,6 +861,7 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
    size_t header_end = 0;
    int chunked = 0;
    size_t content_length = 0;
+   int has_content_length = 0;
    int status = -1;
 
    while (!headers_done)
@@ -768,7 +893,8 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
          headers_done = 1;
    }
 
-   status = parse_response_headers(buf, len, &header_end, &chunked, &content_length);
+   status = parse_response_headers(buf, len, &header_end, &chunked, &content_length,
+                                   &has_content_length);
    if (status < 0)
    {
       free(buf);
@@ -786,6 +912,7 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
 
       /* Start from data after headers */
       size_t pos = header_end;
+      int trailers = 0;
 
       for (;;)
       {
@@ -812,7 +939,11 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
             }
             ssize_t n = conn_read(conn, buf + len, cap - len - 1);
             if (n <= 0)
-               break;
+            {
+               free(body);
+               free(buf);
+               return -1;
+            }
             len += (size_t)n;
             buf[len] = '\0';
             if (conn_past_deadline(conn))
@@ -826,14 +957,38 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
 
          /* Parse chunk size */
          char *crlf = strstr(buf + pos, "\r\n");
-         if (!crlf)
-            break;
+         if (trailers)
+         {
+            int final = crlf == buf + pos;
+            pos = (size_t)(crlf - buf) + 2;
+            if (final)
+               break;
+            continue;
+         }
 
-         size_t chunk_size = (size_t)strtoul(buf + pos, NULL, 16);
+         char *size_end = NULL;
+         errno = 0;
+         size_t chunk_size = (size_t)strtoul(buf + pos, &size_end, 16);
+         int invalid_size = errno == ERANGE || size_end == buf + pos || size_end > crlf;
+         for (const char *digit = buf + pos; !invalid_size && digit < size_end; digit++)
+            if (!((*digit >= '0' && *digit <= '9') || (*digit >= 'a' && *digit <= 'f') ||
+                  (*digit >= 'A' && *digit <= 'F')))
+               invalid_size = 1;
+         while (size_end < crlf && (*size_end == ' ' || *size_end == '\t'))
+            size_end++;
+         if (invalid_size || (size_end != crlf && *size_end != ';'))
+         {
+            free(body);
+            free(buf);
+            return -1;
+         }
          pos = (size_t)(crlf - buf) + 2;
 
          if (chunk_size == 0)
-            break; /* final chunk */
+         {
+            trailers = 1;
+            continue;
+         }
 
          /* Overflow-safe combined size check: reject before reading.
           * chunk_size > MAX is the simple case; the subtraction form
@@ -870,7 +1025,11 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
             }
             ssize_t n = conn_read(conn, buf + len, cap - len - 1);
             if (n <= 0)
-               break;
+            {
+               free(body);
+               free(buf);
+               return -1;
+            }
             len += (size_t)n;
             buf[len] = '\0';
             if (conn_past_deadline(conn))
@@ -880,6 +1039,13 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
                free(buf);
                return -1;
             }
+         }
+
+         if (buf[pos + chunk_size] != '\r' || buf[pos + chunk_size + 1] != '\n')
+         {
+            free(body);
+            free(buf);
+            return -1;
          }
 
          char *tmp = realloc(body, body_len + chunk_size + 1);
@@ -898,6 +1064,14 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
       }
 
       free(buf);
+      if (!body)
+      {
+         /* An empty completed body still owns a trailing NUL, like fixed-length
+          * and close-delimited responses. NULL remains a failure output. */
+         body = calloc(1, 1);
+         if (!body)
+            return -1;
+      }
       *out_body = body;
       *out_len = body_len;
    }
@@ -905,9 +1079,9 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
    {
       /* Content-Length or read-until-close */
       size_t body_so_far = len - header_end;
-      size_t target = content_length > 0 ? content_length : 0;
+      size_t target = content_length;
 
-      if (content_length > 0)
+      if (has_content_length)
       {
          /* Read remaining body bytes */
          while (body_so_far < target)
@@ -930,7 +1104,10 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
             }
             ssize_t n = conn_read(conn, buf + len, cap - len - 1);
             if (n <= 0)
-               break;
+            {
+               free(buf);
+               return -1;
+            }
             len += (size_t)n;
             body_so_far += (size_t)n;
             buf[len] = '\0';
@@ -964,7 +1141,12 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
                buf = tmp;
             }
             ssize_t n = conn_read(conn, buf + len, cap - len - 1);
-            if (n <= 0)
+            if (n < 0)
+            {
+               free(buf);
+               return -1;
+            }
+            if (n == 0)
                break;
             len += (size_t)n;
             buf[len] = '\0';
@@ -978,7 +1160,7 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
       }
 
       /* Extract body */
-      size_t blen = len - header_end;
+      size_t blen = has_content_length ? target : len - header_end;
       char *body = malloc(blen + 1);
       if (!body)
       {
@@ -1036,7 +1218,7 @@ static int http_read_response_stream(http_conn_t *conn, agent_http_stream_cb cal
    size_t header_end = 0;
    int chunked = 0;
    size_t content_length = 0;
-   int status = parse_response_headers(buf, len, &header_end, &chunked, &content_length);
+   int status = parse_response_headers(buf, len, &header_end, &chunked, &content_length, NULL);
    if (status < 0)
    {
       free(buf);
@@ -1190,6 +1372,8 @@ static int http_read_response(http_conn_t *conn, char **out_body, size_t *out_le
 int agent_http_get_location(const char *url, const char *extra_headers, char *location,
                             size_t location_cap, char **response_buf, int timeout_ms)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
    if (location && location_cap)
       location[0] = '\0';
@@ -1226,6 +1410,8 @@ int agent_http_get_location(const char *url, const char *extra_headers, char *lo
 int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *extra_headers,
                           char **response_buf, int timeout_ms)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
    parsed_url_t pu;
    if (parse_url(url, &pu) < 0)
@@ -1254,6 +1440,8 @@ int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *ex
 
 int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1323,6 +1511,8 @@ int agent_http_post_guarded_bytes(const char *url, const char *auth_header, cons
                                   size_t body_len, char **response_buf, int timeout_ms,
                                   const char *extra_headers, const agent_http_send_guard_t *guard)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1353,6 +1543,11 @@ int agent_http_post_guarded_bytes(const char *url, const char *auth_header, cons
    size_t resp_len = 0;
    int status = http_read_response(&conn, response_buf, &resp_len);
    conn_close(&conn);
+   /* This JSON POST API returns a C string. Refuse before discarding the
+    * transport length: otherwise a valid JSON prefix can hide later bytes.
+    * Streaming and explicit content-type transports retain their binary contract. */
+   if (status >= 0 && *response_buf && memchr(*response_buf, '\0', resp_len))
+      status = -1;
    if (status < 0)
    {
       free(*response_buf);
@@ -1366,7 +1561,23 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
                                  const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers)
 {
-   *response_buf = NULL;
+   size_t response_len = 0;
+   return agent_http_post_content_type_bytes(url, auth_header, content_type, body,
+                                             body ? strlen(body) : 0, response_buf, &response_len,
+                                             timeout_ms, extra_headers);
+}
+
+int agent_http_post_content_type_bytes(const char *url, const char *auth_header,
+                                       const char *content_type, const void *body, size_t body_len,
+                                       char **response_buf, size_t *response_len, int timeout_ms,
+                                       const char *extra_headers)
+{
+   if (response_buf)
+      *response_buf = NULL;
+   if (response_len)
+      *response_len = 0;
+   if (!response_buf || !response_len || (!body && body_len))
+      return -1;
 
    parsed_url_t pu;
    if (parse_url(url, &pu) < 0)
@@ -1383,12 +1594,12 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
    }
 
    aimee_log(LOG_DEBUG, "agent_http", "connected; sending request to %s:%d (%zu body bytes)",
-             pu.host, pu.port, body ? strlen(body) : (size_t)0);
+             pu.host, pu.port, body_len);
 
    const char *ct =
        content_type && content_type[0] ? content_type : "Content-Type: application/json";
    if (send_request(&conn, "POST", &pu, ct, auth_header, extra_headers, "aimee/1.0", body,
-                    body ? strlen(body) : 0) < 0)
+                    body_len) < 0)
    {
       aimee_log(LOG_ERROR, "agent_http", "send_request failed: %s:%d", pu.host, pu.port);
       conn_close(&conn);
@@ -1410,6 +1621,7 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
    }
    else
    {
+      *response_len = resp_len;
       aimee_log(LOG_DEBUG, "agent_http", "response received: HTTP %d, %zu bytes from %s:%d", status,
                 resp_len, pu.host, pu.port);
    }
@@ -1419,6 +1631,8 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
 int agent_http_put(const char *url, const char *auth_header, const char *body, char **response_buf,
                    int timeout_ms, const char *extra_headers)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1452,6 +1666,8 @@ int agent_http_put(const char *url, const char *auth_header, const char *body, c
 int agent_http_patch(const char *url, const char *auth_header, const char *body,
                      char **response_buf, int timeout_ms, const char *extra_headers)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1477,37 +1693,6 @@ int agent_http_patch(const char *url, const char *auth_header, const char *body,
       free(*response_buf);
       *response_buf = NULL;
       aimee_log(LOG_ERROR, "agent_http", "PATCH request failed");
-   }
-   return status;
-}
-
-int agent_http_post_form(const char *url, const char *body, char **response_buf, int timeout_ms)
-{
-   *response_buf = NULL;
-
-   parsed_url_t pu;
-   if (parse_url(url, &pu) < 0)
-      return -1;
-
-   http_conn_t conn;
-   if (conn_open(&conn, &pu, timeout_ms) < 0)
-      return -1;
-
-   if (send_request(&conn, "POST", &pu, "Content-Type: application/x-www-form-urlencoded", NULL,
-                    "originator: codex_cli_rs", "codex_cli/1.0", body, body ? strlen(body) : 0) < 0)
-   {
-      conn_close(&conn);
-      return -1;
-   }
-
-   size_t resp_len = 0;
-   int status = http_read_response(&conn, response_buf, &resp_len);
-   conn_close(&conn);
-
-   if (status < 0)
-   {
-      free(*response_buf);
-      *response_buf = NULL;
    }
    return status;
 }
@@ -1555,30 +1740,6 @@ int agent_http_post_stream_guarded_bytes(const char *url, const char *auth_heade
    return status;
 }
 
-int agent_http_delete(const char *url, const char *auth_header, int timeout_ms)
-{
-   parsed_url_t pu;
-   if (parse_url(url, &pu) < 0)
-      return -1;
-
-   http_conn_t conn;
-   if (conn_open(&conn, &pu, timeout_ms) < 0)
-      return -1;
-
-   if (send_request(&conn, "DELETE", &pu, NULL, auth_header, NULL, "aimee/1.0", NULL, 0) < 0)
-   {
-      conn_close(&conn);
-      return -1;
-   }
-
-   char *response = NULL;
-   size_t resp_len = 0;
-   int status = http_read_response(&conn, &response, &resp_len);
-   conn_close(&conn);
-   free(response);
-   return status;
-}
-
 /* ================================================================
  * From: agent_tunnel.c
  * ================================================================ */
@@ -1596,26 +1757,6 @@ int agent_http_delete(const char *url, const char *auth_header, int timeout_ms)
 #endif
 
 /* --- State string conversion --- */
-
-const char *agent_tunnel_state_str(agent_tunnel_state_t state)
-{
-   switch (state)
-   {
-   case TUNNEL_STATE_IDLE:
-      return "idle";
-   case TUNNEL_STATE_CONNECTING:
-      return "connecting";
-   case TUNNEL_STATE_ACTIVE:
-      return "active";
-   case TUNNEL_STATE_RECONNECTING:
-      return "reconnecting";
-   case TUNNEL_STATE_FAILED:
-      return "failed";
-   case TUNNEL_STATE_STOPPED:
-      return "stopped";
-   }
-   return "unknown";
-}
 
 /* --- Internal: parse allocated port from ssh stderr --- */
 
@@ -1962,22 +2103,6 @@ void agent_tunnel_stop_all(agent_tunnel_mgr_t *mgr)
    }
 }
 
-void agent_tunnel_mgr_destroy(agent_tunnel_mgr_t *mgr)
-{
-   agent_tunnel_stop_all(mgr);
-   pthread_mutex_destroy(&mgr->lock);
-}
-
-agent_tunnel_t *agent_tunnel_find(agent_tunnel_mgr_t *mgr, const char *name)
-{
-   for (int i = 0; i < mgr->tunnel_count; i++)
-   {
-      if (strcmp(mgr->tunnels[i].name, name) == 0)
-         return &mgr->tunnels[i];
-   }
-   return NULL;
-}
-
 int agent_tunnel_resolve_entry(const agent_tunnel_mgr_t *mgr, const agent_network_t *network,
                                const agent_net_host_t *host, char *buf, size_t buf_len)
 {
@@ -2001,50 +2126,4 @@ int agent_tunnel_resolve_entry(const agent_tunnel_mgr_t *mgr, const agent_networ
    else
       buf[0] = '\0';
    return 0;
-}
-
-void agent_tunnel_print_status(const agent_tunnel_mgr_t *mgr, int json_output)
-{
-   if (json_output)
-   {
-      cJSON *arr = cJSON_CreateArray();
-      for (int i = 0; i < mgr->tunnel_count; i++)
-      {
-         const agent_tunnel_t *t = &mgr->tunnels[i];
-         cJSON *obj = cJSON_CreateObject();
-         cJSON_AddStringToObject(obj, "name", t->name);
-         cJSON_AddStringToObject(obj, "state", agent_tunnel_state_str(t->state));
-         cJSON_AddStringToObject(obj, "relay", t->relay_ssh);
-         cJSON_AddStringToObject(obj, "target_host", t->target_host);
-         cJSON_AddNumberToObject(obj, "target_port", t->target_port);
-         cJSON_AddNumberToObject(obj, "allocated_port", t->allocated_port);
-         if (t->error[0])
-            cJSON_AddStringToObject(obj, "error", t->error);
-         cJSON_AddItemToArray(arr, obj);
-      }
-      char *json = cJSON_Print(arr);
-      if (json)
-      {
-         printf("%s\n", json);
-         free(json);
-      }
-      cJSON_Delete(arr);
-   }
-   else
-   {
-      if (mgr->tunnel_count == 0)
-      {
-         printf("No tunnels configured.\n");
-         return;
-      }
-      printf("%-12s %-12s %-30s %-20s %s\n", "TUNNEL", "STATE", "RELAY", "TARGET", "PORT");
-      for (int i = 0; i < mgr->tunnel_count; i++)
-      {
-         const agent_tunnel_t *t = &mgr->tunnels[i];
-         char target[80];
-         snprintf(target, sizeof(target), "%s:%d", t->target_host, t->target_port);
-         printf("%-12s %-12s %-30s %-20s %d\n", t->name, agent_tunnel_state_str(t->state),
-                t->relay_ssh, target, t->allocated_port);
-      }
-   }
 }

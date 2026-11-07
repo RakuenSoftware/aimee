@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -45,12 +45,12 @@ func exerciseFactContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, s *
 	low := seed("user", "works_for", "Context Model Corp", "context-low", modelFactActor())
 	born := seed("user", "born_in", "Context City", "context-born", modelFactActor())
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
-	verified := bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: user.Principal, TransportIdentity: user.TransportIdentity}
+	verified := ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: user.Principal, TransportIdentity: user.TransportIdentity}
 	call := func(verb, query string) map[string]any {
 		t.Helper()
 		raw, _ := json.Marshal(map[string]any{"query": query, "authority": "user", "actor": "operator", "scope_context": true})
 		r, status := invokeContextCommand(t, handler, 0, verified, verb, string(raw))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(r, status)
 		}
 		return r

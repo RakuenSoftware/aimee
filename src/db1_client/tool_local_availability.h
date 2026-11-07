@@ -21,11 +21,6 @@ extern "C"
       char checked_at[DB1_TOOL_TS_LEN];
    } db1_tool_local_availability_t;
 
-   int db1_tool_local_availability_set(const char *tool_uuid, int usable, const char *binary_path);
-   int db1_tool_local_availability_get(const char *tool_uuid, db1_tool_local_availability_t *out);
-   int db1_tool_local_availability_delete(const char *tool_uuid);
-   int db1_tool_local_availability_list(db1_tool_local_availability_t *out, int max);
-
 #ifdef __cplusplus
 }
 #endif

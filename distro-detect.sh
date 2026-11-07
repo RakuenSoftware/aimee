@@ -39,10 +39,6 @@ detect_pkg_manager() {
         PKG_MGR="pacman"
         PKG_INSTALL="$AIMEE_SUDO pacman -S --noconfirm"
         PKG_UPDATE="$AIMEE_SUDO pacman -Sy"
-    elif command -v brew &>/dev/null; then
-        PKG_MGR="brew"
-        PKG_INSTALL="brew install"
-        PKG_UPDATE="brew update"
     else
         PKG_MGR="unknown"
         PKG_INSTALL=""
@@ -106,24 +102,6 @@ pkg_name() {
                 postgresql-pgvector) echo "pgvector" ;;
                 *)                   echo "$dep" ;;
             esac ;;
-        brew)
-            case "$dep" in
-                libsqlite3-dev)      echo "sqlite" ;;
-                libpq-dev)           echo "libpq" ;;
-                libzstd-dev)         echo "zstd" ;;
-                zlib1g-dev)          echo "zlib" ;;
-                libcurl4-openssl-dev) echo "curl" ;;
-                libpam0g-dev)        echo "" ;;  # PAM is built-in on macOS
-                universal-ctags)     echo "universal-ctags" ;;
-                sqlite3)             echo "sqlite" ;;
-                python3-yaml)        echo "pyyaml" ;;  # Homebrew formula (or pip3 install pyyaml)
-                clang-format-19)     echo "clang-format" ;;
-                build-essential)     echo "" ;;  # Xcode CLT covers this
-                clang-tidy)          echo "llvm" ;;
-                postgresql-server)   echo "postgresql" ;;
-                postgresql-pgvector) echo "pgvector" ;;
-                *)                   echo "$dep" ;;
-            esac ;;
         *)
             echo "$dep" ;;
     esac
@@ -140,7 +118,6 @@ pkg_install_hint() {
         yum)    echo "yum install $pkg" ;;
         apt)    echo "apt-get install $pkg" ;;
         pacman) echo "pacman -S $pkg" ;;
-        brew)   echo "brew install $pkg" ;;
         *)      echo "install $pkg" ;;
     esac
 }
@@ -176,8 +153,8 @@ dep_present() {
         libzstd-dev)          pkg-config --exists libzstd 2>/dev/null ;;
         zlib1g-dev)           pkg-config --exists zlib 2>/dev/null ;;
         libcurl4-openssl-dev) pkg-config --exists libcurl 2>/dev/null ;;
-        # No pkg-config .pc for PAM; probe the header the way cgo will, which
-        # also resolves the macOS SDK location. If no C compiler is present yet
+        # No pkg-config .pc for PAM; probe the header the way cgo will. If no C
+        # compiler is present yet
         # the probe fails and we (harmlessly) queue libpam0g-dev for install.
         libpam0g-dev)         echo '#include <security/pam_appl.h>' \
                                   | "${CC:-cc}" -fsyntax-only -xc - &>/dev/null ;;

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Gateway counters belong to one module handler/process, not to native callers.
@@ -37,9 +37,9 @@ func gatewayEnabled(value string) bool {
 	return true
 }
 
-func handleGatewayCommand(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleGatewayCommand(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if invocation.PrincipalRef != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	switch args.stringOr("operation", "") {
 	case "gateway-enabled":
@@ -47,7 +47,7 @@ func handleGatewayCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		if raw, exists := args["value"]; exists {
 			var supplied *string
 			if json.Unmarshal(raw, &supplied) != nil || supplied == nil {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			value = *supplied
 		}
@@ -57,13 +57,13 @@ func handleGatewayCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	case "gateway-recall":
 		var query *string
 		if json.Unmarshal(args["query"], &query) != nil || query == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		return commandResult(gatewayRecall(options.gateway, *query))
 	case "gateway-outcome":
 		var predicted, needed *bool
 		if json.Unmarshal(args["predicted_skip"], &predicted) != nil || json.Unmarshal(args["retrieval_needed"], &needed) != nil || predicted == nil || needed == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if *predicted && *needed {
 			options.gateway.wronglySkipped.Add(1)
@@ -74,7 +74,7 @@ func handleGatewayCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	case "gateway-metrics":
 		return commandResult(options.gateway.metrics())
 	}
-	return nil, bus.ModuleStatusInvalidRequest
+	return nil, ring.ModuleStatusInvalidRequest
 }
 
 func gatewayRecall(state *gatewayState, query string) map[string]any {

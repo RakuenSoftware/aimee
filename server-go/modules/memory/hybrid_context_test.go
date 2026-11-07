@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -25,17 +25,17 @@ func TestHybridSymbolKey(t *testing.T) {
 func TestHybridHostBoundary(t *testing.T) {
 	for _, placement := range []Placement{PlacementKB, PlacementServer} {
 		handler := NewHandler(nil, WithDataStore(placement, nil))
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"hybrid-context","query":"needle"}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"hybrid-context","query":"needle"}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal(placement, status)
 		}
 	}
 }
 
-func exerciseHybridReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseHybridReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -123,8 +123,8 @@ func exerciseHybridReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 	// Go transaction boundary, with both distractor buckets larger than LIMIT.
 	read := func(req DataRequest) []Record {
 		t.Helper()
-		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
-		if status != bus.ModuleStatusOK {
+		raw, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
+		if status != ring.ModuleStatusOK {
 			t.Fatal(req.Operation, status)
 		}
 		var response DataResponse

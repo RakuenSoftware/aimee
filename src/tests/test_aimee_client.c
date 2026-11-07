@@ -2,6 +2,7 @@
  * remote TCP path. A loopback mock HTTP server validates real request framing,
  * bearer-token injection, and response parsing end to end. */
 #include <assert.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -44,23 +45,31 @@ static void *mock_server(void *arg)
       size_t want = 0; /* total bytes expected once headers are parsed (0 = unknown) */
       for (;;)
       {
-         if (len + 1 >= sizeof(g_seen_request))
-            break;
-         ssize_t n = read(c, g_seen_request + len, sizeof(g_seen_request) - 1 - len);
-         if (n <= 0)
-            break;
+         /* Capture a bounded prefix for header assertions, but consume the full
+          * advertised request. Closing with unread payload can reset TCP and
+          * discard the otherwise valid response (the gzip probe sends 8 KiB). */
+         char discard[4096];
+         size_t capture_capacity = sizeof(g_seen_request) - 1;
+         char *buffer = len < capture_capacity ? g_seen_request + len : discard;
+         size_t available = len < capture_capacity ? capture_capacity - len : sizeof discard;
+         if (want && available > want - len)
+            available = want - len;
+         ssize_t n = read(c, buffer, available);
+         if (n < 0 && errno == EINTR)
+            continue;
+         assert(n > 0);
          len += (size_t)n;
-         g_seen_request[len] = '\0';
+         g_seen_request[len < capture_capacity ? len : capture_capacity] = '\0';
          char *hdr_end = strstr(g_seen_request, "\r\n\r\n");
          if (hdr_end && want == 0)
          {
             size_t header_bytes = (size_t)(hdr_end - g_seen_request) + 4;
             const char *cl = strstr(g_seen_request, "Content-Length:");
-            long body_len = 0;
-            if (cl)
-               body_len = strtol(cl + 15, NULL, 10);
+            long body_len = cl ? strtol(cl + 15, NULL, 10) : 0;
+            assert(body_len >= 0 && body_len <= 1024 * 1024);
             want = header_bytes + (size_t)body_len;
          }
+         assert(want || len < capture_capacity); /* Headers themselves must fit. */
          if (want && len >= want)
             break;
       }

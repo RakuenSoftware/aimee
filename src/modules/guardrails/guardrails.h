@@ -139,6 +139,12 @@ classification_t classify_path_sensitivity(const char *file_path);
  *   2 = block (msg_buf contains error message) */
 int pre_tool_check(const char *tool_name, const char *input_json, session_state_t *state,
                    const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len);
+/* Host dispatcher only, after resolving an actual registered Aimee tool.
+ * Owned delegate RPCs are not provider-native spawns. All other policy and audit
+ * checks still apply to the original name and arguments. Never select from JSON. */
+int pre_tool_check_registered_tool(const char *tool_name, const char *input_json,
+                                   session_state_t *state, const char *guardrail_mode,
+                                   const char *cwd, char *msg_buf, size_t msg_len);
 /* Hook adapter only: the authenticated client has checked its own filesystem.
  * Native/server tools must use pre_tool_check and the server's scope check. */
 int pre_tool_check_client_workspace(const char *tool_name, const char *input_json,
@@ -156,7 +162,7 @@ void guardrails_action_audit_register_reload(void);
  * row. Same return contract as pre_tool_check. */
 int pre_tool_check_inner(const char *tool_name, const char *input_json, session_state_t *state,
                          const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len,
-                         int client_non_git_workspace);
+                         int client_non_git_workspace, int registered_aimee_tool);
 
 /* Normalize provider/internal tool names into guardrail-facing categories.
  * Provider-native sub-agent spawns (Task/Agent/spawn_agent/RemoteTrigger) map to

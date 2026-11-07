@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -57,11 +57,11 @@ func exerciseReembedReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend
 	handler := NewHandler(executor, WithDataStore(PlacementKB, backend))
 	call := func(verb, args string, success bool) map[string]any {
 		t.Helper()
-		result, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, verb, args)
-		if success && (status != bus.ModuleStatusOK || result["status"] != "ok") {
+		result, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, verb, args)
+		if success && (status != ring.ModuleStatusOK || result["status"] != "ok") {
 			t.Fatal(verb, result, status)
 		}
-		if !success && status == bus.ModuleStatusOK && result["status"] == "ok" {
+		if !success && status == ring.ModuleStatusOK && result["status"] == "ok" {
 			t.Fatal("unexpected success", verb, result)
 		}
 		return result

@@ -8,7 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
-static _Thread_local char g_session_override[64];
+static _Thread_local char g_session_override[128];
 static _Thread_local int g_session_drop;
 
 void session_id_refresh(void)
@@ -19,7 +19,7 @@ void session_id_refresh(void)
 
 const char *session_id(void)
 {
-   static _Thread_local char id[64];
+   static _Thread_local char id[128];
    if (g_session_override[0])
       return g_session_override;
    if (g_session_drop)

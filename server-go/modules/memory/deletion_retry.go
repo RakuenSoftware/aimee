@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type kbDeletion struct {
@@ -83,7 +83,7 @@ func (s *postgresDataStore) deleteKBVersion(ctx context.Context, id int64, autho
 
 // Retried destruction confirms the original commit without inventing a current
 // canonical version. It cannot erase a resurrected ID or reveal a hidden row.
-func (s *postgresDataStore) deleteKBIdempotent(ctx context.Context, r DataRequest, authority int, caller *bus.CommandContext, correlation string) (receipt *MemoryMutationReceipt, err error) {
+func (s *postgresDataStore) deleteKBIdempotent(ctx context.Context, r DataRequest, authority int, caller *ring.CommandContext, correlation string) (receipt *MemoryMutationReceipt, err error) {
 	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || r.Operation != "delete-as" || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.ValidFor(r.ID) {
 		return nil, errors.New("memory: invalid idempotent deletion")
 	}

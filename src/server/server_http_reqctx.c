@@ -11,8 +11,10 @@
 #include "aimee/core/connection/auth.h"
 #include "kb_identity_token.h"
 #include "request_context.h"
+#include "server_http_identity.h"
 #include "config.h"
 #include "runtime_secret.h"
+#include <aimee/workspace/module_api.h>
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK */
 #include <openssl/crypto.h>
 #include <pwd.h>
@@ -157,6 +159,9 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
    ctx.transport = is_tcp ? REQ_TRANSPORT_TCP : REQ_TRANSPORT_UDS;
    ctx.peer_uid = reqctx_peer_uid(fd, is_tcp);
    ctx.capabilities = caps;
+   ctx.vault_transport = server_http_identity_transport();
+   snprintf(ctx.vault_principal, sizeof ctx.vault_principal, "%s",
+            server_http_identity_principal());
    ctx.trusted = 0;
 
    http_header(buf, "Idempotency-Key", ctx.idempotency_key, sizeof(ctx.idempotency_key));
@@ -216,6 +221,14 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
          snprintf(ctx.source, sizeof(ctx.source), "%s", source);
       http_header(buf, "X-Aimee-Session-Key", ctx.session_key, sizeof(ctx.session_key));
    }
+
+   /* Not identity: a channel only says which of this caller's own processes
+    * runs the request's workspace ops, and it is a 128-bit name the CLI chose,
+    * so any authorized caller may set it for its own request. */
+   char channel[64] = "";
+   if (http_header(buf, "X-Aimee-Runner", channel, sizeof(channel)) &&
+       aimee_ws_runner_channel_valid(channel))
+      snprintf(ctx.runner_channel, sizeof(ctx.runner_channel), "%s", channel);
 
    request_context_capture_budget_header(&ctx, buf);
    request_context_set(&ctx);

@@ -5,13 +5,13 @@
 #include "kb_payload.h"
 #include "aimee.h"
 #include "artifacts.h"
-#include "../support/kb_store_runtime_config.h"
+#include "config.h"
 #include "pgvec_transport.h"
 
 #include "db_postgres.h"
 #include "cJSON.h"
 #include "kb_store_internal.h"
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -269,12 +269,6 @@ int kb_store_kb_documents_hll_sources_for_hash(const char *project, const char *
    }
    aimee_pg_finalize(st);
    return n;
-}
-
-int kb_store_kb_documents_fts_search(const char *project, const char *query, int64_t *ids,
-                                     double *scores, int max)
-{
-   return kb_store_kb_documents_fts_search_scoped(project, NULL, query, ids, scores, max);
 }
 
 int kb_store_kb_documents_fts_search_scoped(const char *project, const char *exclude_project,
@@ -581,26 +575,6 @@ void kb_store_kb_documents_delete_for_file(const char *project, const char *file
    aimee_pg_bind_text(st, "?2", file_path);
    (void)aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
-}
-
-int kb_store_kb_documents_delete_older_than(int days)
-{
-   if (days <= 0)
-      return 0;
-   void *conn = kb_store_conn();
-   if (!conn)
-      return 0;
-   static const char *sql = "SELECT kb_document_retention_reap(?1)";
-   char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return 0;
-   aimee_pg_bind_int(st, "?1", days);
-   int deleted = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      deleted = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
-   return deleted;
 }
 
 int kb_store_subject_erasure_begin(const char *request_id, const char *subject,

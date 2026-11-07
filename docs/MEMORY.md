@@ -51,8 +51,9 @@ for engine selection, optional cleanup, authoring and required CI. The
 ## Language and bus boundary
 
 The memory module, including its bus producer and consumer, must be pure Go.
-The existing bus in `src/core/event_bus` remains C. `server-go/bus` is the Go
-binding to that bus, not a replacement implementation. Server and KB use one
+The bus is the ouroboros ring, hosted in C by `src/modules/audit/obs_bus.c`. Go code
+attaches with the ring's pure-Go client (`github.com/RakuenSoftware/ouroboros-ring/go/ring`),
+not a replacement implementation. Server and KB use one
 shared Go memory implementation with placement-specific storage and permissions.
 
 External C hosts may retain transport callers and their protocol declarations.

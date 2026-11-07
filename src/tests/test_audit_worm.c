@@ -728,6 +728,96 @@ static void test_disk_full(void)
    puts("  test_disk_full: committed rows preserved; write failure and restart recovery verified");
 }
 
+static void archive_rollback_journal(const char *path)
+{
+   sqlite3 *db = NULL;
+   assert(sqlite3_open(path, &db) == SQLITE_OK);
+   assert(sqlite3_exec(db, "PRAGMA journal_mode=DELETE", NULL, NULL, NULL) == SQLITE_OK);
+   sqlite3_close(db);
+}
+
+static void test_restored_history_verification(void)
+{
+   char dir[512], path[600], err[256];
+   const char *previous_epoch = getenv("AIMEE_AUDIT_RECOVERY_EPOCH");
+   char *saved_epoch = previous_epoch ? strdup(previous_epoch) : NULL;
+   assert(!previous_epoch || saved_epoch);
+   assert(setenv("AIMEE_AUDIT_RECOVERY_EPOCH", "20261014", 1) == 0);
+   snprintf(dir, sizeof dir, "%s/audit", g_dir);
+   (void)mkdir(dir, 0700);
+   snprintf(path, sizeof path, "%s/worm-restored-20261014.db", dir);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   assert(audit_worm_init_at(path) == 0);
+   audit_worm_close();
+   archive_rollback_journal(path);
+   assert(chmod(path, 0444) == 0);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   assert(chmod(path, 0644) == 0);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("operator", "restore", "test.restored", "archive", "ok", "{}") == 0);
+   assert(audit_worm_checkpoint() == 0);
+   audit_worm_close();
+   archive_rollback_journal(path);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   assert(chmod(path, 0444) == 0);
+   long head = 0, checkpoint = 0;
+   assert(audit_worm_verify_restored_history(err, sizeof err, &head, &checkpoint) ==
+          AUDIT_WORM_VERIFY_GREEN);
+   assert(head == 2 && checkpoint == 2);
+   assert(setenv("AIMEE_AUDIT_RECOVERY_EPOCH", "20261015", 1) == 0);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   assert(setenv("AIMEE_AUDIT_RECOVERY_EPOCH", "../20261014", 1) == 0);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   assert(setenv("AIMEE_AUDIT_RECOVERY_EPOCH", "20261014", 1) == 0);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) ==
+          AUDIT_WORM_VERIFY_GREEN);
+   char key_path[512];
+   snprintf(key_path, sizeof key_path, "%s/.audit-chain-key", g_dir);
+   unsigned char original_key[32], changed_key[32];
+   FILE *key = fopen(key_path, "rb");
+   assert(key && fread(original_key, 1, sizeof original_key, key) == sizeof original_key);
+   fclose(key);
+   memcpy(changed_key, original_key, sizeof changed_key);
+   changed_key[0] ^= 1;
+   key = fopen(key_path, "wb");
+   assert(key && fwrite(changed_key, 1, sizeof changed_key, key) == sizeof changed_key);
+   fclose(key);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   key = fopen(key_path, "wb");
+   assert(key && fwrite(original_key, 1, sizeof original_key, key) == sizeof original_key);
+   fclose(key);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) ==
+          AUDIT_WORM_VERIFY_GREEN);
+   char sidecar[640];
+   snprintf(sidecar, sizeof sidecar, "%s-wal", path);
+   FILE *wal = fopen(sidecar, "wb");
+   assert(wal);
+   fclose(wal);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   assert(unlink(sidecar) == 0);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) ==
+          AUDIT_WORM_VERIFY_GREEN);
+   // Even a cached successful archive must fail closed after a content change.
+   assert(chmod(path, 0644) == 0);
+   sqlite3 *db = NULL;
+   assert(sqlite3_open(path, &db) == SQLITE_OK);
+   assert(sqlite3_exec(db,
+                       "DROP TRIGGER audit_event_no_update; UPDATE audit_event SET "
+                       "detail='tampered' WHERE seq=1",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   sqlite3_close(db);
+   assert(chmod(path, 0444) == 0);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   assert(unlink(path) == 0);
+   if (saved_epoch)
+   {
+      assert(setenv("AIMEE_AUDIT_RECOVERY_EPOCH", saved_epoch, 1) == 0);
+      free(saved_epoch);
+   }
+   else
+      assert(unsetenv("AIMEE_AUDIT_RECOVERY_EPOCH") == 0);
+}
+
 int main(int argc, char **argv)
 {
    if (argc == 2 && strcmp(argv[1], "--check-runtime") == 0)
@@ -757,6 +847,16 @@ int main(int argc, char **argv)
       puts("New recovery epoch seeded; historical continuity remains broken.");
       return 0;
    }
+   if (argc == 3 && strcmp(argv[1], "--checkpoint-file") == 0)
+   {
+      if (audit_worm_runtime_supported() != 0 || audit_worm_init_at(argv[2]) != 0 ||
+          audit_worm_verify_chain(NULL, 0) != 0 || audit_worm_checkpoint() != 0)
+         return 1;
+      audit_worm_close();
+      archive_rollback_journal(argv[2]);
+      puts("Archive head checkpointed now; original historical rows were retained.");
+      return 0;
+   }
    if (argc == 3 && strcmp(argv[1], "--verify-file") == 0)
    {
       char err[256] = "";
@@ -771,6 +871,7 @@ int main(int argc, char **argv)
       test_disk_full();
       return 0;
    }
+   test_restored_history_verification();
    test_health_snapshot_scope_and_bounds();
    test_dispatch_owner_crash();
    test_cross_engine_vector();

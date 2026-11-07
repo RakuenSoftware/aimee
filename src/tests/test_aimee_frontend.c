@@ -32,8 +32,109 @@ static const char *OPENAI =
     "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},"
     "\"required\":[\"path\"]}}}]}";
 
+static int refusal_emits;
+static void refusal_chat(void *context, const char *json)
+{
+   (void)context;
+   (void)json;
+   refusal_emits++;
+}
+static void refusal_sse(void *context, const char *event, const char *json)
+{
+   (void)context;
+   (void)event;
+   (void)json;
+   refusal_emits++;
+}
+static void unrepresentable_refusal(void)
+{
+   aimee_refusal_details_t details = {.category = "future_category",
+                                      .explanation = "Diagnostic only"};
+   aimee_response_t response = {.role = "assistant",
+                                .stop_reason = AIMEE_STOP_CONTENT_FILTER,
+                                .raw_stop_reason = "refusal",
+                                .refusal = &details};
+   char buffer[4096];
+   assert(!openai_frontend_render(&response));
+   assert(!responses_frontend_render(&response));
+   assert(aimee_openai_buffered_response(&response, "r", "model", 1, 0, buffer, sizeof(buffer)) <
+          0);
+   assert(aimee_openai_buffered_response(&response, "r", "model", 1, 1, buffer, sizeof(buffer)) <
+          0);
+   assert(aimee_openai_emit_chat_response(&response, "r", "model", 1, refusal_chat, NULL) < 0);
+   assert(aimee_openai_emit_responses_tail(&response, "r", "model", 1, refusal_sse, NULL) < 0);
+   assert(!refusal_emits && response.refusal == &details);
+   assert(!strcmp(response.refusal->category, "future_category"));
+   assert(!strcmp(response.refusal->explanation, "Diagnostic only"));
+   details.category = details.explanation = NULL;
+   assert(!openai_frontend_render(&response) && !responses_frontend_render(&response));
+   response.refusal = NULL;
+   cJSON *chat = openai_frontend_render(&response),
+         *responses = responses_frontend_render(&response);
+   assert(chat && responses); /* Legacy content_filter without details remains representable. */
+   cJSON_Delete(chat);
+   cJSON_Delete(responses);
+}
+
+static void test_unobserved_usage_projection(void)
+{
+   aimee_response_t response = {
+       .role = "assistant", .stop_reason = AIMEE_STOP_END_TURN, .usage_unobserved = 1};
+   cJSON *chat = openai_frontend_render(&response);
+   cJSON *responses = responses_frontend_render(&response);
+   assert(chat && responses);
+   assert(!cJSON_GetObjectItem(chat, "usage"));
+   assert(cJSON_IsNull(cJSON_GetObjectItem(responses, "usage")));
+   /* Anthropic requires numeric usage; it cannot truthfully render this state. */
+   assert(!anthropic_frontend_render(&response));
+   cJSON_Delete(chat);
+   cJSON_Delete(responses);
+   response.usage_unobserved = 0;
+   chat = openai_frontend_render(&response);
+   assert(cJSON_GetObjectItem(cJSON_GetObjectItem(chat, "usage"), "total_tokens")->valueint == 0);
+   cJSON_Delete(chat);
+   chat = anthropic_frontend_render(&response);
+   assert(chat);
+   cJSON_Delete(chat);
+}
+
+static void test_canonical_success_usage_and_truncation(void)
+{
+   aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "the answer"};
+   aimee_response_t response = {
+       .role = "assistant", .content = &text, .n_content = 1, .stop_reason = AIMEE_STOP_END_TURN};
+   response.usage_in = 100;
+   response.usage_out = 5;
+   response.usage_cache_read = 80;
+   cJSON *chat = openai_frontend_render(&response);
+   cJSON *reply = responses_frontend_render(&response);
+   assert(chat && reply);
+   const cJSON *usage = cJSON_GetObjectItem(reply, "usage");
+   assert(cJSON_GetObjectItem(usage, "total_tokens")->valueint == 105);
+   assert(cJSON_GetObjectItem(cJSON_GetObjectItem(usage, "input_tokens_details"), "cached_tokens")
+              ->valueint == 80);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(reply, "status")), "completed"));
+   cJSON_Delete(chat);
+   cJSON_Delete(reply);
+   response.stop_reason = AIMEE_STOP_MAX_TOKENS;
+   reply = responses_frontend_render(&response);
+   chat = openai_frontend_render(&response);
+   assert(reply && chat);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(reply, "status")), "incomplete"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(
+                      cJSON_GetObjectItem(reply, "incomplete_details"), "reason")),
+                  "max_output_tokens"));
+   const cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItem(chat, "choices"), 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(choice, "finish_reason")), "length"));
+   cJSON_Delete(chat);
+   cJSON_Delete(reply);
+}
+
 int main(void)
 {
+   test_canonical_success_usage_and_truncation();
+   test_unobserved_usage_projection();
+   unrepresentable_refusal();
    printf("aimee-frontend: ");
    char err[128];
 
@@ -155,6 +256,8 @@ int main(void)
    /* Responses render: output items (message + function_call) */
    cJSON *rresp = responses_frontend_render(&rr);
    assert(rresp);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(
+              cJSON_GetObjectItemCaseSensitive(rresp, "usage"), "total_tokens")) == 15);
    assert(strcmp(cJSON_GetObjectItem(rresp, "object")->valuestring, "response") == 0);
    assert(strcmp(cJSON_GetObjectItem(rresp, "status")->valuestring, "completed") == 0);
    cJSON *rout = cJSON_GetObjectItem(rresp, "output");
@@ -209,14 +312,9 @@ int main(void)
    cJSON_Delete(oj3);
    cJSON_Delete(rj3);
 
-   /* A Codex client sends provider-native tool TYPES alongside its function tools:
-    * custom, local_shell, web_search, image_generation. None carries a top-level
-    * `name`. Admitting them produced an IR tool with a NULL name, which reached the
-    * provider as tools[N].name = "" and made it reject the ENTIRE request
-    * (400 empty_string) -- every tool in the catalog lost, and the turn with it.
-    *
-    * Assert the shape, not a count that will drift: every parsed tool has a usable
-    * name, and the named function tool survives. */
+   /* Function, hosted and namespace catalogs have typed ownership. Unknown
+    * entries (including a nameless custom tool) must refuse at admission instead
+    * of hiding in a raw sidecar or becoming an empty function definition. */
    {
       static const char *MIXED =
           "{\"model\":\"m\",\"input\":[{\"type\":\"message\",\"role\":\"user\","
@@ -226,7 +324,6 @@ int main(void)
           "\"parameters\":{\"type\":\"object\"}},"
           "{\"type\":\"local_shell\"},"
           "{\"type\":\"web_search\"},"
-          "{\"type\":\"custom\",\"description\":\"no name here\"},"
           /* The shape a real Codex client sends for an MCP server: a named group
            * whose nested `tools` hold the callable functions. Flattening this lost
            * every tool inside it. */
@@ -240,9 +337,14 @@ int main(void)
       aimee_request_t mi;
       assert(responses_frontend_parse(mj, &mi, err, sizeof err) == 0);
 
-      /* Every entry is CARRIED (the sidecar keeps the ones the IR does not model),
-       * so nothing a client sent is silently lost. */
-      assert(mi.n_tools == 5);
+      /* Every admitted entry has a typed catalog representation. */
+      assert(mi.n_tools == 4);
+      assert(mi.tools[0].kind == AIMEE_TOOL_FUNCTION);
+      assert(mi.tools[1].kind == AIMEE_TOOL_HOSTED &&
+             !strcmp(mi.tools[1].native_type, "local_shell"));
+      assert(mi.tools[2].kind == AIMEE_TOOL_HOSTED &&
+             !strcmp(mi.tools[2].native_type, "web_search"));
+      assert(mi.tools[3].kind == AIMEE_TOOL_NAMESPACE && mi.tools[3].n_children == 2);
       for (int i = 0; i < mi.n_tools; i++)
          assert(mi.tools[i].raw != NULL);
 
@@ -253,7 +355,7 @@ int main(void)
       cJSON *rendered = responses_backend_build(&mi);
       assert(rendered);
       cJSON *rt = cJSON_GetObjectItemCaseSensitive(rendered, "tools");
-      assert(cJSON_IsArray(rt) && cJSON_GetArraySize(rt) == 5);
+      assert(cJSON_IsArray(rt) && cJSON_GetArraySize(rt) == 4);
       int saw_ns = 0, saw_named_fn = 0, saw_search = 0;
       cJSON *e = NULL;
       cJSON_ArrayForEach(e, rt)
@@ -278,6 +380,23 @@ int main(void)
       cJSON_Delete(rendered);
       aimee_request_free(&mi);
       cJSON_Delete(mj);
+   }
+
+   {
+      const char *invalid[] = {
+          "{\"type\":\"custom\",\"description\":\"no name here\"}",
+          "{\"type\":\"future_unknown_tool\"}",
+          "{\"type\":\"function\",\"name\":\"\",\"parameters\":{\"type\":\"object\"}}"};
+      for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+      {
+         cJSON *native = cJSON_Parse("{\"input\":\"hi\",\"tools\":[]}");
+         assert(native && cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(native, "tools"),
+                                               cJSON_Parse(invalid[i])));
+         aimee_request_t request = {0};
+         assert(responses_frontend_parse(native, &request, err, sizeof err) != 0);
+         aimee_request_free(&request);
+         cJSON_Delete(native);
+      }
    }
 
    printf("ok\n");

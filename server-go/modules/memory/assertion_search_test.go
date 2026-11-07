@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -25,26 +25,26 @@ func TestAssertionTimestampsAndBoundary(t *testing.T) {
 	}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, nil))
 	for _, verb := range []string{"search_assertions", "assemble_typed_context"} {
-		frame, _ := bus.EncodeCommand(verb, []byte(`{"query":"x","include_all":true}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand(verb, []byte(`{"query":"x","include_all":true}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("plugin gained host evidence authority", verb, status)
 		}
 	}
 	for _, raw := range []string{`{"operation":"assertion-search","query":""}`, `{"operation":"assertion-search","query":"x","max_hops":3}`, `{"operation":"assertion-search","query":"x","include_historical":1}`, `{"operation":"assertion-search","query":"x","valid_at":null}`, `{"operation":"assertion-search","query":"x","include_historical":null}`} {
-		public, _ := bus.EncodeCommand("search_assertions", []byte(raw))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, public); status != bus.ModuleStatusInvalidRequest {
+		public, _ := ring.EncodeCommand("search_assertions", []byte(raw))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, public); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("public validation", raw, status)
 		}
-		frame, _ := bus.EncodeCommand("runtime", []byte(raw))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", []byte(raw))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}
 	}
-	frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"assertion-search","query":"x"}`))
-	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+	frame, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"assertion-search","query":"x"}`))
+	if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal(status)
 	}
-	if _, status := NewHandler(nil, WithDataStore(PlacementServer, nil))(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := NewHandler(nil, WithDataStore(PlacementServer, nil))(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatal(status)
 	}
 	result := runHostRuntime(t, handler, `{"operation":"assertion-search","query":"x","valid_at":"2026-02-30T00:00:00Z"}`)
@@ -105,7 +105,7 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	args := map[string]any{"operation": "assertion-search", "query": "AssertionAtlas", "valid_at": "2026-02-01T00:00:00Z", "believed_at": "2026-02-02T00:00:00Z"}
 	call := func() map[string]any {
 		raw, _ := json.Marshal(args)
-		result := runPublicCommand(t, clientForHandler(t, func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+		result := runPublicCommand(t, clientForHandler(t, func(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 			// The KB RPC host invokes these fixed-owner data operations.
 			invocation.PrincipalRef = 0
 			return handler(invocation, frame)
@@ -247,9 +247,9 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	delete(args, "max_hops")
 	// Canonical numeric tokens and the exact decimal ID survive serialization.
 	raw, _ := json.Marshal(args)
-	frame, _ := bus.EncodeCommand("search_assertions", raw)
-	encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-	if status != bus.ModuleStatusOK || !strings.Contains(string(encoded), `"assertion_id":9007199254742002`) {
+	frame, _ := ring.EncodeCommand("search_assertions", raw)
+	encoded, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+	if status != ring.ModuleStatusOK || !strings.Contains(string(encoded), `"assertion_id":9007199254742002`) {
 		t.Fatal(string(encoded), status)
 	}
 	// Scope filtering is deny-dominant across mixed visible/hidden evidence.
@@ -519,9 +519,9 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	// Required SQL failures cannot masquerade as successful empty assertions.
 	exec(`SAVEPOINT assertion_denied; RESET ROLE; REVOKE SELECT ON fact_evidence FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	raw, _ = json.Marshal(args)
-	frame, _ = bus.EncodeCommand("search_assertions", raw)
-	failed, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-	if status != bus.ModuleStatusOK || !strings.Contains(string(failed), `"status":"degraded"`) {
+	frame, _ = ring.EncodeCommand("search_assertions", raw)
+	failed, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+	if status != ring.ModuleStatusOK || !strings.Contains(string(failed), `"status":"degraded"`) {
 		t.Fatal(status, string(failed))
 	}
 	if got := call(); got["status"] != "degraded" {

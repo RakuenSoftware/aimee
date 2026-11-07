@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Trace collection and its durable cursor are separate from pattern detection.
@@ -122,7 +122,7 @@ func tracePatterns(rows []traceObservation) ([]tracePattern, error) {
 	return patterns, nil
 }
 
-func handleTracePatterns(args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleTracePatterns(args commandArgs) ([]byte, ring.ModuleStatus) {
 	var rows []traceObservation
 	if len(args["traces"]) > 1<<20 || json.Unmarshal(args["traces"], &rows) != nil || rows == nil || len(rows) > 512 {
 		return commandResult(commandError("invalid_argument", "trace pattern analysis requires at most 512 observations within one MiB"))

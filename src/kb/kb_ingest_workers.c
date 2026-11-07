@@ -17,6 +17,7 @@
 
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 #include "aimee.h"
 #include "config.h"
 #include "kb.h"
@@ -50,12 +51,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#ifndef AIMEE_WINDOWS
 #include <sched.h>
 #include <unistd.h>
 #include <poll.h>
 #include <sys/resource.h>
-#endif
 
 /* Fallback kb_embeddings dimension when config.embedder_dims is unset; the
  * default embedder is pplx-embed-v1-4b (2560-dim). Advisory only — the real
@@ -283,10 +282,8 @@ static int kbiw_claim_and_process(void)
 static void *kbiw_worker_thread(void *arg)
 {
    kb_service_ctx_t *ctx = (kb_service_ctx_t *)arg;
-#ifndef AIMEE_WINDOWS
    /* Yield CPU priority to user-facing socket threads. */
    setpriority(PRIO_PROCESS, 0, 5);
-#endif
    for (;;)
    {
       pthread_mutex_lock(&ctx->ingest_mu);
@@ -360,9 +357,7 @@ static void *kbiw_timer_thread(void *arg)
          if (ctx->ingest_stop)
             return NULL;
          int chunk = (interval_secs - slept > 5) ? 5 : (interval_secs - slept);
-#ifndef AIMEE_WINDOWS
          sleep((unsigned int)chunk);
-#endif
          slept += chunk;
       }
       if (ctx->ingest_stop)
@@ -376,7 +371,6 @@ static void *kbiw_timer_thread(void *arg)
 /* inotify watch thread (Linux only)                                   */
 /* ------------------------------------------------------------------ */
 
-#ifdef __linux__
 #include <sys/inotify.h>
 
 static void *kbiw_watch_thread(void *arg)
@@ -486,13 +480,6 @@ static void *kbiw_watch_thread(void *arg)
    close(ifd);
    return NULL;
 }
-#else
-static void *kbiw_watch_thread(void *arg)
-{
-   (void)arg;
-   return NULL;
-}
-#endif
 
 /* CPUs this process may actually run on.
  *
@@ -504,7 +491,6 @@ static void *kbiw_watch_thread(void *arg)
  * is what nproc uses and what the scheduler will honour. */
 static long kbiw_usable_cpus(void)
 {
-#ifdef __linux__
    cpu_set_t set;
    CPU_ZERO(&set);
    if (sched_getaffinity(0, sizeof(set), &set) == 0)
@@ -513,7 +499,6 @@ static long kbiw_usable_cpus(void)
       if (n > 0)
          return (long)n;
    }
-#endif
    long n = sysconf(_SC_NPROCESSORS_ONLN);
    return n > 0 ? n : 1;
 }
@@ -801,8 +786,7 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
       (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
                                                     &embed_0_reply);
       cJSON_Delete(embed_0_args);
-      int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
-                               EMBED_MAX_DIM);
+      int dim = embed_reply_vector(embed_0_reply, vec, EMBED_MAX_DIM);
       cJSON_Delete(embed_0_reply);
       if (dim > 0)
       {
@@ -1011,8 +995,7 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
       (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_1_args,
                                                     &embed_1_reply);
       cJSON_Delete(embed_1_args);
-      int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), vec,
-                               EMBED_MAX_DIM);
+      int dim = embed_reply_vector(embed_1_reply, vec, EMBED_MAX_DIM);
       cJSON_Delete(embed_1_reply);
       /* Payload reconstruction reads kb_documents, so it needs a fresh short
        * project scope after the embedder round-trip. The fenced helper opens

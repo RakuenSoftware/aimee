@@ -17,19 +17,28 @@ typedef struct
    } flags[V1_MAX_FLAGS];
    int flag_count;
 } cli_args_t;
+/* Consumes marshalled request; returns only a complete typed MCP receipt.
+ * Native child credentials only; no alternate/global transport fallback. */
+int cli_native_bridge_enabled(void);
+char *cli_native_bridge_endpoint(void); /* Owned, explicit loopback only. */
+typedef int (*cli_native_finish_fn)(const cli_v1_route_t *, cJSON *, int, int, int, char **);
+int cli_native_bridge_forward(cJSON *request, int json_output, int argc, char **argv,
+                              cli_native_finish_fn finish);
 int cli_v1_args_request_json(int argc, char **argv);
-int cli_agent_probe_response_is_failure(cJSON *resp);
+int cli_agent_probe_response_exit_code(cJSON *resp, int argc, char **argv);
 int cli_index_investigate_response_is_failure(cJSON *resp);
 char *cli_index_worktree_root(const char *method, const cJSON *req);
-void cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON *response);
-void cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root,
-                             char *out, size_t out_len);
+int cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON *response);
+int cli_ws_output_quiet_bind(int quiet);
+int cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root, char *out,
+                            size_t out_len);
 void __attribute__((unused)) cli_v1_sleep_ms(int ms);
 const char *cli_v1_run_failure_reason(cJSON *result, cJSON *snapshot);
 int git_verify_response_is_failure(cJSON *resp);
 double json_double(cJSON *obj, const char *key, double def);
 int json_int(cJSON *obj, const char *key, int def);
 const char *json_str(cJSON *obj, const char *key);
+cJSON *marshal_model_generate(int argc, char **argv);
 cJSON *marshal_audit_fidelity(int argc, char **argv);
 cJSON *marshal_audit_provenance(int argc, char **argv);
 cJSON *marshal_audit_trace(int argc, char **argv);
@@ -81,6 +90,8 @@ cJSON *marshal_kb_status(int argc, char **argv);
 cJSON *marshal_kb_update(int argc, char **argv);
 cJSON *marshal_mcp_recheck(int argc, char **argv);
 cJSON *marshal_tool_call(int argc, char **argv);
+cJSON *marshal_agent_args(const char *method, int argc, char **argv);
+cJSON *cli_workspace_finalize_root(cJSON *req, int argc, char **argv, const char *root_arg);
 cJSON *marshal_workspace_add(int argc, char **argv);
 cJSON *marshal_workspace_prepare(int argc, char **argv);
 cJSON *marshal_memory_benchmark(int argc, char **argv);

@@ -12,7 +12,7 @@ package workflows
 import (
 	"encoding/json"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type VerdictKind int
@@ -82,18 +82,6 @@ func effectiveKind(v Verdict, artifactHash string) VerdictKind {
 		return v.Kind
 	}
 	return VerdictRequestChanges
-}
-
-// EffectiveQuorum is max(requested, nreq, 2) -- the single-lens floor.
-func EffectiveQuorum(requested, nreq int) int {
-	q := requested
-	if q < nreq {
-		q = nreq
-	}
-	if q < 2 {
-		q = 2
-	}
-	return q
 }
 
 // GateDecide returns the ruling and a human-readable reason.
@@ -212,18 +200,18 @@ func decodeGateRequest(request []byte) (GateDecideRequest, bool) {
 // The ruling is fail-closed, so a request we cannot read is refused outright
 // rather than answered with a default: an invented "approve" here would be a
 // gate bypass, and an invented "changes" would silently loop a healthy run.
-func handleGateDecide(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleGateDecide(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	decoded, ok := decodeGateRequest(request)
 	if !ok {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	encoded, err := json.Marshal(GateDecide(decoded.Verdicts, decoded.Required,
 		decoded.Quorum, decoded.ArtifactHash))
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }

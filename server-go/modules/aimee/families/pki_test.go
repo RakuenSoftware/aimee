@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // --- a PKI-shaped fake --------------------------------------------------------
@@ -177,8 +177,8 @@ func pkiCall(t *testing.T, db store.DB, op uint32, fields []string) (uint32, []s
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	response, status := PKI.Handler(db)(bus.ModuleInvocation{StageID: StagePKI}, frame)
-	if status != bus.ModuleStatusOK {
+	response, status := PKI.Handler(db)(ring.ModuleInvocation{StageID: StagePKI}, frame)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("wire status = %v, want OK", status)
 	}
 	inBand, cells, err := wire.DecodeFields(response)

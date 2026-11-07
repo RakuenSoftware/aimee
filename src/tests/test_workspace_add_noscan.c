@@ -120,9 +120,70 @@ static void test_absent_coordinates_send_nothing(void)
    printf("  absent --remote/--head send nothing\n");
 }
 
+/* Relative paths belong to the CLI process, even when the HTTP/UDS server
+ * runs elsewhere. Keep both the REST field and socket argv carrier identical. */
+static void test_relative_root_uses_client_cwd(void)
+{
+   char cwd[4096], expected[8192];
+   assert(getcwd(cwd, sizeof cwd));
+   const char *relative[] = {".", "../sibling with spaces", "not-created-yet"};
+   for (int i = 0; i < 3; i++)
+   {
+      snprintf(expected, sizeof expected, "%s/%s", cwd, relative[i]);
+      char *argv[] = {"--provider", "mirror",        (char *)relative[i],
+                      "--remote",   "git@example:r", "--no-scan"};
+      cJSON *req = marshal(6, argv);
+      assert(
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "root")), expected));
+      const cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "args");
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(args, 2)), expected));
+      assert(!strcmp(argv[2], relative[i]));
+      assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(req, "scan")));
+      cJSON_Delete(req);
+   }
+   char *argv[] = {"."};
+   cJSON *prepared = marshal_workspace_prepare(1, argv);
+   assert(prepared && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(prepared, "prepare")));
+   snprintf(expected, sizeof expected, "%s/.", cwd);
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(prepared, "root")), expected));
+   cJSON_Delete(prepared);
+   puts("  client-relative add/prepare roots agree across REST and argv carriers");
+}
+
+static void test_absolute_virtual_roots_are_preserved(void)
+{
+   char *paths[] = {"/not-created/virtual/root", "C:\\client\\virtual"};
+   for (int i = 0; i < 2; i++)
+   {
+      char *argv[] = {paths[i], "--provider", "detached"};
+      cJSON *req = marshal(3, argv);
+      assert(
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "root")), paths[i]));
+      assert(!strcmp(cJSON_GetStringValue(
+                         cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(req, "args"), 0)),
+                     paths[i]));
+      cJSON_Delete(req);
+   }
+   puts("  absolute virtual detached roots retain client spelling");
+}
+
+static void test_overlong_relative_root_refuses(void)
+{
+   char path[8192];
+   memset(path, 'a', sizeof path - 1);
+   path[sizeof path - 1] = 0;
+   char *argv[] = {path};
+   assert(!marshal_workspace_add(1, argv));
+   puts("  unrepresentable client-relative root refuses before dispatch");
+}
+
 int main(void)
 {
    printf("workspace add --no-scan:\n");
+   test_relative_root_uses_client_cwd();
+   test_absolute_virtual_roots_are_preserved();
+   test_overlong_relative_root_refuses();
    test_no_scan_sets_scan_false();
    test_default_sends_no_scan_field();
    test_no_scan_composes_with_provider();

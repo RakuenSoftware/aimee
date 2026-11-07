@@ -11,9 +11,6 @@
  * unlisted alias resolves to itself, which is what the module does; an unlisted
  * role is not built in, which is also what the module does. Nothing here decides
  * either.
- *
- * Do not link this alongside delegate_role_policy_stub.c: that one REPLACES the
- * seam rather than filling it, and the two would collide.
  */
 
 #include "delegate_role_seam_stub.h"
@@ -28,20 +25,20 @@ static const struct
    const char *alias;
    const char *canonical;
 } k_aliases[] = {
-    {"implement", "code"},          {"build", "code"},
-    {"reviewer", "review"},         {"verifier", "validate"},
-    {"test", "validate"},           {"check", "validate"},
-    {"evaluate", "validate"},       {"evaluate-optimize", "validate"},
-    {"inspect", "diagnose"},        {"research", "execute"},
-    {"enforce", "execute"},         {"recall", "search"},
-    {"synthesize", "summarize"},    {"rank-fuse", "reason"},
-    {"classify-score", "reason"},   {"planner", "plan"},
+    {"implement", "code"},        {"build", "code"},
+    {"reviewer", "review"},       {"verifier", "validate"},
+    {"test", "validate"},         {"check", "validate"},
+    {"evaluate", "validate"},     {"evaluate-optimize", "validate"},
+    {"inspect", "diagnose"},      {"research", "execute"},
+    {"enforce", "execute"},       {"recall", "search"},
+    {"synthesize", "summarize"},  {"rank-fuse", "reason"},
+    {"classify-score", "reason"}, {"planner", "plan"},
     {"planning", "plan"},
 };
 
 static const char *const k_builtin_roles[] = {
-    "review",  "validate", "diagnose",   "code",       "refactor", "explain", "draft",  "execute",
-    "summarize", "format", "search",     "reason",     "plan",     "continuity", "beat-check"};
+    "review",    "validate", "diagnose", "code",   "refactor", "explain",    "draft",     "execute",
+    "summarize", "format",   "search",   "reason", "plan",     "continuity", "beat-check"};
 
 static const char *canonical_of(const char *role)
 {
@@ -55,7 +52,11 @@ static int seam_canonicalize(const char *role, char *out, size_t cap)
 {
    if (!role || !role[0] || !out)
       return -1;
-   snprintf(out, cap, "%s", canonical_of(role));
+   const char *canonical = canonical_of(role);
+   size_t length = strlen(canonical);
+   if (length >= cap)
+      return -1;
+   memmove(out, canonical, length + 1);
    return 0;
 }
 

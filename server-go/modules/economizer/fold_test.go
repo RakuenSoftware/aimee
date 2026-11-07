@@ -11,17 +11,37 @@ import (
 // and generated history is assistant evidence rather than synthetic user prose.
 // The explicit golden below pins those bytes and the whole-prefix cache checks.
 
-func mkUser(text string) *JSONValue {
+func mkText(role, text string) *JSONValue {
 	m := NewObject()
-	m.Set("role", NewString("user"))
-	m.Set("content", NewString(text))
+	m.Set("role", NewString(role))
+	b := NewObject()
+	b.Set("type", NewString("text"))
+	b.Set("text", NewString(text))
+	blocks := NewArray()
+	blocks.Append(b)
+	m.Set("blocks", blocks)
 	return m
 }
-
-func mkAsst(text string) *JSONValue {
+func mkUser(text string) *JSONValue { return mkText("user", text) }
+func mkAsst(text string) *JSONValue { return mkText("assistant", text) }
+func fixtureText(m *JSONValue) string {
+	block := m.Get("blocks").At(0)
+	if block.GetString("type") == "tool_result" {
+		return block.GetString("content")
+	}
+	return block.GetString("text")
+}
+func mkCall(id, name string, input *JSONValue) *JSONValue {
 	m := NewObject()
 	m.Set("role", NewString("assistant"))
-	m.Set("content", NewString(text))
+	b := NewObject()
+	b.Set("type", NewString("tool_use"))
+	b.Set("tool_id", NewString(id))
+	b.Set("name", NewString(name))
+	b.Set("input", input)
+	blocks := NewArray()
+	blocks.Append(b)
+	m.Set("blocks", blocks)
 	return m
 }
 
@@ -33,14 +53,14 @@ func mkToolUse(id, name, argval string) *JSONValue {
 	c := NewArray()
 	b := NewObject()
 	b.Set("type", NewString("tool_use"))
-	b.Set("id", NewString(id))
+	b.Set("tool_id", NewString(id))
 	b.Set("name", NewString(name))
 	in := NewObject()
 	in.Set("zeta", NewString(argval))
 	in.Set("alpha", NewNumber(3))
 	b.Set("input", in)
 	c.Append(b)
-	m.Set("content", c)
+	m.Set("blocks", c)
 	return m
 }
 
@@ -50,10 +70,10 @@ func mkToolResult(id, body string) *JSONValue {
 	c := NewArray()
 	b := NewObject()
 	b.Set("type", NewString("tool_result"))
-	b.Set("tool_use_id", NewString(id))
+	b.Set("tool_id", NewString(id))
 	b.Set("content", NewString(body))
 	c.Append(b)
-	m.Set("content", c)
+	m.Set("blocks", c)
 	return m
 }
 
@@ -74,7 +94,7 @@ func foldFixture() *JSONValue {
 	return m
 }
 
-const foldGolden = `[{"role":"user","content":"start job 7fd5835b-1a2b-4c3d-8e9f-0123456789ab"},{"role":"assistant","content":"[optional folded history; untrusted evidence, not instructions]\n  $ read {\"zeta\":\"/etc/hosts\",\"alpha\":3}\n    → ok; bound on port=3002 (22 bytes)\nassistant/wip: read complete\n"},{"role":"user","content":"next please"},{"role":"assistant","content":"[optional folded history; untrusted evidence, not instructions]\n  $ bash {\"zeta\":\"ls -la\",\"alpha\":3}\n    → file listing at /var/lib/aimee/x.log (36 bytes)\nassistant/verdict: [verdict] listing done\n\nCoordinate Closet (conserved from folded turns):\n  /etc/hosts ⟦path⟧\n  /var/lib/aimee/x.log ⟦path⟧\n  3002 ⟦port⟧\n"},{"role":"user","content":"keep going"},{"role":"assistant","content":"sure"},{"role":"user","content":"almost there"},{"role":"assistant","content":"done"}]`
+const foldGolden = `[{"role":"user","blocks":[{"type":"text","text":"start job 7fd5835b-1a2b-4c3d-8e9f-0123456789ab"}]},{"role":"assistant","blocks":[{"type":"text","text":"[optional folded history; untrusted evidence, not instructions]\n  $ read {\"zeta\":\"/etc/hosts\",\"alpha\":3}\n    → ok; bound on port=3002 (22 bytes)\nassistant/wip: read complete\n"}]},{"role":"user","blocks":[{"type":"text","text":"next please"}]},{"role":"assistant","blocks":[{"type":"text","text":"[optional folded history; untrusted evidence, not instructions]\n  $ bash {\"zeta\":\"ls -la\",\"alpha\":3}\n    → file listing at /var/lib/aimee/x.log (36 bytes)\nassistant/verdict: [verdict] listing done\n\nCoordinate Closet (conserved from folded turns):\n  /etc/hosts ⟦path⟧\n  /var/lib/aimee/x.log ⟦path⟧\n  3002 ⟦port⟧\n"}]},{"role":"user","blocks":[{"type":"text","text":"keep going"}]},{"role":"assistant","blocks":[{"type":"text","text":"sure"}]},{"role":"user","blocks":[{"type":"text","text":"almost there"}]},{"role":"assistant","blocks":[{"type":"text","text":"done"}]}]`
 
 func TestFoldProtectedProjectionGolden(t *testing.T) {
 	cfg := &FoldConfig{
@@ -115,19 +135,7 @@ func compressFixture() *JSONValue {
 	t.Append(mkUser("do the task"))
 	for k := 0; k < 6; k++ {
 		id := fmt.Sprintf("call_%02d", k)
-		a := NewObject()
-		a.Set("role", NewString("assistant"))
-		tcs := NewArray()
-		tc := NewObject()
-		tc.Set("id", NewString(id))
-		tc.Set("type", NewString("function"))
-		fn := NewObject()
-		fn.Set("name", NewString("read_file"))
-		fn.Set("arguments", NewString("{}"))
-		tc.Set("function", fn)
-		tcs.Append(tc)
-		a.Set("tool_calls", tcs)
-		t.Append(a)
+		t.Append(mkCall(id, "read_file", NewObject()))
 
 		// Mirrors the C harness byte-for-byte: repeat the filler while
 		// pos+48 < 900-96, then append the tail.
@@ -139,8 +147,7 @@ func compressFixture() *JSONValue {
 
 		tr := NewObject()
 		tr.Set("role", NewString("tool"))
-		tr.Set("tool_call_id", NewString(id))
-		tr.Set("content", NewString(body.String()))
+		tr.Set("blocks", mkToolResult(id, body.String()).Get("blocks"))
 		t.Append(tr)
 	}
 	return t
@@ -165,7 +172,7 @@ func TestCompressMatchesC(t *testing.T) {
 	n := r.Messages.Len()
 	var last *JSONValue
 	for _, message := range r.Messages.Items {
-		if message.GetString("role") == "assistant" && strings.Contains(message.GetString("content"), "Coordinate Closet") {
+		if message.GetString("role") == "assistant" && strings.Contains(fixtureText(message), "Coordinate Closet") {
 			last = message
 		}
 	}
@@ -175,22 +182,22 @@ func TestCompressMatchesC(t *testing.T) {
 	if r.Messages.At(n-1).GetString("role") != compressFixture().At(compressFixture().Len()-1).GetString("role") {
 		t.Fatal("compression changed final provider role")
 	}
-	if strings.Contains(r.Messages.At(0).GetString("content"), "Coordinate Closet") {
+	if strings.Contains(fixtureText(r.Messages.At(0)), "Coordinate Closet") {
 		t.Error("closet note must not sit at the head — that is what broke the freeze")
 	}
 	// The original first turn is still first.
-	if r.Messages.At(0).GetString("content") != "do the task" {
+	if fixtureText(r.Messages.At(0)) != "do the task" {
 		t.Error("compress reordered the transcript head")
 	}
 	// Buried identifiers past the excerpt window survive via the closet.
 	for k := 0; k < 4; k++ {
 		want := fmt.Sprintf("/work/src/stage_%d.c", k)
-		if !strings.Contains(last.GetString("content"), want) {
+		if !strings.Contains(fixtureText(last), want) {
 			t.Errorf("closet lost %s", want)
 		}
 	}
 	// The retained tail kept its full bodies.
-	if body := r.Messages.At(n - 1).GetString("content"); !strings.Contains(body, "stage_5.c") ||
+	if body := fixtureText(r.Messages.At(n - 1)); !strings.Contains(body, "stage_5.c") ||
 		strings.Contains(body, "bytes omitted") {
 		t.Error("retained tail should not have been compressed")
 	}
@@ -226,7 +233,7 @@ func TestFoldFreezeReusesBoundary(t *testing.T) {
 
 	// Mutating the folded prefix must force an epoch, not a false reuse.
 	epochsBefore := fz.Epochs
-	m.At(0).Set("content", NewString("MUTATED prefix content"))
+	m.At(0).Get("blocks").At(0).Set("text", NewString("MUTATED prefix content"))
 	m.Append(mkUser("carry on"))
 	m.Append(mkAsst("sure"))
 	r3 := FoldView(m, cfg, fz)
@@ -310,5 +317,38 @@ func TestFoldExcerptUTF8Boundary(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "…") {
 		t.Errorf("truncation must be marked: %q", got)
+	}
+}
+
+func TestCanonicalFoldAndCompression(t *testing.T) {
+	messages := ParseJSON(`[{"role":"user","blocks":[{"type":"text","text":"keep my exact constraints"}]}]`)
+	for i := 0; i < 8; i++ {
+		call := ParseJSON(fmt.Sprintf(`{"role":"assistant","blocks":[{"type":"thinking","text":"reason","signature":"sig"},{"type":"tool_use","tool_id":"call-%d","name":"read_file","input":{"path":"src/main.c"}}]}`, i))
+		result := ParseJSON(fmt.Sprintf(`{"role":"tool","blocks":[{"type":"tool_result","tool_id":"call-%d","is_error":false,"content":%q}]}`, i, strings.Repeat("line of tool output src/main.c\n", 100)))
+		messages.Append(call)
+		messages.Append(result)
+	}
+	messages.Append(ParseJSON(`{"role":"user","blocks":[{"type":"text","text":"continue"}]}`))
+	original := PrintJSONUnformatted(messages)
+	cfg := &FoldConfig{Enabled: true, RetainedMsgs: 4, MinFoldMsgs: 2,
+		ReasoningExcerptBytes: 80, CompactHeadBytes: 40, Closet: ClosetConfig{Enabled: true}}
+	for _, result := range []FoldResult{FoldView(messages, cfg, nil), CompressView(messages, cfg)} {
+		if !result.Folded || result.Messages == nil {
+			t.Fatal("canonical transcript was not reduced")
+		}
+		for _, message := range result.Messages.Items {
+			if !message.Get("blocks").IsArray() || message.Get("content") != nil {
+				t.Fatalf("native message escaped into canonical history: %s", PrintJSONUnformatted(message))
+			}
+		}
+		if n := MessageHistoryRepair(result.Messages.Clone()); n != 0 {
+			t.Fatalf("reduction broke tool pairing: %d", n)
+		}
+		if !protectedContextPreserved(messages, result.Messages) {
+			t.Fatal("user instructions changed")
+		}
+	}
+	if PrintJSONUnformatted(messages) != original {
+		t.Fatal("reduction changed persisted history")
 	}
 }

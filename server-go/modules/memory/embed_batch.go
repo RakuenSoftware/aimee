@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Loaded batch embedders need more headroom than single-text inference.
@@ -26,7 +26,8 @@ func embedHTTPTimeout() time.Duration {
 }
 
 // EmbedBatch makes one request and publishes no vectors unless every row has
-// the requested width. Non-HTTP embedders use the caller's single-text fallback.
+// one nonzero width within MaxDim. Non-HTTP embedders use the caller's
+// single-text fallback.
 func EmbedBatch(ctx context.Context, trace uint64, executor egress.Executor, request EmbedRequest) EmbedResponse {
 	if !EmbedIsHTTP(request.BaseURL) || request.MaxDim <= 0 || len(request.Texts) == 0 {
 		return EmbedResponse{Error: "embed: invalid batch request"}
@@ -51,7 +52,7 @@ func EmbedBatch(ctx context.Context, trace uint64, executor egress.Executor, req
 	response, err := executor.Do(ctx, trace, egress.HTTPRequest{Request: egress.Request{
 		TargetURL: endpoint, Purpose: "embedding", Method: "POST", RequestSHA256: egress.RequestDigest("POST", endpoint, body, false)},
 		Headers: map[string]string{"Content-Type": "application/json"}, Body: body,
-		MaxResponseBytes: int64(bus.ModuleMessageMaxBody) - 12, TimeoutMS: embedHTTPTimeout().Milliseconds()})
+		MaxResponseBytes: int64(ring.ModuleMessageMaxBody) - 12, TimeoutMS: embedHTTPTimeout().Milliseconds()})
 	fail := func(message string) EmbedResponse { breaker.reportFailure(now); return EmbedResponse{Error: message} }
 	if err != nil {
 		return fail("embed: " + err.Error())
@@ -68,8 +69,9 @@ func EmbedBatch(ctx context.Context, trace uint64, executor egress.Executor, req
 		return fail("embed: invalid batch row count")
 	}
 	vectors := make([][]float32, len(raw))
+	dim := len(raw[0])
 	for i, row := range raw {
-		if len(row) != request.MaxDim {
+		if dim == 0 || dim > request.MaxDim || len(row) != dim {
 			return fail("embed: invalid batch vector width")
 		}
 		vectors[i] = make([]float32, len(row))
@@ -85,7 +87,7 @@ func EmbedBatch(ctx context.Context, trace uint64, executor egress.Executor, req
 		}
 	}
 	breaker.reportSuccess(now)
-	return EmbedResponse{Vectors: vectors, Dim: request.MaxDim}
+	return EmbedResponse{Vectors: vectors, Dim: dim}
 }
 
 // EmbedDimension owns the configured program's --dim protocol as well as the

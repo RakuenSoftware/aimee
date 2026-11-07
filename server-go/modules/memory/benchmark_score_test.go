@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -43,11 +43,11 @@ func TestBenchmarkScoreUsesOwnerRetrieval(t *testing.T) {
 			t.Fatal("support relevance cap or duplicate semantics changed", got)
 		}
 		s.searchErr = errors.New("index unavailable")
-		frame, _ := bus.EncodeCommand("runtime", []byte(args))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand("runtime", []byte(args))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK {
 			t.Fatal("failed retrieval reported as zero score")
 		}
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("peer obtained host-only evaluation", status)
 		}
 		before := s.searched
@@ -57,8 +57,8 @@ func TestBenchmarkScoreUsesOwnerRetrieval(t *testing.T) {
 			strings.Replace(args, `["9007199254740993"]`, `["9223372036854775808"]`, 1),
 			strings.Replace(args, `["9007199254740993"]`, `[`+strings.Repeat(`"1",`, 128)+`"1"]`, 1),
 		} {
-			frame, _ := bus.EncodeCommand("runtime", []byte(bad))
-			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+			frame, _ := ring.EncodeCommand("runtime", []byte(bad))
+			if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 				t.Fatal(bad, status)
 			}
 		}
@@ -68,7 +68,7 @@ func TestBenchmarkScoreUsesOwnerRetrieval(t *testing.T) {
 	}
 }
 
-func exerciseBenchmarkScoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseBenchmarkScoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -160,8 +160,8 @@ func exerciseBenchmarkScoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	}
 	exec(`RESET ROLE; REVOKE SELECT ON memories FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	raw, _ := json.Marshal(args)
-	frame, _ := bus.EncodeCommand("runtime", raw)
-	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+	frame, _ := ring.EncodeCommand("runtime", raw)
+	if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK {
 		t.Fatal("required query failure became zero score")
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func skillsRequest(count, interval int32) []byte {
@@ -35,9 +35,9 @@ func TestSkillReviewIntervalParity(t *testing.T) {
 		want            uint32
 	}{{12, 6, 1}, {11, 6, 0}, {0, 6, 0}, {12, 0, 0}, {-12, 6, 0}, {12, -6, 0}}
 	for _, test := range tests {
-		response, status := Handle(bus.ModuleInvocation{StageID: StageContext},
+		response, status := Handle(ring.ModuleInvocation{StageID: StageContext},
 			skillsRequest(test.count, test.interval))
-		if status != bus.ModuleStatusOK || len(response) != responseLen ||
+		if status != ring.ModuleStatusOK || len(response) != responseLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != responseMagic ||
 			binary.LittleEndian.Uint32(response[4:8]) != test.want {
 			t.Errorf("count=%d interval=%d response=%x status=%d", test.count, test.interval,
@@ -49,11 +49,11 @@ func TestSkillReviewIntervalParity(t *testing.T) {
 func TestSkillsRejectInvalidWire(t *testing.T) {
 	request := skillsRequest(12, 6)
 	binary.LittleEndian.PutUint32(request[4:8], 2)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageContext}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageContext}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("version status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageContext, DeadlineNS: 1},
-		skillsRequest(12, 6)); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageContext, DeadlineNS: 1},
+		skillsRequest(12, 6)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }
@@ -75,9 +75,9 @@ func TestSkillTriggerParity(t *testing.T) {
 		{"no frontmatter", "Bash", "sleep 5", 0},
 	}
 	for _, test := range tests {
-		response, status := Handle(bus.ModuleInvocation{StageID: StageTrigger},
+		response, status := Handle(ring.ModuleInvocation{StageID: StageTrigger},
 			triggerRequest(test.content, test.tool, test.subject))
-		if status != bus.ModuleStatusOK || len(response) != triggerResponseLen ||
+		if status != ring.ModuleStatusOK || len(response) != triggerResponseLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != triggerResponseMagic ||
 			binary.LittleEndian.Uint32(response[4:8]) != wireVersion ||
 			binary.LittleEndian.Uint32(response[8:12]) != test.want {
@@ -90,15 +90,15 @@ func TestSkillTriggerParity(t *testing.T) {
 func TestSkillTriggerRejectsMalformedWire(t *testing.T) {
 	request := triggerRequest("---\ntriggers:\n  tool: [Bash]\n---\n", "Bash", "x")
 	binary.LittleEndian.PutUint32(request[12:16], 0)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageTrigger}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageTrigger}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("empty tool status = %d", status)
 	}
 	request = triggerRequest("---\ntriggers:\n  tool: [Bash]\n---\n", "Bash", "x")
 	request[len(request)-1] = 0
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageTrigger}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageTrigger}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("embedded NUL status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageTrigger}, request[:len(request)-1]); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageTrigger}, request[:len(request)-1]); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("truncated status = %d", status)
 	}
 }

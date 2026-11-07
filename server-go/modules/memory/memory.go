@@ -6,9 +6,9 @@ import (
 	"encoding/binary"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -57,11 +57,11 @@ const (
 )
 
 // Handle dispatches a memory stage call.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	return NewHandler(nil)(invocation, request)
 }
 
-func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHandler {
+func NewHandler(executor egress.Executor, option ...HandlerOption) ring.ModuleHandler {
 	options := handlerOptions{executor: executor, gateway: &gatewayState{}}
 	for _, apply := range option {
 		if apply != nil {
@@ -73,7 +73,7 @@ func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHan
 	// recreate derived copies after an erasure reset has acknowledged success.
 	gate := make(chan struct{}, 1)
 	gate <- struct{}{}
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 		if hasSelectedBackend(options.data) && (invocation.StageID == StageData || invocation.StageID == StageCommand) {
 			ctx := options.dataContext
 			if ctx == nil {
@@ -81,7 +81,7 @@ func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHan
 			}
 			remaining := invocation.Remaining(dataTimeout)
 			if remaining <= 0 || invocation.Cancelled() {
-				return nil, bus.ModuleStatusCancelled
+				return nil, ring.ModuleStatusCancelled
 			}
 			timer := time.NewTimer(remaining)
 			defer timer.Stop()
@@ -95,17 +95,17 @@ func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHan
 					acquired = true
 					defer func() { gate <- struct{}{} }()
 				case <-ctx.Done():
-					return nil, bus.ModuleStatusCancelled
+					return nil, ring.ModuleStatusCancelled
 				case <-timer.C:
-					return nil, bus.ModuleStatusCancelled
+					return nil, ring.ModuleStatusCancelled
 				case <-poll.C:
 					if invocation.Cancelled() {
-						return nil, bus.ModuleStatusCancelled
+						return nil, ring.ModuleStatusCancelled
 					}
 				}
 			}
 			if invocation.Cancelled() {
-				return nil, bus.ModuleStatusCancelled
+				return nil, ring.ModuleStatusCancelled
 			}
 		}
 		switch invocation.StageID {
@@ -120,7 +120,7 @@ func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHan
 			return handleRetrieve(invocation, request)
 		case StageEmbed:
 			return handleEmbed(executor, options, invocation, request)
-		case bus.StageDescribeCommands:
+		case ring.StageDescribeCommands:
 			return describeCommandRoutes(options, invocation, request)
 		case StageDeclareCommands:
 			return handleDeclareCommands(invocation, request)
@@ -131,29 +131,29 @@ func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHan
 		case StageRerank:
 			return handleRerank(invocation, request)
 		}
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 }
 
 // handleScanTurn answers both halves of the §4 correction pre-scan: whether the
 // turn retracts something, and which attribute it names. One call, because the
 // caller asks both about the same turn at the same moment.
-func handleScanTurn(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleScanTurn(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < scanRequestHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != scanRequestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion ||
 		int(binary.LittleEndian.Uint32(request[8:12])) != len(request)-scanRequestHeaderLen {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	text := string(request[scanRequestHeaderLen:])
 	attr, hasAttr := PossessiveAttr(text)
 	if len(attr) >= attrMax {
 		// Unreachable: PossessiveAttr trims to attrMax. Refuse rather than emit a
 		// field the C decoder rejects, so the failure names the stage.
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	response := make([]byte, scanResponseHeaderLen, scanResponseHeaderLen+len(attr))
 	binary.LittleEndian.PutUint32(response[0:4], scanResponseMagic)
@@ -164,7 +164,7 @@ func handleScanTurn(invocation bus.ModuleInvocation, request []byte) ([]byte, bu
 		binary.LittleEndian.PutUint32(response[8:12], 1)
 	}
 	binary.LittleEndian.PutUint32(response[12:16], uint32(len(attr)))
-	return append(response, attr...), bus.ModuleStatusOK
+	return append(response, attr...), ring.ModuleStatusOK
 }
 
 // handleExtract runs the pattern-first extraction over a turn's text.
@@ -172,19 +172,19 @@ func handleScanTurn(invocation bus.ModuleInvocation, request []byte) ([]byte, bu
 // The text is length-prefixed and unbounded on the wire: unlike a relation
 // label, there is no length past which a turn stops being a turn. The bus body
 // cap is the only limit, and it is enforced before the request gets here.
-func handleExtract(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleExtract(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < extractRequestHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != extractRequestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	max := binary.LittleEndian.Uint32(request[8:12])
 	textLen := int(binary.LittleEndian.Uint32(request[12:16]))
 	if max == 0 || textLen != len(request)-extractRequestHeaderLen {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	triples := ExtractPatterns(string(request[extractRequestHeaderLen:]), int(max))
@@ -197,7 +197,7 @@ func handleExtract(invocation bus.ModuleInvocation, request []byte) ([]byte, bus
 			// Unreachable through ExtractPatterns, which trims to these bounds.
 			// Refuse rather than emit a field the C decoder will reject anyway,
 			// so the failure names the stage instead of the transport.
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var kinds [8]byte
 		binary.LittleEndian.PutUint32(kinds[0:4], uint32(triple.SubjectKind))
@@ -210,7 +210,7 @@ func handleExtract(invocation bus.ModuleInvocation, request []byte) ([]byte, bus
 			response = append(response, field...)
 		}
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 // handleWrite validates a candidate typed fact against the seed ontology.
@@ -218,19 +218,19 @@ func handleExtract(invocation bus.ModuleInvocation, request []byte) ([]byte, bus
 // A relation the wire cannot carry never reaches here: the encoder refuses a
 // label over relTypeMax rather than truncating it, so a length past the bound is
 // a malformed request, not a long fact.
-func handleWrite(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleWrite(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != gateRequestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != gateRequestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion ||
 		binary.LittleEndian.Uint16(request[18:20]) != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	length := int(binary.LittleEndian.Uint16(request[16:18]))
 	if length > relTypeMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	headKind := NodeKind(binary.LittleEndian.Uint32(request[8:12]))
 	tailKind := NodeKind(binary.LittleEndian.Uint32(request[12:16]))
@@ -238,13 +238,13 @@ func handleWrite(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.M
 	response := make([]byte, gateResponseLen)
 	binary.LittleEndian.PutUint32(response[0:4], gateResponseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], uint32(verdict))
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 // handleRetrieve serves both halves of the PII recall gate. They share a stage
 // and are told apart by their magic, so a request meant for one is rejected by
 // the other rather than misparsed.
-func handleRetrieve(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleRetrieve(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) >= 4 && binary.LittleEndian.Uint32(request[0:4]) == sensRequestMagic {
 		return handleSensitivity(invocation, request)
 	}
@@ -252,20 +252,20 @@ func handleRetrieve(invocation bus.ModuleInvocation, request []byte) ([]byte, bu
 }
 
 // handleSensitivity classifies a whole recall block's relations at once.
-func handleSensitivity(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleSensitivity(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < sensRequestHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != sensRequestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	count := int(binary.LittleEndian.Uint32(request[8:12]))
 	// Each relation needs at least its two-byte length. Bound the peer-supplied
 	// count before allocating a response, including on 32-bit hosts.
 	if count <= 0 || count > (len(request)-sensRequestHeaderLen)/2 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	response := make([]byte, sensResponseHeaderLen, sensResponseHeaderLen+count)
@@ -274,12 +274,12 @@ func handleSensitivity(invocation bus.ModuleInvocation, request []byte) ([]byte,
 	offset := sensRequestHeaderLen
 	for i := 0; i < count; i++ {
 		if offset+2 > len(request) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		length := int(binary.LittleEndian.Uint16(request[offset : offset+2]))
 		offset += 2
 		if length > relTypeMax || offset+length > len(request) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		response = append(response, byte(RelSensitivityOf(string(request[offset:offset+length]))))
 		offset += length
@@ -288,22 +288,22 @@ func handleSensitivity(invocation bus.ModuleInvocation, request []byte) ([]byte,
 	// than answer for the names that happened to parse: a caller that gets fewer
 	// tiers than it has facts cannot tell which fact each tier belongs to.
 	if offset != len(request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 // handlePIITurn answers whether a turn explicitly asks for sensitive
 // information -- the once-per-turn half of the PII recall gate.
-func handlePIITurn(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handlePIITurn(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < piiRequestHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != piiRequestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion ||
 		int(binary.LittleEndian.Uint32(request[8:12])) != len(request)-piiRequestHeaderLen {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	answer := uint32(0)
 	if TurnRequestsSensitive(string(request[piiRequestHeaderLen:])) {
@@ -312,18 +312,18 @@ func handlePIITurn(invocation bus.ModuleInvocation, request []byte) ([]byte, bus
 	response := make([]byte, piiResponseLen)
 	binary.LittleEndian.PutUint32(response[0:4], piiResponseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], answer)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 // handleRerank classifies a fixed-point reranking score into a confidence band.
-func handleRerank(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleRerank(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.StageID != StageRerank || len(request) != requestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	score := int64(binary.LittleEndian.Uint64(request[8:16]))
@@ -331,7 +331,7 @@ func handleRerank(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], confidence)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 func confidenceForMicros(score float64) uint32 {

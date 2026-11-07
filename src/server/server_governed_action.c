@@ -6,6 +6,7 @@
 #include "ingress_preinject.h"
 #include "module_commands.h"
 #include "request_context.h"
+#include "server_session_capture.h"
 #include "util.h"
 #include <aimee/tools/module_api.h>
 #include <stdio.h>
@@ -13,24 +14,58 @@
 #include <string.h>
 #include <time.h>
 
-static __thread char action_attempt[128];
-static __thread char action_session[129];
-static __thread char action_principal[129];
-static __thread cJSON *action_intent;
-static __thread cJSON *action_verification_request;
-static __thread cJSON *action_existing_receipt;
-static __thread char action_refusal[128];
+typedef struct
+{
+   char attempt[128], session[129], principal[129], actor[VAULT_PRINCIPAL_MAX];
+   char turn_session[128], turn[128], refusal[128];
+   cJSON *intent, *verification_request, *existing_receipt;
+} action_state_t;
+static _Thread_local action_state_t action_state;
+struct policy_action_scope
+{
+   action_state_t saved;
+   struct policy_action_scope *previous;
+};
+static _Thread_local policy_action_scope_t *action_scope;
+
+int policy_action_scope_push(policy_action_scope_t **out)
+{
+   if (!out || *out)
+      return -1;
+   policy_action_scope_t *scope = calloc(1, sizeof *scope);
+   if (!scope)
+      return -1;
+   scope->saved = action_state;
+   scope->previous = action_scope;
+   memset(&action_state, 0, sizeof action_state);
+   action_scope = scope;
+   *out = scope;
+   return 0;
+}
+int policy_action_scope_pop(policy_action_scope_t *scope)
+{
+   if (!scope || action_scope != scope)
+      return -1;
+   cJSON_Delete(action_state.intent);
+   cJSON_Delete(action_state.verification_request);
+   cJSON_Delete(action_state.existing_receipt);
+   action_state = scope->saved;
+   action_scope = scope->previous;
+   free(scope);
+   return 0;
+}
 
 void policy_action_attempt(const char *attempt)
 {
-   snprintf(action_attempt, sizeof(action_attempt), "%s", attempt ? attempt : "");
-   action_refusal[0] = 0;
-   cJSON_Delete(action_existing_receipt);
-   action_existing_receipt = NULL;
-   cJSON_Delete(action_intent);
-   action_intent = NULL;
-   cJSON_Delete(action_verification_request);
-   action_verification_request = NULL;
+   snprintf(action_state.attempt, sizeof(action_state.attempt), "%s", attempt ? attempt : "");
+   action_state.refusal[0] = 0;
+   action_state.turn_session[0] = action_state.turn[0] = 0;
+   cJSON_Delete(action_state.existing_receipt);
+   action_state.existing_receipt = NULL;
+   cJSON_Delete(action_state.intent);
+   action_state.intent = NULL;
+   cJSON_Delete(action_state.verification_request);
+   action_state.verification_request = NULL;
 }
 
 static const char *action_text(const cJSON *object, const char *key)
@@ -66,12 +101,12 @@ int policy_action_inherit(const char *session)
       return 0;
    }
    int accepted = 0;
-   if (!strcmp(action_text(binding, "principal"), ctx->principal))
+   if (!strcmp(action_text(binding, "principal"), request_context_session_actor(ctx)))
    {
       cJSON *request = cJSON_CreateObject();
       cJSON_AddStringToObject(request, "operation", "fork");
       cJSON_AddStringToObject(request, "parent_session", parent);
-      cJSON *reply = action_store(ctx->principal, session, request);
+      cJSON *reply = action_store(request_context_session_actor(ctx), session, request);
       accepted = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "allowed"));
       cJSON_Delete(reply);
       cJSON_Delete(request);
@@ -129,14 +164,39 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
                         int authorized)
 {
    const request_context_t *ctx = request_context_get();
-   snprintf(action_refusal, sizeof(action_refusal), "host_action_binding_unavailable");
-   if (!ctx || ctx->context_refused || !ctx->principal[0] || !ctx->request_id[0] || !sid ||
-       !sid[0] || !action_attempt[0] || (!authorized && !(ctx->capabilities & CAP_TOOL_EXECUTE)) ||
-       action_intent)
+   snprintf(action_state.refusal, sizeof(action_state.refusal), "host_action_binding_unavailable");
+   if (!ctx || ctx->context_refused || !ctx->principal[0] ||
+       !request_context_session_actor(ctx)[0] || !ctx->request_id[0] || !sid || !sid[0] ||
+       !action_state.attempt[0] || (!authorized && !(ctx->capabilities & CAP_TOOL_EXECUTE)) ||
+       action_state.intent)
+   {
+      policy_unknown_effect_clear();
       return -1;
+   }
    if (policy_action_inherit(sid) != 0)
    {
-      snprintf(action_refusal, sizeof(action_refusal), "action_lineage_unavailable");
+      snprintf(action_state.refusal, sizeof(action_state.refusal), "action_lineage_unavailable");
+      policy_unknown_effect_clear();
+      return -1;
+   }
+   /* The journal may belong to a verified source session while a private child
+    * owns the canonical destination. Only the retained host capture supplies
+    * this tuple; public tool arguments cannot nominate a turn. */
+   server_session_capture_t *capture = NULL;
+   if (server_session_capture_retain_current(sid, request_context_session_actor(ctx), &capture) ||
+       (ctx->model_execution && !ctx->operator_script_origin && !capture))
+   {
+      policy_unknown_effect_clear();
+      return -1;
+   }
+   const char *turn_session = server_session_capture_session(capture);
+   const char *turn = server_session_capture_turn(capture);
+   if (capture && (!server_session_capture_accepting(capture) || !turn_session ||
+                   !turn_session[0] || strlen(turn_session) >= sizeof action_state.turn_session ||
+                   !turn || !turn[0] || strlen(turn) >= sizeof action_state.turn))
+   {
+      server_session_capture_release(capture);
+      policy_unknown_effect_clear();
       return -1;
    }
    int rc = -1;
@@ -147,7 +207,8 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    cJSON_AddStringToObject(request, "tool", name);
    cJSON_AddStringToObject(request, "directory", cwd ? cwd : "");
    cJSON_AddItemToObject(request, "arguments", cJSON_Duplicate(*arguments, 1));
-   snprintf(action_refusal, sizeof(action_refusal), "exact_resource_adapter_unavailable");
+   snprintf(action_state.refusal, sizeof(action_state.refusal),
+            "exact_resource_adapter_unavailable");
    cJSON *resource = aimee_module_command_call_context(AIMEE_TOOLS_EVENT_ACTION_RESOURCE,
                                                        AIMEE_TOOLS_STAGE_ACTION_RESOURCE,
                                                        "describe", request, caller);
@@ -165,26 +226,34 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    *arguments = cJSON_Duplicate(effective, 1);
    char *wire = cJSON_PrintUnformatted(*arguments);
    char reason[256];
-   snprintf(action_refusal, sizeof(action_refusal), "current_operator_policy_refused");
-   if (!wire || policy_recheck_action_tool(name, "filesystem", wire, reason, sizeof(reason)) != 0)
+   snprintf(action_state.refusal, sizeof(action_state.refusal), "current_operator_policy_refused");
+   if (!wire || policy_recheck_action_tool_attempt(
+                    name, "filesystem", wire, action_state.attempt,
+                    (!strcmp(action_text(resource, "class"), "read_only") ||
+                     !strcmp(action_text(resource, "class"), "sensitive_read"))
+                        ? AIMEE_TOOL_POLICY_READ
+                        : 0,
+                    reason, sizeof(reason)) != 0)
    {
       free(wire);
       goto done;
    }
    free(wire);
-   snprintf(action_refusal, sizeof(action_refusal), "current_memory_evidence_unavailable");
+   snprintf(action_state.refusal, sizeof(action_state.refusal),
+            "current_memory_evidence_unavailable");
    evidence = action_evidence(ctx, &guard);
    if (!evidence)
       goto done;
    intent = cJSON_CreateObject();
    cJSON_AddStringToObject(intent, "request_id", ctx->request_id);
    cJSON *task_binding = cJSON_Parse(ctx->exploration_binding);
-   const char *task = !strcmp(action_text(task_binding, "principal"), ctx->principal)
-                          ? action_text(task_binding, "task")
-                          : "";
+   const char *task =
+       !strcmp(action_text(task_binding, "principal"), request_context_session_actor(ctx))
+           ? action_text(task_binding, "task")
+           : "";
    cJSON_AddStringToObject(intent, "task_id", task[0] ? task : sid);
    cJSON_Delete(task_binding);
-   cJSON_AddStringToObject(intent, "attempt_id", action_attempt);
+   cJSON_AddStringToObject(intent, "attempt_id", action_state.attempt);
    cJSON_AddStringToObject(intent, "tool", name);
    cJSON_AddStringToObject(intent, "action_class", action_text(resource, "class"));
    cJSON_AddStringToObject(intent, "destination", action_text(resource, "destination"));
@@ -196,19 +265,25 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
       cJSON_AddStringToObject(intent, fields[i], action_text(evidence, fields[i]));
    request = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "operation", "issue");
+   if (capture)
+   {
+      cJSON_AddStringToObject(request, "turn_session_id", turn_session);
+      cJSON_AddStringToObject(request, "turn_id", turn);
+   }
    cJSON_AddItemToObject(request, "arguments", cJSON_Duplicate(*arguments, 1));
    cJSON_AddStringToObject(request, "registry_class", action_text(resource, "class"));
    cJSON_AddItemToObject(request, "intent", intent);
    intent = NULL;
-   snprintf(action_refusal, sizeof(action_refusal), "action_owner_unavailable");
-   decision = action_store(ctx->principal, sid, request);
+   snprintf(action_state.refusal, sizeof(action_state.refusal), "action_owner_unavailable");
+   decision = action_store(request_context_session_actor(ctx), sid, request);
    next = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(
                               cJSON_GetObjectItemCaseSensitive(decision, "receipt"), "intent"),
                           1);
    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(decision, "allowed")) || !next)
    {
       if (action_text(decision, "reason")[0])
-         snprintf(action_refusal, sizeof(action_refusal), "%s", action_text(decision, "reason"));
+         snprintf(action_state.refusal, sizeof(action_state.refusal), "%s",
+                  action_text(decision, "reason"));
       goto done;
    }
    cJSON_ReplaceItemInObjectCaseSensitive(request, "intent", cJSON_Duplicate(next, 1));
@@ -222,32 +297,41 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
       cJSON_ReplaceItemInObjectCaseSensitive(request, "operation",
                                              cJSON_CreateString(operations[i]));
       cJSON_Delete(decision);
-      decision = action_store(ctx->principal, sid, request);
+      decision = action_store(request_context_session_actor(ctx), sid, request);
       if (!cJSON_IsTrue(
               cJSON_GetObjectItemCaseSensitive(decision, i ? "dispatch_allowed" : "allowed")))
       {
          if (action_text(decision, "reason")[0])
-            snprintf(action_refusal, sizeof(action_refusal), "%s", action_text(decision, "reason"));
+            snprintf(action_state.refusal, sizeof(action_state.refusal), "%s",
+                     action_text(decision, "reason"));
          if (cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(decision, "receipt")))
-            action_existing_receipt = cJSON_Duplicate(decision, 1);
+            action_state.existing_receipt = cJSON_Duplicate(decision, 1);
          goto done;
       }
    }
-   action_intent = next;
+   action_state.intent = next;
    next = NULL;
-   action_verification_request = cJSON_CreateObject();
-   cJSON_AddStringToObject(action_verification_request, "tool", name);
-   cJSON_AddStringToObject(action_verification_request, "directory", cwd);
-   cJSON_AddItemToObject(action_verification_request, "arguments", cJSON_Duplicate(*arguments, 1));
-   cJSON_AddStringToObject(action_verification_request, "destination",
-                           action_text(action_intent, "destination"));
-   cJSON_AddStringToObject(action_verification_request, "payload_sha256",
-                           action_text(action_intent, "payload_sha256"));
-   snprintf(action_session, sizeof(action_session), "%s", sid);
-   snprintf(action_principal, sizeof(action_principal), "%s", ctx->principal);
+   action_state.verification_request = cJSON_CreateObject();
+   cJSON_AddStringToObject(action_state.verification_request, "tool", name);
+   cJSON_AddStringToObject(action_state.verification_request, "directory", cwd);
+   cJSON_AddItemToObject(action_state.verification_request, "arguments",
+                         cJSON_Duplicate(*arguments, 1));
+   cJSON_AddStringToObject(action_state.verification_request, "destination",
+                           action_text(action_state.intent, "destination"));
+   cJSON_AddStringToObject(action_state.verification_request, "payload_sha256",
+                           action_text(action_state.intent, "payload_sha256"));
+   snprintf(action_state.session, sizeof(action_state.session), "%s", sid);
+   snprintf(action_state.principal, sizeof(action_state.principal), "%s", ctx->principal);
+   snprintf(action_state.actor, sizeof(action_state.actor), "%s",
+            request_context_session_actor(ctx));
+   snprintf(action_state.turn_session, sizeof action_state.turn_session, "%s",
+            turn_session ? turn_session : "");
+   snprintf(action_state.turn, sizeof action_state.turn, "%s", turn ? turn : "");
    rc = 0;
-   action_refusal[0] = 0;
+   action_state.refusal[0] = 0;
 done:
+   if (rc)
+      policy_unknown_effect_clear();
    ingress_preinject_release_send_guard(guard);
    cJSON_Delete(request);
    cJSON_Delete(resource);
@@ -255,56 +339,66 @@ done:
    cJSON_Delete(intent);
    cJSON_Delete(decision);
    cJSON_Delete(next);
+   server_session_capture_release(capture);
    return rc;
 }
 
-char *policy_action_finish(const char *verdict, char *result)
+char *policy_action_finish(const char *verdict, char *result, int *is_error)
 {
-   if (action_existing_receipt)
+   if (action_state.existing_receipt)
    {
-      action_refusal[0] = 0;
-      char *prior = cJSON_PrintUnformatted(action_existing_receipt);
-      cJSON_Delete(action_existing_receipt);
-      action_existing_receipt = NULL;
+      action_state.refusal[0] = 0;
+      const char *state = action_text(
+          cJSON_GetObjectItemCaseSensitive(action_state.existing_receipt, "receipt"), "state");
+      if (is_error)
+         *is_error = strcmp(state, "acknowledged") && strcmp(state, "effect_confirmed");
+      char *prior = cJSON_PrintUnformatted(action_state.existing_receipt);
+      cJSON_Delete(action_state.existing_receipt);
+      action_state.existing_receipt = NULL;
       free(result);
+      if (!prior && is_error)
+         *is_error = 1;
       return prior ? prior : safe_strdup("error: prior action receipt unavailable; do not replay");
    }
-   if (!action_intent)
+   if (!action_state.intent)
    {
-      if (!action_refusal[0])
+      if (!action_state.refusal[0])
          return result;
+      if (is_error)
+         *is_error = 1;
       cJSON *refusal = cJSON_CreateObject();
       cJSON_AddStringToObject(refusal, "status", "refused");
-      cJSON_AddStringToObject(refusal, "reason", action_refusal);
+      cJSON_AddStringToObject(refusal, "reason", action_state.refusal);
       cJSON_AddBoolToObject(refusal, "dispatch_allowed", 0);
       char *encoded = cJSON_PrintUnformatted(refusal);
       cJSON_Delete(refusal);
-      action_refusal[0] = 0;
+      action_state.refusal[0] = 0;
       free(result);
       return encoded ? encoded : safe_strdup("error: governed action refused");
    }
    cJSON *request = cJSON_CreateObject(), *outcome = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "operation", "outcome");
-   cJSON_AddStringToObject(request, "registry_class", action_text(action_intent, "action_class"));
-   cJSON_AddItemToObject(request, "intent", cJSON_Duplicate(action_intent, 1));
+   cJSON_AddStringToObject(request, "registry_class",
+                           action_text(action_state.intent, "action_class"));
+   cJSON_AddItemToObject(request, "intent", cJSON_Duplicate(action_state.intent, 1));
    const char *state =
        result && verdict && strcmp(verdict, "ok") == 0 ? "acknowledged" : "outcome_unknown";
    cJSON *verification = NULL;
    if (strcmp(state, "acknowledged") == 0 &&
-       strcmp(action_text(action_intent, "tool"), "write_file") == 0)
+       strcmp(action_text(action_state.intent, "tool"), "write_file") == 0)
    {
       cJSON *caller = cJSON_CreateObject();
       cJSON_AddBoolToObject(caller, "authenticated", 1);
-      cJSON_AddStringToObject(caller, "principal", action_principal);
+      cJSON_AddStringToObject(caller, "principal", action_state.principal);
       verification = aimee_module_command_call_context(AIMEE_TOOLS_EVENT_ACTION_RESOURCE,
                                                        AIMEE_TOOLS_STAGE_ACTION_RESOURCE, "verify",
-                                                       action_verification_request, caller);
+                                                       action_state.verification_request, caller);
       cJSON_Delete(caller);
       if (strcmp(action_text(verification, "state"), "effect_confirmed") == 0 &&
           strcmp(action_text(verification, "destination"),
-                 action_text(action_intent, "destination")) == 0 &&
+                 action_text(action_state.intent, "destination")) == 0 &&
           strcmp(action_text(verification, "payload_sha256"),
-                 action_text(action_intent, "payload_sha256")) == 0 &&
+                 action_text(action_state.intent, "payload_sha256")) == 0 &&
           action_text(verification, "object_version")[0])
       {
          state = "effect_confirmed";
@@ -315,18 +409,24 @@ char *policy_action_finish(const char *verdict, char *result)
          state = "outcome_unknown";
    }
    cJSON_Delete(verification);
-   cJSON_Delete(action_verification_request);
-   action_verification_request = NULL;
+   cJSON_Delete(action_state.verification_request);
+   action_state.verification_request = NULL;
    cJSON_AddStringToObject(outcome, "state", state);
-   cJSON_AddStringToObject(outcome, "evidence_ref", action_text(action_intent, "action_id"));
-   cJSON_AddStringToObject(outcome, "destination", action_text(action_intent, "destination"));
-   cJSON_AddStringToObject(outcome, "payload_sha256", action_text(action_intent, "payload_sha256"));
+   cJSON_AddStringToObject(outcome, "evidence_ref", action_text(action_state.intent, "action_id"));
+   cJSON_AddStringToObject(outcome, "destination", action_text(action_state.intent, "destination"));
+   cJSON_AddStringToObject(outcome, "payload_sha256",
+                           action_text(action_state.intent, "payload_sha256"));
    cJSON_AddItemToObject(request, "outcome", outcome);
-   cJSON *decision = action_store(action_principal, action_session, request);
+   if (action_state.turn[0])
+   {
+      cJSON_AddStringToObject(request, "turn_session_id", action_state.turn_session);
+      cJSON_AddStringToObject(request, "turn_id", action_state.turn);
+   }
+   cJSON *decision = action_store(action_state.actor, action_state.session, request);
    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(decision, "allowed")))
       state = "outcome_unknown";
    cJSON *envelope = cJSON_CreateObject();
-   cJSON_AddStringToObject(envelope, "action_id", action_text(action_intent, "action_id"));
+   cJSON_AddStringToObject(envelope, "action_id", action_text(action_state.intent, "action_id"));
    cJSON_AddStringToObject(envelope, "status", state);
    cJSON_AddStringToObject(envelope, "completion_claim",
                            strcmp(state, "acknowledged") == 0 ? "provider_acknowledged" : state);
@@ -336,8 +436,10 @@ char *policy_action_finish(const char *verdict, char *result)
    cJSON_Delete(envelope);
    cJSON_Delete(request);
    cJSON_Delete(decision);
-   cJSON_Delete(action_intent);
-   action_intent = NULL;
+   cJSON_Delete(action_state.intent);
+   action_state.intent = NULL;
+   if (is_error)
+      *is_error = !wrapped || (strcmp(state, "acknowledged") && strcmp(state, "effect_confirmed"));
    return wrapped ? wrapped : safe_strdup("error: action outcome unknown; reconcile before retry");
 }
 
@@ -345,7 +447,8 @@ char *policy_action_finish(const char *verdict, char *result)
  * the resource owner. Public JSON cannot submit an outcome or object version. */
 cJSON *action_receipt_command(cJSON *input)
 {
-   const char *principal = request_context_principal();
+   const request_context_t *ctx = request_context_get();
+   const char *principal = request_context_session_actor(ctx);
    const char *sid = action_text(input, "session_id");
    const char *id = action_text(input, "action_id");
    const char *operation = action_text(input, "operation");
@@ -393,7 +496,7 @@ cJSON *action_receipt_command(cJSON *input)
    cJSON *arguments = cJSON_ParseWithOpts(action_text(input, "arguments_json"), NULL, 1);
    cJSON *probe = cJSON_CreateObject(), *caller = cJSON_CreateObject();
    cJSON_AddBoolToObject(caller, "authenticated", 1);
-   cJSON_AddStringToObject(caller, "principal", principal);
+   cJSON_AddStringToObject(caller, "principal", ctx->principal);
    cJSON_AddStringToObject(probe, "tool", action_text(intent, "tool"));
    cJSON_AddStringToObject(probe, "directory", action_text(input, "directory"));
    cJSON_AddStringToObject(probe, "destination", action_text(intent, "destination"));

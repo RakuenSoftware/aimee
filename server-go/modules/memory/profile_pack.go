@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type profilePack struct {
@@ -153,9 +153,9 @@ func activateProfilePack(dir, name string) error {
 	return os.Rename(file.Name(), filepath.Join(dir, "active-pack"))
 }
 
-func handlePackCommand(_ handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handlePackCommand(_ handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	dir, err := profilePackDir()
 	if err != nil {

@@ -10,6 +10,7 @@
 #define DEC_DB1_SERVER_SESSIONS_H 1
 
 #include <stddef.h>
+#include "vault_principal.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -18,7 +19,7 @@ extern "C"
 
 #define DB1_SS_ID_LEN        128
 #define DB1_SS_CLIENT_LEN    32
-#define DB1_SS_PRINCIPAL_LEN 64
+#define DB1_SS_PRINCIPAL_LEN VAULT_PRINCIPAL_MAX
 #define DB1_SS_TITLE_LEN     256
 #define DB1_SS_TS_LEN        32
 #define DB1_SS_CSID_LEN      128
@@ -40,6 +41,28 @@ extern "C"
       char chat_key[DB1_SS_CHAT_KEY_LEN]; /* gateway session key e.g. "telegram:dm:123" */
    } db1_server_session_t;
 
+   /* Authority/incarnation projection. Opaque display metadata cannot make an
+    * otherwise valid owner unreadable; identity bounds remain exact. */
+   typedef struct
+   {
+      char id[DB1_SS_ID_LEN], principal[DB1_SS_PRINCIPAL_LEN], created_at[DB1_SS_TS_LEN];
+   } db1_server_session_owner_t;
+   int db1_server_session_owner_get(const char *id, db1_server_session_owner_t *out);
+
+   /* Complete owned metadata from the existing ten-cell session operation.
+    * Every field is non-NULL after a successful read, including empty values.
+    * Release each returned row with record_free; failures leave it empty. */
+   typedef struct
+   {
+      char *id, *client_type, *principal, *title, *created_at, *last_activity_at;
+      char *claude_session_id, *outcome, *source, *chat_key;
+   } db1_server_session_record_t;
+   int db1_server_session_record_get(const char *id, db1_server_session_record_t *out);
+   int db1_server_session_record_list_recent(db1_server_session_record_t *out, int max);
+   int db1_server_session_record_search_by_title(const char *pattern,
+                                                 db1_server_session_record_t *out, int max);
+   void db1_server_session_record_free(db1_server_session_record_t *record);
+
    /* Insert a fresh row with empty title + outcome, created_at/last_activity_at
     * set to now. Returns 0 on success, -1 on error. */
    int db1_server_session_create(const char *id, const char *client_type, const char *principal);
@@ -47,8 +70,12 @@ extern "C"
    /* Load session by id. Returns 0 on hit, -1 on miss or error. */
    int db1_server_session_get(const char *id, db1_server_session_t *out);
 
-   /* UPDATE outcome. Returns 0 on success. */
-   int db1_server_session_set_outcome(const char *id, const char *outcome);
+   /* Owner-bound durable primary agent. Empty selection means default.
+    * Returns 0 only on acknowledged owner-checked read/write; -1 on error. */
+   int db1_server_session_primary_get(const char *principal, const char *session_id, char *out,
+                                      size_t cap);
+   int db1_server_session_primary_set(const char *principal, const char *session_id,
+                                      const char *agent);
 
    /* UPDATE source + chat_key (gateway origin). Returns 0 on success. */
 
@@ -65,12 +92,6 @@ extern "C"
 
    /* DELETE by id. Returns 0 on success. */
    int db1_server_session_delete(const char *id);
-
-   /* List most recent `max` sessions, newest-last_activity first. */
-   int db1_server_session_list_recent(db1_server_session_t *out, int max);
-
-   /* Rows whose title LIKE `pattern`. */
-   int db1_server_session_search_by_title(const char *pattern, db1_server_session_t *out, int max);
 
    /* SELECT COUNT(*), optionally filtered by created_at >= since. */
    int db1_server_session_count(const char *since_or_null);

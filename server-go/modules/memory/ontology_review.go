@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func ontologyReviewName(name string) bool {
@@ -21,17 +21,17 @@ func ontologyReviewName(name string) bool {
 	return true
 }
 
-func ontologyHTTP(status int, value any) ([]byte, bus.ModuleStatus) {
+func ontologyHTTP(status int, value any) ([]byte, ring.ModuleStatus) {
 	body, err := json.Marshal(value)
 	if err != nil || len(body) > maxDataBody {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(map[string]any{"http_status": status, "json": string(body)})
 }
 
-func handleOntologyConsole(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleOntologyConsole(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if options.placement != PlacementKB {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	operation := args.stringOr("operation", "")
 	request := DataRequest{Operation: operation, IncludeAll: true}
@@ -53,7 +53,7 @@ func handleOntologyConsole(options handlerOptions, invocation bus.ModuleInvocati
 	}
 	body, _ := json.Marshal(request)
 	raw, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		if operation == "ontology-review" {
 			return ontologyHTTP(500, map[string]any{"ok": false, "action": map[string]string{"approve": "approved", "map": "mapped", "reject": "rejected"}[request.State], "relation": request.Relation})
 		}
@@ -61,7 +61,7 @@ func handleOntologyConsole(options handlerOptions, invocation bus.ModuleInvocati
 	}
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return ontologyHTTP(200, response.Payload)
 }

@@ -53,6 +53,9 @@ func TestSubjectErasurePrivateCopiesPostgres(t *testing.T) {
 		}
 	}
 	exec(`INSERT INTO server_sessions(id,principal) VALUES('erased-session','erased-principal'),('retained-session','retained-principal')`)
+	exec(`INSERT INTO local_procedure_events(principal,event_id,procedure,event,exposure,scope_kind,scope_id)
+ VALUES('erased-principal','feedback','{}','{}','{}','global',''),('retained-principal','feedback','{}','{}','{}','global','')`)
+
 	exec(`SELECT set_config('aimee.private_authority','user',true),set_config('aimee.private_principal','erased-principal',true)`)
 	var erasedID int64
 	if err := tx.QueryRow(ctx, `INSERT INTO user_memories(key,content,source_session) VALUES('private copy','private secret','erased-session') RETURNING id`).Scan(&erasedID); err != nil {
@@ -98,6 +101,12 @@ func TestSubjectErasurePrivateCopiesPostgres(t *testing.T) {
 		}
 	}
 	var n int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM local_procedure_events WHERE principal='erased-principal'`).Scan(&n); err != nil || n != 0 {
+		t.Fatal("erased local procedure retained", n, err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM local_procedure_events WHERE principal='retained-principal'`).Scan(&n); err != nil || n != 1 {
+		t.Fatal("unrelated local procedure erased", n, err)
+	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM context_cache WHERE session_id='erased-session'`).Scan(&n); err != nil || n != 0 {
 		t.Fatal("erased prompt cache retained", n, err)
 	}
@@ -106,6 +115,7 @@ func TestSubjectErasurePrivateCopiesPostgres(t *testing.T) {
 	}
 	erase()
 	for _, q := range []string{
+		`INSERT INTO local_procedure_events(principal,event_id,procedure,event,exposure,scope_kind,scope_id) VALUES('erased-principal','feedback','{}','{}','{}','global','')`,
 		`INSERT INTO user_memories(key,content) VALUES('restored snapshot','updated private secret')`,
 		`INSERT INTO user_memories(key,content) VALUES('old revision snapshot','private secret')`,
 		`INSERT INTO user_memories(key,content,source_session) VALUES('late derived copy','late copied payload','erased-session')`,
@@ -128,7 +138,7 @@ func TestSubjectErasurePrivateCopiesPostgres(t *testing.T) {
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM agent_cache`).Scan(&n); err != nil || n != 0 {
 		t.Fatal("unowned cache retained erased data", n, err)
 	}
-	for _, table := range []string{"user_memory_erasure_intents", "user_memory_erasure_delegations", "db1_subject_erasure_request"} {
+	for _, table := range []string{"user_memory_erasure_intents", "user_memory_erasure_delegations", "db1_subject_erasure_request", "local_procedure_erasure_intents"} {
 		exec(`SAVEPOINT control_acl`)
 		_, err := tx.Exec(ctx, "DELETE FROM "+table)
 		exec(`ROLLBACK TO control_acl; RELEASE control_acl`)
@@ -139,10 +149,12 @@ func TestSubjectErasurePrivateCopiesPostgres(t *testing.T) {
 	}
 	// Restore old content with triggers disabled, exactly as a content snapshot
 	// loader can. Startup replay must run even with no pending migration version.
-	exec(`RESET ROLE; ALTER TABLE user_memories DISABLE TRIGGER user_memory_erasure_restore_guard;
+	exec(`RESET ROLE; ALTER TABLE local_procedure_events DISABLE TRIGGER local_procedure_event_guard; ALTER TABLE user_memories DISABLE TRIGGER user_memory_erasure_restore_guard;
  ALTER TABLE context_cache DISABLE TRIGGER user_memory_erasure_payload_guard;
  ALTER TABLE delegation_messages DISABLE TRIGGER user_memory_erasure_payload_guard`)
 	exec(`INSERT INTO user_memories(id,key,content,source_session) VALUES($1,'restored private snapshot','updated private secret','erased-session')`, erasedID)
+	exec(`INSERT INTO local_procedure_events(principal,event_id,procedure,event,exposure,scope_kind,scope_id) VALUES('erased-principal','feedback','{}','{}','{}','global','');
+ ALTER TABLE local_procedure_events ENABLE TRIGGER local_procedure_event_guard`)
 	exec(`INSERT INTO context_cache(hash,output,session_id) VALUES('restored-cache','private secret','erased-session');
  INSERT INTO delegation_messages(delegation_id,content) VALUES('erased-delegation','restored delegated secret');
  ALTER TABLE user_memories ENABLE TRIGGER user_memory_erasure_restore_guard;
@@ -150,8 +162,11 @@ func TestSubjectErasurePrivateCopiesPostgres(t *testing.T) {
  ALTER TABLE delegation_messages ENABLE TRIGGER user_memory_erasure_payload_guard;
  SET LOCAL ROLE mr04_private_runtime`)
 	removed, err := ReplayErasureIntents(ctx, erasureReplayQueryer{traceReplayQueryer{tx}})
-	if err != nil || removed < 3 {
+	if err != nil || removed < 4 {
 		t.Fatal("startup did not replay surviving intent", removed, err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM local_procedure_events WHERE principal='erased-principal'`).Scan(&n); err != nil || n != 0 {
+		t.Fatal("startup retained restored procedure", n, err)
 	}
 	removed, err = ReplayErasureIntents(ctx, erasureReplayQueryer{traceReplayQueryer{tx}})
 	if err != nil || removed != 0 {
@@ -250,6 +265,21 @@ func TestSubjectErasureRejectsOldSnapshotPostgres(t *testing.T) {
 		t.Fatal(status, cells, err)
 	}
 	if err = erase.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Even a new event ID cannot use an old repeatable-read snapshot to bypass
+	// the shared erasure barrier. No stored event ID tombstone is needed here.
+	if _, err = old.Exec(ctx, `SAVEPOINT late_procedure`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = old.Exec(ctx, `INSERT INTO local_procedure_events(principal,event_id,procedure,event,exposure,scope_kind,scope_id) VALUES('erased-principal','late-feedback','{}','{}','{}','global','')`)
+	{
+		var pgerr *pgconn.PgError
+		if !errors.As(err, &pgerr) || pgerr.Code != "40001" {
+			t.Fatal("old procedure snapshot bypassed erasure epoch", err)
+		}
+	}
+	if _, err = old.Exec(ctx, `ROLLBACK TO late_procedure; RELEASE late_procedure`); err != nil {
 		t.Fatal(err)
 	}
 	// The old producer snapshot cannot see the newly committed intent. Locking

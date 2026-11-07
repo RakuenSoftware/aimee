@@ -69,6 +69,13 @@ static inline int platform_test_mkdir(const char *path, int mode)
    return _mkdir(path);
 }
 
+static inline int platform_test_symlink_file(const char *target, const char *link)
+{
+   if (CreateSymbolicLinkA(link, target, 2) || CreateSymbolicLinkA(link, target, 0))
+      return 0;
+   return -1;
+}
+
 static inline int platform_mkstemp(char *path, size_t path_size, const char *prefix)
 {
    char filename[MAX_PATH];
@@ -88,6 +95,12 @@ static inline int platform_mkstemp(char *path, size_t path_size, const char *pre
    return fd;
 }
 #else
+#include <unistd.h>
+
+static inline int platform_test_symlink_file(const char *target, const char *link)
+{
+   return symlink(target, link);
+}
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/stat.h>

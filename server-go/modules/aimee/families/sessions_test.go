@@ -4,13 +4,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // --- a sessions-shaped fake ---------------------------------------------------
@@ -73,10 +76,10 @@ type sessDB struct {
 	// ownership probe; those have their own fields so a test can set them
 	// independently.
 	row          []any
+	primaryRow   []any
 	receiptRow   []any
 	rows         [][]any
 	personaState *int
-	ownedByOther bool
 	scanErr      error
 	execRows     int
 
@@ -94,12 +97,30 @@ func (d *sessDB) Exec(_ context.Context, sql string, args ...any) (store.Tag, er
 func (d *sessDB) Query(_ context.Context, sql string, args ...any) (store.Rows, error) {
 	d.executed = append(d.executed, sql)
 	d.args = append(d.args, args)
+	if sql == sessionIRHistorySQL {
+		after, _ := strconv.ParseUint(args[2].(string), 10, 64)
+		page := make([][]any, 0, sessionIRHistoryPageSize)
+		for _, row := range d.rows {
+			n, _ := strconv.ParseUint(row[0].(string), 10, 64)
+			if n > after {
+				page = append(page, row)
+				if len(page) == sessionIRHistoryPageSize {
+					break
+				}
+			}
+		}
+		return &sessRows{rows: page}, nil
+	}
 	return &sessRows{rows: d.rows}, nil
 }
 func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row {
 	d.executed = append(d.executed, sql)
 	d.args = append(d.args, args)
 	switch {
+	case sql == primaryGetLatestSQL && d.primaryRow != nil:
+		return sessRow{db: d, sql: sql, values: d.primaryRow}
+	case strings.Contains(sql, "local_procedure_prepare_subject_erasure"):
+		return sessRow{db: d, sql: sql, values: []any{int64(0)}}
 	case strings.Contains(sql, "user_memory_prepare_subject_erasure"):
 		return sessRow{db: d, sql: sql, values: d.receiptRow}
 	case strings.Contains(sql, "SELECT persona_delivery_state"):
@@ -107,11 +128,6 @@ func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row 
 			return sessRow{db: d, sql: sql}
 		}
 		return sessRow{db: d, sql: sql, values: []any{*d.personaState}}
-	case strings.Contains(sql, "SELECT 1 FROM webchat_claude_sessions"):
-		if !d.ownedByOther {
-			return sessRow{db: d, sql: sql}
-		}
-		return sessRow{db: d, sql: sql, values: []any{1}}
 	}
 	return sessRow{db: d, sql: sql, values: d.row}
 }
@@ -128,8 +144,8 @@ func sessCall(t *testing.T, db store.DB, op uint32, fields []string) (uint32, []
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	response, status := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions}, frame)
-	if status != bus.ModuleStatusOK {
+	response, status := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions}, frame)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("wire status = %v, want OK", status)
 	}
 	inBand, cells, err := wire.DecodeFields(response)
@@ -139,13 +155,34 @@ func sessCall(t *testing.T, db store.DB, op uint32, fields []string) (uint32, []
 	return inBand, cells
 }
 
-func ran(db *sessDB, fragment string) bool {
-	for _, sql := range db.executed {
-		if strings.Contains(sql, fragment) {
-			return true
+// Retired private transcript/binding op numbers are never reused or served.
+// The real wire handler must refuse before any read, write, or transaction.
+func TestRetiredLegacySessionOperationsRefuseBeforeStorage(t *testing.T) {
+	cases := []struct {
+		id     uint32
+		fields []string
+	}{
+		{10, []string{"legacy", "agent", "provider", "[]"}},
+		{11, []string{"legacy", "agent", "provider"}},
+		{12, []string{"legacy", "agent", "provider"}},
+		{13, []string{"2"}}, {14, []string{"legacy", "2"}},
+		{18, []string{"actor", "legacy"}},
+		{19, []string{"actor", "legacy", "sdk-id"}},
+		{20, []string{"actor", "legacy", "sdk-id"}},
+	}
+	for _, test := range cases {
+		for _, principal := range []uint32{0, 7} {
+			db := newSessDB()
+			frame, err := wire.EncodeFields(test.id, test.fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reply, status := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: principal}, frame)
+			if status != ring.ModuleStatusInvalidRequest || len(reply) != 0 || len(db.executed) != 0 {
+				t.Fatalf("retired op %d principal %d reached storage or acquired a reply: status=%d reply=%x statements=%v", test.id, principal, status, reply, db.executed)
+			}
 		}
 	}
-	return false
 }
 
 // --- persona delivery: the part that must be race-free ------------------------
@@ -414,97 +451,6 @@ func TestTitleSearchIsCaseInsensitive(t *testing.T) {
 	}
 }
 
-// The transcript search's wire carries a RAW query, not a pattern: the C wrapped
-// it in %...%, and this must too, or a caller searching for a word gets an exact
-// comparison and no results.
-func TestTranscriptSearchWrapsTheRawQuery(t *testing.T) {
-	db := newSessDB()
-	sessCall(t, db, opPrimarySessionAllocSearch, []string{"deploy", "10"})
-	if bound := db.args[0][0].(string); bound != "%deploy%" {
-		t.Fatalf("bound %q, want the query wrapped as a substring pattern", bound)
-	}
-	// And it covers every column a person might recognise a transcript by.
-	sql := db.executed[0]
-	for _, column := range []string{"messages_json", "session_id", "agent_name", "provider"} {
-		if !strings.Contains(sql, column) {
-			t.Fatalf("the transcript search does not cover %s: %s", column, sql)
-		}
-	}
-	if !strings.Contains(sql, "ILIKE") {
-		t.Fatalf("the transcript search is case-sensitive: %s", sql)
-	}
-}
-
-// --- webchat bindings -----------------------------------------------------------
-
-// A binding is never hijacked. If another tab already owns the id the bind is
-// refused rather than repointing it.
-func TestBindRefusesToHijackAnotherTabsSession(t *testing.T) {
-	db := newSessDB()
-	db.ownedByOther = true
-	status, _ := sessCall(t, db, opWebchatClaudeSessionBind,
-		[]string{"webuser:a", "aimee-1", "claude-1"})
-	if status != store.StatusFailed {
-		t.Fatalf("status = %d, want %d (failed)", status, store.StatusFailed)
-	}
-	if ran(db, "UPDATE webchat_claude_sessions") || ran(db, "INSERT INTO webchat_claude_sessions") {
-		t.Fatalf("a hijacking bind wrote anyway")
-	}
-}
-
-// Existing databases can hold one tab under several historical principals, so
-// the update touches every copy: principal is attribution, not a namespace.
-func TestBindUpdatesEveryCopyAndInsertsOnlyWhenNoneExist(t *testing.T) {
-	db := newSessDB()
-	status, _ := sessCall(t, db, opWebchatClaudeSessionBind,
-		[]string{"webuser:a", "aimee-1", "claude-1"})
-	if status != store.StatusOK {
-		t.Fatalf("status = %d", status)
-	}
-	if !ran(db, "UPDATE webchat_claude_sessions") {
-		t.Fatalf("the bind did not update")
-	}
-	if ran(db, "INSERT INTO webchat_claude_sessions") {
-		t.Fatalf("the bind inserted despite an existing row")
-	}
-	// The update is keyed on the tab alone.
-	for i, sql := range db.executed {
-		if strings.Contains(sql, "UPDATE webchat_claude_sessions") {
-			if strings.Contains(sql, "principal") {
-				t.Fatalf("the update is namespaced by principal: %s", sql)
-			}
-			if db.args[i][1].(string) != "aimee-1" {
-				t.Fatalf("the update is keyed on %v", db.args[i][1])
-			}
-		}
-	}
-
-	db = newSessDB()
-	db.execRows = 0 // nothing to update
-	sessCall(t, db, opWebchatClaudeSessionBind, []string{"webuser:a", "aimee-1", "claude-1"})
-	if !ran(db, "INSERT INTO webchat_claude_sessions") {
-		t.Fatalf("a new tab was not inserted")
-	}
-}
-
-// A row with no binding reads the same as no row: the caller has nothing to
-// resume either way.
-func TestWebchatGetTreatsAnEmptyBindingAsMissing(t *testing.T) {
-	db := newSessDB()
-	db.row = []any{""}
-	status, _ := sessCall(t, db, opWebchatClaudeSessionGet, []string{"webuser:a", "aimee-1"})
-	if status != store.StatusMissing {
-		t.Fatalf("status = %d, want %d (missing)", status, store.StatusMissing)
-	}
-
-	db = newSessDB()
-	db.row = []any{"claude-1"}
-	status, cells := sessCall(t, db, opWebchatClaudeSessionGet, []string{"webuser:a", "aimee-1"})
-	if status != store.StatusOK || cells[0] != "claude-1" {
-		t.Fatalf("status = %d, cells = %v", status, cells)
-	}
-}
-
 // --- the live turn ----------------------------------------------------------------
 
 // rev advances on every write so a poller can tell the row moved without
@@ -573,13 +519,10 @@ func TestSessionsValidateTheirArguments(t *testing.T) {
 		{"list max too large", opServerSessionListRecent, []string{"99999"}},
 		{"search max not a number", opServerSessionSearchByTitle, []string{"x", "all"}},
 		{"expired negative threshold", opServerSessionListExpired, []string{"-1", "10"}},
-		{"primary save without agent", opPrimarySessionSave, []string{"s", "", "p", "[]"}},
-		{"primary load without provider", opPrimarySessionLoad, []string{"s", "a", ""}},
 		{"write path with no path", opSessionWritePathRecord, []string{"sess", ""}},
 		{"stale reads without child", opSessionStaleReads, []string{"parent", "", "10"}},
 		{"live set with no session", opWebchatLiveSet, []string{"", "t", "x", "idle"}},
 		{"live get with a bad revision", opWebchatLiveGet, []string{"sess", "soon"}},
-		{"bind with no claude id", opWebchatClaudeSessionBind, []string{"p", "aimee-1", ""}},
 		{"persona finish with a bad flag", opPersonaDeliveryFinish, []string{"sess", "maybe"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -623,7 +566,6 @@ func TestReadsDistinguishMissingFromFailed(t *testing.T) {
 		fields []string
 	}{
 		{"server session get", opServerSessionGet, []string{"sess"}},
-		{"primary load", opPrimarySessionLoad, []string{"s", "a", "p"}},
 		{"primary latest", opPrimarySessionGetLatest, []string{"s"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -648,8 +590,6 @@ func TestListReadsAreTotallyOrdered(t *testing.T) {
 		{opServerSessionListRecent, []string{"10"}},
 		{opServerSessionSearchByTitle, []string{"x", "10"}},
 		{opServerSessionListExpired, []string{"60", "10"}},
-		{opPrimarySessionAllocRecent, []string{"10"}},
-		{opPrimarySessionAllocSearch, []string{"x", "10"}},
 	} {
 		db := newSessDB()
 		sessCall(t, db, test.op, test.fields)
@@ -661,5 +601,175 @@ func TestListReadsAreTotallyOrdered(t *testing.T) {
 		if strings.Count(sql[strings.Index(sql, "ORDER BY"):], ",") == 0 {
 			t.Fatalf("the ordering has no tiebreaker: %s", sql)
 		}
+	}
+}
+
+// The append boundary must fail before touching storage for malformed content;
+// model/harness conversion belongs upstream of the session log.
+func TestSessionIRRejectsInvalidFramesAndCursors(t *testing.T) {
+	for _, fields := range [][]string{
+		{"", "e", "t", "actor", `{"kind":"message","payload":{}}`},
+		{"s", "", "t", "actor", `{"kind":"message","payload":{}}`},
+		{"s", "e", "t", "actor", `{"kind":"native","payload":{}}`},
+		{"s", "e", "t", "actor", `{"kind":"message"}`},
+		{"s", "e", "t", "actor", `not JSON`},
+		{"s", "e", "t", "actor", strings.Repeat("x", (1<<20)+1)},
+	} {
+		db := &sessDB{}
+		status, _ := sessCall(t, db, opSessionIRAppend, fields)
+		if status != store.StatusInvalid {
+			t.Fatalf("invalid append status %d", status)
+		}
+		if len(db.executed) != 0 {
+			t.Fatal("malformed event reached storage")
+		}
+	}
+	for _, fields := range [][]string{{"s", "-1", "1"}, {"s", "0", "129"}, {"s", "not-a-cursor", "1"}, {"s", "0", "0"}} {
+		status, _ := sessCall(t, &sessDB{}, opSessionIRPage, append(fields, "actor"))
+		if status != store.StatusInvalid {
+			t.Fatalf("invalid page status %d", status)
+		}
+	}
+}
+
+func TestSessionIRPagePreservesRolesToolsAndExactSequence(t *testing.T) {
+	db := &sessDB{rows: [][]any{
+		{int64(9007199254740993), "event-1", "turn-1", "operator",
+			`{"kind":"message","message_id":"m1","payload":{"role":"user","blocks":[{"type":"text","text":"hello"}]}}`},
+		{int64(9007199254740994), "event-2", "turn-1", "tool-runtime",
+			`{"kind":"message","message_id":"m2","payload":{"role":"tool","blocks":[{"type":"tool_result","tool_id":"opaque:42","content":"done"}]}}`},
+	}}
+	status, cells := sessCall(t, db, opSessionIRPage, []string{"session-1", "9007199254740992", "128", "actor"})
+	if status != store.StatusOK || len(cells) != 1 {
+		t.Fatalf("page %d %v", status, cells)
+	}
+	var envelopes []struct {
+		Version  int             `json:"version"`
+		Session  string          `json:"session_id"`
+		Sequence string          `json:"sequence"`
+		Event    json.RawMessage `json:"event"`
+	}
+	if err := json.Unmarshal([]byte(cells[0]), &envelopes); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelopes) != 2 || envelopes[0].Sequence != "9007199254740993" || envelopes[1].Sequence != "9007199254740994" {
+		t.Fatalf("sequence precision lost: %s", cells[0])
+	}
+	if envelopes[0].Version != 1 || envelopes[0].Session != "session-1" || !strings.Contains(string(envelopes[1].Event), `"tool_id":"opaque:42"`) {
+		t.Fatalf("canonical envelope lost content: %s", cells[0])
+	}
+}
+
+type irAppendFixture struct {
+	*sessDB
+	existing  []any
+	inserted  int64
+	lockErr   error
+	insertErr error
+	reads     []string
+}
+
+func (d *irAppendFixture) QueryRow(ctx context.Context, sql string, args ...any) store.Row {
+	d.reads = append(d.reads, sql)
+	switch sql {
+	case sessionIRLockSQL:
+		return sessRow{db: &sessDB{scanErr: d.lockErr}, values: []any{"actor"}}
+	case sessionIRExistingSQL:
+		return sessRow{db: &sessDB{}, values: d.existing}
+	case nativeRecoveryFenceSQL:
+		return sessRow{db: &sessDB{scanErr: store.ErrNoRows}}
+	case sessionIRInsertSQL:
+		return sessRow{db: &sessDB{scanErr: d.insertErr}, values: []any{d.inserted}}
+	default:
+		return d.sessDB.QueryRow(ctx, sql, args...)
+	}
+}
+func TestSessionIRAppendRetryAndFailure(t *testing.T) {
+	payload := `{"kind":"message","message_id":"m","payload":{"role":"assistant","blocks":[]}}`
+	fields := []string{"session-1", "event-1", "turn-1", "actor", payload}
+	db := &irAppendFixture{sessDB: &sessDB{}, inserted: 42}
+	status, cells, err := sessionIRAppend(context.Background(), db, fields)
+	if err != nil || status != store.StatusOK || len(cells) != 1 || cells[0] != "42" {
+		t.Fatalf("append %d %v %v", status, cells, err)
+	}
+	if len(db.reads) != 4 || db.reads[0] != sessionIRLockSQL || db.reads[2] != nativeRecoveryFenceSQL || db.reads[3] != sessionIRInsertSQL {
+		t.Fatal("append was not serialized under session lock")
+	}
+	db = &irAppendFixture{sessDB: &sessDB{}, existing: []any{int64(42), "turn-1", "actor", payload}}
+	status, cells, err = sessionIRAppend(context.Background(), db, fields)
+	if err != nil || status != store.StatusOK || cells[0] != "42" || len(db.reads) != 2 {
+		t.Fatal("retry inserted another event")
+	}
+	for _, index := range []int{2, 3, 4} {
+		changed := append([]string{}, fields...)
+		changed[index] += " "
+		status, _, err = sessionIRAppend(context.Background(), db, changed)
+		if err != nil || status != store.StatusInvalid {
+			t.Fatal("conflicting retry was accepted")
+		}
+	}
+	db = &irAppendFixture{sessDB: &sessDB{}, insertErr: errors.New("disk unavailable")}
+	_, _, err = sessionIRAppend(context.Background(), db, fields)
+	if err == nil {
+		t.Fatal("storage failure was hidden")
+	}
+}
+
+func TestSessionIRPageBoundsIncludeEncoding(t *testing.T) {
+	// HTML-sensitive text is common in code/tool results. JSON transport must not
+	// expand this into an oversized envelope or an empty, non-advancing page.
+	text := strings.Repeat("<>&", 240000)
+	payload := `{"kind":"message","message_id":"m","payload":{"role":"assistant","blocks":[{"type":"text","text":"` + text + `"}]}}`
+	db := &sessDB{}
+	for n := 1; n <= 5; n++ {
+		db.rows = append(db.rows, []any{int64(n), fmt.Sprintf("e%d", n), "turn", "actor", payload})
+	}
+	status, cells := sessCall(t, db, opSessionIRPage, []string{"s", "0", "128", "actor"})
+	if status != store.StatusOK || len(cells) != 1 || len(cells[0]) > 3<<20 {
+		t.Fatalf("invalid page: %d cells=%d", status, len(cells))
+	}
+	var page []struct {
+		Sequence string          `json:"sequence"`
+		Event    json.RawMessage `json:"event"`
+	}
+	if err := json.Unmarshal([]byte(cells[0]), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != 4 || page[0].Sequence != "1" || page[3].Sequence != "4" {
+		t.Fatalf("page did not advance to bounded cursor: %d records", len(page))
+	}
+	if !strings.Contains(string(page[0].Event), "<>&") {
+		t.Fatal("transport unexpectedly HTML-escaped code")
+	}
+}
+
+func TestSessionHarnessMetadata(t *testing.T) {
+	db := newSessDB()
+	db.row = []any{"native-one"}
+	status, cells := sessCall(t, db, opSessionHarnessGet, []string{"s", "claude", "owner"})
+	if status != store.StatusOK || len(cells) != 1 || cells[0] != "native-one" {
+		t.Fatalf("get: %d %v", status, cells)
+	}
+	db = newSessDB()
+	status, _ = sessCall(t, db, opSessionHarnessGet, []string{"s", "claude", "owner"})
+	if status != store.StatusMissing {
+		t.Fatalf("missing became %d", status)
+	}
+	db = newSessDB()
+	db.row = []any{"owner"}
+	status, _ = sessCall(t, db, opSessionHarnessBind, []string{"s", "codex", "native-two", "owner"})
+	if status != store.StatusOK || len(db.executed) != 2 || db.executed[0] != sessionIRLockSQL || db.executed[1] != sessionHarnessBindSQL {
+		t.Fatalf("bind not locked: %d %v", status, db.executed)
+	}
+	for _, f := range [][]string{{"", "codex", "id"}, {"s", "", "id"}, {"s", strings.Repeat("x", 129), "id"}, {"s", "codex", ""}} {
+		status, _ = sessCall(t, newSessDB(), opSessionHarnessBind, append(f, "owner"))
+		if status != store.StatusInvalid {
+			t.Fatalf("accepted bad metadata: %v", f)
+		}
+	}
+	db = newSessDB()
+	db.scanErr = errors.New("store unavailable")
+	if _, _, err := sessionHarnessGet(context.Background(), db, []string{"s", "codex", "owner"}); err == nil {
+		t.Fatal("store failure became missing")
 	}
 }

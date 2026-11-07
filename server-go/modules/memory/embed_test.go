@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type testEgress struct{}
@@ -283,8 +283,8 @@ func TestHandleEmbedRoutesThroughStageThree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, status := NewHandler(allowEgress)(bus.ModuleInvocation{StageID: StageEmbed}, request)
-	if status != bus.ModuleStatusOK {
+	body, status := NewHandler(allowEgress)(ring.ModuleInvocation{StageID: StageEmbed}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	var decoded EmbedResponse
@@ -294,7 +294,7 @@ func TestHandleEmbedRoutesThroughStageThree(t *testing.T) {
 	if decoded.Dim != 2 || decoded.Vector[1] != 0.5 {
 		t.Fatalf("decoded = %+v", decoded)
 	}
-	if _, status := NewHandler(allowEgress)(bus.ModuleInvocation{StageID: StageEmbed}, []byte("{")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := NewHandler(allowEgress)(ring.ModuleInvocation{StageID: StageEmbed}, []byte("{")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed JSON must be rejected, got %v", status)
 	}
 }

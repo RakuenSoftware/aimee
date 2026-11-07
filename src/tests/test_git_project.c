@@ -5,13 +5,15 @@
  * PAM identities that authorize and attribute a request; they never select a
  * tree, so they all resolve the same projects. */
 #include "modules/git/git_project.h"
+#include "server_project_workspace.h"
 #include "modules/workspace/workspace_scope.h"
 #include "ws_registry.h"
 
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 #include <aimee/workspace/module_api.h>
 
 #include <assert.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -20,11 +22,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-extern aimee_module_status_t aimee_workspace_module_handler(const aimee_module_invocation_t *,
-                                                            const uint8_t *, uint32_t, uint8_t *,
-                                                            uint32_t, uint32_t *, void *);
+extern ouro_module_status_t aimee_workspace_module_handler(const ouro_module_invocation_t *,
+                                                           const uint8_t *, uint32_t, uint8_t *,
+                                                           uint32_t, uint32_t *, void *);
 
-int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+int ouro_module_invocation_cancelled(const ouro_module_invocation_t *invocation)
 {
    (void)invocation;
    return 0;
@@ -34,11 +36,11 @@ static int validate_workspace_ref_via_module(const char *ref, size_t ref_len, in
 {
    uint8_t request[AIMEE_WORKSPACE_REQUEST_LEN], response[AIMEE_WORKSPACE_RESPONSE_LEN];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_WORKSPACE_STAGE_ACCESS};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_WORKSPACE_STAGE_ACCESS};
    return aimee_workspace_request_encode(ref, ref_len, request, sizeof(request)) == 0 &&
                   aimee_workspace_module_handler(&invocation, request, sizeof(request), response,
                                                  sizeof(response), &response_len,
-                                                 NULL) == AIMEE_MODULE_STATUS_OK
+                                                 NULL) == OURO_MODULE_STATUS_OK
               ? aimee_workspace_response_decode(response, response_len, allowed)
               : -1;
 }
@@ -92,6 +94,86 @@ int main(void)
    assert(stat(check, &st) == 0 && S_ISDIR(st.st_mode)); /* cloned */
    snprintf(check, sizeof(check), "%s/README.md", path);
    assert(stat(check, &st) == 0); /* file came across */
+
+   /* Real clone ownership is distinct from generic workspace registration. */
+   {
+      char child[PATH_MAX + 128], outside[PATH_MAX + 128], saved[PATH_MAX + 128];
+      snprintf(child, sizeof child, "%s/.aimee/worktrees/live/main", path);
+      assert(!run("mkdir -p %s", child));
+      int fd = git_project_open_workspace("webuser:alice", child);
+      struct stat held, named;
+      assert(fd >= 0 && !fstat(fd, &held) && !stat(child, &named) && held.st_dev == named.st_dev &&
+             held.st_ino == named.st_ino);
+      close(fd);
+      request_context_t owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED,
+                                 .capabilities = CAP_TOOL_EXECUTE};
+      snprintf(owner.vault_principal, sizeof owner.vault_principal, "webuser:alice");
+      /* Exercise the exact production callback predicate, not just its resource
+       * helper. A syntactically valid webuser on another transport is no grant. */
+      fd = server_project_workspace_open_owned(&owner, child);
+      assert(fd >= 0);
+      close(fd);
+      assert(server_project_workspace_open_owned(NULL, child) < 0);
+      attested_transport_t refused[] = {ATTEST_NONE, ATTEST_TCP_BEARER, ATTEST_UDS_PEERCRED,
+                                        ATTEST_MTLS_CLIENT};
+      for (size_t t = 0; t < sizeof refused / sizeof refused[0]; t++)
+      {
+         owner.vault_transport = refused[t];
+         assert(server_project_workspace_open_owned(&owner, child) < 0);
+      }
+      owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+      owner.capabilities = CAP_CHAT;
+      assert(server_project_workspace_open_owned(&owner, child) < 0);
+      owner.capabilities = CAP_TOOL_EXECUTE;
+      snprintf(owner.vault_principal, sizeof owner.vault_principal, "uid:0");
+      snprintf(owner.principal, sizeof owner.principal, "webuser:alice");
+      assert(server_project_workspace_open_owned(&owner, child) < 0);
+      snprintf(owner.vault_principal, sizeof owner.vault_principal, "webuser:../alice");
+      assert(server_project_workspace_open_owned(&owner, child) < 0);
+      /* The environment is deliberately shared by authenticated PAM actors. */
+      fd = git_project_open_workspace("webuser:bob", child);
+      assert(fd >= 0);
+      close(fd);
+      assert(git_project_open_workspace("uid:0", child) < 0);
+      assert(git_project_open_workspace("webchat:alice", child) < 0);
+      assert(git_project_open_workspace("webuser:../alice", child) < 0);
+      assert(git_project_open_workspace(NULL, child) < 0);
+      assert(git_project_open_workspace("webuser:alice", src) < 0);
+      snprintf(outside, sizeof outside, "%s/environment/impostor", wsdir);
+      assert(!run("mkdir -p %s/.git", outside));
+      assert(git_project_open_workspace("webuser:alice", outside) < 0);
+      assert(!run("rm -rf %s", outside));
+      snprintf(outside, sizeof outside, "%s/escape", path);
+      assert(!symlink(src, outside));
+      assert(git_project_open_workspace("webuser:alice", outside) < 0);
+      assert(!unlink(outside));
+      snprintf(outside, sizeof outside, "%s/.aimee/remote", path);
+      snprintf(saved, sizeof saved, "%s/.aimee/remote.saved", path);
+      assert(!rename(outside, saved));
+      assert(git_project_open_workspace("webuser:alice", child) < 0);
+      assert(!symlink(saved, outside));
+      assert(git_project_open_workspace("webuser:alice", child) < 0);
+      assert(!unlink(outside));
+      FILE *fake = fopen(outside, "w");
+      assert(fake && fputs("https://example.invalid/unregistered\n", fake) >= 0 && !fclose(fake));
+      assert(git_project_open_workspace("webuser:alice", child) < 0);
+      assert(!unlink(outside) && !rename(saved, outside));
+      int lock = ws_reg_lock("srcrepo");
+      assert(lock >= 0 && !ws_reg_unregister("srcrepo"));
+      close(lock);
+      assert(git_project_open_workspace("webuser:alice", child) < 0);
+      assert(!ws_reg_rebuild());
+      fd = git_project_open_workspace("webuser:alice", child);
+      assert(fd >= 0);
+      close(fd);
+      /* A returned descriptor pins the measured directory across replacement. */
+      snprintf(saved, sizeof saved, "%s.retired", child);
+      fd = git_project_open_workspace("webuser:alice", child);
+      assert(fd >= 0 && !rename(child, saved) && !mkdir(child, 0700));
+      assert(!fstat(fd, &held) && !stat(child, &named) && held.st_ino != named.st_ino);
+      close(fd);
+      assert(!rmdir(child) && !rename(saved, child));
+   }
 
    /* re-clone the same name -> project already exists -> conflict */
    assert(git_project_clone("webuser:alice", url, NULL, NULL, NULL, path, sizeof(path), name,
@@ -274,6 +356,13 @@ int main(void)
    snprintf(check, sizeof(check), "%s/environment/stale", wsdir);
    assert(git_project_delete("webuser:alice", "stale", derr, sizeof(derr)) == 0);
    assert(stat(check, &st) != 0);
+
+   snprintf(check, sizeof(check), "%s/environment/acme/syncy", wsdir);
+   int project_fd = git_project_open_workspace("webuser:alice", check);
+   assert(project_fd >= 0);
+   close(project_fd);
+   snprintf(check, sizeof(check), "%s/environment/acme", wsdir);
+   assert(git_project_open_workspace("webuser:alice", check) < 0);
 
    /* final tally: only acme/syncy remains. */
    assert(git_project_list("webuser:alice", names, 64) == 1);

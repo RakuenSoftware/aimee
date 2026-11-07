@@ -12,6 +12,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include "cJSON.h"
 
 #include "db1_client/delegate_learning.h"
 
@@ -43,7 +44,7 @@ const char *dl_failure_mode_to_string(dl_failure_mode_t mode)
 dl_failure_mode_t dl_string_to_failure_mode(const char *s)
 {
    if (!s)
-      return DL_MODE_SUCCESS;
+      return DL_MODE_UNKNOWN;
    if (strcmp(s, "success") == 0)
       return DL_MODE_SUCCESS;
    if (strcmp(s, "stall/no-writes") == 0)
@@ -60,10 +61,39 @@ dl_failure_mode_t dl_string_to_failure_mode(const char *s)
       return DL_MODE_DRIFT_BRANCH;
    if (strcmp(s, "cancelled") == 0)
       return DL_MODE_CANCELLED;
-   return DL_MODE_SUCCESS;
+   return DL_MODE_UNKNOWN;
 }
 
 /* ── Classification logic ──────────────────────────────────────────────── */
+
+/* Error text is data. Never interpolate it into JSON or truncate an encoded
+ * object into an apparently valid evidence record. The production error buffer
+ * is 512 bytes; evidence capacity includes its worst-case JSON escaping. */
+static void classify_error_evidence(dl_classification_t *out, const dl_exit_metrics_t *m, int tools,
+                                    int no_writes)
+{
+   cJSON *object = cJSON_CreateObject();
+   int ok = object && cJSON_AddStringToObject(object, "error", m->error ? m->error : "unknown") &&
+            cJSON_AddNumberToObject(object, "turns", m->turns);
+   if (ok && tools)
+      ok = cJSON_AddNumberToObject(object, "tool_calls", m->tool_calls) != NULL;
+   if (ok && m->max_turns_limit > 0)
+      ok = cJSON_AddNumberToObject(object, "max_turns", m->max_turns_limit) != NULL;
+   if (ok && m->write_enforce_fired)
+      ok = cJSON_AddTrueToObject(object, "write_enforce") != NULL;
+   if (ok && no_writes)
+      ok = cJSON_AddStringToObject(object, "write_progress", "none_in_observed_guard_window") !=
+           NULL;
+   if (ok)
+      ok = m->had_writes < 0
+               ? cJSON_AddNullToObject(object, "had_writes") != NULL
+               : cJSON_AddBoolToObject(object, "had_writes", m->had_writes > 0) != NULL;
+   if (ok)
+      ok = cJSON_AddStringToObject(object, "verification", "ungraded") != NULL;
+   if (!ok || !cJSON_PrintPreallocated(object, out->evidence, sizeof out->evidence, 0))
+      out->evidence[0] = '\0';
+   cJSON_Delete(object);
+}
 
 void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out)
 {
@@ -81,11 +111,9 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
                   "editing. On a similar goal, start from a concrete defect hypothesis and "
                   "attempt the smallest justified edit or decisive test before broadening "
                   "exploration.");
-         snprintf(out->evidence, sizeof(out->evidence),
-                  "{\"error\":\"%s\",\"turns\":%d,\"tool_calls\":%d,\"had_writes\":0}", m->error,
-                  m->turns, m->tool_calls);
+         classify_error_evidence(out, m, 1, 1);
       }
-      else if (m->write_enforce_fired && !m->had_writes)
+      else if (m->write_enforce_fired && m->had_writes == 0)
       {
          /* Stall with no writes */
          out->failure_mode = DL_MODE_STALL_NO_WRITES;
@@ -98,11 +126,9 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
                   "Ensure the task is actionable and files are writable. "
                   "Break large tasks into smaller sub-delegations.",
                   m->turns, m->role ? m->role : "unknown");
-         snprintf(out->evidence, sizeof(out->evidence),
-                  "{\"turns\":%d,\"tool_calls\":%d,\"had_writes\":0,\"write_enforce\":1}", m->turns,
-                  m->tool_calls);
+         classify_error_evidence(out, m, 1, 0);
       }
-      else if (m->write_enforce_fired && m->had_writes)
+      else if (m->write_enforce_fired && m->had_writes > 0)
       {
          /* Stall but eventually wrote */
          out->failure_mode = DL_MODE_STALL_SLOW_WRITES;
@@ -111,9 +137,7 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
                   "Delegate was slow to produce writes (%d turns) in role '%s'. "
                   "Consider tightening the prompt to require early writes.",
                   m->turns, m->role ? m->role : "unknown");
-         snprintf(out->evidence, sizeof(out->evidence),
-                  "{\"turns\":%d,\"tool_calls\":%d,\"had_writes\":1,\"write_enforce\":1}", m->turns,
-                  m->tool_calls);
+         classify_error_evidence(out, m, 1, 0);
       }
       else if (m->max_turns_limit > 0 && m->turns >= m->max_turns_limit)
       {
@@ -128,9 +152,7 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
                   "Task may be too complex for the turn budget. "
                   "Split into smaller delegations or increase max_turns.",
                   m->turns, m->max_turns_limit, m->role ? m->role : "unknown");
-         snprintf(out->evidence, sizeof(out->evidence),
-                  "{\"turns\":%d,\"max_turns\":%d,\"had_writes\":%d}", m->turns, m->max_turns_limit,
-                  m->had_writes);
+         classify_error_evidence(out, m, 1, 0);
       }
       else if (m->error && strstr(m->error, "drift") != NULL)
       {
@@ -148,8 +170,7 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
                   "Delegate drifted from expected state in role '%s'. "
                   "Ground the prompt with current file contents or diff evidence.",
                   m->role ? m->role : "unknown");
-         snprintf(out->evidence, sizeof(out->evidence), "{\"error\":\"%s\",\"turns\":%d}", m->error,
-                  m->turns);
+         classify_error_evidence(out, m, 0, 0);
       }
       else if (m->error && strstr(m->error, "cancel") != NULL)
       {
@@ -159,34 +180,39 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
                   "Delegate was cancelled in role '%s' after %d turns. "
                   "Ensure the task can complete within the timeout.",
                   m->role ? m->role : "unknown", m->turns);
-         snprintf(out->evidence, sizeof(out->evidence), "{\"error\":\"%s\",\"turns\":%d}", m->error,
-                  m->turns);
+         classify_error_evidence(out, m, 0, 0);
       }
       else
       {
-         /* Generic failure — classify as max-turns if turns were high, else unknown */
-         out->failure_mode = DL_MODE_MAX_TURNS;
+         /* An opaque failure does not establish a turn-budget failure. */
+         out->failure_mode = DL_MODE_UNKNOWN;
          out->confidence = 0.6;
          snprintf(out->lesson, sizeof(out->lesson),
                   "Delegate failed in role '%s' after %d turns: %s", m->role ? m->role : "unknown",
                   m->turns, m->error ? m->error : "unknown error");
-         snprintf(out->evidence, sizeof(out->evidence),
-                  "{\"error\":\"%s\",\"turns\":%d,\"tool_calls\":%d}",
-                  m->error ? m->error : "unknown", m->turns, m->tool_calls);
+         classify_error_evidence(out, m, 1, 0);
       }
    }
    else
    {
-      /* Success */
+      /* Process completion is an observation, not an independent task grade. */
       out->failure_mode = DL_MODE_SUCCESS;
       out->confidence = 0.6;
       snprintf(out->lesson, sizeof(out->lesson),
-               "Delegate succeeded in role '%s' in %d turns with %d tool calls. "
-               "This pattern worked — reuse similar prompt structure.",
+               "Delegate process completed in role '%s' in %d turns with %d tool calls. "
+               "Task correctness remains ungraded.",
                m->role ? m->role : "unknown", m->turns, m->tool_calls);
-      snprintf(out->evidence, sizeof(out->evidence),
-               "{\"turns\":%d,\"tool_calls\":%d,\"had_writes\":%d}", m->turns, m->tool_calls,
-               m->had_writes);
+      cJSON *evidence = cJSON_CreateObject();
+      int ok = evidence && cJSON_AddNumberToObject(evidence, "turns", m->turns) &&
+               cJSON_AddNumberToObject(evidence, "tool_calls", m->tool_calls) &&
+               cJSON_AddStringToObject(evidence, "verification", "ungraded");
+      if (ok)
+         ok = m->had_writes < 0
+                  ? cJSON_AddNullToObject(evidence, "had_writes") != NULL
+                  : cJSON_AddBoolToObject(evidence, "had_writes", m->had_writes > 0) != NULL;
+      if (!ok || !cJSON_PrintPreallocated(evidence, out->evidence, sizeof out->evidence, 0))
+         out->evidence[0] = 0;
+      cJSON_Delete(evidence);
    }
 }
 

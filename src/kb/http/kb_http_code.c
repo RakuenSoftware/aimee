@@ -1,5 +1,6 @@
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 #include "kb_http_code.h"
 #include "kb_http_code_vector_status.h"
 #include "aimee.h"
@@ -1185,8 +1186,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
                                                     &embed_0_reply);
       cJSON_Delete(embed_0_args);
-      int qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), qvec,
-                                EMBED_MAX_DIM);
+      int qdim = embed_reply_vector(embed_0_reply, qvec, EMBED_MAX_DIM);
       int embed_unauthorized =
           cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "unauthorized"));
       cJSON_Delete(embed_0_reply);

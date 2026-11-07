@@ -7,11 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net"
+	"github.com/JBailes/aimee/server-go/thinclient"
 	"net/http"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -88,103 +86,38 @@ func rpcErrorStatus(err error) int {
 	return http.StatusBadGateway
 }
 
-// socketCall sends a single-shot RPC and returns the parsed response.
-// streamEvent is one NDJSON line from a streaming aimee-server response.
-type streamEvent struct {
-	Event string `json:"event"`
-	// text/thinking/session events
-	Content string `json:"content,omitempty"`
-	ID      string `json:"id,omitempty"`
-	// status (final message)
-	Status  string `json:"status,omitempty"`
-	Error   string `json:"error,omitempty"`
-	Message string `json:"message,omitempty"`
-	// usage event
-	In   int64   `json:"in,omitempty"`
-	Out  int64   `json:"out,omitempty"`
-	Cost float64 `json:"cost,omitempty"`
-	// usage_kind: realized (provider-reported) vs estimated/avoided/partial. The
-	// webchat chat path uses provider-reported usage, so it is realized unless the
-	// server overrides it.
-	Kind string `json:"kind,omitempty"`
-}
-
-// chatStreamHTTP POSTs to
-// aimee-server's native POST /v1/chat/stream over the Unix socket and reads the
-// newline-delimited JSON event stream (application/x-ndjson), calling cb for each
-// intermediate event. The public config still calls its historical socket field
-// `socketPath`; the HTTP UDS lives beside that path.
-func chatStreamHTTP(ctx context.Context, socketPath, message, aimeeSessionID, claudeSessionID, cwd, attachID string, cb func(streamEvent)) error {
-	sock := filepath.Join(filepath.Dir(socketPath), "aimee-http.sock")
-
-	reqBody := map[string]string{"message": message}
-	if aimeeSessionID != "" {
-		reqBody["aimee_session_id"] = aimeeSessionID
-	}
-	if claudeSessionID != "" {
-		reqBody["claude_session_id"] = claudeSessionID
-	}
-	if cwd != "" {
-		reqBody["cwd"] = cwd
-	}
-	// Unified-presence: when the browser tab has attached a "webchat" surface,
-	// forward its attach_id so aimee-server serializes turns across surfaces
-	// (declining a racing submit with presence_busy).
-	if attachID != "" {
-		reqBody["attach_id"] = attachID
-	}
-	payload, err := json.Marshal(reqBody)
+// The browser transport does not interpret conversation events. Native adapters
+// have already produced and persisted canonical IR before these bytes arrive.
+func chatIRHTTP(ctx context.Context, socketPath, username string, message json.RawMessage, sid, cwd, attachID string, cb func([]byte) error) error {
+	payload, err := json.Marshal(map[string]any{"message": message, "aimee_session_id": sid, "cwd": cwd, "attach_id": attachID, "ir_version": 1, "queue": true, "queue_wait_ms": 30000})
 	if err != nil {
 		return err
 	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, "unix", sock)
-			},
-		},
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://aimee/v1/chat/stream",
-		bytes.NewReader(payload))
+	sock := filepath.Join(filepath.Dir(socketPath), "aimee-http.sock")
+	transport := &thinclient.Transport{Endpoint: "unix:" + sock}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://aimee/v1/chat/stream", bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
+	req.Header.Set("X-Aimee-Webuser", username)
+	response, err := (&http.Client{Transport: transport}).Do(req)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("chat stream: status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("chat stream HTTP %d", response.StatusCode)
 	}
-
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024) // tolerate long event lines
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 65536), 4*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+		if len(bytes.TrimSpace(line)) != 0 {
+			if err = cb(line); err != nil {
+				return err
+			}
 		}
-		var msg map[string]json.RawMessage
-		if json.Unmarshal(line, &msg) != nil {
-			continue
-		}
-		// The final message carries a "status" field (ok / error).
-		if _, ok := msg["status"]; ok {
-			return rpcError(msg)
-		}
-		var evt streamEvent
-		json.Unmarshal(line, &evt)
-		cb(evt)
 	}
-	if err := scanner.Err(); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return err
-	}
-	return nil
+	return scanner.Err()
 }

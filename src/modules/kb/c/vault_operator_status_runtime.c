@@ -459,18 +459,6 @@ unavailable:
    return KB_STORE_VAULT_OPERATOR_UNAVAILABLE;
 }
 
-int kb_store_vault_operator_runtime_snapshot(kb_store_vault_operator_runtime_t *r,
-                                             kb_store_vault_operator_snapshot_t *out)
-{
-   int64_t deadline;
-   if (!r || !out || !r->mutex_initialized || deadline_new(&deadline) ||
-       mutex_until(runtime_mutex(r), deadline))
-      return KB_STORE_VAULT_OPERATOR_UNAVAILABLE;
-   memset(out, 0, sizeof(*out));
-   int rc = snapshot_locked(r, deadline, out);
-   pthread_mutex_unlock(runtime_mutex(r));
-   return rc;
-}
 int kb_store_vault_operator_snapshot_equal(const kb_store_vault_operator_snapshot_t *a,
                                            const kb_store_vault_operator_snapshot_t *b)
 {

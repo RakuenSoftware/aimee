@@ -4,12 +4,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
 
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
 
 // The sessions family: the server's sessions, per-agent transcripts, the
-// write-path log, and the two webchat bindings.
+// write-path log, legacy import source, and live display state.
 const (
 	EventSessions uint32 = 11782
 	StageSessions uint32 = 6
@@ -23,17 +28,9 @@ const (
 	opServerSessionCount          uint32 = 7
 	opServerSessionListExpired    uint32 = 8
 	opServerSessionDeleteExpired  uint32 = 9
-	opPrimarySessionSave          uint32 = 10
-	opPrimarySessionLoad          uint32 = 11
-	opPrimarySessionDelete        uint32 = 12
-	opPrimarySessionAllocRecent   uint32 = 13
-	opPrimarySessionAllocSearch   uint32 = 14
 	opPrimarySessionGetLatest     uint32 = 15
 	opSessionWritePathRecord      uint32 = 16
 	opSessionStaleReads           uint32 = 17
-	opWebchatClaudeSessionGet     uint32 = 18
-	opWebchatClaudeOwnedByOther   uint32 = 19
-	opWebchatClaudeSessionBind    uint32 = 20
 	opWebchatLiveSet              uint32 = 21
 	opWebchatLiveGet              uint32 = 22
 	opPersonaDeliveryClaim        uint32 = 23
@@ -41,6 +38,15 @@ const (
 	opServerSessionListBySubject  uint32 = 25
 	opServerSessionEraseSubject   uint32 = 26
 	opServerSessionErasureReceipt uint32 = 27
+	opSessionIRAppend             uint32 = 28
+	opSessionIRPage               uint32 = 29
+	opSessionHarnessGet           uint32 = 30
+	opSessionHarnessBind          uint32 = 31
+	opSessionIRHistorySave        uint32 = 32
+	opSessionIRHistoryLoad        uint32 = 33
+	opSessionHarnessCompareSwap   uint32 = 34
+	opSessionIRRunningHistoryLoad uint32 = 35
+	opSessionIRAppendVerified     uint32 = 36
 )
 
 // Persona delivery states. The claim is an UPDATE guarded on unclaimed, so of
@@ -310,45 +316,11 @@ const (
 	                       SET persona_delivery_state = $2, last_activity_at = now()
 	                     WHERE id = $1 AND persona_delivery_state = 2`
 
-	primarySessionSaveSQL = `INSERT INTO primary_sessions
-	                             (session_id, agent_name, provider, messages_json)
-	                         VALUES ($1, $2, $3, $4)
-	                         ON CONFLICT (session_id, agent_name, provider)
-	                         DO UPDATE SET messages_json = EXCLUDED.messages_json,
-	                                       updated_at = now()`
-
-	primarySessionLoadSQL = `SELECT messages_json FROM primary_sessions
-	                          WHERE session_id = $1 AND agent_name = $2 AND provider = $3`
-
-	primarySessionDeleteSQL = `DELETE FROM primary_sessions
-	                            WHERE session_id = $1 AND agent_name = $2 AND provider = $3`
-
-	primarySessionColumns = `session_id, agent_name, provider, messages_json,
-	        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
-	        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')`
-
-	primaryAllocRecentSQL = `SELECT ` + primarySessionColumns + `
-	                           FROM primary_sessions
-	                          ORDER BY updated_at DESC, session_id
-	                          LIMIT $1`
-
-	// Four columns, because the caller is searching for a transcript and any of
-	// these is how a person recognises one. The wire carries a RAW query, not a
-	// pattern: the module wraps it, which is what the C did.
-	primaryAllocSearchSQL = `SELECT ` + primarySessionColumns + `
-	                           FROM primary_sessions
-	                          WHERE messages_json ILIKE $1 ESCAPE '\'
-	                             OR session_id    ILIKE $1 ESCAPE '\'
-	                             OR agent_name    ILIKE $1 ESCAPE '\'
-	                             OR provider      ILIKE $1 ESCAPE '\'
-	                          ORDER BY updated_at DESC, session_id
-	                          LIMIT $2`
-
-	primaryGetLatestSQL = `SELECT ` + primarySessionColumns + `
-	                         FROM primary_sessions
-	                        WHERE session_id = $1
-	                        ORDER BY updated_at DESC, agent_name, provider
-	                        LIMIT 1`
+	primaryGetLatestSQL = `SELECT session_id,agent_name,provider,
+ to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+ to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+ FROM primary_sessions WHERE session_id=$1
+ ORDER BY updated_at DESC,agent_name,provider LIMIT 1 FOR SHARE`
 
 	// seq is allocated from the current maximum so the caller does not track a
 	// per-session counter. The primary key makes a duplicate impossible.
@@ -365,26 +337,6 @@ const (
 	                  WHERE r.session_id = $1 AND w.session_id = $2
 	                  ORDER BY r.path
 	                  LIMIT $3`
-
-	// principal is attribution, never a namespace: a tab is identified by its
-	// aimee_session_id alone, and the C passed principal in and then explicitly
-	// ignored it at every read.
-	webchatClaudeGetSQL = `SELECT claude_session_id FROM webchat_claude_sessions
-	                        WHERE aimee_session_id = $1
-	                        ORDER BY updated_at DESC
-	                        LIMIT 1`
-
-	webchatOwnedByOtherSQL = `SELECT 1 FROM webchat_claude_sessions
-	                           WHERE claude_session_id = $1 AND aimee_session_id <> $2
-	                           LIMIT 1`
-
-	webchatBindUpdateSQL = `UPDATE webchat_claude_sessions
-	                           SET claude_session_id = $1, updated_at = now()
-	                         WHERE aimee_session_id = $2`
-
-	webchatBindInsertSQL = `INSERT INTO webchat_claude_sessions
-	                            (principal, aimee_session_id, claude_session_id)
-	                        VALUES ($1, $2, $3)`
 
 	webchatLiveSetSQL = `INSERT INTO webchat_live (session_id, turn_id, rev, text, status)
 	                     VALUES ($1, $2, 1, $3, $4)
@@ -403,19 +355,6 @@ const (
 func serverSessionRow(scan func(...any) error) ([]string, error) {
 	cells := make([]string, 10)
 	dest := make([]any, 10)
-	for i := range cells {
-		dest[i] = &cells[i]
-	}
-	if err := scan(dest...); err != nil {
-		return nil, err
-	}
-	return cells, nil
-}
-
-// primarySessionRow reads the six cells of a primary-session row.
-func primarySessionRow(scan func(...any) error) ([]string, error) {
-	cells := make([]string, 6)
-	dest := make([]any, 6)
 	for i := range cells {
 		dest[i] = &cells[i]
 	}
@@ -619,6 +558,10 @@ func serverSessionEraseSubject(ctx context.Context, q store.Queryer, f []string)
 	if sessionCount > 4096 {
 		return store.StatusInvalid, nil, nil
 	}
+	var removedProcedures int64
+	if err := q.QueryRow(ctx, `SELECT local_procedure_prepare_subject_erasure($1)`, principal).Scan(&removedProcedures); err != nil {
+		return 0, nil, err
+	}
 	tag, err := q.Exec(ctx, serverSessionEraseSubjectSQL, principal)
 	if err != nil {
 		return 0, nil, err
@@ -723,71 +666,26 @@ func personaDeliveryFinish(ctx context.Context, q store.Queryer, f []string) (ui
 
 // --- primary sessions ----------------------------------------------------------
 
-func primarySessionSave(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	if f[0] == "" || f[1] == "" || f[2] == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	if _, err := q.Exec(ctx, primarySessionSaveSQL, f[0], f[1], f[2], f[3]); err != nil {
-		return 0, nil, err
-	}
-	return store.StatusOK, nil, nil
-}
-
-func primarySessionLoad(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	if f[0] == "" || f[1] == "" || f[2] == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	var messages string
-	switch err := q.QueryRow(ctx, primarySessionLoadSQL, f[0], f[1], f[2]).Scan(&messages); {
-	case store.IsNoRows(err):
-		return store.StatusMissing, nil, nil
-	case err != nil:
-		return 0, nil, err
-	}
-	return store.StatusOK, []string{messages}, nil
-}
-
-func primarySessionDelete(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	if f[0] == "" || f[1] == "" || f[2] == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	if _, err := q.Exec(ctx, primarySessionDeleteSQL, f[0], f[1], f[2]); err != nil {
-		return 0, nil, err
-	}
-	return store.StatusOK, nil, nil
-}
-
-func primarySessionAllocRecent(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	max, ok := boundedMax(f[0])
-	if !ok {
-		return store.StatusInvalid, nil, nil
-	}
-	return collect(ctx, q, primaryAllocRecentSQL, 6, primarySessionRow, max)
-}
-
-// primarySessionAllocSearch is op 14: find transcripts by free text.
-//
-// f[0] is the user's raw query, NOT a pattern -- it is wrapped here and escaped,
-// so a query containing % matches a literal % rather than everything.
-func primarySessionAllocSearch(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	max, ok := boundedMax(f[1])
-	if f[0] == "" || !ok {
-		return store.StatusInvalid, nil, nil
-	}
-	return collect(ctx, q, primaryAllocSearchSQL, 6, primarySessionRow, likeContains(f[0]), max)
-}
-
 func primarySessionGetLatest(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	if f[0] == "" {
 		return store.StatusInvalid, nil, nil
 	}
-	cells, err := primarySessionRow(q.QueryRow(ctx, primaryGetLatestSQL, f[0]).Scan)
+	var session, agent, provider, created, updated string
+	err := q.QueryRow(ctx, primaryGetLatestSQL, f[0]).Scan(&session, &agent, &provider, &created, &updated)
 	switch {
 	case store.IsNoRows(err):
 		return store.StatusMissing, nil, nil
 	case err != nil:
 		return 0, nil, err
 	}
+	messages, err := legacyPrimaryTextBounded(ctx, q, session, agent, provider, legacyPrimaryReplyCapacity(session, agent, provider, created, updated))
+	if err == errLegacyPrimaryReplyTooLong {
+		return store.StatusTooLong, nil, nil
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	cells := []string{session, agent, provider, created, updated, messages}
 	return store.StatusOK, cells, nil
 }
 
@@ -820,75 +718,6 @@ func sessionStaleReads(ctx context.Context, q store.Queryer, f []string) (uint32
 }
 
 // --- webchat ---------------------------------------------------------------------
-
-func webchatClaudeSessionGet(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	if f[1] == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	var claudeID string
-	switch err := q.QueryRow(ctx, webchatClaudeGetSQL, f[1]).Scan(&claudeID); {
-	case store.IsNoRows(err):
-		return store.StatusMissing, nil, nil
-	case err != nil:
-		return 0, nil, err
-	}
-	if claudeID == "" {
-		// A row with no binding is the same answer as no row.
-		return store.StatusMissing, nil, nil
-	}
-	return store.StatusOK, []string{claudeID, "0"}, nil
-}
-
-// webchatOwnedByOther is op 19: does another tab already own this id.
-//
-// It answers 0 on failure rather than reporting one, because the C did and
-// because the caller uses it as a guard -- an error that read as "not owned"
-// would be the wrong way to fail, but reporting a status the caller does not
-// branch on would be worse.
-func webchatOwnedByOther(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	if f[2] == "" {
-		return store.StatusOK, []string{"0"}, nil
-	}
-	var one int
-	switch err := q.QueryRow(ctx, webchatOwnedByOtherSQL, f[2], f[1]).Scan(&one); {
-	case store.IsNoRows(err):
-		return store.StatusOK, []string{"0"}, nil
-	case err != nil:
-		return 0, nil, err
-	}
-	return store.StatusOK, []string{"1"}, nil
-}
-
-// webchatClaudeSessionBind is op 20.
-//
-// A binding is never hijacked: if another tab already owns this claude session
-// id, the bind is refused rather than repointing it. Existing databases can
-// hold one tab under several historical principals, so the update touches every
-// copy -- principal is attribution, not a namespace.
-func webchatClaudeSessionBind(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	principal, aimeeID, claudeID := f[0], f[1], f[2]
-	if aimeeID == "" || claudeID == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	var one int
-	switch err := q.QueryRow(ctx, webchatOwnedByOtherSQL, claudeID, aimeeID).Scan(&one); {
-	case err == nil:
-		return store.StatusFailed, nil, nil
-	case !store.IsNoRows(err):
-		return 0, nil, err
-	}
-	tag, err := q.Exec(ctx, webchatBindUpdateSQL, claudeID, aimeeID)
-	if err != nil {
-		return 0, nil, err
-	}
-	if tag.RowsAffected() > 0 {
-		return store.StatusOK, nil, nil
-	}
-	if _, err := q.Exec(ctx, webchatBindInsertSQL, principal, aimeeID, claudeID); err != nil {
-		return 0, nil, err
-	}
-	return store.StatusOK, nil, nil
-}
 
 func webchatLiveSet(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	if f[0] == "" {
@@ -927,32 +756,306 @@ var Sessions = store.Family{
 	Event: EventSessions,
 	Stage: StageSessions,
 	Ops: map[uint32]store.Op{
-		opServerSessionCreate:         {Name: "server_session_create", Args: 3, Tx: true, Run: serverSessionCreate},
-		opServerSessionGet:            {Name: "server_session_get", Cells: 10, Args: 1, Run: serverSessionGet},
-		opServerSessionSetOutcome:     {Name: "server_session_set_outcome", Args: 2, Tx: true, Run: serverSessionSetOutcome},
-		opServerSessionDelete:         {Name: "server_session_delete", Args: 1, Tx: true, Run: serverSessionDelete},
-		opServerSessionListRecent:     {Name: "server_session_list_recent", Cells: 10, Args: 1, Run: serverSessionListRecent},
-		opServerSessionSearchByTitle:  {Name: "server_session_search_by_title", Cells: 10, Args: 2, Run: serverSessionSearchByTitle},
-		opServerSessionCount:          {Name: "server_session_count", Args: 1, Run: serverSessionCount},
-		opServerSessionListExpired:    {Name: "server_session_list_expired", Cells: 1, Args: 2, Run: serverSessionListExpired},
-		opServerSessionDeleteExpired:  {Name: "server_session_delete_expired", Args: 1, Tx: true, Run: serverSessionDeleteExpired},
-		opPrimarySessionSave:          {Name: "primary_session_save", Args: 4, Tx: true, Run: primarySessionSave},
-		opPrimarySessionLoad:          {Name: "primary_session_load", Args: 3, Run: primarySessionLoad},
-		opPrimarySessionDelete:        {Name: "primary_session_delete", Args: 3, Tx: true, Run: primarySessionDelete},
-		opPrimarySessionAllocRecent:   {Name: "primary_session_alloc_recent", Cells: 6, Args: 1, Run: primarySessionAllocRecent},
-		opPrimarySessionAllocSearch:   {Name: "primary_session_alloc_search", Cells: 6, Args: 2, Run: primarySessionAllocSearch},
-		opPrimarySessionGetLatest:     {Name: "primary_session_get_latest", Cells: 6, Args: 1, Run: primarySessionGetLatest},
-		opSessionWritePathRecord:      {Name: "session_write_path_record", Args: 2, Tx: true, Run: sessionWritePathRecord},
-		opSessionStaleReads:           {Name: "session_stale_reads", Cells: 1, Args: 3, Run: sessionStaleReads},
-		opWebchatClaudeSessionGet:     {Name: "webchat_claude_session_get", Cells: 2, Args: 2, Run: webchatClaudeSessionGet},
-		opWebchatClaudeOwnedByOther:   {Name: "webchat_claude_session_owned_by_other", Args: 3, Run: webchatOwnedByOther},
-		opWebchatClaudeSessionBind:    {Name: "webchat_claude_session_bind", Args: 3, Tx: true, Run: webchatClaudeSessionBind},
-		opWebchatLiveSet:              {Name: "webchat_live_set", Args: 4, Tx: true, Run: webchatLiveSet},
-		opWebchatLiveGet:              {Name: "webchat_live_get", Cells: 4, Args: 2, Run: webchatLiveGet},
-		opPersonaDeliveryClaim:        {Name: "server_session_persona_delivery_claim", Args: 1, Tx: true, Run: personaDeliveryClaim},
-		opPersonaDeliveryFinish:       {Name: "server_session_persona_delivery_finish", Args: 2, Tx: true, Run: personaDeliveryFinish},
-		opServerSessionListBySubject:  {Name: "server_session_list_by_subject", Cells: 1, Args: 2, Run: serverSessionListBySubject},
-		opServerSessionEraseSubject:   {Name: "server_session_erase_subject", Args: 2, Tx: true, Run: serverSessionEraseSubject},
-		opServerSessionErasureReceipt: {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
+		opServerSessionCreate:               {Name: "server_session_create", Args: 3, Tx: true, Run: serverSessionCreate},
+		opServerSessionGet:                  {Name: "server_session_get", Cells: 10, Args: 1, Run: serverSessionGet},
+		opServerSessionSetOutcome:           {Name: "server_session_set_outcome", Args: 2, Tx: true, Run: serverSessionSetOutcome},
+		opServerSessionDelete:               {Name: "server_session_delete", Args: 1, Tx: true, Run: serverSessionDelete},
+		opServerSessionListRecent:           {Name: "server_session_list_recent", Cells: 10, Args: 1, Run: serverSessionListRecent},
+		opServerSessionSearchByTitle:        {Name: "server_session_search_by_title", Cells: 10, Args: 2, Run: serverSessionSearchByTitle},
+		opServerSessionCount:                {Name: "server_session_count", Args: 1, Run: serverSessionCount},
+		opServerSessionListExpired:          {Name: "server_session_list_expired", Cells: 1, Args: 2, Run: serverSessionListExpired},
+		opServerSessionDeleteExpired:        {Name: "server_session_delete_expired", Args: 1, Tx: true, Run: serverSessionDeleteExpired},
+		opPrimarySessionGetLatest:           {Name: "primary_session_get_latest", Timeout: store.CanonicalHistoryTimeout, Cells: 6, Args: 1, Tx: true, Run: primarySessionGetLatest},
+		opSessionWritePathRecord:            {Name: "session_write_path_record", Args: 2, Tx: true, Run: sessionWritePathRecord},
+		opSessionStaleReads:                 {Name: "session_stale_reads", Cells: 1, Args: 3, Run: sessionStaleReads},
+		opWebchatLiveSet:                    {Name: "webchat_live_set", Args: 4, Tx: true, Run: webchatLiveSet},
+		opWebchatLiveGet:                    {Name: "webchat_live_get", Cells: 4, Args: 2, Run: webchatLiveGet},
+		opPersonaDeliveryClaim:              {Name: "server_session_persona_delivery_claim", Args: 1, Tx: true, Run: personaDeliveryClaim},
+		opPersonaDeliveryFinish:             {Name: "server_session_persona_delivery_finish", Args: 2, Tx: true, Run: personaDeliveryFinish},
+		opServerSessionListBySubject:        {Name: "server_session_list_by_subject", Cells: 1, Args: 2, Run: serverSessionListBySubject},
+		opServerSessionEraseSubject:         {Name: "server_session_erase_subject", Args: 2, Tx: true, Run: serverSessionEraseSubject},
+		opServerSessionErasureReceipt:       {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
+		opSessionIRAppend:                   {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
+		opSessionIRAppendVerified:           {Name: "session_ir_append_verified", Args: 5, Tx: true, HostOnly: true, Run: sessionIRAppendVerified},
+		opSessionIRCancel:                   {Name: "session_ir_cancel", Timeout: store.CanonicalHistoryTimeout, Args: 3, Cells: 1, Tx: true, HostOnly: true, Run: sessionIRCancel},
+		opSessionIRSearch:                   {Name: "session_ir_search", Timeout: store.CanonicalHistoryTimeout, Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionIRSearch},
+		opSessionNativeSourceAppend:         {Name: "session_native_source_append", Args: 5, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeSourceAppend},
+		opSessionNativeActiveOwned:          {Name: "session_native_active_owned", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeActiveOwned},
+		opSessionNativeHistory:              {Name: "session_native_history", Timeout: store.CanonicalHistoryTimeout, Args: 4, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeHistory},
+		opSessionNativeReservationFinish:    {Name: "session_native_reservation_finish", Timeout: store.CanonicalHistoryTimeout, Args: 2, Cells: 3, Tx: true, HostOnly: true, Run: sessionNativeReservationFinish},
+		opSessionNativeReserve:              {Name: "session_native_reserve", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeReserve},
+		opSessionNativeReservationReconcile: {Name: "session_native_reservation_reconcile", Timeout: store.CanonicalHistoryTimeout, Args: 2, Cells: 2, Tx: true, HostOnly: true, Run: sessionNativeReservationReconcile},
+		opSessionNativeEpoch:                {Name: "session_native_epoch", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeEpoch},
+		opSessionNativeReservationLookup:    {Name: "session_native_reservation_lookup", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeReservationLookup},
+		opSessionNativeOwnerClaim:           {Name: "session_native_owner_claim", Args: 2, Tx: true, HostOnly: true, Run: sessionNativeOwnerClaim},
+		opSessionNativeReconcile:            {Name: "session_native_reconcile", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeReconcile},
+		opSessionIRHistoryImport:            {Name: "session_ir_history_import", Timeout: store.CanonicalHistoryTimeout, Cells: 1, Args: 9, Tx: true, HostOnly: true, Run: sessionIRHistoryImport},
+		opServerSessionPrimaryGet:           {Name: "server_session_primary_get", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionPrimaryGet},
+		opServerSessionPrimarySet:           {Name: "server_session_primary_set", Args: 3, Tx: true, HostOnly: true, Run: sessionPrimarySet},
+		opSessionIRPage:                     {Name: "session_ir_page", Args: 4, Run: sessionIRPage},
+		opSessionIRHistorySave:              {Name: "session_ir_history_save", Args: 5, Tx: true, Run: sessionIRHistorySave},
+		opSessionIRHistoryLoad:              {Name: "session_ir_history_load", Timeout: store.CanonicalHistoryTimeout, Tx: true, Args: 4, Run: sessionIRHistoryLoad},
+		opSessionIRRunningHistoryLoad:       {Name: "session_ir_running_history_load", Timeout: store.CanonicalHistoryTimeout, Tx: true, Args: 3, Run: sessionIRRunningHistoryLoad},
+		opSessionHarnessGet:                 {Name: "session_harness_get", Args: 3, Cells: 1, Run: sessionHarnessGet},
+		opSessionHarnessBind:                {Name: "session_harness_bind", Args: 4, Tx: true, Run: sessionHarnessBind},
+		opSessionHarnessCompareSwap:         {Name: "session_harness_compare_swap", Args: 5, Tx: true, Run: sessionHarnessCompareSwap},
 	},
+}
+
+// The existing session row is the append lock. Appends and retry checks run in
+// one transaction, so concurrent producers cannot allocate the same sequence.
+// Sequence strings remain exact when consumed by a JavaScript browser.
+const sessionIRLockSQL = `SELECT principal FROM server_sessions WHERE id = $1 FOR UPDATE`
+const sessionIRExistingSQL = `SELECT sequence, turn_id, actor, payload FROM session_ir_events
+ WHERE session_id = $1 AND event_id = $2`
+const sessionIRInsertSQL = `INSERT INTO session_ir_events
+ (session_id, sequence, event_id, turn_id, actor, payload)
+ VALUES ($1, (SELECT coalesce(max(sequence), 0) + 1 FROM session_ir_events WHERE session_id = $1),
+ $2, $3, $4, $5) RETURNING sequence`
+
+// Bound the store reply before the presentation reducer applies its smaller
+// page budget. Continuation always uses the last emitted immutable sequence.
+const sessionIRPageSQL = `WITH candidates AS MATERIALIZED (
+ SELECT sequence,event_id,turn_id,actor,payload FROM session_ir_events
+ WHERE session_id=$1 AND sequence>$2
+ AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$4)
+ ORDER BY session_ir_events.sequence LIMIT $3
+), budgeted AS (
+ SELECT *,sum(octet_length(turn_id)+octet_length(actor)+octet_length(event_id)+octet_length(payload)+64)
+ OVER (ORDER BY candidates.sequence) AS wire_bytes FROM candidates
+) SELECT sequence,event_id,turn_id,actor,payload FROM budgeted
+ WHERE wire_bytes<=8388608 ORDER BY budgeted.sequence`
+
+// The ordinary append cannot carry verification authority. Only the private
+// host operation may persist a proof, and every proof binds the same immutable
+// session/turn/actor as its terminal envelope. Schema validity alone never
+// establishes actual execution custody or a grade.
+func sessionIRAppend(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	return sessionIRAppendInternal(ctx, q, f, false)
+}
+func sessionIRAppendVerified(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	return sessionIRAppendInternal(ctx, q, f, true)
+}
+func sessionIRProofBindings(encoded []byte, session, turn, actor string, allowProof bool) bool {
+	var event struct {
+		Kind    string          `json:"kind"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if json.Unmarshal(encoded, &event) != nil {
+		return false
+	}
+	if event.Kind == "child_execution" {
+		var child canonical.ChildExecutionPayload
+		if !canonical.Decode(event.Payload, &child) {
+			return false
+		}
+		if child.LearningBinding == nil {
+			return !allowProof
+		}
+		return allowProof && child.Turn == turn && child.Session != session && canonical.ValidDelegateLearningBinding(child.LearningBinding) && validDelegateChildIdentity(session, child)
+	}
+	if event.Kind != "execution" {
+		return !allowProof
+	}
+	var payload canonical.ExecutionPayload
+	if !canonical.Decode(event.Payload, &payload) {
+		return false
+	}
+	if len(payload.VerificationProofs) == 0 {
+		return !allowProof
+	}
+	if !allowProof || payload.Status != "completed" || len(payload.VerificationProofs) > 8 {
+		return false
+	}
+	// The canonical event validator has admitted every exact proof schema.
+	for _, proof := range payload.VerificationProofs {
+		if proof.Session != session || proof.Turn != turn || proof.Actor != actor {
+			return false
+		}
+	}
+	return true
+}
+func sessionIRAppendInternal(ctx context.Context, q store.Queryer, f []string, allowProof bool) (uint32, []string, error) {
+	return sessionIRAppendAuthorized(ctx, q, f, allowProof, false, false)
+}
+func sessionIRAppendAuthorized(ctx context.Context, q store.Queryer, f []string, allowProof, allowInterruption, allowNativeOwner bool) (uint32, []string, error) {
+	return sessionIRAppendImportAuthorized(ctx, q, f, allowProof, allowInterruption, allowNativeOwner, false)
+}
+func sessionIRAppendImportAuthorized(ctx context.Context, q store.Queryer, f []string, allowProof, allowInterruption, allowNativeOwner, allowImport bool) (uint32, []string, error) {
+	if len(f) != 5 {
+		return store.StatusInvalid, nil, nil
+	}
+	for _, identity := range f[:4] {
+		if identity == "" || len(identity) > 1024 {
+			return store.StatusInvalid, nil, nil
+		}
+	}
+	if (strings.HasPrefix(f[1], operatorCancelPrefix) || strings.HasPrefix(f[1], "operator-interruption:")) || !validSessionIREvent([]byte(f[4])) || !sessionIRProofBindings([]byte(f[4]), f[0], f[2], f[3], allowProof) {
+		return store.StatusInvalid, nil, nil
+	}
+	var eventKind struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal([]byte(f[4]), &eventKind) != nil {
+		return store.StatusInvalid, nil, nil
+	}
+	var top map[string]json.RawMessage
+	if json.Unmarshal([]byte(f[4]), &top) != nil {
+		return store.StatusInvalid, nil, nil
+	}
+	if _, present := top["native_owner"]; present && !allowNativeOwner {
+		return store.StatusInvalid, nil, nil
+	}
+	if _, present := top["partial"]; present && !allowNativeOwner {
+		return store.StatusInvalid, nil, nil
+	}
+	if eventKind.Kind == "tool_interruption" && !allowInterruption {
+		return store.StatusInvalid, nil, nil
+	}
+	if eventKind.Kind == "history" && !allowImport {
+		var e struct {
+			Kind    string                 `json:"kind"`
+			Payload canonical.HistoryEvent `json:"payload"`
+		}
+		if json.Unmarshal([]byte(f[4]), &e) != nil {
+			return store.StatusInvalid, nil, nil
+		}
+		if e.Payload.Phase == "import_report" || e.Payload.Phase == "archive" || e.Payload.Phase == "message_fragment" {
+			return store.StatusInvalid, nil, nil
+		}
+	}
+	var locked string
+	if err := q.QueryRow(ctx, sessionIRLockSQL, f[0]).Scan(&locked); err != nil {
+		if store.IsNoRows(err) {
+			return store.StatusMissing, nil, nil
+		}
+		return 0, nil, err
+	}
+	if locked != f[3] {
+		return store.StatusInvalid, nil, nil
+	}
+	var sequence int64
+	var turn, actor, payload string
+	err := q.QueryRow(ctx, sessionIRExistingSQL, f[0], f[1]).Scan(&sequence, &turn, &actor, &payload)
+	if err == nil {
+		if turn != f[2] || actor != f[3] || payload != f[4] {
+			return store.StatusInvalid, nil, nil
+		}
+		return store.StatusOK, []string{strconv.FormatInt(sequence, 10)}, nil
+	}
+	if !store.IsNoRows(err) {
+		return 0, nil, err
+	}
+	fenced, fenceErr := nativeRecoveryFenced(ctx, q, f[0], f[2])
+	if fenceErr != nil {
+		return 0, nil, fenceErr
+	}
+	if fenced {
+		return store.StatusInvalid, nil, nil
+	}
+	if err = q.QueryRow(ctx, sessionIRInsertSQL, f[0], f[1], f[2], f[3], f[4]).Scan(&sequence); err != nil {
+		return 0, nil, err
+	}
+	if err = enqueueLearningProjection(ctx, q, f, sequence); err != nil {
+		return store.StatusFailed, nil, err
+	}
+	return store.StatusOK, []string{strconv.FormatInt(sequence, 10)}, nil
+}
+
+func sessionIRPage(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	after, err := strconv.ParseInt(f[1], 10, 64)
+	limit, limitErr := strconv.Atoi(f[2])
+	if f[0] == "" || len(f[0]) > 1024 || err != nil || after < 0 || strconv.FormatInt(after, 10) != f[1] || limitErr != nil || limit < 1 || limit > 128 || f[3] == "" || len(f[3]) > 1024 {
+		return store.StatusInvalid, nil, nil
+	}
+	rows, err := q.Query(ctx, sessionIRPageSQL, f[0], after, limit, f[3])
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+	events := make([]json.RawMessage, 0)
+	total := 2
+	for rows.Next() {
+		var sequence int64
+		var eventID, turnID, actor, payload string
+		if err := rows.Scan(&sequence, &eventID, &turnID, &actor, &payload); err != nil {
+			return 0, nil, err
+		}
+		envelope := struct {
+			Version   int             `json:"version"`
+			SessionID string          `json:"session_id"`
+			Sequence  string          `json:"sequence"`
+			EventID   string          `json:"event_id"`
+			TurnID    string          `json:"turn_id"`
+			Actor     string          `json:"actor"`
+			Event     json.RawMessage `json:"event"`
+		}{1, f[0], strconv.FormatInt(sequence, 10), eventID, turnID, actor, json.RawMessage(payload)}
+		encoded, err := encodeSessionIR(envelope)
+		if err != nil {
+			return 0, nil, err
+		}
+		if total+len(encoded)+1 > 3<<20 {
+			if len(events) == 0 {
+				return 0, nil, fmt.Errorf("canonical session event exceeds replay page budget")
+			}
+			break
+		}
+		events = append(events, encoded)
+		total += len(encoded) + 1
+	}
+	if err := rows.Err(); err != nil {
+		return 0, nil, err
+	}
+	encoded, err := encodeSessionIR(events)
+	if err != nil {
+		return 0, nil, err
+	}
+	return store.StatusOK, []string{string(encoded)}, nil
+}
+
+// Harness handles cannot be adopted by another session. The canonical session
+// owner authorizes the caller before invoking this runtime-metadata contract.
+const sessionHarnessGetSQL = `SELECT native_id FROM session_harness_handles WHERE session_id=$1 AND harness=$2 AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$3)`
+const sessionHarnessBindSQL = `INSERT INTO session_harness_handles(session_id,harness,native_id)
+ VALUES($1,$2,$3) ON CONFLICT(session_id,harness) DO UPDATE SET native_id=excluded.native_id`
+
+func validHarnessIdentity(f []string) bool {
+	for _, value := range f {
+		if value == "" || len(value) > 1024 {
+			return false
+		}
+	}
+	return len(f[1]) <= 128
+}
+func sessionHarnessGet(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	if !validHarnessIdentity(f) {
+		return store.StatusInvalid, nil, nil
+	}
+	var id string
+	if err := q.QueryRow(ctx, sessionHarnessGetSQL, f[0], f[1], f[2]).Scan(&id); err != nil {
+		if store.IsNoRows(err) {
+			return store.StatusMissing, nil, nil
+		}
+		return 0, nil, err
+	}
+	return store.StatusOK, []string{id}, nil
+}
+func sessionHarnessBind(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	if !validHarnessIdentity(f) {
+		return store.StatusInvalid, nil, nil
+	}
+	var id string
+	if err := q.QueryRow(ctx, sessionIRLockSQL, f[0]).Scan(&id); err != nil {
+		if store.IsNoRows(err) {
+			return store.StatusMissing, nil, nil
+		}
+		return 0, nil, err
+	}
+	if id != f[3] {
+		return store.StatusInvalid, nil, nil
+	}
+	if _, err := q.Exec(ctx, sessionHarnessBindSQL, f[0], f[1], f[2]); err != nil {
+		return 0, nil, err
+	}
+	return store.StatusOK, nil, nil
 }

@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -17,7 +15,6 @@ import (
 	"time"
 
 	aimeecontract "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	appconfig "github.com/JBailes/aimee/server-go/config"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/internal/api"
@@ -27,6 +24,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/observability"
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 	"github.com/JBailes/aimee/server-go/modules/workflows"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func configuredForge(url, socket string) (engine.Forge, error) {
@@ -53,7 +51,6 @@ func main() {
 		homeDefault = filepath.Join(userHome, ".config", "aimee")
 	}
 	home := flag.String("home", homeDefault, "aimee state directory")
-	socket := flag.String("socket", "", "Unix socket path")
 	runnerURL := flag.String("runner-url", os.Getenv("AIMEE_WFE_RUNNER_URL"),
 		"typed WFE runner endpoint; empty keeps execution disabled")
 	runnerSocket := flag.String("runner-socket", os.Getenv("AIMEE_WFE_RUNNER_SOCKET"),
@@ -79,9 +76,6 @@ func main() {
 	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 5),
 		"maximum concurrent work items across the whole WFE (total agent budget)")
 	flag.Parse()
-	if *socket == "" {
-		*socket = filepath.Join(*home, "aimee-server.sock")
-	}
 	if *workflowDir == "" {
 		*workflowDir = filepath.Join(*home, "workflows")
 	}
@@ -113,7 +107,7 @@ func main() {
 	// processes with two schema authorities on one store. It reaches the module
 	// over the bus instead, which is why the attach happens here, before
 	// anything that needs a store, rather than further down beside the runner.
-	rootCtx, rootCancel := context.WithCancel(context.Background())
+	rootCtx, rootCancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer rootCancel()
 	if *moduleBusSocket == "" {
 		log.Fatal("the workflow engine needs --module-bus-socket " +
@@ -127,7 +121,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("attach to the module bus: %v", err)
 	}
-	caller, err := bus.NewConcurrentModuleCaller(rootCtx, attached)
+	caller, err := ring.NewConcurrentModuleCaller(rootCtx, attached)
 	if err != nil {
 		log.Fatalf("module bus caller: %v", err)
 	}
@@ -158,6 +152,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("config bus client: %v", err)
 	}
+	// Read config from a cache the module's config-changed announcements keep
+	// current, instead of asking the module several times a second.
+	configClient.Subscribe(caller)
 	if err := waitForConfig(rootCtx, configClient, 60*time.Second); err != nil {
 		log.Fatalf("config module did not answer: %v", err)
 	}
@@ -170,13 +167,6 @@ func main() {
 		log.Fatal(err)
 	}
 	handler.SetConfigStore(configClient)
-	// The WFE control plane is deliberately Unix-socket-only. Credentials must
-	// never be carried in this long-lived process's argv or environment; the
-	// socket's ownership and 0600 mode are the authentication boundary.
-	server := &http.Server{
-		Handler:           telemetry.HTTPHandler("aimee-server.http", handler),
-		ReadHeaderTimeout: 15 * time.Second,
-	}
 	var runner engine.Runner
 	var worktreeManager *engine.WorktreeManager
 	if *runnerURL != "" {
@@ -295,42 +285,63 @@ func main() {
 		})
 		handler.SetSchedulerNotify(scheduler.Notify)
 		handler.SetSchedulerCancel(scheduler.Cancel)
+		// The store announces each committed lifecycle write, and a live config
+		// change can open capacity: either is a reason to look, and nothing else
+		// is. A missed announcement is a reason to look as well.
+		caller.OnNotification(workflowstore.WorkItemChangedKind, func([]byte) { scheduler.Notify() })
+		caller.OnOverflow(workflowstore.WorkItemChangedKind, scheduler.Notify)
+		configClient.OnChange(scheduler.Notify)
 		if worktreeManager != nil {
 			handler.SetWorktreeCleanup(worktreeManager.Cleanup)
 		}
 		go scheduler.Run(rootCtx)
-		// Trigger definitions are live UI/config state. Re-read them every scan so
-		// a saved workflow or run-policy change takes effect without a restart.
+		// Trigger definitions are live UI/config state, so a saved workflow or a
+		// config change rescans at once. A defined trigger watches a git ref,
+		// which nothing announces, so only then is the scan also periodic; with
+		// none defined the loop sleeps until one might exist.
+		triggersChanged := make(chan struct{}, 1)
+		retrigger := func() {
+			select {
+			case triggersChanged <- struct{}{}:
+			default:
+			}
+		}
+		configClient.OnChange(retrigger)
+		handler.SetTriggersChanged(retrigger)
+		go func() {
+			if err := wfe.WatchDefinitions(rootCtx, *workflowDir, retrigger); err != nil && rootCtx.Err() == nil {
+				log.Printf("workflow files edited on disk will apply on the next trigger scan: %v", err)
+			}
+		}()
 		go func() {
 			for {
 				handler.ScanTriggers(rootCtx)
-				interval := configClient.Int("trigger.scan_interval_secs", 5)
-				if interval < 1 {
-					interval = 1
+				var due <-chan time.Time
+				var timer *time.Timer
+				if handler.TriggersWatched() {
+					interval := configClient.Int("trigger.scan_interval_secs", 5)
+					if interval < 1 {
+						interval = 1
+					}
+					timer = time.NewTimer(time.Duration(interval) * time.Second)
+					due = timer.C
 				}
-				timer := time.NewTimer(time.Duration(interval) * time.Second)
 				select {
 				case <-rootCtx.Done():
-					timer.Stop()
+					if timer != nil {
+						timer.Stop()
+					}
 					return
-				case <-timer.C:
+				case <-due:
+				case <-triggersChanged:
+					if timer != nil {
+						timer.Stop()
+					}
 				}
 			}
 		}()
 	}
 
-	if err := os.MkdirAll(filepath.Dir(*socket), 0o700); err != nil {
-		log.Fatal(err)
-	}
-	_ = os.Remove(*socket)
-	listener, err := net.Listen("unix", *socket)
-	if err == nil {
-		err = os.Chmod(*socket, 0o600)
-	}
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer listener.Close()
 	metricsServer, err = observability.StartMetricsServer(metricsConfig, telemetry.MetricsHandler())
 	if err != nil {
 		log.Fatalf("initialize observability listener: %v", err)
@@ -344,59 +355,26 @@ func main() {
 		}()
 	}
 
-	// Serve the workflow control stage over the event bus.
-	//
-	// This is the same mux the private AF_UNIX socket above serves; what changes
-	// is that the C resource plane no longer needs a second transport to reach
-	// it. The engine and its stores stay here -- only the way in moves -- so this
-	// deletes src/server/wfe_http_proxy.c without relocating any state.
-	//
-	// The socket comes from the SAME value the store attach used, not from the
-	// environment again. --module-bus-socket already defaults to
-	// AIMEE_MODULE_BUS_SOCKET, so reading the variable here served the env case
-	// and silently declined the flag case: an operator who passed the documented
-	// flag got a process that attached its store, logged one line, and left every
-	// /v1/workflow route and /v1/dev/submit answering 503. There is no missing
-	// case left to tolerate -- the flag is checked above and the process does not
-	// get this far without it.
-	{
-		busSocket := *moduleBusSocket
-		go func() {
-			err := bus.RunModuleProcess(rootCtx, bus.ModuleProcessConfig{
-				SocketPath:     busSocket,
-				ModuleName:     "workflows",
-				PrincipalClass: 1,
-				PrincipalRef:   20,
-				Stages: []bus.ModuleStage{
-					{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance},
-					{EventKind: workflows.EventControl, StageID: workflows.StageControl},
-					{EventKind: workflows.EventGateDecide, StageID: workflows.StageGateDecide},
-					{EventKind: workflows.EventAutonomousRoute, StageID: workflows.StageAutonomousRoute},
-				},
-				Handler: workflows.NewHandler(handler),
-			})
-			if err != nil && rootCtx.Err() == nil {
-				log.Printf("workflow control stage stopped: %v", err)
-			}
-		}()
-	}
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-stop
-		rootCancel()
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if metricsServer != nil {
-			_ = metricsServer.Shutdown(ctx)
-		}
-		_ = server.Shutdown(ctx)
-	}()
-	log.Printf("Go aimee-server listening on %s", listener.Addr())
-	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-		log.Printf("serve: %v", err)
-		return
+	// The authenticated module stage is the only workflow control ingress.
+	// A second HTTP socket would trust caller-supplied identity headers without
+	// the host's source admission. Run the stage on this lifecycle so shutdown
+	// drains its handlers before the outbound store caller is detached.
+	log.Printf("Go workflow control serving authenticated module bus %s", *moduleBusSocket)
+	err = ring.RunModuleProcess(rootCtx, ring.ModuleProcessConfig{
+		SocketPath:     *moduleBusSocket,
+		ModuleName:     "workflows",
+		PrincipalClass: 1,
+		PrincipalRef:   20,
+		Stages: []ring.ModuleStage{
+			{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance},
+			{EventKind: workflows.EventControl, StageID: workflows.StageControl},
+			{EventKind: workflows.EventGateDecide, StageID: workflows.StageGateDecide},
+			{EventKind: workflows.EventAutonomousRoute, StageID: workflows.StageAutonomousRoute},
+		},
+		Handler: workflows.NewHandlerContext(rootCtx, handler),
+	})
+	if rootCtx.Err() == nil {
+		log.Printf("workflow control module stopped: %v", err)
 	}
 }
 
@@ -415,11 +393,11 @@ func envInt(name string, fallback int) int {
 // attachWithRetry dials the module bus until it answers or the deadline passes.
 // The socket is created by the daemon and the engine may be started beside it,
 // so "not there yet" is an ordinary boot state rather than a misconfiguration.
-func attachWithRetry(ctx context.Context, socket string, within time.Duration) (*bus.Client, error) {
+func attachWithRetry(ctx context.Context, socket string, within time.Duration) (*ring.Client, error) {
 	deadline := time.Now().Add(within)
 	var last error
 	for {
-		attached, err := bus.ConnectClient(ctx, socket, engine.BusPrincipalClass,
+		attached, err := ring.ConnectClient(ctx, socket, engine.BusPrincipalClass,
 			engine.WFEBusPrincipalRef)
 		if err == nil {
 			return attached, nil

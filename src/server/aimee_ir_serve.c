@@ -14,9 +14,7 @@
 #include "server_http.h"          /* session_persona_get */
 #include "server_http_identity.h" /* inbound session identity */
 #include "request_context.h"
-#include <aimee/ir/aimee_ir_metrics.h>
-#include "aimee.h"          /* size macros for agent_types.h */
-#include "agent_protocol.h" /* parsed_response_t (Slice 3 transitional adapter) */
+#include "aimee.h" /* size macros for agent_types.h */
 #include <aimee/ir/aimee_ir.h>
 #include <aimee/core/turn_integrity.h>
 #include "cJSON.h"
@@ -25,36 +23,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-int aimee_ir_path_enabled(void)
-{
-   /* DEFAULT-ON: the IR path is now the primary request-build path (proven live on
-    * .254 for Claude Code->codex incl. tools/streaming). An explicit setting wins;
-    * legacy translators remain as the automatic fallback on any IR-build failure.
-    * Set AIMEE_IR_PATH=0 to force the legacy path. */
-   const char *v = getenv("AIMEE_IR_PATH");
-   if (v && v[0])
-      return v[0] != '0';
-   return 1;
-}
-
-int aimee_ir_stream_relay_enabled(void)
-{
-   /* DEFAULT-OFF, gated SEPARATELY from AIMEE_IR_PATH (roundtable Q6: gate
-    * buffered-IR / streaming-IR / passthrough independently). When on, the
-    * incremental OpenAI-chat -> Anthropic SSE relay is driven by the neutral
-    * IR-delta model (openai_chunk_to_deltas -> anthropic_delta_emit) instead of
-    * the legacy anthropic_stream_feed_openai translator -- eliminating the last
-    * live direct-translation site. Ships dark; enablement is a rollout decision
-    * gated on live cross-protocol parity, exactly like the legacy-deletion step.
-    * (The user's codex config uses the buffered-replay path, not this relay.) */
-   const char *v = getenv("AIMEE_IR_STREAM_RELAY");
-   return v && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0);
-}
-
 /* Resolve the memory module toggle: config-store modules.memory (canonical) -> env
  * default parsed by the Go owner. Cached legacy_config_read applies operator
- * toggles without restarting. Resolved at the seam
- * call site, mirroring the legacy gw_stage_slot_t catalogs. */
+ * toggles without restarting. Resolved at the canonical stage call site. */
 static int ir_memory_enabled(void)
 {
    int tri = config_present() ? config_module_memory() : -1;
@@ -116,59 +87,6 @@ static char *ir_resolve_persona_instructions(void)
    return persona_compose_primary_instructions(name, NULL);
 }
 
-/* The neutral IR keeps provider-native tool sidecars so a Responses request can
- * survive its intermediate chat-shaped hop and be rebuilt for a Responses
- * backend. That preservation must end at an actual OpenAI chat backend: its
- * `tools` array accepts function entries only (llama.cpp rejects a Codex
- * `custom` tool before inference). Filter only the final provider request, after
- * the driver is known, so chatgpt/Responses still receives native tool types. */
-static void filter_openai_chat_tools(cJSON *provider_request, int is_responses)
-{
-   if (is_responses || !provider_request)
-      return;
-   cJSON *tools = cJSON_GetObjectItemCaseSensitive(provider_request, "tools");
-   if (!cJSON_IsArray(tools))
-      return;
-   for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
-   {
-      cJSON *tool = cJSON_GetArrayItem(tools, i);
-      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(tool, "type"));
-      if (type && strcmp(type, "function") != 0)
-         cJSON_DeleteItemFromArray(tools, i);
-   }
-   if (cJSON_GetArraySize(tools) == 0)
-      cJSON_DeleteItemFromObjectCaseSensitive(provider_request, "tools");
-}
-
-char *aimee_ir_prepend_active_persona_text(const char *text, int conversation_established)
-{
-   const char *sid = server_http_identity_session_hdr();
-   int claim = session_persona_delivery_claim(sid);
-   if (claim == 0)
-      return strdup(text ? text : "");
-   if (claim < 0)
-   {
-      fprintf(stderr, "aimee: persona delivery state unavailable; retaining retry eligibility\n");
-      return NULL;
-   }
-   /* A migrated/restarted named session starts with delivery_state=0 even when
-    * its transcript is already established. Commit that observation before a
-    * later compacted request drops the assistant history; otherwise the legacy
-    * flat path would misclassify the compacted turn as a new conversation and
-    * inject a persona midway through it. */
-   if (conversation_established)
-   {
-      char *out = strdup(text ? text : "");
-      session_persona_delivery_finish(sid, out != NULL);
-      return out;
-   }
-   char *instructions = ir_resolve_persona_instructions();
-   char *out = aimee_ir_prepend_persona_text(text, instructions);
-   session_persona_delivery_finish(sid, instructions && instructions[0] && out);
-   free(instructions);
-   return out;
-}
-
 /* A transform returning zero can still mean the persona was already present, or
  * that a restarted server first observed an established conversation.  Both are
  * terminal.  Only a genuine first request that could not be mutated (for example
@@ -178,10 +96,11 @@ static int ir_persona_delivery_already_satisfied(const aimee_request_t *ir)
    if (!ir)
       return 0;
    for (int i = 0; i < ir->n_messages; i++)
+      if (ir->messages[i].role && strcmp(ir->messages[i].role, "assistant") == 0)
+         return 1;
+   for (int i = 0; i < ir->n_messages; i++)
    {
       const aimee_message_t *message = &ir->messages[i];
-      if (message->role && strcmp(message->role, "assistant") == 0)
-         return 1;
       if (!message->role || strcmp(message->role, "user") != 0)
          continue;
       for (int j = 0; j < message->n_blocks; j++)
@@ -195,11 +114,8 @@ static int ir_persona_delivery_already_satisfied(const aimee_request_t *ir)
 
 void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
 {
-   /* The one place modules register on the IR (universal-gateway P4): fired once per
-    * ingress, after frontend_parse and before backend_build, protocol-neutral. Memory
-    * is the first ported module -- it replaces gw_stage_memory's two structured-ingress
-    * arms (anthropic /v1/messages + /v1/responses). The four legacy plain-chat handlers
-    * stay on gw_memory_system_prompt until agent_execute itself moves onto the IR. */
+   /* Register protocol-neutral transforms once after frontend admission and
+    * before provider egress. All supported model ingresses use this typed owner. */
    /* Capture the user's OWN query before anything is prepended to it.
     *
     * ir_stage_memory takes its query from aimee_ir_last_user_text(), and the
@@ -286,302 +202,13 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
                                                    : "none");
 }
 
-char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
-                                   const char *agent_model, int max_tokens_override,
-                                   int want_stream)
+void aimee_ir_apply_gateway_request_stages(aimee_request_t *request)
 {
-   aimee_request_t ir;
-   char err[128];
-   if (anthropic_frontend_parse(req, &ir, err, sizeof err) != 0)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, AIMEE_WIRE_ANTHROPIC);
-      return NULL;
-   }
-   /* the served model + cap come from the configured agent, not the client */
-   if (agent_model && agent_model[0])
-   {
-      free(ir.model);
-      ir.model = strdup(agent_model);
-   }
-   if (max_tokens_override > 0)
-   {
-      ir.max_tokens = max_tokens_override;
-      ir.has_max_tokens = 1;
-   }
-   /* Match the legacy ingress, which defaults an absent temperature to 1.0 and
-    * always emits it (build_provider_body is fed jo_num(req, "temperature", 1.0)).
-    * Applied at BUILD time, like legacy -- not in the frontend parse, so the IR
-    * request itself stays protocol-neutral (an Anthropic-parsed and OpenAI-parsed
-    * copy of the same request remain equal). Without it the IR omits temperature
-    * when the client sends none, diverging from the legacy provider body. */
-   if (!ir.has_temperature)
-   {
-      ir.temperature = 1.0;
-      ir.has_temperature = 1;
-   }
-   /* The upstream stream flag is the CALLER's decision, not the client's: a caller
-    * that streams to the client may still want the upstream reply buffered so it can
-    * police + replay it. Inheriting ir.stream from the request is what made the
-    * buffered-replay path ask for SSE and then parse it as JSON. */
-   ir.stream = want_stream ? 1 : 0;
-
-   aimee_ir_apply_request_stages(
-       &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
-
-   int is_responses = driver_name && strcmp(driver_name, "chatgpt") == 0;
-   cJSON *prov = is_responses ? responses_backend_build(&ir) : openai_backend_build(&ir);
-   aimee_request_free(&ir);
-   if (!prov)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_ANTHROPIC);
-      return NULL;
-   }
-   filter_openai_chat_tools(prov, is_responses);
-   char *s = cJSON_PrintUnformatted(prov);
-   cJSON_Delete(prov);
-   if (s)
-      aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_ANTHROPIC);
-   return s;
+   aimee_ir_apply_request_stages(request, ir_memory_enabled());
 }
 
-static const char *jo_str(const cJSON *o, const char *k)
+void aimee_ir_apply_native_request_stages(aimee_request_t *request)
 {
-   const cJSON *it = cJSON_GetObjectItemCaseSensitive((cJSON *)o, k);
-   return (it && cJSON_IsString(it)) ? it->valuestring : NULL;
-}
-
-int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
-                               char **instructions_out, cJSON **messages_out, cJSON **tools_out,
-                               int *stream_out)
-{
-   if (model && model_n)
-      model[0] = '\0';
-   if (instructions_out)
-      *instructions_out = NULL;
-   if (messages_out)
-      *messages_out = NULL;
-   if (tools_out)
-      *tools_out = NULL;
-   if (stream_out)
-      *stream_out = 0;
-
-   cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
-   if (!req)
-      return -1;
-   aimee_request_t ir;
-   char err[128];
-   if (responses_frontend_parse(req, &ir, err, sizeof err) != 0)
-   {
-      cJSON_Delete(req);
-      aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, AIMEE_WIRE_RESPONSES);
-      return -1;
-   }
-   cJSON_Delete(req);
-   if (model && model_n && ir.model)
-      snprintf(model, model_n, "%s", ir.model);
-   if (stream_out)
-      *stream_out = ir.stream;
-
-   /* This is an intermediate decode, not provider assembly. Both buffered and
-    * streaming Responses subsequently enter aimee_ir_build_from_chat, which
-    * applies request stages after routing. Applying them here too duplicates Go
-    * recall/guidance and makes the second recall query include the persona. */
-   /* build the chat shape, then split leading system messages -> instructions */
-   cJSON *chat = openai_backend_build(&ir);
-   aimee_request_free(&ir);
-   if (!chat)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_RESPONSES);
-      return -1;
-   }
-   cJSON *msgs = cJSON_DetachItemFromObjectCaseSensitive(chat, "messages");
-   cJSON *tools = cJSON_DetachItemFromObjectCaseSensitive(chat, "tools");
-   cJSON_Delete(chat);
-
-   char *instr = NULL;
-   size_t ilen = 0;
-   cJSON *first;
-   while (msgs && (first = cJSON_GetArrayItem(msgs, 0)) != NULL)
-   {
-      const char *role = jo_str(first, "role");
-      if (!role || strcmp(role, "system") != 0)
-         break;
-      const char *c = jo_str(first, "content");
-      if (c && c[0])
-      {
-         size_t cl = strlen(c);
-         char *p = realloc(instr, ilen + cl + 3);
-         if (p)
-         {
-            instr = p;
-            if (ilen)
-            {
-               memcpy(instr + ilen, "\n\n", 2);
-               ilen += 2;
-            }
-            memcpy(instr + ilen, c, cl);
-            ilen += cl;
-            instr[ilen] = '\0';
-         }
-      }
-      cJSON_DeleteItemFromArray(msgs, 0);
-   }
-
-   if (instructions_out)
-      *instructions_out = instr;
-   else
-      free(instr);
-   if (messages_out)
-      *messages_out = msgs;
-   else
-      cJSON_Delete(msgs);
-   if (tools_out)
-      *tools_out = tools;
-   else
-      cJSON_Delete(tools);
-   aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_RESPONSES);
-   return 0;
-}
-
-cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, const cJSON *tools,
-                                const char *system, const char *driver_name, int max_tokens,
-                                double temperature)
-{
-   /* assemble a chat request {model, messages: [system?] + messages, tools} */
-   cJSON *chat = cJSON_CreateObject();
-   if (agent_model)
-      cJSON_AddStringToObject(chat, "model", agent_model);
-   cJSON *msgs = cJSON_AddArrayToObject(chat, "messages");
-   if (system && system[0])
-   {
-      cJSON *sm = cJSON_CreateObject();
-      cJSON_AddStringToObject(sm, "role", "system");
-      cJSON_AddStringToObject(sm, "content", system);
-      cJSON_AddItemToArray(msgs, sm);
-   }
-   if (cJSON_IsArray(messages))
-   {
-      const cJSON *m = NULL;
-      cJSON_ArrayForEach(m, messages) cJSON_AddItemToArray(msgs, cJSON_Duplicate(m, 1));
-   }
-   if (cJSON_IsArray(tools))
-      cJSON_AddItemToObject(chat, "tools", cJSON_Duplicate((cJSON *)tools, 1));
-
-   /* Keep generation controls on the IR path. AIMEE_IR_PATH silently discarded
-    * the output cap, leaving local llama.cpp delegates at n_predict=-1 -- an
-    * unbounded generation where the caller had asked for a bounded one.
-    * Responses-backed provider CLIs keep their established no-cap request
-    * shape, because that wire rejects the chat-completions field. */
-   int is_responses_wire = driver_name && strcmp(driver_name, "chatgpt") == 0;
-   if (!is_responses_wire && max_tokens > 0)
-      cJSON_AddNumberToObject(chat, "max_tokens", max_tokens);
-   if (!is_responses_wire && temperature >= 0.0)
-      cJSON_AddNumberToObject(chat, "temperature", temperature);
-
-   aimee_request_t ir;
-   char err[128];
-   int rc = openai_frontend_parse(chat, &ir, err, sizeof err);
-   cJSON_Delete(chat);
-   if (rc != 0)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, AIMEE_WIRE_OPENAI_CHAT);
-      return NULL;
-   }
-   if (agent_model && agent_model[0])
-   {
-      free(ir.model);
-      ir.model = strdup(agent_model);
-   }
-   aimee_ir_apply_request_stages(
-       &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
-
-   int is_anthropic_wire = driver_name && strcmp(driver_name, "anthropic") == 0;
-   cJSON *prov = is_responses_wire   ? responses_backend_build(&ir)
-                 : is_anthropic_wire ? anthropic_backend_build(&ir)
-                                     : openai_backend_build(&ir);
-   aimee_request_free(&ir);
-   if (!is_anthropic_wire)
-      filter_openai_chat_tools(prov, is_responses_wire);
-   if (!prov)
-      aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_OPENAI_CHAT);
-   else
-      aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_OPENAI_CHAT);
-   return prov;
-}
-
-/* aimee_ir_resp_path_enabled -- Slice 3 gate (config-only: AIMEE_IR_RESP_PATH env,
- * DEFAULT-OFF). When on, the OPENAI-WIRE buffered response parse on the /v1/messages
- * ingress runs provider-JSON -> openai_backend_parse -> IR -> aimee_ir_response_to_parsed,
- * replacing driver->parse_response. Per-wire by ruling: anthropic + responses stay on
- * legacy until their response-shadow parity is proven live. Ships dark; flip after the
- * on-box emit diff confirms byte-identity. */
-int aimee_ir_resp_path_enabled(void)
-{
-   const char *v = getenv("AIMEE_IR_RESP_PATH");
-   return v && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0);
-}
-
-/* TRANSITIONAL (Slice 3, canonical-IR) -- bridge the IR response back to the legacy
- * parsed_response_t so the existing Anthropic emit + gateway policing keep working
- * while the response PARSE moves onto the IR. REMOVE once the emit + police paths are
- * IR-native (proposal: full IR render + IR-coupled police). DO NOT add new callers.
- * Fills every parsed_response_t field the ingress emit/police consume (audited): content,
- * calls[]/call_count, is_tool_call, prompt/completion/cache tokens, stop_reason, model.
- * `out` is zeroed here; caller frees via the usual agent_free_parsed_response. */
-void aimee_ir_response_to_parsed(const aimee_response_t *r, parsed_response_t *out)
-{
-   if (!out)
-      return;
-   memset(out, 0, sizeof(*out));
-   if (!r)
-      return;
-
-   out->prompt_tokens = (int)r->usage_in;
-   out->completion_tokens = (int)r->usage_out;
-   out->cache_read_tokens = (int)r->usage_cache_read;
-   out->cache_write_tokens = (int)r->usage_cache_write;
-   if (r->model)
-      snprintf(out->model, sizeof(out->model), "%s", r->model);
-   if (r->raw_stop_reason)
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", r->raw_stop_reason);
-
-   /* content = concatenation of all TEXT blocks (parsed_response_t convention: a
-    * single flat string; NULL when there is no text, e.g. a pure tool call). */
-   size_t cap = 1;
-   for (int i = 0; i < r->n_content; i++)
-      if (r->content[i].type == AIMEE_BLK_TEXT && r->content[i].text)
-         cap += strlen(r->content[i].text);
-   if (cap > 1)
-   {
-      out->content = malloc(cap);
-      if (out->content)
-      {
-         out->content[0] = '\0';
-         for (int i = 0; i < r->n_content; i++)
-            if (r->content[i].type == AIMEE_BLK_TEXT && r->content[i].text)
-               strncat(out->content, r->content[i].text, cap - strlen(out->content) - 1);
-      }
-   }
-
-   /* tool calls: id (opaque) / name / arguments (serialized tool_input JSON). */
-   int nc = 0;
-   for (int i = 0; i < r->n_content && nc < AGENT_MAX_TOOL_CALLS; i++)
-   {
-      const aimee_block_t *b = &r->content[i];
-      if (b->type != AIMEE_BLK_TOOL_USE)
-         continue;
-      parsed_tool_call_t *c = &out->calls[nc++];
-      if (b->tool_id)
-         snprintf(c->id, sizeof(c->id), "%s", b->tool_id);
-      if (b->tool_name)
-         snprintf(c->name, sizeof(c->name), "%s", b->tool_name);
-      /* Carried with the name: a namespaced call is only routable as the pair. */
-      if (b->tool_namespace)
-         snprintf(c->tool_namespace, sizeof(c->tool_namespace), "%s", b->tool_namespace);
-      c->arguments = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
-      if (!c->arguments)
-         c->arguments = strdup("{}");
-   }
-   out->call_count = nc;
-   out->is_tool_call = (nc > 0);
+   if (config_present() && config_ingress_preinject_anthropic_enabled())
+      aimee_ir_apply_request_stages(request, ir_memory_enabled());
 }

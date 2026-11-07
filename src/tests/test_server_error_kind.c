@@ -4,7 +4,7 @@
 #include "server.h"
 #include "server/server_error_kind.h"
 
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 #include <aimee/runtime-web/module_api.h>
 
 #include <assert.h>
@@ -12,13 +12,13 @@
 #include <stdio.h>
 #include <string.h>
 
-extern aimee_module_status_t aimee_runtime_web_module_handler(const aimee_module_invocation_t *,
-                                                              const uint8_t *, uint32_t, uint8_t *,
-                                                              uint32_t, uint32_t *, void *);
+extern ouro_module_status_t aimee_runtime_web_module_handler(const ouro_module_invocation_t *,
+                                                             const uint8_t *, uint32_t, uint8_t *,
+                                                             uint32_t, uint32_t *, void *);
 
 static cJSON *g_response;
 
-int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+int ouro_module_invocation_cancelled(const ouro_module_invocation_t *invocation)
 {
    (void)invocation;
    return 0;
@@ -37,11 +37,11 @@ static int runtime_web_provider(const char *kind, uint32_t *http_status)
    uint8_t request[AIMEE_RUNTIME_WEB_REQUEST_LEN];
    uint8_t response[AIMEE_RUNTIME_WEB_RESPONSE_LEN];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_RUNTIME_WEB_STAGE_CLASSIFY};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_RUNTIME_WEB_STAGE_CLASSIFY};
    if (aimee_runtime_web_request_encode(kind, request, sizeof(request)) != 0 ||
        aimee_runtime_web_module_handler(&invocation, request, sizeof(request), response,
                                         sizeof(response), &response_len,
-                                        NULL) != AIMEE_MODULE_STATUS_OK)
+                                        NULL) != OURO_MODULE_STATUS_OK)
       return -1;
    return aimee_runtime_web_response_decode(response, response_len, http_status);
 }

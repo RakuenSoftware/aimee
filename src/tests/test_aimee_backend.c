@@ -41,16 +41,304 @@ static void parse_anthropic(const char *json, aimee_request_t *ir)
    cJSON_Delete(j);
 }
 
+static cJSON *refusal_response(const char *details)
+{
+   char buffer[8192];
+   snprintf(buffer, sizeof buffer,
+            "{\"role\":\"assistant\",\"content\":[],\"stop_reason\":\"refusal\","
+            "\"stop_details\":%s,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}",
+            details);
+   return cJSON_Parse(buffer);
+}
+
+static void test_refusal_details_shapes(void)
+{
+   const char *valid[] = {
+       "{\"type\":\"refusal\",\"category\":null,\"explanation\":null}",
+       "{\"type\":\"refusal\",\"category\":\"\",\"explanation\":\"\"}",
+       "{\"type\":\"refusal\",\"category\":\"future\",\"explanation\":null,"
+       "\"fallback_credit_token\":\"do-not-retain\",\"recommended_model\":\"not-authority\"}",
+       "{\"type\":\"refusal\"}"};
+   char error[128];
+   for (size_t i = 0; i < sizeof valid / sizeof *valid; i++)
+   {
+      cJSON *input = refusal_response(valid[i]);
+      aimee_response_t response = {0};
+      assert(input && !anthropic_backend_parse(input, &response, error, sizeof error));
+      cJSON *output = anthropic_frontend_render(&response);
+      cJSON *details = cJSON_GetObjectItemCaseSensitive(output, "stop_details");
+      assert(cJSON_IsObject(details) && cJSON_GetArraySize(details) == 3);
+      assert(cJSON_GetObjectItemCaseSensitive(details, "category"));
+      assert(cJSON_GetObjectItemCaseSensitive(details, "explanation"));
+      char *raw = cJSON_PrintUnformatted(response.raw);
+      assert(raw && !strstr(raw, "fallback_credit_token") && !strstr(raw, "recommended_model"));
+      free(raw);
+      cJSON_Delete(output);
+      aimee_response_free(&response);
+      cJSON_Delete(input);
+   }
+   cJSON *error_with_details = cJSON_Parse(
+       "{\"error\":{\"type\":\"api_error\",\"message\":\"upstream error\"},"
+       "\"stop_details\":{\"type\":\"refusal\",\"fallback_credit_token\":\"do-not-retain\"}}");
+   aimee_response_t failed_response = {0};
+   assert(error_with_details &&
+          anthropic_backend_parse(error_with_details, &failed_response, error, sizeof error) == -1);
+   assert(!failed_response.raw && !failed_response.refusal);
+   aimee_response_free(&failed_response);
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(error_with_details, "stop_details",
+                                                 cJSON_CreateNull()));
+   assert(!anthropic_backend_parse(error_with_details, &failed_response, error, sizeof error));
+   assert(failed_response.stop_reason == AIMEE_STOP_ERROR && failed_response.error_message);
+   aimee_response_free(&failed_response);
+   cJSON_DeleteItemFromObjectCaseSensitive(error_with_details, "stop_details");
+   assert(!anthropic_backend_parse(error_with_details, &failed_response, error, sizeof error));
+   assert(failed_response.stop_reason == AIMEE_STOP_ERROR && failed_response.error_message);
+   aimee_response_free(&failed_response);
+   cJSON_Delete(error_with_details);
+   const char *invalid[] = {"[]",
+                            "5",
+                            "{\"type\":\"other\"}",
+                            "{\"type\":null}",
+                            "{\"type\":\"refusal\",\"category\":1}",
+                            "{\"type\":\"refusal\",\"explanation\":{}}",
+                            "{\"type\":\"refusal\",\"category\":null,\"category\":\"duplicate\"}"};
+   for (size_t i = 0; i < sizeof invalid / sizeof *invalid; i++)
+   {
+      cJSON *input = refusal_response(invalid[i]);
+      aimee_response_t response = {0};
+      assert(input && anthropic_backend_parse(input, &response, error, sizeof error) == -1);
+      aimee_response_free(&response);
+      cJSON_Delete(input);
+   }
+   for (int field = 0; field < 2; field++)
+   {
+      size_t bound = field ? 4096 : 64;
+      char *text = malloc(bound + 2);
+      assert(text);
+      memset(text, 'x', bound + 1);
+      for (int overflow = 0; overflow < 2; overflow++)
+      {
+         text[bound + overflow] = 0;
+         cJSON *input =
+             refusal_response("{\"type\":\"refusal\",\"category\":null,\"explanation\":null}");
+         cJSON *details = cJSON_GetObjectItemCaseSensitive(input, "stop_details");
+         assert(cJSON_ReplaceItemInObjectCaseSensitive(details, field ? "explanation" : "category",
+                                                       cJSON_CreateString(text)));
+         aimee_response_t response = {0};
+         assert(anthropic_backend_parse(input, &response, error, sizeof error) ==
+                (overflow ? -1 : 0));
+         aimee_response_free(&response);
+         cJSON_Delete(input);
+         text[bound] = 'x';
+      }
+      free(text);
+   }
+   cJSON *bad_utf8 = refusal_response("{\"type\":\"refusal\"}");
+   cJSON *details = cJSON_GetObjectItemCaseSensitive(bad_utf8, "stop_details");
+   cJSON_AddStringToObject(details, "explanation", "\xff");
+   aimee_response_t response = {0};
+   assert(anthropic_backend_parse(bad_utf8, &response, error, sizeof error) == -1);
+   aimee_response_free(&response);
+   cJSON_Delete(bad_utf8);
+   aimee_refusal_details_t details_view = {.category = "future", .explanation = "Diagnostic"};
+   aimee_response_t contradictory = {
+       .role = "assistant", .stop_reason = AIMEE_STOP_END_TURN, .refusal = &details_view};
+   assert(!anthropic_frontend_render(&contradictory));
+   contradictory.stop_reason = AIMEE_STOP_ERROR;
+   contradictory.error_message = "existing error";
+   assert(!anthropic_frontend_render(&contradictory));
+   contradictory.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+   assert(!anthropic_frontend_render(&contradictory));
+   contradictory.error_message = NULL;
+   details_view.category = "\xff";
+   assert(!anthropic_frontend_render(&contradictory));
+
+   aimee_response_t filtered = {.role = "assistant", .stop_reason = AIMEE_STOP_CONTENT_FILTER};
+   cJSON *filtered_wire = anthropic_frontend_render(&filtered);
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(filtered_wire, "stop_reason")),
+               "refusal"));
+   cJSON_Delete(filtered_wire);
+   filtered.raw_stop_reason = "contradictory-raw-value";
+   filtered_wire = anthropic_frontend_render(&filtered);
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(filtered_wire, "stop_reason")),
+               "refusal"));
+   cJSON_Delete(filtered_wire);
+   for (int present = 0; present < 2; present++)
+   {
+      cJSON *input = refusal_response("null");
+      if (!present)
+         cJSON_DeleteItemFromObjectCaseSensitive(input, "stop_details");
+      assert(!anthropic_backend_parse(input, &response, error, sizeof error));
+      cJSON *output = anthropic_frontend_render(&response);
+      assert(!cJSON_GetObjectItemCaseSensitive(output, "stop_details"));
+      cJSON_Delete(output);
+      aimee_response_free(&response);
+      cJSON_Delete(input);
+   }
+}
+
+static void test_refusal_details_codec(void)
+{
+   const char *wire = "{\"id\":\"refusal-codec\",\"model\":\"model\",\"role\":\"assistant\","
+                      "\"content\":[],\"stop_reason\":\"refusal\","
+                      "\"stop_details\":{\"type\":\"refusal\",\"category\":\"future-category\","
+                      "\"explanation\":\"Provider explanation\"},"
+                      "\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}";
+   cJSON *input = cJSON_Parse(wire);
+   aimee_response_t response = {0};
+   char error[128];
+   assert(input && !anthropic_backend_parse(input, &response, error, sizeof error));
+   cJSON *output = anthropic_frontend_render(&response);
+   const cJSON *details = cJSON_GetObjectItemCaseSensitive(output, "stop_details");
+   assert(cJSON_IsObject(details));
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(details, "type")), "refusal"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(details, "category")),
+                  "future-category"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(details, "explanation")),
+                  "Provider explanation"));
+   cJSON_Delete(output);
+   aimee_response_free(&response);
+   cJSON_Delete(input);
+}
+
+static void test_unobserved_usage(void)
+{
+   struct usage_case
+   {
+      const char *response, *input, *output;
+      int (*parse)(const cJSON *, aimee_response_t *, char *, size_t);
+   } cases[] = {{"{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"answer\"},"
+                 "\"finish_reason\":\"stop\"}]}",
+                 "prompt_tokens", "completion_tokens", openai_backend_parse},
+                {"{\"status\":\"completed\",\"output\":[]}", "input_tokens", "output_tokens",
+                 responses_backend_parse},
+                {"{\"role\":\"assistant\",\"content\":[],\"stop_reason\":\"end_turn\"}",
+                 "input_tokens", "output_tokens", anthropic_backend_parse}};
+   for (size_t i = 0; i < sizeof cases / sizeof *cases; i++)
+      for (int variant = 0; variant < 6; variant++)
+      {
+         cJSON *wire = cJSON_Parse(cases[i].response);
+         assert(wire);
+         if (variant == 1)
+            cJSON_AddNullToObject(wire, "usage");
+         else if (variant >= 2)
+         {
+            cJSON *usage = cJSON_AddObjectToObject(wire, "usage");
+            if (variant >= 3)
+               cJSON_AddNumberToObject(usage, cases[i].input, variant == 3 ? 7 : 0);
+            if (variant >= 4)
+               cJSON_AddNumberToObject(usage, cases[i].output, variant == 5 ? 9 : 0);
+         }
+         aimee_response_t response = {0};
+         char error[128];
+         assert(!cases[i].parse(wire, &response, error, sizeof error));
+         assert(response.usage_unobserved == (variant < 4));
+         assert(response.usage_in == 0 && response.usage_out == (variant == 5 ? 9 : 0));
+         /* Partial observations remain in the opaque provider sidecar. */
+         if (variant == 3)
+            assert(cJSON_GetObjectItem(cJSON_GetObjectItem(response.raw, "usage"), cases[i].input)
+                       ->valueint == 7);
+         aimee_response_free(&response);
+         cJSON_Delete(wire);
+      }
+   for (size_t i = 0; i < sizeof cases / sizeof *cases; i++)
+      for (int known = 0; known < 2; known++)
+      {
+         cJSON *wire = cJSON_Parse("{\"error\":{\"message\":\"upstream failure\"}}");
+         if (known)
+         {
+            cJSON *usage = cJSON_AddObjectToObject(wire, "usage");
+            cJSON_AddNumberToObject(usage, cases[i].input, 0);
+            cJSON_AddNumberToObject(usage, cases[i].output, 0);
+         }
+         aimee_response_t response = {0};
+         char error[128];
+         assert(!cases[i].parse(wire, &response, error, sizeof error));
+         assert(response.stop_reason == AIMEE_STOP_ERROR && response.error_message);
+         assert(response.usage_unobserved == !known);
+         aimee_response_free(&response);
+         cJSON_Delete(wire);
+      }
+}
+
 int main(void)
 {
+   test_unobserved_usage();
+   test_refusal_details_codec();
+   test_refusal_details_shapes();
    printf("aimee-backend: ");
    char err[128];
 
-   /* --- (1) the canonical Anthropic egress is DETERMINISTIC and round-trip STABLE.
-    *         The raw sidecar was retired: egress is now a pure function of the typed IR
-    *         plus the uniform cache policy, so parse->build is NOT the identity (it adds
-    *         the policy's cache markers), but it IS idempotent -- building twice is
-    *         byte-identical, and re-parsing the egress then rebuilding reproduces it. --- */
+   const char *fallbacks[] = {"selected", "fallback", "fallback"};
+   aimee_openai_host_profile_t host_profile = {.min_p = 0.2,
+                                               .repeat_penalty = 1.1,
+                                               .disable_thinking = 1,
+                                               .split_reasoning = 1,
+                                               .fallback_models = fallbacks,
+                                               .n_fallback_models = 3};
+   aimee_request_t host_ir = {.model = strdup("selected"), .frontend = AIMEE_WIRE_OPENAI_CHAT};
+   assert(!openai_ir_set_host_profile(&host_ir, &host_profile));
+   cJSON *host_native = openai_backend_build(&host_ir);
+   assert(host_native);
+   const cJSON *host_models = cJSON_GetObjectItemCaseSensitive(host_native, "models");
+   assert(cJSON_GetArraySize(host_models) == 2);
+   assert(!strcmp(cJSON_GetArrayItem(host_models, 0)->valuestring, "selected"));
+   assert(!strcmp(cJSON_GetArrayItem(host_models, 1)->valuestring, "fallback"));
+   assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(host_native, "chat_template_kwargs"), "enable_thinking")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(host_native, "reasoning_split")));
+   cJSON *entry = host_ir.raw;
+   assert(openai_ir_set_host_profile(&host_ir, &host_profile) == -1 && host_ir.raw == entry);
+   cJSON_Delete(host_native);
+   aimee_request_free(&host_ir);
+   host_ir = (aimee_request_t){.model = strdup("selected"), .frontend = AIMEE_WIRE_RESPONSES};
+   assert(openai_ir_set_host_profile(&host_ir, &host_profile) == -1 && !host_ir.raw);
+   aimee_request_free(&host_ir);
+
+   /* Only declared same-wire extensions survive; typed edits and removals
+    * cannot be overwritten by the entry snapshot or private root metadata. */
+   cJSON *profile = cJSON_Parse(
+       "{\"model\":\"old\",\"messages\":[],\"temperature\":0.5,"
+       "\"min_p\":0.1,\"repeat_penalty\":1.1,\"chat_template_kwargs\":{\"enable_thinking\":false},"
+       "\"route\":\"fallback\",\"models\":[\"old\",\"fallback\"],\"reasoning_split\":true,"
+       "\"_host_authority\":\"private\",\"unregistered_extension\":true}");
+   aimee_request_t profile_ir = {0};
+   assert(profile && !openai_frontend_parse(profile, &profile_ir, err, sizeof err));
+   profile_ir.has_temperature = 0;
+   profile_ir.mutated = 1;
+   cJSON *projected = openai_backend_build(&profile_ir);
+   assert(projected);
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(projected, "model")->valuestring, "old"));
+   assert(!cJSON_GetObjectItemCaseSensitive(projected, "temperature"));
+   assert(!cJSON_GetObjectItemCaseSensitive(projected, "_host_authority"));
+   assert(!cJSON_GetObjectItemCaseSensitive(projected, "unregistered_extension"));
+   const char *extensions[] = {"min_p", "repeat_penalty", "chat_template_kwargs",
+                               "route", "models",         "reasoning_split"};
+   for (size_t i = 0; i < sizeof extensions / sizeof *extensions; i++)
+      assert(cJSON_Compare(cJSON_GetObjectItemCaseSensitive(profile, extensions[i]),
+                           cJSON_GetObjectItemCaseSensitive(projected, extensions[i]), 1));
+   cJSON_Delete(projected);
+   free(profile_ir.model);
+   profile_ir.model = strdup("new");
+   projected = openai_backend_build(&profile_ir);
+   assert(projected && !cJSON_GetObjectItemCaseSensitive(projected, "models"));
+   assert(!cJSON_GetObjectItemCaseSensitive(projected, "reasoning_split"));
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(projected, "model")->valuestring, "new"));
+   cJSON_Delete(projected);
+   free(profile_ir.model);
+   profile_ir.model = strdup("old");
+   profile_ir.frontend = AIMEE_WIRE_RESPONSES;
+   projected = openai_backend_build(&profile_ir);
+   assert(projected && !cJSON_GetObjectItemCaseSensitive(projected, "route"));
+   cJSON_Delete(projected);
+   aimee_request_free(&profile_ir);
+   cJSON_Delete(profile);
+
+   /* Native Anthropic replay preserves client forms and cache markers. Repeated
+    * rendering and parse/render remain deterministic. */
    aimee_request_t air;
    parse_anthropic(ANTHROPIC, &air);
    cJSON *built = anthropic_backend_build(&air);
@@ -116,6 +404,8 @@ int main(void)
    free(air.model);
    air.model = strdup("claude-3-5-sonnet");
    air.mutated = 1;
+   air.cache_policy = AIMEE_CACHE_STABLE_PREFIX;
+   oir.cache_policy = AIMEE_CACHE_STABLE_PREFIX;
    cJSON *xbuilt = anthropic_backend_build(&oir); /* openai -> IR -> anthropic egress */
    cJSON *abuilt = anthropic_backend_build(&air); /* anthropic -> IR -> anthropic egress */
    assert(xbuilt && abuilt);
@@ -179,14 +469,18 @@ int main(void)
           strcmp(cJSON_GetObjectItem(tblk, "signature")->valuestring, "ErUBCkYIAxgCIkA") == 0);
    cJSON_Delete(trendered);
 
-   /* an unsigned thinking block omits the key rather than emitting an empty one --
-    * an empty signature would be rejected, where an absent one is merely unsigned. */
+   /* An unsigned/foreign thought stays canonical but cannot be replayed as
+    * fabricated Anthropic reasoning with a missing signature. */
    free(tresp.content[0].thinking_signature);
    tresp.content[0].thinking_signature = NULL;
    cJSON *tunsigned = anthropic_frontend_render(&tresp);
    assert(tunsigned);
-   assert(!cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(tunsigned, "content"), 0),
-                               "signature"));
+   const cJSON *unsigned_content = cJSON_GetObjectItem(tunsigned, "content");
+   assert(cJSON_GetArraySize(unsigned_content) == 1);
+   assert(!strcmp(
+       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(unsigned_content, 0), "text")),
+       "done"));
+   assert(tresp.n_content == 2 && !strcmp(tresp.content[0].text, "let me check"));
    cJSON_Delete(tunsigned);
 
    aimee_response_free(&tresp);

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -182,11 +182,11 @@ func TestTypedContextRefusesUnsupportedLimitsBeforeRetrieval(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, envelope := range []bool{false, true} {
-			encoded, status := handleTypedContextResult(handlerOptions{placement: PlacementKB}, bus.ModuleInvocation{}, args, envelope)
-			if status != bus.ModuleStatusOK {
+			encoded, status := handleTypedContextResult(handlerOptions{placement: PlacementKB}, ring.ModuleInvocation{}, args, envelope)
+			if status != ring.ModuleStatusOK {
 				t.Fatal(tc, status)
 			}
-			raw, err := bus.DecodeCommandResult(encoded)
+			raw, err := ring.DecodeCommandResult(encoded)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,8 +205,8 @@ func TestTypedContextRefusesUnsupportedLimitsBeforeRetrieval(t *testing.T) {
 		}
 	}
 	for _, raw := range []string{`null`, `{"schema_version":1,"max_context_byte":0}`, `{"schema_version":1,"max_context_bytes":"1"}`} {
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"typed-context","query":"fixture","context_limits":`+raw+`}`))
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"typed-context","query":"fixture","context_limits":`+raw+`}`))
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}
 	}
@@ -298,11 +298,11 @@ func TestTypedContextDefaultsAndCompleteBudget(t *testing.T) {
 	}
 }
 func TestTypedContextHostBoundary(t *testing.T) {
-	frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"typed-context","query":"x"}`))
-	if _, status := NewHandler(nil, WithDataStore(PlacementKB, nil))(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+	frame, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"typed-context","query":"x"}`))
+	if _, status := NewHandler(nil, WithDataStore(PlacementKB, nil))(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal(status)
 	}
-	if _, status := NewHandler(nil, WithDataStore(PlacementServer, nil))(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := NewHandler(nil, WithDataStore(PlacementServer, nil))(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatal(status)
 	}
 }
@@ -345,7 +345,7 @@ func exerciseTypedContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	call := func() (typedContextResult, string) {
 		t.Helper()
 		raw, _ := json.Marshal(args)
-		payload, err := clientForHandler(t, func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+		payload, err := clientForHandler(t, func(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 			// The KB RPC host invokes these fixed-owner data operations.
 			invocation.PrincipalRef = 0
 			return handler(invocation, frame)

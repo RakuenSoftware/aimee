@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func handleAnswerCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleAnswerCommand(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	query, ok := args.stringValue("query")
 	if !ok || strings.TrimSpace(query) == "" {
 		return commandResult(commandError("invalid_argument", "memory.ask requires query"))
@@ -25,15 +25,15 @@ func handleAnswerCommand(options handlerOptions, invocation bus.ModuleInvocation
 	}
 	encoded, _ := json.Marshal(request)
 	reply, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInternal || status == bus.ModuleStatusCapabilityAbsent {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInternal || status == ring.ModuleStatusCapabilityAbsent {
 			return commandResult(commandError("unavailable", "memory retrieval unavailable"))
 		}
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(reply, &response) != nil || response.Answer == nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	result := map[string]any{}
 	raw, _ := json.Marshal(response.Answer)

@@ -37,9 +37,6 @@ extern "C"
     * Returns 0 on success. */
    int db1_session_state_delete(const char *sid);
 
-   /* Returns 1 if a session_state row exists for sid, 0 otherwise. */
-   int db1_session_state_exists(const char *sid);
-
 #define DB1_SS_SID_LEN      64
 #define DB1_SS_STATE_TS_LEN 32
 
@@ -52,9 +49,6 @@ extern "C"
 
    /* List sessions by updated_at DESC, newest first. Returns rows written. */
    int db1_session_state_list(db1_session_state_summary_t *out, int max);
-
-   /* Fetch a single summary row. Returns 0 on hit, -1 on miss or error. */
-   int db1_session_state_get_summary(const char *sid, db1_session_state_summary_t *out);
 
    /* List session ids older than threshold_seconds. Returns ids written. */
    int db1_session_state_list_expired(int threshold_seconds, char (*out_ids)[DB1_SS_SID_LEN],

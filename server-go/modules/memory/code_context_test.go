@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -117,9 +117,9 @@ func TestCodeContextHostBoundary(t *testing.T) {
 		json.Unmarshal([]byte(codeContextInput), &args)
 		args["operation"], _ = json.Marshal(operation)
 		encoded, _ := json.Marshal(args)
-		frame, _ := bus.EncodeCommand("runtime", encoded)
+		frame, _ := ring.EncodeCommand("runtime", encoded)
 		handler := NewHandler(nil, WithDataStore(PlacementKB, nil))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 		r := runHostRuntime(t, handler, string(encoded))
@@ -130,15 +130,15 @@ func TestCodeContextHostBoundary(t *testing.T) {
 		for _, generation := range []string{"null", "1.5", "0", "9223372036854775808"} {
 			args["generation"] = json.RawMessage(generation)
 			raw, _ := json.Marshal(args)
-			f, _ := bus.EncodeCommand("runtime", raw)
-			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, f); status != bus.ModuleStatusInvalidRequest {
+			f, _ := ring.EncodeCommand("runtime", raw)
+			if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, f); status != ring.ModuleStatusInvalidRequest {
 				t.Fatal(generation, status)
 			}
 		}
 	}
 }
 
-func exerciseCodeContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseCodeContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	if _, err := tx.Exec(ctx, `SELECT set_config('aimee.memory_scope_all','1',true)`); err != nil {
 		t.Fatal(err)

@@ -1,8 +1,11 @@
+#include "server_verification.h"
 /* server.c: aimee-server core -- event loop, connection handling, method dispatch */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
 #include "workspace_hook_scope.h"
+#include <aimee/translation/hook_ir.h>
+#include <aimee/ir/session_event.h>
 #include "server_internal.h"
 #include "aimee.h"
 #include "harness_memory_scope.h" /* hmem_scope_for_client */
@@ -10,6 +13,7 @@
 #include "json_fluent.h" /* jo_ok */
 #include "primary_cli_ingestor.h"
 #include "server.h"
+#include "mirror_sync_wire.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
 #include "kb_client.h"           /* request-local memory scope context */
 #include <aimee/audit/obs_bus.h>
@@ -28,9 +32,14 @@
 #include "modules/workspace/workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
 #include "modules/workspace/workspace_turn.h" /* the ONE workspace bound, shared with the delegate turn */
 #include "server_delegate_monitor.h"
+#include "server_learning_outcome.h"
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
 #include "server_compute_impl.h"
+#include "server_native_execution.h"
+#include "server_native_history.h"
+#include "server_unknown_effect_policy.h"
+#include "primary_session_adapter.h"
 #include "module_stage_adapters.h"
 #include "trigger_scheduler.h"
 #include "server_trigger.h"
@@ -62,15 +71,52 @@
 #include <aimee/workspace/workspace.h>
 #include "worktree_gc.h"
 #include "modules/git/git_verify.h"
+#include "server_project_workspace.h"
 #include "toolset.h"
 #include "cJSON.h"
 #include "s2_native_gate_hook.h" /* S2 native-tool gate (server-side, tracks 2+3) */
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/eventfd.h>
 #include <signal.h>
 /* Defined in server_main.c; set by the SIGHUP handler, observed by the main loop (P1b). */
 extern volatile sig_atomic_t g_config_reload_requested;
+
+/* The park loop's doorbell: written by a signal, by an announced config change
+ * and by shutdown; read by the loop. An eventfd write is async-signal-safe. */
+static int g_park_fd = -1;
+
+void server_park_wake(void)
+{
+   int fd = g_park_fd;
+   if (fd >= 0)
+   {
+      uint64_t one = 1;
+      ssize_t ignored = write(fd, &one, sizeof one);
+      (void)ignored;
+   }
+}
+
+/* Sleep until woken or timeout_ms passes (negative: until woken). */
+static void server_park_sleep(int timeout_ms)
+{
+   if (g_park_fd < 0)
+      g_park_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+   if (g_park_fd < 0)
+   {
+      struct timespec ts = {.tv_sec = 1, .tv_nsec = 0}; /* no eventfd: the old cadence */
+      nanosleep(&ts, NULL);
+      return;
+   }
+   struct pollfd park = {.fd = g_park_fd, .events = POLLIN};
+   if (poll(&park, 1, timeout_ms) > 0)
+   {
+      uint64_t count;
+      ssize_t ignored = read(g_park_fd, &count, sizeof count);
+      (void)ignored;
+   }
+}
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -358,6 +404,10 @@ static int handle_server_info(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    return server_send_ok(conn, resp);
 }
 
+/* Weak so unit binaries that link the dispatcher without the readiness sampler
+ * resolve it to NULL and report no verdict; the server always links it. */
+int server_ready_summary(char *boundary, size_t n) __attribute__((weak));
+
 static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)req;
@@ -366,6 +416,16 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    /* Probe DB1 directly; module registry state survives death for about 37s. */
    cJSON_AddStringToObject(resp, "state", db1_store_probe() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
+   /* The verdict the container is judged by, so this answer cannot say the
+    * server is fine while /v1/ready -- and every governed action -- says not. */
+   if (server_ready_summary)
+   {
+      char not_ready[96];
+      int ready = server_ready_summary(not_ready, sizeof not_ready);
+      cJSON_AddBoolToObject(resp, "ready", ready);
+      if (!ready)
+         cJSON_AddStringToObject(resp, "not_ready", not_ready);
+   }
    obs_bus_capture_health_t capture;
    obs_bus_capture_health(&capture);
    cJSON_AddBoolToObject(resp, "capture_ok", capture.capture_ok);
@@ -859,54 +919,44 @@ static int server_hook_identity(server_conn_t *conn, cJSON *req, const char *sid
  * interception deny. Honest scope + fail policy: see wfe_native_gate.h / cmd_hooks.c. */
 static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   cJSON *jtn = cJSON_GetObjectItemCaseSensitive(req, "tool_name");
-   cJSON *jti = cJSON_GetObjectItemCaseSensitive(req, "tool_input");
-   cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(req, "cwd");
-   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
-   cJSON *jrid = cJSON_GetObjectItemCaseSensitive(req, "request_id");
-
-   const char *request_id = cJSON_IsString(jrid) ? jrid->valuestring : NULL;
-
-   if (!cJSON_IsString(jtn))
-      return server_send_error(conn, "missing tool_name", request_id);
-
-   const char *tool_name = jtn->valuestring;
-   char *ti_heap = NULL;
-   const char *tool_input = "{}";
-
-   if (cJSON_IsString(jti))
-      tool_input = jti->valuestring;
-   else if (cJSON_IsObject(jti) || cJSON_IsArray(jti))
+   const char *request_id =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "request_id"));
+   aimee_hook_ir_t hook = {0};
+   if (aimee_hook_ir_admit(req, &hook))
+      return hook_send_blocked(conn, "Malformed native or canonical hook intent.", request_id);
+   /* The native guardrail catalog is flat. Never reinterpret a foreign
+    * namespaced identity as a privileged/known leaf name. */
+   if (hook.call.tool_namespace && hook.call.tool_namespace[0])
    {
-      ti_heap = cJSON_PrintUnformatted(jti);
-      tool_input = ti_heap;
+      aimee_hook_ir_free(&hook);
+      return hook_send_blocked(conn, "Namespaced hook has no registered policy owner.", request_id);
    }
-
-   const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
-   const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : "unknown";
+   const char *tool_name = hook.call.tool_name;
+   char *ti_heap = aimee_hook_ir_arguments(&hook);
+   if (!ti_heap)
+   {
+      aimee_hook_ir_free(&hook);
+      return hook_send_blocked(conn, "Cannot retain canonical hook arguments.", request_id);
+   }
+   const char *tool_input = ti_heap;
+   const char *cwd = hook.cwd ? hook.cwd : "";
+   const char *sid = hook.session_id ? hook.session_id : "unknown";
    if (!is_safe_id(sid))
+   {
+      free(ti_heap);
+      aimee_hook_ir_free(&hook);
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
-
-   cJSON *scope_input = cJSON_Parse(tool_input);
-   const char *scope_cwd = cwd;
-   static const char *const scope_keys[] = {"workdir", "cwd", "working_dir", "working_directory",
-                                            NULL};
-   for (int i = 0; scope_keys[i]; i++)
-   {
-      const char *value =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(scope_input, scope_keys[i]));
-      if (value && value[0])
-      {
-         scope_cwd = value;
-         break;
-      }
    }
-   int registered = workspace_hook_registered(scope_cwd);
-   cJSON_Delete(scope_input);
+   const char *target_cwd = hook.tool_cwd && hook.tool_cwd[0] ? hook.tool_cwd : cwd;
+   char authorized_cwd[MAX_PATH_LEN];
+   int registered =
+       workspace_hook_registered(target_cwd) ||
+       workspace_turn_workspace_authorized(target_cwd, authorized_cwd, sizeof authorized_cwd);
    if (!registered)
    {
       free(ti_heap);
+      aimee_hook_ir_free(&hook);
       cJSON *allowed = cJSON_CreateObject();
       cJSON_AddStringToObject(allowed, "status", "ok");
       cJSON_AddNumberToObject(allowed, "exit_code", 0);
@@ -920,29 +970,22 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *trusted_client = NULL;
    int hook_identity = server_hook_identity(conn, req, sid, &trusted_client);
    if (hook_identity < 0)
+   {
+      free(ti_heap);
+      aimee_hook_ir_free(&hook);
       return hook_send_blocked(conn, "Unauthenticated or mismatched session hook identity.",
                                request_id);
+   }
 
    session_state_t state;
    session_state_load(&state, sid);
-
-   /* Memory interception: redirect an agent's local memory-file write into the
-    * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
-   {
-      char mr_msg[1024] = "";
-      if (trusted_client && server_memory_intercept(tool_name, tool_input, cwd, req, trusted_client,
-                                                    mr_msg, sizeof(mr_msg)) == 2)
-      {
-         free(ti_heap);
-         return hook_send_blocked(conn, mr_msg, request_id);
-      }
-   }
 
    /* S2 native-tool externalization gate (tracks 2+3): sends the block on deny. */
    int s2rc = s2_native_gate_hook_pre(conn, sid, tool_name, tool_input, request_id);
    if (s2rc >= 0)
    {
       free(ti_heap);
+      aimee_hook_ir_free(&hook);
       return s2rc;
    }
 
@@ -953,19 +996,6 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * branch and verify guards. Binding only the file-tool provider leaves those
     * probes on the server and makes every remote push unresolvable.
     * Worktree creation/routing belongs to the thin client for detached roots. */
-   cJSON *input = cJSON_Parse(tool_input);
-   const char *target_cwd = cwd;
-   static const char *cwd_keys[] = {"workdir", "cwd", "working_dir", "working_directory", NULL};
-   for (int i = 0; cwd_keys[i]; i++)
-   {
-      const char *value =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, cwd_keys[i]));
-      if (value && value[0])
-      {
-         target_cwd = value;
-         break;
-      }
-   }
    char saved_cwd[MAX_PATH_LEN];
    snprintf(saved_cwd, sizeof(saved_cwd), "%s", run_cmd_get_cwd() ? run_cmd_get_cwd() : "");
    /* Only an authenticated lifecycle hook may attest to client-local scope.
@@ -973,29 +1003,56 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int client_non_git =
        hook_identity == 1 &&
        cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "client_non_git_workspace"));
-   int bound = workspace_turn_bind_active(target_cwd);
+   workspace_turn_scope_t *hook_scope = NULL;
+   int bound = workspace_turn_scope_begin(target_cwd, &hook_scope);
+   if (bound < 0)
+   {
+      free(ti_heap);
+      aimee_hook_ir_free(&hook);
+      return hook_send_blocked(conn, "Cannot acquire the registered workspace source.", request_id);
+   }
    const workspace_provider_t *provider = workspace_provider_active();
+   const char *held_cwd = workspace_turn_active_cwd();
+   const char *resource_cwd = held_cwd && held_cwd[0] ? held_cwd : target_cwd;
    int detached = bound && provider->kind == WS_PROVIDER_DETACHED;
-   if (detached)
-      run_cmd_set_cwd(target_cwd);
-   else if (!client_non_git)
-      hooks_ensure_cwd_worktree(&state, sid, target_cwd);
+   if (bound)
+      run_cmd_set_cwd(resource_cwd);
+   /* Memory interception: redirect an agent's local memory-file write into the
+    * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
+   {
+      char mr_msg[1024] = "";
+      if (trusted_client && server_memory_intercept(&hook.call, resource_cwd, req, trusted_client,
+                                                    mr_msg, sizeof(mr_msg)) == 2)
+      {
+         run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
+         if (workspace_turn_scope_end(hook_scope))
+            snprintf(mr_msg, sizeof mr_msg, "Cannot restore the enclosing workspace source.");
+         free(ti_heap);
+         aimee_hook_ir_free(&hook);
+         return hook_send_blocked(conn, mr_msg, request_id);
+      }
+   }
+
+   if (!detached && !client_non_git)
+      hooks_ensure_cwd_worktree(&state, sid, resource_cwd);
    int rc = pre_tool_check_client_workspace(tool_name, tool_input, &state, config_guardrail_mode(),
-                                            target_cwd, msg, sizeof(msg), client_non_git);
+                                            resource_cwd, msg, sizeof(msg), client_non_git);
    session_state_save(&state, sid);
 
    if (rc != 2 && hook_identity == 1)
    {
-      const char *attempt =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "tool_use_id"));
+      const char *attempt = hook.call.tool_id;
       if (!attempt || !attempt[0])
          attempt = request_id;
       if (policy_check_session_tool(sid, tool_name, tool_input, attempt, msg, sizeof(msg)) != 0)
          rc = 2;
    }
    run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
-   workspace_turn_unbind_active();
-   cJSON_Delete(input);
+   if (workspace_turn_scope_end(hook_scope))
+   {
+      rc = 2;
+      snprintf(msg, sizeof msg, "Cannot restore the enclosing workspace source.");
+   }
 
    /* Sub-agent interception (enforce-delegate-only): the primary agent must not
     * spawn its OWN sub-agents. pre_tool_check already blocks Task/Agent/spawn_agent
@@ -1006,7 +1063,7 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
        agent_any_delegate_available())
    {
       char prompt[8192] = "";
-      cJSON *ti = cJSON_Parse(tool_input);
+      const cJSON *ti = hook.call.tool_input;
       if (ti)
       {
          cJSON *jp = cJSON_GetObjectItemCaseSensitive(ti, "prompt");
@@ -1019,14 +1076,19 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
             snprintf(prompt, sizeof(prompt), "%s", p);
          else if (d)
             snprintf(prompt, sizeof(prompt), "%s", d);
-         cJSON_Delete(ti);
       }
       if (strlen(prompt) >= 20)
       {
          cJSON *dreq = cJSON_CreateObject();
          cJSON_AddStringToObject(dreq, "role", "execute");
          cJSON_AddStringToObject(dreq, "persona", "engineer");
-         cJSON_AddStringToObject(dreq, "prompt", prompt);
+         aimee_request_t input = {0};
+         cJSON *canonical = NULL;
+         if (!aimee_ir_request_from_text(&input, NULL, prompt, 0, 0.3))
+            canonical = aimee_ir_request_json(&input);
+         aimee_request_free(&input);
+         if (canonical)
+            cJSON_AddItemToObject(dreq, "request", canonical);
          if (sid && sid[0])
             cJSON_AddStringToObject(dreq, "session_id", sid);
          if (cwd && cwd[0])
@@ -1064,44 +1126,48 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    int src = server_send_response(conn, resp);
    cJSON_Delete(resp);
-   if (ti_heap)
-      free(ti_heap);
+   free(ti_heap);
+   aimee_hook_ir_free(&hook);
    return src;
 }
 
 static int handle_hooks_post(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-
-   cJSON *jtn = cJSON_GetObjectItemCaseSensitive(req, "tool_name");
-   cJSON *jti = cJSON_GetObjectItemCaseSensitive(req, "tool_input");
-   cJSON *jrid = cJSON_GetObjectItemCaseSensitive(req, "request_id");
-   const char *request_id = cJSON_IsString(jrid) ? jrid->valuestring : NULL;
-
-   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id"));
+   const char *request_id =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "request_id"));
+   aimee_hook_ir_t hook = {0};
+   if (aimee_hook_ir_admit(req, &hook))
+      return hook_send_blocked(conn, "Malformed native or canonical hook intent.", request_id);
+   if (hook.call.tool_namespace && hook.call.tool_namespace[0])
+   {
+      aimee_hook_ir_free(&hook);
+      return hook_send_blocked(conn, "Namespaced hook has no registered policy owner.", request_id);
+   }
+   const char *sid = hook.session_id;
    if (!sid || !is_safe_id(sid))
+   {
+      aimee_hook_ir_free(&hook);
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
+   }
    const char *trusted_client = NULL;
    int hook_identity = server_hook_identity(conn, req, sid, &trusted_client);
    if (hook_identity < 0)
+   {
+      aimee_hook_ir_free(&hook);
       return hook_send_blocked(conn, "Unauthenticated or mismatched session hook identity.",
                                request_id);
-
-   const char *tool_name = cJSON_IsString(jtn) ? jtn->valuestring : "";
-   char *ti_heap = NULL;
-   const char *tool_input = "{}";
-
-   if (cJSON_IsString(jti))
-      tool_input = jti->valuestring;
-   else if (cJSON_IsObject(jti) || cJSON_IsArray(jti))
-   {
-      ti_heap = cJSON_PrintUnformatted(jti);
-      tool_input = ti_heap;
    }
-
-   post_tool_update(tool_name, tool_input, NULL);
-
+   char *arguments = aimee_hook_ir_arguments(&hook);
+   if (!arguments)
+   {
+      aimee_hook_ir_free(&hook);
+      return hook_send_blocked(conn, "Cannot retain canonical hook arguments.", request_id);
+   }
+   post_tool_update(hook.call.tool_name, arguments, NULL);
+   free(arguments);
+   aimee_hook_ir_free(&hook);
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "exit_code", 0);
    cJSON_AddStringToObject(resp, "hook_identity", trusted_client ? "trusted" : "untrusted");
@@ -1109,8 +1175,6 @@ static int handle_hooks_post(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);
    cJSON_Delete(resp);
-   if (ti_heap)
-      free(ti_heap);
    return rc;
 }
 
@@ -1201,6 +1265,19 @@ static void session_start_worktree_gc(const char *hook_input)
    cJSON_Delete(hi_json);
 }
 
+/* A harness client name: 1-32 of [a-z0-9_-], the shape every hook installer uses. */
+static int hook_client_name_ok(const char *client)
+{
+   size_t n = strlen(client);
+   if (n == 0 || n > 32)
+      return 0;
+   for (size_t i = 0; i < n; i++)
+      if (!((client[i] >= 'a' && client[i] <= 'z') || (client[i] >= '0' && client[i] <= '9') ||
+            client[i] == '-' || client[i] == '_'))
+         return 0;
+   return 1;
+}
+
 static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1219,7 +1296,12 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
 
    const char *hook_client =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "harness_client"));
-   if (hook_client && !hmem_scope_for_client(hook_client))
+   /* A hook identity is bound to (session, client, principal), so any well-formed
+    * client name may hold one. Requiring a harness-memory scope here refused every
+    * client but claude: on CT100 all 9,531 codex hooks ran untrusted because each
+    * codex session_start came back 502 (Sep 23 - Oct 26). Memory interception keeps
+    * its own scope check. */
+   if (hook_client && !hook_client_name_ok(hook_client))
       return server_send_error(conn, "unknown harness_client", request_id);
    char hook_token[HOOK_SESSION_TOKEN_CAP] = "";
    time_t hook_token_expires = 0;
@@ -1239,8 +1321,8 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
     * findable record. Idempotent (SessionStart also fires on resume); best-effort. */
    if (sid && sid[0])
    {
-      db1_server_session_t existing;
-      if (db1_server_session_get(sid, &existing) != 0)
+      db1_server_session_owner_t existing;
+      if (db1_server_session_owner_get(sid, &existing) != 0)
       {
          char principal[32];
          snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
@@ -1485,10 +1567,16 @@ static size_t method_size_limit(const char *method)
       const char *prefix;
       size_t max;
    } limits[] = {
-       {"memory.", LIMIT_MEMORY},      {"tool.", LIMIT_TOOL},
-       {"delegate", LIMIT_DELEGATE},   {"roundtable.review", LIMIT_ROUNDTABLE},
-       {"mcp.call", LIMIT_DELEGATE},   {"chat.", LIMIT_CHAT},
-       {"index.ingest", LIMIT_INGEST}, {"session.record_transcript", LIMIT_TRANSCRIPT},
+       {"memory.", LIMIT_MEMORY},
+       {"tool.", LIMIT_TOOL},
+       {"delegate", LIMIT_DELEGATE},
+       {"roundtable.review", LIMIT_ROUNDTABLE},
+       {"mcp.call", LIMIT_DELEGATE},
+       {"chat.", LIMIT_CHAT},
+       {"index.ingest", LIMIT_INGEST},
+       {"session.record_transcript", LIMIT_TRANSCRIPT},
+       /* Explicit, and shared with the clients that size their chunks by it. */
+       {"workspace.mirror-sync", MIRROR_SYNC_MAX_BODY},
        {NULL, LIMIT_DEFAULT},
    };
 
@@ -1925,6 +2013,11 @@ static void server_shell_git_gate_log_posture(void)
              "ARMED: git/gh in a delegate shell is refused; delegates use the git_* tools");
 }
 
+static int server_project_workspace_open(const char *cwd)
+{
+   return server_project_workspace_open_owned(request_context_get(), cwd);
+}
+
 int server_init(server_ctx_t *ctx, const char *socket_path)
 {
    memset(ctx, 0, sizeof(*ctx));
@@ -1938,6 +2031,16 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
       errno = EEXIST;
       return -1;
    }
+
+   /* Install host custody/policy before any background worker starts. Detached
+    * delegates can outlive a bounded shutdown drain, so these fail-closed hooks
+    * remain installed for the process lifetime, including store teardown. */
+   workspace_turn_register_project_owner(server_project_workspace_open);
+   primary_session_adapter_set_native_reconcile(server_native_session_reconcile);
+   primary_session_adapter_set_native_browse_reconcile(server_native_session_reconcile_browse);
+   primary_session_adapter_set_native_history_load(server_native_history_load);
+   aimee_ir_history_set_host_admission(server_native_history_admit_current);
+   policy_set_unknown_effect_gate(server_unknown_effect_policy_stage);
 
    /* The legacy NDJSON RPC listener was removed: aimee-server serves only the
     * /v1 HTTP surface (server_http.c binds its own UDS + optional TCP). No Unix
@@ -1980,14 +2083,12 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * tuning that went with it was being applied to the one process where it
     * could not matter. The module applies it now.
     *
-    * The three restart chores below reach the store over the bus. Each already
-    * warns when it cannot, which is also what happens when the module has not
-    * attached yet: nothing in this process launches it. */
-   int orphaned = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
-   if (orphaned < 0)
-      LOG_WARN("server", "failed to reconcile delegate jobs from the prior process");
-   else if (orphaned > 0)
-      LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
+    * Restart chores reach the store over the bus. Delegate cleanup retries
+    * after attachment and gates new durable job admission until acknowledged;
+    * the nonce cleanup below warns if its typed owner is not yet attached. */
+   if (server_delegate_startup_reconcile() != 0)
+      LOG_WARN("server",
+               "delegate startup reconciliation pending store attachment; new jobs blocked");
    if (server_mgmt_status_init() != 0)
       LOG_WARN("server", "management status nonce initialization failed");
    const char *trust_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
@@ -2156,10 +2257,11 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* WFE lifecycle is Go-only. This process exposes agent/roundtable resources
     * to the Go control plane but never registers a C workflow executor. */
    /* Give aimee's own agents the MCP tools marked native in mcp_tool_table. Must
-    * precede any toolset_registry_init() / build_tools_array(), which snapshot the
+    * precede any toolset_registry_init() / agent_tools_catalog(), which snapshot the
     * registrations. aimee's agents and an external MCP client now reach the SAME
     * handler, so the two surfaces cannot drift apart: the drift is what left review
     * panelists unable to ask "is this still called?" while Claude Code could. */
+   server_verification_register();
    mcp_tool_register_native_surface();
    /* Hand the native agent surface aimee's git-write tools. Without this the
     * builtin set is read-only git, so a delegate's ONLY way to land work is to
@@ -2186,6 +2288,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
 }
 int server_run(server_ctx_t *ctx)
 {
+   server_learning_recovery_init();
    /* enforce-delegate-only: register the delegate-availability provider so the
     * gateway strips provider-native sub-agent tools whenever usable delegates
     * exist (CORE gateway_policy can't read agent state itself). */
@@ -2206,13 +2309,25 @@ int server_run(server_ctx_t *ctx)
    /* The /v1 HTTP listener (server_http.c) runs on its own accept thread with
     * per-connection workers, so the main thread has no NDJSON accept loop to
     * drive any more. Park here until a signal flips ctx->running, then return so
-    * run_server() can tear everything down. The 1s tick also drives idle-reaping
-    * of per-webuser code-server editors (WP-I lifecycle) via reap_tick. */
+    * run_server() can tear everything down. The park sleeps until there is
+    * something to do -- a SIGHUP, an announced config change, shutdown -- and
+    * otherwise wakes only while it has a deadline: idle code-server editors to
+    * reap, or a startup reconciliation to retry. It used to wake every second. */
+   /* Seed from the real state: startup's attempt usually runs before the store
+    * module has attached, and a park with no deadline would never retry it. */
+   int reconcile_failed = server_delegate_startup_reconcile() != 0;
    while (ctx->running)
    {
-      struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
-      nanosleep(&ts, NULL);
+      int timeout_ms = -1;
+      if (reconcile_failed)
+         timeout_ms = 1000;
+      else if (webuser_editor_running() > 0)
+         timeout_ms = WEBUSER_EDITOR_REAP_EVERY_SECS * 1000;
+      server_park_sleep(timeout_ms);
+      if (!ctx->running)
+         break;
       webuser_editor_reap_tick();
+      reconcile_failed = server_delegate_startup_reconcile() != 0;
       /* SIGHUP requested a config reload (live-config-reload P1b): do it here, off the
        * signal path, since config_reload takes a mutex and does file I/O. */
       if (g_config_reload_requested)
@@ -2240,6 +2355,7 @@ int server_run(server_ctx_t *ctx)
 }
 void server_shutdown(server_ctx_t *ctx)
 {
+   server_learning_recovery_shutdown();
    /* Stop trigger scheduler before draining compute pool */
    trigger_scheduler_shutdown();
    server_delegate_monitor_shutdown();
@@ -2273,6 +2389,7 @@ void server_shutdown(server_ctx_t *ctx)
    delegate_ondemand_drain(5000);
    /* Shut down compute pool (drain in-flight work) */
    compute_pool_shutdown(&ctx->pool);
+   server_native_execution_shutdown();
    pthread_cond_destroy(&ctx->compute_budget_cond);
    pthread_mutex_destroy(&ctx->compute_budget_mutex);
    pthread_mutex_destroy(&ctx->conns_mutex);

@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "principal_class": 1,
   "components": [
     {
@@ -27,6 +27,20 @@
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
           "emitter": "obs_bus_emit_durable_event"
+        }
+      ],
+      "notifications": [
+        {
+          "id": 2,
+          "name": "config-changed",
+          "event_kind": 4610,
+          "durability": "capture",
+          "durability_reason": "carries only the committed config version; the mutation that produced it is already a durable config-store row",
+          "subscribers": [
+            "core",
+            "wfe",
+            "memory-postgres"
+          ]
         }
       ]
     },
@@ -167,6 +181,13 @@
           "event_kind": 6146,
           "durability": "capture",
           "durability_reason": "bounded owner admission and projection RPC; accepted observations persist in the immutable learning application ledger"
+        },
+        {
+          "id": 3,
+          "name": "canonical-execution-observation",
+          "event_kind": 6147,
+          "durability": "capture",
+          "durability_reason": "pure projection of an already persisted canonical terminal; host records the observation in the existing local interaction ledger"
         }
       ]
     },
@@ -380,6 +401,15 @@
           "event_kind": 6678,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 23,
+          "name": "native-host-execute",
+          "event_kind": 6679,
+          "hosted_by": "server-core",
+          "durability": "ledger",
+          "durability_reason": "host-owned canonical native execution admission and lifecycle require durable execution receipts",
           "emitter": "obs_bus_emit_durable_event"
         }
       ]
@@ -1104,6 +1134,38 @@
           "durability_reason": "peer channel operations change durable communication state",
           "emitter": "obs_bus_emit_durable_event"
         }
+      ],
+      "notifications": [
+        {
+          "id": 24,
+          "name": "aimee-work-item-changed",
+          "event_kind": 11800,
+          "durability": "capture",
+          "durability_reason": "carries only a work item id and the earliest pending resume time; the lifecycle transition is already a durable aimee-lifecycle row",
+          "subscribers": [
+            "wfe"
+          ]
+        },
+        {
+          "id": 25,
+          "name": "aimee-delegation-changed",
+          "event_kind": 11801,
+          "durability": "capture",
+          "durability_reason": "carries only a delegate job id and state; the job transition is already a durable aimee-delegation row",
+          "subscribers": [
+            "core"
+          ]
+        },
+        {
+          "id": 26,
+          "name": "aimee-learning-projection-pending",
+          "event_kind": 11802,
+          "durability": "capture",
+          "durability_reason": "says only that a learning projection was queued; the queued source pointer is already a durable learning_projection_outbox row",
+          "subscribers": [
+            "core"
+          ]
+        }
       ]
     },
     {
@@ -1401,6 +1463,26 @@
       "request": [
         4609
       ]
+    },
+    {
+      "id": "delegates-host",
+      "principal_ref": 76,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-delegates",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        6679
+      ]
     }
-  ]
+  ],
+  "telemetry": {
+    "id": "ring-telemetry",
+    "principal_ref": 77,
+    "executable": "/usr/local/libexec/aimee-modules/aimee-module-ring-telemetry",
+    "placements": [
+      "server",
+      "kb"
+    ]
+  }
 }

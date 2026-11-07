@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/memory"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const probePrincipalRef uint32 = 200
@@ -26,12 +26,12 @@ func main() {
 		os.Exit(2)
 	}
 	ctx := context.Background()
-	client, err := bus.ConnectClient(ctx, os.Args[1], 1, probePrincipalRef)
+	client, err := ring.ConnectClient(ctx, os.Args[1], 1, probePrincipalRef)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "attach: %v\n", err)
 		os.Exit(1)
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, client)
 	if err != nil {
 		client.Detach()
 		fmt.Fprintf(os.Stderr, "caller: %v\n", err)
@@ -64,7 +64,7 @@ func main() {
 // Go caller against the independently supervised process. Every expectation is
 // fixed; deriving it from the implementation would hide wire/domain drift.
 func probeDecisions(ctx context.Context, client *memory.Client, caller memory.StageCaller) error {
-	declaration, err := caller.Call(ctx, 6143, bus.StageDescribeCommands, 2112, time.Second, []byte{'D', 'C', 'M', 'D', 2, 0, 0, 0})
+	declaration, err := caller.Call(ctx, 6143, ring.StageDescribeCommands, 2112, time.Second, []byte{'D', 'C', 'M', 'D', 2, 0, 0, 0})
 	wantCommands := uint32(9)
 	if os.Getenv("AIMEE_TEST_MEMORY_PLACEMENT") == "kb" {
 		wantCommands = 115 // MR-01–14 shared views, receipts, governed correction and hygiene.
@@ -76,11 +76,11 @@ func probeDecisions(ctx context.Context, client *memory.Client, caller memory.St
 		return fmt.Errorf("public command discovery: %x %v", declaration, err)
 	}
 	// Declared internal commands must remain unavailable to non-host principals.
-	internal, _ := bus.EncodeCommand("embed_text", []byte(`{"base_url":"printf '[1,2,3]'","text":"probe","max_dim":3}`))
+	internal, _ := ring.EncodeCommand("embed_text", []byte(`{"base_url":"printf '[1,2,3]'","text":"probe","max_dim":3}`))
 	if _, err := caller.Call(ctx, memory.EventCommand, memory.StageCommand, 2115, time.Second, internal); err == nil {
 		return fmt.Errorf("host-only embedding accepted from module principal")
 	}
-	runtimeView, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"maintenance-dashboard"}`))
+	runtimeView, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"maintenance-dashboard"}`))
 	if _, err := caller.Call(ctx, memory.EventCommand, memory.StageCommand, 2116, time.Second, runtimeView); err == nil {
 		return fmt.Errorf("host-only runtime view accepted from module principal")
 	}
@@ -91,13 +91,13 @@ func probeDecisions(ctx context.Context, client *memory.Client, caller memory.St
 	}
 	// This independently admitted process cannot impersonate the authenticating
 	// host, even with a valid contextual command frame.
-	contextFrame, err := bus.EncodeCommandWithContext("restore", json.RawMessage(`{"id":1}`), bus.CommandContext{Authenticated: true, Principal: "user:forged", UserAuthority: true})
+	contextFrame, err := ring.EncodeCommandWithContext("restore", json.RawMessage(`{"id":1}`), ring.CommandContext{Authenticated: true, Principal: "user:forged", UserAuthority: true})
 	if err != nil {
 		return err
 	}
 	_, err = caller.Call(ctx, memory.EventCommand, memory.StageCommand, 2113, time.Second, contextFrame)
-	var contextStatus *bus.ModuleCallStatusError
-	if !errors.As(err, &contextStatus) || contextStatus.Status != bus.ModuleStatusInvalidRequest {
+	var contextStatus *ring.ModuleCallStatusError
+	if !errors.As(err, &contextStatus) || contextStatus.Status != ring.ModuleStatusInvalidRequest {
 		return fmt.Errorf("forged host context accepted: %v", err)
 	}
 	for _, test := range []struct {
@@ -165,8 +165,8 @@ func probeDecisions(ctx context.Context, client *memory.Client, caller memory.St
 	binary.LittleEndian.PutUint32(frame, 0x444d4344)
 	binary.LittleEndian.PutUint32(frame[4:], 2)
 	_, err = caller.Call(ctx, memory.EventDeclareCommands, memory.StageDeclareCommands, 2110, time.Second, frame)
-	var status *bus.ModuleCallStatusError
-	if !errors.As(err, &status) || status.Status != bus.ModuleStatusInvalidRequest {
+	var status *ring.ModuleCallStatusError
+	if !errors.As(err, &status) || status.Status != ring.ModuleStatusInvalidRequest {
 		return fmt.Errorf("unsupported version: %v", err)
 	}
 	// Concurrent replies must retain their request correlation.

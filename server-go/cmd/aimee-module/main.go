@@ -15,7 +15,6 @@ import (
 	"syscall"
 
 	aimeecontract "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
@@ -34,6 +33,7 @@ import (
 	mcpmodule "github.com/JBailes/aimee/server-go/modules/mcp"
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
+	"github.com/JBailes/aimee/server-go/modules/observability"
 	"github.com/JBailes/aimee/server-go/modules/postgres"
 	"github.com/JBailes/aimee/server-go/modules/postgres/storage"
 	"github.com/JBailes/aimee/server-go/modules/providers"
@@ -47,6 +47,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/skills"
 	moduletools "github.com/JBailes/aimee/server-go/modules/tools"
 	"github.com/JBailes/aimee/server-go/modules/workspace"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 var errUsage = errors.New("usage: aimee-module-NAME DAEMON_MODULE_BUS_SOCKET")
@@ -72,11 +73,11 @@ func economizerStore(ctx context.Context, moduleBusSocket string) economizer.Sta
 	if ctx == nil || moduleBusSocket == "" {
 		return nil
 	}
-	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, economizerStorePrincipalRef)
+	busClient, err := ring.ConnectClient(ctx, moduleBusSocket, 1, economizerStorePrincipalRef)
 	if err != nil {
 		return nil
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, busClient)
 	if err != nil {
 		busClient.Detach()
 		return nil
@@ -99,12 +100,12 @@ func moduleEgress(ctx context.Context, moduleBusSocket string, principalRef uint
 	if ctx == nil || moduleBusSocket == "" || principalRef == 0 {
 		return nil
 	}
-	client, err := bus.ConnectClient(ctx, moduleBusSocket, 1, principalRef)
+	client, err := ring.ConnectClient(ctx, moduleBusSocket, 1, principalRef)
 	if err != nil {
 		log.Printf("egress: could not attach outbound principal %d: %v", principalRef, err)
 		return nil
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, client)
 	if err != nil {
 		client.Detach()
 		log.Printf("egress: could not create outbound caller %d: %v", principalRef, err)
@@ -131,11 +132,11 @@ func roundtableReviewer(ctx context.Context, moduleBusSocket string) (*roundtabl
 	if err != nil {
 		return nil, err
 	}
-	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, roundtableDelegatePrincipalRef)
+	busClient, err := ring.ConnectClient(ctx, moduleBusSocket, 1, roundtableDelegatePrincipalRef)
 	if err != nil {
 		return nil, err
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, busClient)
 	if err != nil {
 		busClient.Detach()
 		return nil, err
@@ -165,16 +166,16 @@ func sandboxHome() string {
 	return filepath.Join(userHome, ".config", "aimee")
 }
 
-func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
+func moduleConfig(executable string) (ring.ModuleProcessConfig, bool) {
 	return moduleConfigRuntime(nil, executable, "")
 }
 
 // Request-only identity declared as egress-config in process-contracts.json.
 const egressConfigPrincipalRef uint32 = 75
 
-func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string) (bus.ModuleProcessConfig, bool) {
+func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string) (ring.ModuleProcessConfig, bool) {
 	name := strings.TrimPrefix(filepath.Base(executable), "aimee-module-")
-	config := bus.ModuleProcessConfig{PrincipalClass: 1}
+	config := ring.ModuleProcessConfig{PrincipalClass: 1}
 
 	// Plugin modules are instanced: `aimee-module-mcp-github` hosts exactly one
 	// MCP server under the group "github". They are matched by prefix because
@@ -188,7 +189,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "memory":
 		config.ModuleName = name
 		config.PrincipalRef = 7
-		config.Stages = []bus.ModuleStage{
+		config.Stages = []ring.ModuleStage{
 			{EventKind: memory.EventExtractIndex, StageID: memory.StageExtractIndex},
 			{EventKind: memory.EventWrite, StageID: memory.StageWrite},
 			{EventKind: memory.EventEmbed, StageID: memory.StageEmbed},
@@ -197,7 +198,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: memory.EventDeclareCommands, StageID: memory.StageDeclareCommands},
 			{EventKind: memory.EventData, StageID: memory.StageData},
 			{EventKind: memory.EventCommand, StageID: memory.StageCommand},
-			{EventKind: 4096 + 7*256 + bus.StageDescribeCommands, StageID: bus.StageDescribeCommands},
+			{EventKind: 4096 + 7*256 + ring.StageDescribeCommands, StageID: ring.StageDescribeCommands},
 		}
 		// Static registry inspection has no live resources. Every running
 		// process uses the owner's same placement-aware constructor.
@@ -214,12 +215,12 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "learning":
 		config.ModuleName = name
 		config.PrincipalRef = 8
-		config.Stages = []bus.ModuleStage{{EventKind: learning.EventKind, StageID: learning.StageObserve}, {EventKind: learning.EventExperience, StageID: learning.StageExperience}}
+		config.Stages = []ring.ModuleStage{{EventKind: learning.EventKind, StageID: learning.StageObserve}, {EventKind: learning.EventExperience, StageID: learning.StageExperience}, {EventKind: learning.EventExecution, StageID: learning.StageExecution}}
 		config.Handler = learning.Handle
 	case "providers":
 		config.ModuleName = name
 		config.PrincipalRef = providers.PrincipalRef
-		config.Stages = []bus.ModuleStage{{EventKind: providers.EventResolve, StageID: providers.StageResolve}, {EventKind: providers.EventValidate, StageID: providers.StageValidate}, {EventKind: providers.EventManage, StageID: providers.StageManage}}
+		config.Stages = []ring.ModuleStage{{EventKind: providers.EventResolve, StageID: providers.StageResolve}, {EventKind: providers.EventValidate, StageID: providers.StageValidate}, {EventKind: providers.EventManage, StageID: providers.StageManage}}
 		handler, err := providers.NewProcessHandler(ctx, moduleBusSocket, sandboxHome())
 		if err != nil {
 			log.Printf("providers unavailable: %v", err)
@@ -230,12 +231,12 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "routing":
 		config.ModuleName = name
 		config.PrincipalRef = 9
-		config.Stages = []bus.ModuleStage{{EventKind: routing.EventKind, StageID: routing.StageSelect}, {EventKind: routing.EventPlan, StageID: routing.StagePlan}}
+		config.Stages = []ring.ModuleStage{{EventKind: routing.EventKind, StageID: routing.StageSelect}, {EventKind: routing.EventPlan, StageID: routing.StagePlan}}
 		config.Handler = routing.Handle
 	case "delegates":
 		config.ModuleName = name
 		config.PrincipalRef = 10
-		config.Stages = []bus.ModuleStage{
+		config.Stages = []ring.ModuleStage{
 			{EventKind: delegates.EventKind, StageID: delegates.StageInvoke},
 			{EventKind: delegates.EventCapabilities, StageID: delegates.StageCapabilities},
 			{EventKind: delegates.EventChain, StageID: delegates.StageChain},
@@ -259,23 +260,23 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: delegates.EventNamedFileDrift, StageID: delegates.StageNamedFileDrift},
 			{EventKind: delegates.EventGroupPlan, StageID: delegates.StageGroupPlan},
 		}
-		var executor delegates.Executor
-		registryExecutor, err := delegates.NewRegistryExecutor(os.Getenv("AIMEE_HOME"))
+		hostHandler, err := delegates.NewProcessHandler(ctx, moduleBusSocket)
 		if err != nil {
 			log.Printf("delegate execution unavailable: %v", err)
+			config.Handler = delegates.NewHandler(nil)
 		} else {
-			executor = registryExecutor
+			config.Handler = hostHandler
 		}
-		config.Handler = delegates.NewHandler(executor)
+
 	case "tools":
 		config.ModuleName = name
 		config.PrincipalRef = 11
-		config.Stages = []bus.ModuleStage{{EventKind: moduletools.EventKind, StageID: moduletools.StageDispatch}, {EventKind: moduletools.EventActionResource, StageID: moduletools.StageActionResource}}
+		config.Stages = []ring.ModuleStage{{EventKind: moduletools.EventKind, StageID: moduletools.StageDispatch}, {EventKind: moduletools.EventActionResource, StageID: moduletools.StageActionResource}}
 		config.Handler = moduletools.Handle
 	case "workspace":
 		config.ModuleName = name
 		config.PrincipalRef = 12
-		config.Stages = []bus.ModuleStage{
+		config.Stages = []ring.ModuleStage{
 			{EventKind: workspace.EventKind, StageID: workspace.StageAccess},
 			{EventKind: workspace.EventRunner, StageID: workspace.StageRunner},
 			{EventKind: workspace.EventRunnerIO, StageID: workspace.StageRunnerIO},
@@ -284,7 +285,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "git":
 		config.ModuleName = name
 		config.PrincipalRef = 13
-		config.Stages = []bus.ModuleStage{
+		config.Stages = []ring.ModuleStage{
 			{EventKind: modulegit.EventKind, StageID: modulegit.StageOperation},
 			{EventKind: modulegit.EventRefValidate, StageID: modulegit.StageRefValidate},
 			{EventKind: modulegit.EventCIGrade, StageID: modulegit.StageCIGrade},
@@ -303,7 +304,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		}
 		config.ModuleName = name
 		config.PrincipalRef = egress.PrincipalRef
-		config.Stages = []bus.ModuleStage{
+		config.Stages = []ring.ModuleStage{
 			{EventKind: egress.EventAuthorize, StageID: egress.StageAuthorize},
 			{EventKind: egress.EventHTTP, StageID: egress.StageHTTP},
 			{EventKind: egress.EventSSEOpen, StageID: egress.StageSSEOpen},
@@ -316,7 +317,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "skills":
 		config.ModuleName = name
 		config.PrincipalRef = 14
-		config.Stages = []bus.ModuleStage{
+		config.Stages = []ring.ModuleStage{
 			{EventKind: skills.EventKind, StageID: skills.StageContext},
 			{EventKind: skills.EventTrigger, StageID: skills.StageTrigger},
 		}
@@ -324,17 +325,17 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "response-composition":
 		config.ModuleName = name
 		config.PrincipalRef = 15
-		config.Stages = []bus.ModuleStage{{EventKind: responsecomposition.EventKind, StageID: responsecomposition.StageCompose}}
+		config.Stages = []ring.ModuleStage{{EventKind: responsecomposition.EventKind, StageID: responsecomposition.StageCompose}}
 		config.Handler = responsecomposition.Handle
 	case "execution-policy":
 		config.ModuleName = name
 		config.PrincipalRef = 17
-		config.Stages = []bus.ModuleStage{{EventKind: executionpolicy.EventTool, StageID: executionpolicy.StageTool}}
+		config.Stages = []ring.ModuleStage{{EventKind: executionpolicy.EventTool, StageID: executionpolicy.StageTool}}
 		config.Handler = executionpolicy.Handle
 	case "governance":
 		config.ModuleName = name
 		config.PrincipalRef = 19
-		config.Stages = []bus.ModuleStage{{EventKind: governance.EventEvaluate, StageID: governance.StageEvaluate}}
+		config.Stages = []ring.ModuleStage{{EventKind: governance.EventEvaluate, StageID: governance.StageEvaluate}}
 		config.Handler = governance.Handle
 	case "roundtable":
 		config.ModuleName = name
@@ -342,7 +343,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// Deliberate and chunk planning need nothing but their arguments, so both
 		// are declared unconditionally. Review is appended below only when this
 		// process can actually convene one.
-		config.Stages = []bus.ModuleStage{
+		config.Stages = []ring.ModuleStage{
 			{EventKind: roundtable.EventDeliberate, StageID: roundtable.StageDeliberate},
 			{EventKind: roundtable.EventChunkPlan, StageID: roundtable.StageChunkPlan},
 		}
@@ -357,28 +358,28 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			log.Printf("roundtable review stage unavailable: %v", err)
 		} else {
 			config.Stages = append(config.Stages,
-				bus.ModuleStage{EventKind: roundtable.EventReview, StageID: roundtable.StageReview})
+				ring.ModuleStage{EventKind: roundtable.EventReview, StageID: roundtable.StageReview})
 			config.Handler = roundtable.NewHandler(reviewer)
 		}
 	case "kb-synthesis":
 		config.ModuleName = name
 		config.PrincipalRef = 22
-		config.Stages = []bus.ModuleStage{{EventKind: kbsynthesis.EventGrounding, StageID: kbsynthesis.StageGrounding}}
+		config.Stages = []ring.ModuleStage{{EventKind: kbsynthesis.EventGrounding, StageID: kbsynthesis.StageGrounding}}
 		config.Handler = kbsynthesis.Handle
 	case "runtime-web":
 		config.ModuleName = name
 		config.PrincipalRef = 23
-		config.Stages = []bus.ModuleStage{{EventKind: runtimeweb.EventClassify, StageID: runtimeweb.StageClassify}}
+		config.Stages = []ring.ModuleStage{{EventKind: runtimeweb.EventClassify, StageID: runtimeweb.StageClassify}}
 		config.Handler = runtimeweb.Handle
 	case "control-web":
 		config.ModuleName = name
 		config.PrincipalRef = 24
-		config.Stages = []bus.ModuleStage{{EventKind: controlweb.EventAuthorize, StageID: controlweb.StageAuthorize}}
+		config.Stages = []ring.ModuleStage{{EventKind: controlweb.EventAuthorize, StageID: controlweb.StageAuthorize}}
 		config.Handler = controlweb.Handle
 	case "sandbox":
 		config.ModuleName = name
 		config.PrincipalRef = 26
-		config.Stages = []bus.ModuleStage{
+		config.Stages = []ring.ModuleStage{
 			{EventKind: sandbox.EventObserve, StageID: sandbox.StageObserve},
 			{EventKind: sandbox.EventLoad, StageID: sandbox.StageLoad},
 			{EventKind: sandbox.EventProxyRequest, StageID: sandbox.StageProxyRequest},
@@ -391,16 +392,16 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		store, err := sandbox.NewStore(sandboxHome())
 		if err != nil {
 			log.Printf("sandbox stages unavailable: %v", err)
-			return bus.ModuleProcessConfig{}, false
+			return ring.ModuleProcessConfig{}, false
 		}
 		config.Handler = sandbox.NewHandler(store)
 	case "economizer":
-		// Final request admission is on the provider dispatch path. Avoid the
-		// generic consumer's 10ms idle backoff; keep reduction policy unchanged.
-		config.MaxIdlePollInterval = economizer.RequestAdmissionPollInterval
+		// Final request admission is on the provider dispatch path. The ring
+		// wakes the process for each request (doorbell, ring D13), so it no
+		// longer trades idle wakeups for latency with a 1ms poll ceiling.
 		config.ModuleName = name
 		config.PrincipalRef = 27
-		config.Stages = []bus.ModuleStage{
+		config.Stages = []ring.ModuleStage{
 			{EventKind: economizer.EventReduce, StageID: economizer.StageReduce},
 			{EventKind: economizer.EventJSONCompact, StageID: economizer.StageJSONCompact},
 			{EventKind: economizer.EventToolRecall, StageID: economizer.StageToolRecall},
@@ -421,11 +422,11 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		var err error
 		if name == "server" {
 			config.PrincipalRef = serverrole.PrincipalRef
-			config.Stages = []bus.ModuleStage{{EventKind: serverrole.EventIdentity, StageID: serverrole.StageIdentity}}
+			config.Stages = []ring.ModuleStage{{EventKind: serverrole.EventIdentity, StageID: serverrole.StageIdentity}}
 			config.Handler, err = serverrole.NewHandler(os.Getenv("AIMEE_HOME"))
 		} else {
 			config.PrincipalRef = kbrole.PrincipalRef
-			config.Stages = []bus.ModuleStage{{EventKind: kbrole.EventIdentity, StageID: kbrole.StageIdentity}}
+			config.Stages = []ring.ModuleStage{{EventKind: kbrole.EventIdentity, StageID: kbrole.StageIdentity}}
 			config.Handler, err = kbrole.NewHandler(os.Getenv("AIMEE_HOME"))
 		}
 		if err != nil {
@@ -440,7 +441,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// through here. Before it existed the store module attached, built its
 		// client, found nothing serving 11266 and exited -- which read as "the
 		// store is absent" on a system where every other part had been written.
-		config.Stages = []bus.ModuleStage{
+		config.Stages = []ring.ModuleStage{
 			{EventKind: postgres.EventHealth, StageID: postgres.StageHealth},
 			{EventKind: postgres.EventSQL, StageID: postgres.StageSQL},
 			{EventKind: postgres.EventSession, StageID: postgres.StageSession},
@@ -452,7 +453,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// process-contracts.json exactly when the database is unreachable.
 		sqlHandler := postgres.NewSQLHandler()
 		sessionHandler := postgres.NewSessionHandler(ctx)
-		config.Handler = func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+		config.Handler = func(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 			if invocation.StageID == postgres.StageSession {
 				return sessionHandler(invocation, frame)
 			}
@@ -472,22 +473,24 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "aimee", "store", "db1":
 		config.ModuleName = name
 		config.PrincipalRef = aimee.PrincipalRef
-		module, err := aimeeprocess.New(ctx, moduleBusSocket)
+		announcer := aimeeprocess.NewAnnouncer()
+		module, err := aimeeprocess.New(ctx, moduleBusSocket, announcer)
 		if err != nil {
 			return config, false
 		}
 		config.Stages = module.Stages()
 		config.Handler = module.Handle
+		config.Started = func(publisher ring.Publisher) { announcer.Start(ctx, publisher) }
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25
-		config.Stages = []bus.ModuleStage{
+		config.Stages = []ring.ModuleStage{
 			{EventKind: benchmarks.EventRun, StageID: benchmarks.StageRun},
 			{EventKind: benchmarks.EventLatency, StageID: benchmarks.StageLatency},
 		}
 		config.Handler = benchmarks.Handle
 	default:
-		return bus.ModuleProcessConfig{}, false
+		return ring.ModuleProcessConfig{}, false
 	}
 	return config, true
 }
@@ -510,11 +513,11 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 // serves its stages with no plugin attached: it declares zero commands and
 // answers CapabilityAbsent. That is a working, inert module -- not a gap left
 // open.
-func mcpModuleConfig(ctx context.Context, config bus.ModuleProcessConfig, moduleBusSocket,
-	name, instance string) (bus.ModuleProcessConfig, bool) {
+func mcpModuleConfig(ctx context.Context, config ring.ModuleProcessConfig, moduleBusSocket,
+	name, instance string) (ring.ModuleProcessConfig, bool) {
 	if instance == "" {
 		log.Printf("mcp module: executable names no instance (want aimee-module-mcp-NAME)")
-		return bus.ModuleProcessConfig{}, false
+		return ring.ModuleProcessConfig{}, false
 	}
 	// The permission ceiling is what this instance may do at most. Unset means
 	// `read` -- the least privilege -- matching plugin_permission_from_str().
@@ -522,12 +525,12 @@ func mcpModuleConfig(ctx context.Context, config bus.ModuleProcessConfig, module
 	module := mcpmodule.New(instance, ceiling)
 	if module.Group() == "" {
 		log.Printf("mcp module: instance %q has no usable command group", instance)
-		return bus.ModuleProcessConfig{}, false
+		return ring.ModuleProcessConfig{}, false
 	}
 	ref, err := principalRefFromEnv()
 	if err != nil {
 		log.Printf("mcp module %s: %v", name, err)
-		return bus.ModuleProcessConfig{}, false
+		return ring.ModuleProcessConfig{}, false
 	}
 	// The kinds come from the ref, not from a second environment variable. An
 	// independently supplied base is a second allocation authority for one
@@ -536,16 +539,16 @@ func mcpModuleConfig(ctx context.Context, config bus.ModuleProcessConfig, module
 	invoke, declare, err := mcpmodule.EventKinds(ref)
 	if err != nil {
 		log.Printf("mcp module %s: %v", name, err)
-		return bus.ModuleProcessConfig{}, false
+		return ring.ModuleProcessConfig{}, false
 	}
 	if err := checkLegacyEventBase(invoke); err != nil {
 		log.Printf("mcp module %s: %v", name, err)
-		return bus.ModuleProcessConfig{}, false
+		return ring.ModuleProcessConfig{}, false
 	}
 
 	config.ModuleName = name
 	config.PrincipalRef = ref
-	config.Stages = []bus.ModuleStage{
+	config.Stages = []ring.ModuleStage{
 		{EventKind: invoke, StageID: mcpmodule.StageInvoke},
 		{EventKind: declare, StageID: mcpmodule.StageDeclareCommands},
 	}
@@ -689,7 +692,7 @@ func run(ctx context.Context, args []string) error {
 		}
 	}
 	config.SocketPath = args[1]
-	return bus.RunModuleProcess(ctx, config)
+	return ring.RunModuleProcess(ctx, config)
 }
 
 func main() {
@@ -703,12 +706,6 @@ func main() {
 		os.Exit(code)
 	}
 	if handled, code := providers.RunBootstrapLookup(os.Args); handled {
-		os.Exit(code)
-	}
-	if handled, code := providers.RunProbeWorker(os.Args); handled {
-		os.Exit(code)
-	}
-	if handled, code := delegates.RunWatchdog(os.Args); handled {
 		os.Exit(code)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -736,6 +733,19 @@ func main() {
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "aimee composition: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	// The ring's telemetry exporter (D16): a supervised process of its own,
+	// granted the host's telemetry ring, serving no stage.
+	if filepath.Base(os.Args[0]) == "aimee-module-ring-telemetry" {
+		if len(os.Args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: aimee-module-ring-telemetry <module-bus-socket>")
+			os.Exit(2)
+		}
+		if err := observability.RunRingTelemetry(ctx, os.Args[1], ""); err != nil {
+			fmt.Fprintf(os.Stderr, "aimee-module-ring-telemetry: %v\n", err)
 			os.Exit(1)
 		}
 		return

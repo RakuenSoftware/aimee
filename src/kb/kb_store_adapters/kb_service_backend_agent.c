@@ -1141,28 +1141,6 @@ cJSON *kb_store_kb_service_directive_expire_session_json(void)
    return resp;
 }
 
-cJSON *kb_store_kb_service_dashboard_memory_stats_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   char *body = api_memory_stats();
-   if (!body)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "memory stats unavailable");
-      return resp;
-   }
-   cJSON *payload = cJSON_Parse(body);
-   free(body);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   if (payload)
-      cJSON_AddItemToObject(resp, "payload", payload);
-   else
-      cJSON_AddItemToObject(resp, "payload", cJSON_CreateObject());
-   return resp;
-}
-
 cJSON *kb_store_kb_service_dashboard_logs_json(void)
 {
    cJSON *resp = cJSON_CreateObject();

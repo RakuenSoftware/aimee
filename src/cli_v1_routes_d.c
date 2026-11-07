@@ -4,6 +4,7 @@
  * =================================================================== */
 
 #include "cli_v1_routes_internal.h"
+#include "mirror_sync_wire.h"
 #include "json_wire.h"
 #include <stdint.h> /* uint64_t: the manifest cache key must be 64-bit on LLP64 too */
 #include "platform_path.h"
@@ -14,6 +15,7 @@
 #include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
 #include "code_collect.h" /* code_collect_files + code_collect_discover_repos (thin-client push) */
 #include "kb_index_timeouts.h"
+#include <pthread.h>
 #include <stdatomic.h>
 #include <time.h>
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -288,48 +290,14 @@ static int write_delegate_output_file(const char *path, const char *text)
  * URL becomes "tls:host:port" (native client TLS to the server's #304 TLS
  * listener); http:// becomes "tcp:host:port"; an explicit tcp:/tls:/unix:
  * endpoint passes through unchanged. Caller frees. */
-static char *cli_v1_normalize_endpoint(const char *ep)
-{
-   if (!ep || !ep[0])
-      return NULL;
-   const char *scheme = NULL;
-   const char *rest = NULL;
-   if (strncmp(ep, "https://", 8) == 0)
-   {
-      scheme = "tls:";
-      rest = ep + 8;
-   }
-   else if (strncmp(ep, "http://", 7) == 0)
-   {
-      scheme = "tcp:";
-      rest = ep + 7;
-   }
-   if (!scheme)
-      return strdup(ep); /* tcp:/tls:/unix:/host:port already */
-   /* Take host[:port], dropping any trailing path; default the port by scheme. */
-   char hostport[300];
-   size_t n = strcspn(rest, "/");
-   if (n >= sizeof(hostport))
-      n = sizeof(hostport) - 1;
-   memcpy(hostport, rest, n);
-   hostport[n] = '\0';
-   /* Strip any userinfo ("user:pass@host") so it can't corrupt the host:port the
-    * TLS/connect layer parses; credentials belong in the bearer, not the URL. */
-   char *at = strrchr(hostport, '@');
-   char *hp = at ? at + 1 : hostport;
-   char out[320];
-   if (strchr(hp, ':'))
-      snprintf(out, sizeof(out), "%s%s", scheme, hp);
-   else
-      snprintf(out, sizeof(out), "%s%s:%s", scheme, hp, strcmp(scheme, "tls:") == 0 ? "443" : "80");
-   return strdup(out);
-}
 
 char *cli_v1_client_endpoint(void)
 {
+   if (cli_native_bridge_enabled())
+      return cli_native_bridge_endpoint();
    const char *env = getenv("AIMEE_API_ENDPOINT");
    if (env && env[0])
-      return cli_v1_normalize_endpoint(env);
+      return cli_http_endpoint_normalize(env);
    /* Fall back to a --server / AIMEE_SERVER_URL / remote.conf target (aimee_client)
     * by synthesizing the transport endpoint cli_http_request expects: "tls:" for
     * an https:// target (native client TLS, #304), else "tcp:". This makes the
@@ -343,22 +311,6 @@ char *cli_v1_client_endpoint(void)
       snprintf(ep, sizeof(ep), "%s%s", is_https ? "tls:" : "tcp:", hostport);
       return strdup(ep);
    }
-   return NULL;
-}
-
-/* cli_v1_client_bearer: bearer token sent with the remote HTTP transport.
- * AIMEE_API_BEARER overrides; otherwise use the explicit remote credential.
- * Credentials are never read from public config storage. Caller frees. */
-char *cli_v1_client_bearer(void)
-{
-   const char *env = getenv("AIMEE_API_BEARER");
-   if (env && env[0])
-      return strdup(env);
-   /* Token for a synthesized aimee_client endpoint: --server-token /
-    * AIMEE_SERVER_TOKEN / remote.conf line 2. */
-   char tok[300];
-   if (aimee_client_remote_token(tok, sizeof(tok)) && tok[0])
-      return strdup(tok);
    return NULL;
 }
 
@@ -569,15 +521,10 @@ static cJSON *manifest_cache_load(const char *endpoint)
    return doc;
 }
 
-/* The manifest document, or NULL when it could not be fetched. Fetched at most
- * once: every routed command calls through here, so an unconditional diagnostic
- * would print several times for a single failure. */
-static const cJSON *cli_v1_manifest(void)
+/* Fetch and validate the manifest document, or NULL when it could not be
+ * fetched. Touches no cached state; cli_v1_manifest() owns that. */
+static cJSON *cli_v1_manifest_fetch(void)
 {
-   if (g_cli_manifest_fetched)
-      return g_cli_manifest;
-   g_cli_manifest_fetched = 1;
-
    char *remote = cli_v1_client_endpoint();
    if (!remote)
       return NULL; /* cli_v1_warn_no_endpoint() already covers "nothing configured" */
@@ -595,14 +542,13 @@ static const cJSON *cli_v1_manifest(void)
        * that no longer exists fails at the server with its own message, which is
        * strictly better than refusing to explain a command because the machine
        * that documents it is unreachable. */
-      cJSON *cached = manifest_cache_load(remote);
+      cJSON *cached = cli_native_bridge_enabled() ? NULL : manifest_cache_load(remote);
       if (cached)
       {
          free(remote);
          fprintf(stderr, "aimee: using the last known command list; the server did not "
                          "answer, so it may be out of date.\n");
-         g_cli_manifest = cached;
-         return g_cli_manifest;
+         return cached;
       }
       free(remote);
       /* Say which failure class this is. status == 0 means the transport never
@@ -637,10 +583,31 @@ static const cJSON *cli_v1_manifest(void)
       free(remote);
       return NULL;
    }
-   manifest_cache_store(remote, doc);
+   if (!cli_native_bridge_enabled())
+      manifest_cache_store(remote, doc);
    free(remote);
-   g_cli_manifest = doc;
-   return g_cli_manifest;
+   return doc;
+}
+
+/* The manifest document, or NULL when it could not be fetched. Fetched at most
+ * once: every routed command calls through here, so an unconditional diagnostic
+ * would print several times for a single failure. Locked, and marked fetched
+ * only once the document is in place: the MCP bridge's watcher and request loop
+ * both route through here, and a mark set before the GET returned gave the second
+ * thread no manifest, so no route for mcp.call and a bogus "server unavailable". */
+static pthread_mutex_t g_cli_manifest_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static const cJSON *cli_v1_manifest(void)
+{
+   pthread_mutex_lock(&g_cli_manifest_lock);
+   if (!g_cli_manifest_fetched)
+   {
+      g_cli_manifest = cli_v1_manifest_fetch();
+      g_cli_manifest_fetched = 1;
+   }
+   const cJSON *doc = g_cli_manifest;
+   pthread_mutex_unlock(&g_cli_manifest_lock);
+   return doc;
 }
 
 /* The command catalogue the server sent, or NULL when there is none (no server
@@ -738,9 +705,20 @@ const cJSON *cli_v1_manifest_argspec(const char *method)
  * called from tests only; every real invocation still fetches. Takes ownership. */
 void cli_v1_manifest_set_for_test(cJSON *doc)
 {
+   pthread_mutex_lock(&g_cli_manifest_lock);
    cJSON_Delete(g_cli_manifest);
    g_cli_manifest = doc;
    g_cli_manifest_fetched = 1;
+   pthread_mutex_unlock(&g_cli_manifest_lock);
+}
+
+void cli_v1_manifest_reset_for_test(void)
+{
+   pthread_mutex_lock(&g_cli_manifest_lock);
+   cJSON_Delete(g_cli_manifest);
+   g_cli_manifest = NULL;
+   g_cli_manifest_fetched = 0;
+   pthread_mutex_unlock(&g_cli_manifest_lock);
 }
 
 /* Look `method` up in the manifest. want_async selects between the queued
@@ -1152,7 +1130,8 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
          cJSON *st = cJSON_GetObjectItemCaseSensitive(snap, "status");
          if (cJSON_IsString(st) &&
              (strcmp(st->valuestring, "completed") == 0 || strcmp(st->valuestring, "failed") == 0 ||
-              strcmp(st->valuestring, "cancelled") == 0))
+              strcmp(st->valuestring, "cancelled") == 0 ||
+              strcmp(st->valuestring, "incomplete") == 0))
          {
             int ok = strcmp(st->valuestring, "completed") == 0;
             cJSON *result = cJSON_DetachItemFromObjectCaseSensitive(snap, "result");
@@ -1161,12 +1140,9 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
                cJSON_Delete(snap);
                return result;
             }
-            /* A failed/cancelled run, or a completed one with no result, used to
-             * become an empty object. Printers then rendered that as a zero-valued
-             * SUCCESS — `aimee kb build` reported "files indexed: 0, chunks added: 0"
-             * with exit status 0 when the run had actually failed, hiding the failure
-             * from humans and scripts alike. Surface it as an error envelope instead,
-             * carrying whatever the run recorded. */
+            /* Failed, cancelled and incomplete runs, and completed operations
+             * with no result, must surface the recorded failure instead of an
+             * empty object that printers would mistake for success. */
             /* A failed run usually carries its reason inside `result` (e.g.
              * {"result":{"error":"rpc produced no response"}}), so look there first. */
             cJSON *env = cli_v1_failed_run_response(result, snap);
@@ -1192,6 +1168,13 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
  * still works there; client-push indexing does not). */
 #if defined(AIMEE_POSIX)
 static int g_cli_ws_json_output;
+
+int cli_ws_output_quiet_bind(int quiet)
+{
+   int previous = g_cli_ws_json_output;
+   g_cli_ws_json_output = quiet != 0;
+   return previous;
+}
 
 /* Keep the thin-client push path aligned with the local/canonical scanners.
  * Hidden-root projects are deliberately excluded from index reads and startup
@@ -1396,7 +1379,14 @@ static int ws_ingest_collect_cb(const char *rel_path, const char *content, void 
 static int cli_ws_ingest_root(const char *remote, const char *bearer, const char *abs_root)
 {
    char project_name[128];
-   cli_ws_project_identity(remote, bearer, abs_root, project_name, sizeof(project_name));
+   if (cli_ws_project_identity(remote, bearer, abs_root, project_name, sizeof(project_name)))
+   {
+      fprintf(stderr, "aimee: cannot resolve canonical project identity for %s\n", abs_root);
+      return 1;
+   }
+
+   if (!g_cli_ws_json_output)
+      printf("indexing project: %s\n", project_name);
 
    ws_ingest_ctx_t s = {0};
    s.remote = remote;
@@ -1443,8 +1433,8 @@ static int cli_ws_ingest_root(const char *remote, const char *bearer, const char
 /* Ingest a workspace tree as ONE PROJECT PER GIT REPO: code_collect_discover_repos
  * finds each real checkout under abs_root (skipping linked worktrees and symlink
  * cycles) and we ingest each as its own project (cli_ws_ingest_root names a
- * project by its basename). Falls back to ingesting abs_root itself when it holds
- * no nested git repo — e.g. adding a single repo directly, or a plain directory. */
+ * project by its canonical repository identity). Falls back to ingesting abs_root itself when it
+ * holds no nested git repo — e.g. adding a single repo directly, or a plain directory. */
 typedef struct
 {
    const char *remote;
@@ -1456,13 +1446,6 @@ typedef struct
 static void ws_tree_ingest_cb(const char *repo_abs, void *ctx)
 {
    ws_tree_ctx_t *t = (ws_tree_ctx_t *)ctx;
-   const char *base = strrchr(repo_abs, '/');
-   base = (base && base[1]) ? base + 1 : repo_abs;
-   if (!g_cli_ws_json_output)
-   {
-      printf("indexing project: %s\n", base);
-      fflush(stdout);
-   }
    if (cli_ws_ingest_root(t->remote, t->bearer, repo_abs) != 0)
       t->rc = 1;
    t->count++;
@@ -1481,7 +1464,7 @@ static int cli_ws_ingest_tree(const char *remote, const char *bearer, const char
 
 int cli_workspace_add_remote(const char *path, int prepare, int json_output)
 {
-   g_cli_ws_json_output = json_output;
+   (void)cli_ws_output_quiet_bind(json_output);
    if (!path || !path[0])
    {
       fprintf(stderr, "usage: aimee workspace %s <path>\n", prepare ? "prepare" : "add");
@@ -1690,17 +1673,12 @@ static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
    const char *diff = cJSON_IsString(jdiff) ? jdiff->valuestring : "";
    size_t total = strlen(diff);
 
-   /* Sized against the PER-METHOD limit, not the transport one. Requests are
-    * capped twice: SHTTP_MAX_BODY (4MB) at the listener, and a per-method limit
-    * that defaults to LIMIT_DEFAULT — 256KB — for any method without its own
-    * entry, which mirror-sync does not have. The method limit is the binding one
-    * and rejects with PAYLOAD_TOO_LARGE.
-    *
-    * 128KB of patch leaves room for JSON escaping (worst case ~2x on a binary
-    * patch's escapes) and the envelope inside that 256KB. Chunking means no limit
-    * anywhere has to move: the size of one request stops being a function of the
-    * size of the tree. */
-   const size_t chunk_max = 128u * 1024u;
+   /* Sized against the PER-METHOD limit, not the transport one: requests are
+    * capped at SHTTP_MAX_BODY (4MB) by the listener and at MIRROR_SYNC_MAX_BODY
+    * for this method, and the method limit binds. mirror_sync_next_slice cuts
+    * each slice by its JSON-escaped size, so a newline- or quote-heavy patch
+    * cannot push a chunk over it the way a raw-byte count could. Chunking means
+    * the size of one request stops being a function of the size of the tree. */
 
    char *remote = cli_v1_client_endpoint();
    char *bearer = remote ? cli_v1_client_bearer() : NULL;
@@ -1737,7 +1715,7 @@ static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
 
    size_t sent = 0;
    int seq = 0, rc = 0;
-   int data_chunks = (int)((total + chunk_max - 1) / chunk_max);
+   int data_chunks = mirror_sync_slice_count(diff, total);
    /* One empty begin chunk, then the data. A patch that fits in a single request
     * still uses the begin chunk: one extra tiny round trip buys the same
     * old-server safety on every sync rather than only on large ones. */
@@ -1746,7 +1724,7 @@ static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
    for (;;)
    {
       int begin = (seq == 0);
-      size_t n = begin ? 0 : (total - sent > chunk_max ? chunk_max : total - sent);
+      size_t n = begin ? 0 : mirror_sync_next_slice(diff + sent, total - sent);
       int final = !begin && (sent + n >= total);
       if (begin && total == 0)
          final = 1; /* nothing to ship: the begin chunk is the whole sync */
@@ -2041,9 +2019,9 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    {
       exit_rc = 1;
    }
-   else if (strcmp(route->method, "model.probe") == 0 && cli_agent_probe_response_is_failure(resp))
+   else if (strcmp(route->method, "model.probe") == 0)
    {
-      exit_rc = 1;
+      exit_rc = cli_agent_probe_response_exit_code(resp, fwd_argc, fwd_argv);
    }
    else if ((strcmp(route->method, "index.investigate") == 0 ||
              strcmp(route->method, "index.hybrid") == 0) &&
@@ -2256,6 +2234,10 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
       return 2;
    }
 
+   if (cli_native_bridge_enabled())
+      return cli_native_bridge_forward(req, effective_json_output, fwd_argc, fwd_argv,
+                                       cli_v1_finish_response);
+
    int timeout = route->timeout_ms > 0 ? route->timeout_ms : CLIENT_DEFAULT_TIMEOUT_MS;
    if (strcmp(route->method, "workspace.mirror-sync") == 0)
    {
@@ -2307,8 +2289,7 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
     * always remote (resolved from --server / AIMEE_SERVER_URL inside cli_v1_send). */
    char *remote = cli_v1_client_endpoint();
    char *bearer = remote ? cli_v1_client_bearer() : NULL;
-   /* Run after either native or server-advertised argspec marshalling, so both
-    * paths carry the same inferred scope. Keep cwd intact for file requests. */
+   /* Infer scope after marshalling; retain cwd for file requests. */
    char *worktree_root = cli_index_worktree_root(disp_method, req);
    if (worktree_root)
    {
@@ -2319,7 +2300,43 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
           list_path ? cli_v1_send(remote, bearer, list_verb, list_path, "{}", 5000, &list_status)
                     : NULL;
       if (list_status >= 200 && list_status < 300)
-         cli_index_apply_worktree_project(req, worktree_root, projects);
+      {
+         int registered = cli_index_apply_worktree_project(req, worktree_root, projects);
+         (void)registered; /* Bootstrap is POSIX-only; scope forwarding is portable. */
+#if defined(AIMEE_POSIX)
+         /* Bootstrap direct CLI discovery through the existing bounded scan,
+          * then resolve its registered name. Never treat a list outage as absence. */
+         if (!registered && remote &&
+             cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(projects, "projects")) &&
+             !cJSON_GetObjectItemCaseSensitive(req, "project"))
+         {
+            cJSON_Delete(projects);
+            projects = NULL;
+            int previous_json = cli_ws_output_quiet_bind(effective_json_output);
+            int ingest_rc = cli_ws_ingest_tree(remote, bearer, worktree_root);
+            (void)cli_ws_output_quiet_bind(previous_json);
+            if (ingest_rc == 0)
+            {
+               projects =
+                   cli_v1_send(remote, bearer, list_verb, list_path, "{}", 5000, &list_status);
+               if (list_status >= 200 && list_status < 300)
+                  cli_index_apply_worktree_project(req, worktree_root, projects);
+            }
+            if (!cJSON_GetObjectItemCaseSensitive(req, "project"))
+            {
+               fprintf(stderr,
+                       "aimee: could not register the active repository for index discovery: %s\n",
+                       worktree_root);
+               cJSON_Delete(projects);
+               free(worktree_root);
+               cJSON_Delete(req);
+               free(bearer);
+               free(remote);
+               return 1;
+            }
+         }
+#endif
+      }
       cJSON_Delete(projects);
       free(worktree_root);
    }
@@ -2328,7 +2345,17 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
    if (git_tool && strncmp(git_tool, "git_", 4) == 0 && git_runner_start && git_runner_stop &&
        cli_v1_remote_endpoint_is_network())
    {
-      const cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+      cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+#if defined(AIMEE_POSIX)
+      if (strcmp(git_tool, "git_clone") == 0 && cJSON_IsObject(args) &&
+          cli_workspace_git_clone_prepare(args) != 0)
+      {
+         cJSON_Delete(req);
+         free(bearer);
+         free(remote);
+         return 1;
+      }
+#endif
       const char *target = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
           args, strcmp(git_tool, "git_clone") == 0 ? "cwd" : "path"));
       if (!target || !target[0])

@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type healthQueryContext struct {
@@ -27,7 +27,7 @@ type healthKeyCacheEntry struct {
 // The key is persistent in the existing private store. A bounded process cache
 // avoids a database transaction on every provider turn. Raw queries do not enter
 // the journal, receipt metadata, metrics or public health response.
-func captureHealthQuery(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs, query, source string) *healthQueryContext {
+func captureHealthQuery(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs, query, source string) *healthQueryContext {
 	if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") != "1" || options.placement != PlacementServer || invocation.PrincipalRef != 0 || query == "" || len(query) > 4096 {
 		return nil
 	}
@@ -87,7 +87,7 @@ func captureHealthQuery(options handlerOptions, invocation bus.ModuleInvocation,
 	return &healthQueryContext{Namespace: cached.Namespace, Project: project, Workspace: workspace, Fingerprint: healthQueryFingerprint(cached.Key, cached.Namespace, query), Source: source}
 }
 
-func prepareHealthQueryCapture(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs, operation string) {
+func prepareHealthQueryCapture(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs, operation string) {
 	// The only producer of this internal field is the authenticated Go owner.
 	delete(args, "_health_context")
 	prepareHealthFamilyCapture(options, invocation, args, operation)

@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/JBailes/aimee/server-go/thinclient"
 	"io"
-	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -19,13 +19,10 @@ func (s *server) aimeeHTTPSockPath() string {
 	return filepath.Join(filepath.Dir(s.cfg.socketPath), "aimee-http.sock")
 }
 
-func (s *server) aimeeHTTPSockPathFor(path string) string {
-	if s.cfg.wfeEngine == "go" &&
-		(path == "/v1/workflow" || strings.HasPrefix(path, "/v1/workflow/") || path == "/v1/trigger/fire" || path == "/v1/dev/submit") {
-		if s.cfg.wfeSocket != "" {
-			return s.cfg.wfeSocket
-		}
-	}
+// Workflow storage and execution remain Go-owned, reached through the C
+// facade's authenticated bus adapter. A private engine socket is never an
+// alternate public ingress: it would bypass capability checks and source minting.
+func (s *server) aimeeHTTPSockPathFor(_ string) string {
 	return s.aimeeHTTPSockPath()
 }
 
@@ -62,12 +59,8 @@ func (s *server) v1Request(ctx context.Context, method, path string, body []byte
 		}
 	}
 	client := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, "unix", sock)
-			},
-		},
+		Timeout:   timeout,
+		Transport: &thinclient.Transport{Endpoint: "unix:" + sock},
 	}
 	var rdr io.Reader
 	if body != nil {
@@ -182,8 +175,12 @@ func (s *server) handleChatPersona(w http.ResponseWriter, r *http.Request) {
 			path = "/v1/sessions/" + sid + "/persona"
 		}
 		st, data, err := s.v1Request(ctx, http.MethodGet, path, nil)
-		if err != nil || st != http.StatusOK {
-			fmt.Fprintf(w, `{"name":""}`)
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "persona selection unavailable")
+			return
+		}
+		if st != http.StatusOK {
+			writeJSONError(w, st, "could not load persona selection")
 			return
 		}
 		w.Write(data)
@@ -241,9 +238,13 @@ func (s *server) handleChatPrimary(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, `{"agent":""}`)
 			return
 		}
-		st, data, err := s.v1Request(ctx, http.MethodGet, "/v1/sessions/"+sid+"/primary", nil)
-		if err != nil || st != http.StatusOK {
-			fmt.Fprintf(w, `{"agent":""}`)
+		st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodGet, "/v1/sessions/"+sid+"/primary", nil)
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "primary agent selection unavailable")
+			return
+		}
+		if st != http.StatusOK {
+			writeJSONError(w, st, "could not load primary agent selection")
 			return
 		}
 		w.Write(data)
@@ -257,7 +258,7 @@ func (s *server) handleChatPrimary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body, _ := json.Marshal(map[string]string{"agent": req.Agent})
-		st, data, err := s.v1Request(ctx, http.MethodPost, "/v1/sessions/"+req.Sid+"/primary", body)
+		st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/sessions/"+req.Sid+"/primary", body)
 		if err != nil {
 			writeJSONError(w, http.StatusServiceUnavailable, "aimee-server unavailable")
 			return

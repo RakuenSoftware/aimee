@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const servedViewPolicy = "served-memory-v1"
@@ -79,11 +79,11 @@ func servedDigest(value any) string {
 	return fmt.Sprintf("sha256:%x", sha256.Sum256(raw))
 }
 
-func handleServedViewCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleServedViewCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if invocation.PrincipalRef != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	var ok bool
@@ -163,12 +163,12 @@ func handleServedViewCommand(options handlerOptions, invocation bus.ModuleInvoca
 	}
 	raw, _ := json.Marshal(request)
 	body, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(body, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

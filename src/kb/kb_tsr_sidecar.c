@@ -1,6 +1,6 @@
 /* kb_tsr_sidecar.c: TSR sidecar client. See kb_tsr_sidecar.h.
  *
- * Transport is the in-process agent_http_post (the same one the embedder uses; linked by
+ * Transport is the in-process byte-counted HTTP client (linked by
  * aimee-kb). No fork, no document-content retention. A missing/unreachable sidecar or a
  * malformed response is reported as -1 (unavailable) so the caller degrades to text-only
  * rather than failing the ingest. */
@@ -8,6 +8,9 @@
 
 #include "agent_exec.h" /* agent_http_post */
 #include "cJSON.h"
+#include <aimee/ir/aimee_ir.h>
+#include <limits.h>
+#include <math.h>
 #include "log.h"
 
 #include <stdio.h>
@@ -26,17 +29,31 @@ void kb_tsr_free_cells(kb_tsr_cell_t *cells, int n)
    free(cells);
 }
 
-static void copy_field(char *dst, size_t cap, cJSON *obj, const char *key)
+static int copy_field(char *dst, size_t capacity, const cJSON *row, const char *key)
 {
-   cJSON *it = cJSON_GetObjectItemCaseSensitive(obj, key);
-   if (cJSON_IsString(it) && it->valuestring)
-      snprintf(dst, cap, "%s", it->valuestring);
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(row, key);
+   if (!value)
+      return 0;
+   if (!cJSON_IsString(value) || strlen(value->valuestring) >= capacity)
+      return -1;
+   memcpy(dst, value->valuestring, strlen(value->valuestring) + 1);
+   return 0;
 }
 
-static int json_int(cJSON *obj, const char *key, int dflt)
+static int integer(const cJSON *row, const char *key, int fallback, int minimum, int maximum,
+                   int *out)
 {
-   cJSON *it = cJSON_GetObjectItemCaseSensitive(obj, key);
-   return cJSON_IsNumber(it) ? (int)it->valuedouble : dflt;
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(row, key);
+   if (!value)
+   {
+      *out = fallback;
+      return 0;
+   }
+   if (!cJSON_IsNumber(value) || !isfinite(value->valuedouble) || value->valuedouble < minimum ||
+       value->valuedouble > maximum || floor(value->valuedouble) != value->valuedouble)
+      return -1;
+   *out = (int)value->valuedouble;
+   return 0;
 }
 
 int kb_tsr_recognize(const char *endpoint, int page_no, const char *page_json,
@@ -46,23 +63,35 @@ int kb_tsr_recognize(const char *endpoint, int page_no, const char *page_json,
       *cells_out = NULL;
    if (n_out)
       *n_out = 0;
-   if (!endpoint || !endpoint[0] || !page_json)
+   if (!cells_out || !n_out || !endpoint || !endpoint[0] || !page_json)
       return -1;
 
-   /* Request: {"page_no":N,"regions":<page_json array>} */
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
+   /* The page-region array is the documented domain request, not vendor JSON.
+    * Invalid input must not be converted to a successful empty request. */
+   cJSON *regions = aimee_ir_json_parse_frame(page_json, strlen(page_json));
+   if (!cJSON_IsArray(regions))
+   {
+      cJSON_Delete(regions);
       return -1;
-   cJSON_AddNumberToObject(req, "page_no", page_no);
-   cJSON *regions = cJSON_Parse(page_json);
-   cJSON_AddItemToObject(req, "regions", regions ? regions : cJSON_CreateArray());
+   }
+   cJSON *req = cJSON_CreateObject();
+   if (!req || !cJSON_AddNumberToObject(req, "page_no", page_no) ||
+       !cJSON_AddItemToObject(req, "regions", regions))
+   {
+      cJSON_Delete(regions);
+      cJSON_Delete(req);
+      return -1;
+   }
    char *body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    if (!body)
       return -1;
 
    char *resp = NULL;
-   int status = agent_http_post(endpoint, NULL, body, &resp, KB_TSR_TIMEOUT_MS, NULL);
+   size_t response_length = 0;
+   int status =
+       agent_http_post_content_type_bytes(endpoint, NULL, "application/json", body, strlen(body),
+                                          &resp, &response_length, KB_TSR_TIMEOUT_MS, NULL);
    free(body);
    if (status < 200 || status >= 300 || !resp)
    {
@@ -70,62 +99,70 @@ int kb_tsr_recognize(const char *endpoint, int page_no, const char *page_json,
       LOG_WARN("kb_tsr", "TSR sidecar call failed (status=%d)", status);
       return -1;
    }
-   if (strlen(resp) > KB_TSR_MAX_RESP_BYTES)
+   if (response_length > KB_TSR_MAX_RESP_BYTES)
    {
-      LOG_WARN("kb_tsr", "TSR sidecar response too large (%zu bytes); rejecting", strlen(resp));
+      LOG_WARN("kb_tsr", "TSR sidecar response too large (%zu bytes); rejecting", response_length);
       free(resp);
       return -1;
    }
 
-   cJSON *root = cJSON_Parse(resp);
+   cJSON *root = aimee_ir_json_parse_frame(resp, response_length);
    free(resp);
-   if (!root)
+   if (!cJSON_IsObject(root))
    {
       LOG_WARN("kb_tsr", "TSR sidecar returned unparseable JSON");
+      cJSON_Delete(root);
       return -1;
    }
 
-   cJSON *is_table = cJSON_GetObjectItemCaseSensitive(root, "is_table");
-   cJSON *cells = cJSON_GetObjectItemCaseSensitive(root, "cells");
-   if (cJSON_IsBool(is_table) && !cJSON_IsTrue(is_table))
+   const cJSON *is_table = cJSON_GetObjectItemCaseSensitive(root, "is_table");
+   const cJSON *cells = cJSON_GetObjectItemCaseSensitive(root, "cells");
+   if ((is_table && !cJSON_IsBool(is_table)) || (cells && !cJSON_IsArray(cells)))
+      goto invalid;
+   if (cJSON_IsFalse(is_table))
    {
+      if (cells && cJSON_GetArraySize(cells))
+         goto invalid;
       cJSON_Delete(root);
-      return 0; /* sidecar ran, found no table */
+      return 0;
    }
-   if (!cJSON_IsArray(cells) || cJSON_GetArraySize(cells) == 0)
+   if (!cells)
+      goto invalid;
+   int count = cJSON_GetArraySize(cells);
+   if (!count)
    {
       cJSON_Delete(root);
       return 0;
    }
-
-   int count = cJSON_GetArraySize(cells);
    if (count > KB_TSR_MAX_CELLS)
-      count = KB_TSR_MAX_CELLS;
+      goto invalid;
    kb_tsr_cell_t *arr = calloc((size_t)count, sizeof(*arr));
    if (!arr)
-   {
-      cJSON_Delete(root);
-      return -1;
-   }
-
+      goto invalid;
    int n = 0;
-   cJSON *c = NULL;
-   cJSON_ArrayForEach(c, cells)
+   const cJSON *cell;
+   cJSON_ArrayForEach(cell, cells)
    {
-      if (n >= count)
-         break;
-      arr[n].row = json_int(c, "row", 0);
-      arr[n].col = json_int(c, "col", 0);
-      arr[n].confidence = json_int(c, "confidence", 0);
-      arr[n].line_index = json_int(c, "line_index", -1);
-      copy_field(arr[n].text, sizeof(arr[n].text), c, "text");
-      copy_field(arr[n].subject, sizeof(arr[n].subject), c, "subject");
-      copy_field(arr[n].relation, sizeof(arr[n].relation), c, "relation");
-      copy_field(arr[n].object, sizeof(arr[n].object), c, "object");
-      n++;
+      kb_tsr_cell_t value = {0};
+      if (!cJSON_IsObject(cell) || integer(cell, "row", 0, 0, INT_MAX, &value.row) ||
+          integer(cell, "col", 0, 0, INT_MAX, &value.col) ||
+          integer(cell, "confidence", 0, 0, 100, &value.confidence) ||
+          integer(cell, "line_index", -1, -1, INT_MAX, &value.line_index) ||
+          copy_field(value.text, sizeof value.text, cell, "text") ||
+          copy_field(value.subject, sizeof value.subject, cell, "subject") ||
+          copy_field(value.relation, sizeof value.relation, cell, "relation") ||
+          copy_field(value.object, sizeof value.object, cell, "object"))
+      {
+         free(arr);
+         goto invalid;
+      }
+      arr[n++] = value;
    }
    cJSON_Delete(root);
    *cells_out = arr;
    *n_out = n;
-   return n > 0 ? 1 : 0;
+   return 1;
+invalid:
+   cJSON_Delete(root);
+   return -1;
 }

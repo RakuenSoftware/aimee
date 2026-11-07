@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -236,8 +236,8 @@ func TestModelMaintenancePlan(t *testing.T) {
 				t.Fatal(r)
 			}
 		}
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"maintenance-model-plan"}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"maintenance-model-plan"}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("peer reached host policy planner", placement, status)
 		}
 	}

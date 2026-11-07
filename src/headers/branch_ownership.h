@@ -42,10 +42,6 @@ int branch_own_get_session_branch(char *branch_out, size_t branch_len);
 int feature_branch_set(const char *branch);
 int feature_branch_for_session(char *branch_out, size_t branch_len);
 
-/* Check branch ownership for the current branch. Returns NULL if allowed,
- * or an error cJSON response if blocked by another session's ownership. */
-cJSON *branch_own_guard(const char *operation);
-
 /* Like branch_own_guard but takes a pre-fetched branch name to avoid a
  * redundant subprocess call when the caller already knows the branch. */
 cJSON *branch_own_guard_for(const char *branch, const char *operation);

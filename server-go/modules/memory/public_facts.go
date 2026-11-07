@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func handleFactCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleFactCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if verb != "retract" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	source, sourceOK := args.stringValue("source")
 	relation, relationOK := args.stringValue("relation")
@@ -33,18 +33,18 @@ func handleFactCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 	commandScope(args, &request)
 	raw, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	reply, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInternal || status == bus.ModuleStatusCapabilityAbsent {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInternal || status == ring.ModuleStatusCapabilityAbsent {
 			return commandResult(commandError("unavailable", "fact retraction unavailable"))
 		}
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(reply, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

@@ -6,8 +6,14 @@ tmp=$(mktemp -d)
 socket_pid=""
 supervisor_pid=""
 cleanup() {
-    [ -z "$supervisor_pid" ] || kill "$supervisor_pid" 2>/dev/null || true
-    [ -z "$socket_pid" ] || kill "$socket_pid" 2>/dev/null || true
+    if [ -n "$supervisor_pid" ]; then
+        kill "$supervisor_pid" 2>/dev/null || true
+        wait "$supervisor_pid" 2>/dev/null || true
+    fi
+    if [ -n "$socket_pid" ]; then
+        kill "$socket_pid" 2>/dev/null || true
+        wait "$socket_pid" 2>/dev/null || true
+    fi
     rm -rf "$tmp"
 }
 trap 'cleanup' EXIT HUP INT TERM
@@ -51,7 +57,7 @@ supervisor_pid=$!
 ticks=0
 while :; do
     starts=0
-    [ ! -r "$count" ] || read -r starts < "$count"
+    [ ! -r "$count" ] || read -r starts < "$count" || starts=0
     [ "$starts" -ge 2 ] && break
     ticks=$((ticks + 1))
     [ "$ticks" -lt 50 ] || { echo "module-supervisor: module was not restarted" >&2; exit 1; }

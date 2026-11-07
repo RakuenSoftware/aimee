@@ -1,5 +1,6 @@
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 /* embedder_probe.c -- §2b kb-side embedder /health dim probe. Registered with the
  * kb_store layer so kb_store_init can derive a fresh DB's embedding dim from the running
  * embedder without kb_store learning the embed transport (kb_store stays config-free). */
@@ -36,7 +37,7 @@ static int probe_once(void)
    cJSON_AddNumberToObject(args, "max_dim", EMBED_MAX_DIM);
    (void)aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply);
    cJSON_Delete(args);
-   int dim = jo_int(reply, "dim", 0);
+   int dim = embed_reply_dimension(reply, EMBED_MAX_DIM);
    cJSON_Delete(reply);
    return dim > 0 ? dim : -1;
 }

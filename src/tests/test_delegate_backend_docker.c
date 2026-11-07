@@ -634,7 +634,9 @@ static void test_acquire_creates_and_starts_container(void)
 
    delegate_backend_config_t cfg = {0};
    init_fixture_config(&cfg);
-   cfg.image = "ubuntu:22.04";
+   const char *default_image = delegate_backend_docker_default_image();
+   assert(default_image && default_image[0]);
+   cfg.image = NULL;
    void *state = NULL;
    assert(b->acquire(b, "task-acq-1", &cfg, &state) == 0);
    assert(state != NULL);
@@ -644,7 +646,7 @@ static void test_acquire_creates_and_starts_container(void)
    assert(fake_helper_args_contain("--worktree"));
    assert(fake_helper_args_contain(g_fixture_workspace));
    assert(fake_helper_args_contain("--writes-allowed"));
-   assert(fake_helper_args_contain("ubuntu:22.04"));
+   assert(fake_helper_args_contain(default_image));
 
    /* Resume is also delegated to Go and therefore invokes the helper again. */
    b->release(b, state, 1);
@@ -829,47 +831,6 @@ static void test_acquire_rejects_invalid_args(void)
    /* NULL state_out rejected. */
    assert(b->acquire(b, "task", NULL, NULL) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
    printf("  PASS: test_acquire_rejects_invalid_args\n");
-}
-
-static void test_build_exec_command_basic(void)
-{
-   char *cmd = NULL;
-   assert(delegate_backend_docker_build_exec_command("aimee-delegate-task1", "echo hello", &cmd) ==
-          0);
-   assert(cmd != NULL);
-   assert(strstr(cmd, "docker exec -i aimee-delegate-task1 bash -c") != NULL);
-   assert(strstr(cmd, "base64 -d | bash") != NULL);
-   /* Raw user command b64-encoded — must NOT appear directly. */
-   assert(strstr(cmd, "echo hello") == NULL);
-   free(cmd);
-   printf("  PASS: test_build_exec_command_basic\n");
-}
-
-static void test_build_exec_command_handles_special_chars(void)
-{
-   const char *evil = "echo 'with quotes' && echo `backticks` && echo $HOME";
-   char *cmd = NULL;
-   assert(delegate_backend_docker_build_exec_command("c", evil, &cmd) == 0);
-   /* Raw evil string MUST NOT appear; the b64 envelope hides it. */
-   assert(strstr(cmd, "with quotes") == NULL);
-   assert(strstr(cmd, "backticks") == NULL);
-   free(cmd);
-   printf("  PASS: test_build_exec_command_handles_special_chars\n");
-}
-
-static void test_build_exec_command_rejects_invalid(void)
-{
-   char *cmd = (char *)0x1;
-   assert(delegate_backend_docker_build_exec_command(NULL, "x", &cmd) == -1);
-   assert(cmd == NULL);
-   cmd = (char *)0x1;
-   assert(delegate_backend_docker_build_exec_command("c", NULL, &cmd) == -1);
-   assert(cmd == NULL);
-   cmd = (char *)0x1;
-   assert(delegate_backend_docker_build_exec_command("", "x", &cmd) == -1);
-   assert(cmd == NULL);
-   assert(delegate_backend_docker_build_exec_command("c", "x", NULL) == -1);
-   printf("  PASS: test_build_exec_command_rejects_invalid\n");
 }
 
 /* cfg.workspace mounts the caller's complete source tree. No empty-workspace
@@ -1129,6 +1090,50 @@ static void test_docker_workspace_validation_refusals(void)
    cfg.workspace = dwt;
    assert(b->acquire(b, "task-disjoint-bad", &cfg, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
 
+   /* Actual Git bare mirror, matching the server's reconstructed source. Its
+    * admin directory is <mirror>/worktrees/<name>, with no .git component. */
+   char source[400], bare[400], owned[500], admin[500], gitmark[600], metadata[600];
+   snprintf(source, sizeof source, "%s/source", base);
+   snprintf(bare, sizeof bare, "%s/mirror", base);
+   snprintf(owned, sizeof owned, "%s/.aimee/worktrees/owned/main", bare);
+   snprintf(admin, sizeof admin, "%s/worktrees/main", bare);
+   snprintf(gitmark, sizeof gitmark, "%s/.git", owned);
+   char setup[4096];
+   snprintf(setup, sizeof setup,
+            "git init -q -b main '%s' && printf fixture > '%s/README.md' && "
+            "git -C '%s' add README.md && git -C '%s' -c user.name=fixture "
+            "-c user.email=fixture@example.invalid -c commit.gpgsign=false "
+            "-c core.hooksPath=/dev/null commit -qm fixture && "
+            "git clone -q --bare '%s' '%s' && git -C '%s' worktree add -q --detach '%s' HEAD",
+            source, source, source, source, source, bare, bare, owned);
+   int setup_result = system(setup);
+   assert(!setup_result);
+   cfg.workspace = owned;
+   int acquired = b->acquire(b, "task-bare-mirror", &cfg, &state);
+   assert(!acquired && state);
+   assert(fake_helper_args_contain(bare) && fake_helper_args_contain(owned));
+   assert(fake_helper_args_contain(admin));
+   b->release(b, state, 0);
+   state = NULL;
+   snprintf(metadata, sizeof metadata, "%s/gitdir", admin);
+   FILE *bare_backlink = fopen(metadata, "w");
+   assert(bare_backlink);
+   fprintf(bare_backlink, "%s/somewhere-else/.git\n", base);
+   fclose(bare_backlink);
+   acquired = b->acquire(b, "task-bare-bad-backlink", &cfg, &state);
+   assert(acquired == DELEGATE_ACQUIRE_REFUSED_ISOLATION && !state);
+   bare_backlink = fopen(metadata, "w");
+   assert(bare_backlink);
+   fprintf(bare_backlink, "%s\n", gitmark);
+   fclose(bare_backlink);
+   snprintf(metadata, sizeof metadata, "%s/commondir", admin);
+   FILE *common = fopen(metadata, "w");
+   assert(common);
+   fputs("../unrelated\n", common);
+   fclose(common);
+   acquired = b->acquire(b, "task-bare-bad-common", &cfg, &state);
+   assert(acquired == DELEGATE_ACQUIRE_REFUSED_ISOLATION && !state);
+
    snprintf(cmd, sizeof(cmd), "rm -rf %s", base);
    (void)system(cmd);
    teardown_fake_docker();
@@ -1181,6 +1186,12 @@ static void test_reap_aged_removes_only_old(void)
     * `--filter name=^aimee-delegate-` anchor is gone, so this must survive. */
    assert(strstr(buf, "cccccccccccc") == NULL);
 
+   /* The current delegate is not aged yet, so it comes due at a known time:
+    * the monitor sleeps until then rather than asking again on a timer. */
+   time_t due = 0, before = time(NULL);
+   assert(delegate_backend_docker_reap_aged_next(1800, &due) == 1);
+   assert(due >= before + 1800 - 5 && due <= time(NULL) + 1800);
+
    unsetenv("AIMEE_DOCKER_BIN");
    unlink(script);
    unlink(rmlog);
@@ -1195,9 +1206,6 @@ int main(void)
    test_register_puts_docker_in_registry();
    test_file_ops_reject_null_state();
    test_translate_named_volume_socket_path();
-   test_build_exec_command_basic();
-   test_build_exec_command_handles_special_chars();
-   test_build_exec_command_rejects_invalid();
    test_acquire_creates_and_starts_container();
    test_acquire_refuses_when_egress_helper_refuses();
    test_release_hibernate_keeps_container();

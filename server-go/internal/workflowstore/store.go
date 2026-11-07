@@ -42,6 +42,15 @@ import (
 // of them" gets a number rather than a silently truncated page.
 const listCeiling = 512
 
+// ListCeiling is the most work items WorkItems returns; a listing that long may
+// be truncated.
+const ListCeiling = listCeiling
+
+// WorkItemChangedKind is the store's announcement that a lifecycle write
+// committed (aimee-work-item-changed, ouroboros ring D14): 4096 + 30*256 + 24.
+// The workflow engine dispatches on it instead of sweeping on a timer.
+const WorkItemChangedKind uint32 = 11800
+
 // Store is the engine's handle on the aimee domain module.
 type Store struct {
 	client *wire.Client

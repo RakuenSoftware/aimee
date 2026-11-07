@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -28,7 +28,7 @@ func TestLearningPublicValidation(t *testing.T) {
 // Run with the packaged schema's audit triggers, RLS and restricted store role.
 // This replaces the native decision-log extraction regression and covers the
 // public command path used by the session maintenance callers.
-func exerciseMaintenanceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseMaintenanceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	client := clientForHandler(t, handler)
 	run := func(verb, args string) int {

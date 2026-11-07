@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func commandMutationRefusal(code *int, proposals ...*correctionProposal) map[string]any {
@@ -42,9 +42,9 @@ func commandMutationRefusal(code *int, proposals ...*correctionProposal) map[str
 	return nil
 }
 
-func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleMutationCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{IncludeAll: true}
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	if args.stringOr("view", "") == "mcp" && verb != "delete" && verb != "update" && verb != "touch" && verb != "reject" {
@@ -110,22 +110,22 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 		}
 		request.Confidence = &confidence
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInternal || status == bus.ModuleStatusCapabilityAbsent {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInternal || status == ring.ModuleStatusCapabilityAbsent {
 			return commandResult(commandError("unavailable", "memory module unavailable"))
 		}
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if response.Failure != nil {
 		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
@@ -150,7 +150,7 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 		missing = !response.Updated
 	case "update":
 		if response.Code == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		switch *response.Code {
 		case MutationImmutableExperience:
@@ -159,7 +159,7 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 			return commandResult(commandError("conflict", "instruction and policy memories require a replacement"))
 		case MutationOK:
 			if len(response.IDs) != 1 || response.IDs[0] <= 0 {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			result["id"], result["superseded"] = response.IDs[0], response.IDs[0] != request.ID
 		default:
@@ -167,7 +167,7 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 		}
 	case "upsert_workflow":
 		if len(response.Records) != 1 || response.Records[0].ID <= 0 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		result["id"] = response.Records[0].ID
 	}
@@ -193,7 +193,7 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	return commandResult(result)
 }
 
-func mutationMCPResult(verb string, id, newID int64, key string, receipts ...*MemoryMutationReceipt) ([]byte, bus.ModuleStatus) {
+func mutationMCPResult(verb string, id, newID int64, key string, receipts ...*MemoryMutationReceipt) ([]byte, ring.ModuleStatus) {
 	var text string
 	switch verb {
 	case "store":
@@ -212,7 +212,7 @@ func mutationMCPResult(verb string, id, newID int64, key string, receipts ...*Me
 	case "reject":
 		text = fmt.Sprintf("rejected memory id=%d", id)
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	result := map[string]any{"status": "ok", "text": text, "audit_id": fmt.Sprint(newID)}
 	if len(receipts) > 0 && receipts[0] != nil {

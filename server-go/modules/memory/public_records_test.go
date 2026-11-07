@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -155,10 +155,10 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	}
 	// Credential restrictions narrow the audience without turning an implicit
 	// audience query into an exact-scope query that loses public/global rows.
-	caller := bus.CommandContext{Authenticated: true, Principal: "credential:fixture", ScopeKind: "project", ScopeID: "private"}
+	caller := ring.CommandContext{Authenticated: true, Principal: "credential:fixture", ScopeKind: "project", ScopeID: "private"}
 	listed, status := invokeContextCommand(t, handler, 0, caller, "list", `{"limit":64}`)
 	rows, ok := listed["memories"].([]any)
-	if status != bus.ModuleStatusOK || !ok || len(rows) != 2 {
+	if status != ring.ModuleStatusOK || !ok || len(rows) != 2 {
 		t.Fatal("verified audience lost global or admitted foreign records", listed, status)
 	}
 	seen := map[string]bool{}

@@ -9,7 +9,7 @@
 static unsigned char response[4096], request[4096];
 static size_t used, request_length;
 static unsigned calls;
-static aimee_module_call_result_t transport = AIMEE_MODULE_CALL_OK;
+static ouro_module_call_result_t transport = OURO_MODULE_CALL_OK;
 static void put32(uint32_t n)
 {
    for (unsigned i = 0; i < 4; i++)
@@ -38,10 +38,10 @@ uint64_t aimee_module_call_deadline_ns(int ms)
    assert(ms == 60000);
    return 123;
 }
-aimee_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, uint64_t trace,
-                                               uint64_t deadline, const void *body, uint32_t size,
-                                               void *reply, uint32_t capacity, uint32_t *length,
-                                               aimee_module_cancelled_fn cancelled, void *context)
+ouro_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, uint64_t trace,
+                                              uint64_t deadline, const void *body, uint32_t size,
+                                              void *reply, uint32_t capacity, uint32_t *length,
+                                              ouro_module_cancelled_fn cancelled, void *context)
 {
    assert(event == 11267 && stage == 3 && trace == 0 && deadline > 0);
    assert(!cancelled && !context && size <= sizeof(request) && used <= capacity);

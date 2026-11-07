@@ -16,6 +16,7 @@ store wire; peer delivery, inbox, grant, and channel operations use the versione
 
 - `audit`: records governed peer actions and DB1 domain mutations without storing secret payloads.
 - `config`: supplies bounded server settings and the DB1 connection configuration used at startup.
+- `ir`: supplies the public data-only canonical session/history codec; DB1 retains storage and authorization ownership.
 - `execution-policy`: authorizes action-class peer sends before the module accepts their delivery.
 - `module-runtime`: authenticates the process, principal, stage grants, lifecycle, and readiness.
 
@@ -49,6 +50,28 @@ checksummed, owner-scoped, and applied through `postgres`; operators back up DB1
 The descriptor lists embedded SQL in `go_assets`, separate from JSON event `contracts`.
 Independent module exports copy these files and track them as CMake build dependencies;
 complete ownership validation rejects missing assets and paths outside the module Go directory.
+
+### Canonical session log (migration in progress)
+
+Migration 44 adds `session_ir_events`, owned by the existing session lifecycle, with cascade
+deletion on session removal/subject erasure. Session operations 28/29 append validated canonical
+events and return bounded replay pages. Append locks the session row inside the family transaction;
+retrying an identical producer event ID returns its original decimal sequence, while reusing
+that ID with different turn, actor, or payload fails. Sequence values remain decimal strings
+in transport envelopes. Authorization and authenticated actor derivation must occur in Server
+before these internal operations are exposed; there is no new browser-accessible route.
+
+Browser and log-owned delegate capture commit canonical events before delivery. Direct primary
+and delegate IR execution read their canonical history from this log; vendor SDK resume/cache
+activation remains unfinished. Native handles are derived metadata, never a second transcript.
+
+Session operation 34, `session_harness_compare_swap`, compares/replaces an owner-checked native
+metadata value under the existing session-row transaction lock. Empty expected text claims an
+absent key; stale comparisons return `missing` and cannot overwrite another execution's claim or
+completion. The host native-cache controller uses unique claim revisions before dispatch and
+retains an unresolved state if later proof/handle writes fail. Completed prefix commitments live
+in typed `native_checkpoint` session events. This operation introduces no browser route, schema
+migration or parallel history store.
 
 ## Security and privacy
 
@@ -85,3 +108,29 @@ versions are persistent compatibility contracts. The removed SQLite DB1 paths an
 Add a domain operation by registering it in the `families` catalog, assigning a stable stage or typed
 family opcode, adding migrations and failure tests, and updating generated clients. Removal requires a
 versioned consumer migration; principal refs, event kinds, migration owners, and recorded versions are never reused.
+
+### Server-local procedure experience
+
+With KB mode `none`, or unset mode and no configured connection, the existing
+`learning.application` route persists explicit feedback locally. Configured KB
+applications retain their existing owner; an explicitly configured broken KB does
+not silently fall back. The host still reads the principal-owned WORM provider
+receipt and matches exact attempt, procedure revision and exposure references.
+Clients supply neither exposure nor actor authority. Verified UDS users, browser
+users and mTLS clients can submit feedback; model execution intent and daemon
+bearers cannot establish human authority. No active-session/project requirement
+is added to feedback on an existing receipt.
+
+Learning remains the sole admission/projection owner. DB1 telemetry operations 59
+and 60 load a bounded immutable cohort and append against its snapshot digest.
+The host projects before append and re-projects on a concurrent update. Event IDs
+are principal-scoped and immutable; identical retries are idempotent. Migration 46
+owns `local_procedure_events` and payload-free `local_procedure_erasure_intents`.
+These are observation metadata, independent of KB knowledge/artifact storage.
+Full admitted JSON survives the typed interface without the legacy 4096-byte DTO.
+
+Subject erasure captures surviving event-identity digests, removes local rows and
+fences old snapshots through the existing erasure epoch. Startup replay also
+cleans rows resurrected by content-only restores. Runtime roles cannot erase the
+control metadata. No process-success observation becomes a verified task grade.
+This path does not implement autonomous synthesis or independent grading.

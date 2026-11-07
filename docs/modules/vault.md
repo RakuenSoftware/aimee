@@ -7,6 +7,37 @@ and injection, sealing, rotation, and custody-provider binding. It does not own 
 Git or forge protocols, optional OIDC governance, tool execution, workspace selection, or the policy
 that decides whether a caller may request a credential.
 
+Selected native API-key connections use `agent_api_connection_credentials` under the captured
+Vault principal. It resolves only the selected registration, commits the actual key and connection
+profile to opaque lineage, and refuses competing credential headers. A host binds that exact
+credential with `agent_set_request_api_credentials_for` for one request; target edits in that
+registration refuse. Other registrations resolve their own credentials without borrowing the key. These values stay off the module bus and child environment, and are
+cleansed with the per-request credential snapshot. Existing unscoped compatibility resolution is
+unchanged.
+
+Selected Claude subscription connections use `agent_claude_connection_credentials`. The source is
+only the selected registration's sealed native login document. The adapter preserves its persisted
+client ID and exact granted scopes, normalizes expiry from milliseconds, and refreshes through a
+fixed server-owned endpoint using a JSON body on stdin. Missing/removed or ambiguous source
+fields refuse; neither client files nor another registration supply a fallback. Codex and Claude
+share the registration's refresh lock and normalized-source fence, preventing a vendor switch from
+reusing the other vendor's rotated token. Successful refresh retains original source lineage.
+
+The native runtime checks that lineage on callbacks and binds the selected bearer only to model
+requests. Request snapshots retain the registration/target binding; endpoint/profile edits refuse,
+and MCP tools/delegates resolve their own credentials. OAuth beta admission preserves the other
+Anthropic beta capabilities. Source/refresh fixtures and loopback broker tests do not qualify a live
+Claude subscription or activate production SDK spawning.
+
+OAuth refresh and native-source seeding now use `vault_service_write_server_batch`: access,
+refresh, expiry, rejection state and the selected source fence commit through one encrypted Vault
+file replacement. The existing field layout is retained. Missing refresh in a normal refresh
+response preserves the existing refresh credential; a newly selected source requires its own
+refresh credential. Token validity reads access/expiry/rejection from one immutable snapshot.
+Batch updates reject duplicate fields and unsupported backends, with no sequential fallback. Each
+field emits only non-secret audit metadata. Production native activation and live subscription
+qualification remain outstanding.
+
 ## Public contracts
 
 Canonical implementation lives in `src/modules/vault`: the server-wrap retrieval path begins at
@@ -24,10 +55,8 @@ as `private_headers` because they live at the module root rather than under
 always compiled by Make: `WITH_TPM2` and `WITH_PKCS11` toggle a `-D` flag that switches the tpm2 and
 pkcs11 sources between a real implementation and a fail-closed stub rather than omitting them.
 `vault_hwm.c` has no external includer but is live: `vault_custody_kms.c` calls
-`vault_hwm_attest_verify` in its high-water-mark attestation path. CMake compiles the six sources the
-thin `aimee` client reaches (`vault_capability.c`, `vault_crypto.c`, `vault_kek_cache.c`,
-`vault_principal.c`, `vault_service.c`, `vault_store.c`) and omits the four custody backends,
-`vault_hwm.c`, and `vault_server_key.c`, the same intentional thin-client boundary recorded for
+`vault_hwm_attest_verify` in its high-water-mark attestation path. The CMake
+thin client compiles no vault source, the same intentional thin-client boundary recorded for
 gateway, learning, and workspace. `docs/validation/core-modularization-slice-46.md` records the declaration audit and
 `docs/validation/core-modularization-slice-47.md` the completeness audit; the two were split so the
 latch reviews declarations merged on their own first. Adding a new module-local source or module-root
@@ -67,6 +96,14 @@ Surfaces include `aimee vault`, server vault routes, unlock/lock/rekey/seal oper
 presence checks, provider bootstrap, and scoped injection into delegates or Git operations. Lists
 and health output expose references and state only; protocol clients and GUI forms must never receive
 stored secret values merely to display whether a credential exists.
+
+Org-vault egress credentials are adopted, bound and rotated through `aimee-kb vault
+adopt|bind|rotate|remediate|schedule|rotations`: the
+command files a request in `org_rotation_request`, and the KB daemon's rotation worker
+(`src/kb/kb_vault_rotation_worker.c`) starts and drives the fenced workflow with the AWS IAM
+provider (`src/kb/kb_vault_rotation_aws.c`). Rotation needs KMS custody, the only custody that keeps a
+signed high-water mark per slot. See the
+[credential rotation runbook](../runbooks/org-vault-credential-rotation.md).
 
 ## Data and migrations
 

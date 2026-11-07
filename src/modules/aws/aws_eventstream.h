@@ -139,7 +139,6 @@ extern "C"
                                  size_t *consumed);
 
    const char *aws_es_status_str(aws_es_status_t st);
-   const char *aws_es_msg_type_str(aws_es_msg_type_t t);
 
 #ifdef __cplusplus
 }

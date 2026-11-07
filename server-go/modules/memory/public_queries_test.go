@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -41,15 +41,15 @@ func TestPersonalReviewOwnerPostgres(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementServer, data))
 	call := func(args string) []byte {
 		t.Helper()
-		frame, err := bus.EncodeCommand("runtime", []byte(args))
+		frame, err := ring.EncodeCommand("runtime", []byte(args))
 		if err != nil {
 			t.Fatal(err)
 		}
-		encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status != bus.ModuleStatusOK {
+		encoded, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status)
 		}
-		body, err := bus.DecodeCommandResult(encoded)
+		body, err := ring.DecodeCommandResult(encoded)
 		if err != nil {
 			t.Fatal(err)
 		}

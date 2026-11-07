@@ -9,8 +9,8 @@ const context = vi.hoisted(() => ({ sessions: [] as Session[], active: null as S
 vi.mock('../SessionContext', () => ({ useSessions: () => context }));
 vi.mock('./chat/ChatPrimitives', () => ({
   Message: ({ role, text }: { role: string; text: string }) => <div data-testid={role}>{text}</div>,
-  BootstrapBanner: () => null, DiffBlock: () => null, RewindMarker: () => null,
-  ThinkingBlock: () => null, ToolBlock: () => null, TurnSummaryCard: () => null,
+  BootstrapBanner: () => null,
+  ThinkingBlock: () => null, ToolBlock: () => null,
 }));
 
 function session(id: string, text = ''): Session {
@@ -19,10 +19,24 @@ function session(id: string, text = ''): Session {
 }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 let stream: ReadableStreamDefaultController<Uint8Array>;
-const emit = (event: string, data = {}) => stream.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+let sequence = 0;
+let prompt = '';
+function emit(type: string, data: { content?: string } = {}) {
+  const event = (event: unknown) => stream.enqueue(new TextEncoder().encode(`event: ir\ndata: ${JSON.stringify({
+    version: 1, session_id: 'one', sequence: String(++sequence), event_id: `event-${sequence}`,
+    turn_id: 'turn', actor: 'owner', event,
+  })}\n\n`));
+  const delta = (payload: unknown) => event({ kind: 'delta', message_id: 'answer', role: 'assistant', payload });
+  if (type === 'turn_start') {
+    event({ kind: 'message', message_id: 'prompt', payload: { role: 'user', blocks: [{ type: 'text', text: prompt }] } });
+    delta({ type: 'TURN_START' }); delta({ type: 'BLOCK_START', block_id: 0, kind: 'text' });
+  } else if (type === 'text') delta({ type: 'BLOCK_DELTA', block_id: 0, kind: 'text', text_delta: data.content });
+  else { delta({ type: 'BLOCK_STOP', block_id: 0, kind: 'text' }); delta({ type: 'TURN_STOP' }); }
+}
 const tick = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 
 beforeEach(() => {
+  sequence = 0; prompt = '';
   vi.useFakeTimers();
   localStorage.clear();
   context.sessions = [session('one')];
@@ -30,10 +44,17 @@ beforeEach(() => {
   context.patchSession.mockReset();
   Element.prototype.scrollIntoView = vi.fn();
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  vi.stubGlobal('EventSource', class { addEventListener() {} close() {} });
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+  // The real owned stream admits the empty canonical prefix before sending.
+  vi.stubGlobal('EventSource', class {
+    constructor(public url: string) {}
+    addEventListener(type: string, listener: (event: { data: string }) => void) {
+      if (type === 'replay_complete') queueMicrotask(() => listener({ data: JSON.stringify({ session_id: new URL(this.url, 'http://fixture').searchParams.get('sid'), cursor: '0' }) }));
+    }
+    close() {}
+  });
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/chat/send') return new Response(new ReadableStream({ start(controller) { stream = controller; } }));
-    if (url === '/api/chat/attach') return json({ attach_id: 'attachment' });
+    if (url === '/api/chat/attach') return json({ session_id: JSON.parse(String(init?.body)).sid, attach_id: 'attachment' });
     if (url === '/api/git/projects') return json({ root: '/work', projects: ['one', 'two'] });
     if (url.startsWith('/api/chat/bootstrap-status')) return json({ has_rules: true });
     if (url.startsWith('/api/sessions/workflows')) return json({}, 404);
@@ -43,6 +64,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 function send(text: string) {
+  prompt = text;
   const input = screen.getByPlaceholderText(/Type a message/);
   fireEvent.change(input, { target: { value: text } });
   fireEvent.keyDown(input, { key: 'Enter' });
@@ -103,41 +125,46 @@ describe('chat transcript ownership', () => {
     expect(screen.getAllByTestId('assistant').map(node => node.textContent)).toEqual(['Partial answer complete']);
   });
 
-  it('keeps the active conversation when the session list is reordered', async () => {
+  it('keeps the selected legacy archive separate when the session list is reordered', async () => {
     const one = session('one', 'First conversation');
     const two = session('two', 'Second conversation');
     context.sessions = [one, two]; context.active = one;
     const view = render(<Chat />);
     await tick();
-    expect(screen.getByTestId('user').textContent).toBe('First conversation');
+    expect(screen.getByText('First conversation')).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('First conversation');
     context.sessions = [two, one];
     view.rerender(<Chat />);
     await tick();
-    expect(screen.getByTestId('user').textContent).toBe('First conversation');
+    expect(screen.getByText('First conversation')).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('First conversation');
     context.active = two;
     view.rerender(<Chat />);
     await tick();
-    expect(screen.getByTestId('user').textContent).toBe('Second conversation');
+    expect(screen.getByText('Second conversation')).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Second conversation');
     context.active = one;
     view.rerender(<Chat />);
     await tick();
-    expect(screen.getByTestId('user').textContent).toBe('First conversation');
+    expect(screen.getByText('First conversation')).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('First conversation');
   });
 
-  it('flushes a new message to the account cache when navigating before the debounce fires', async () => {
+  it('keeps canonical admission out of the separate text-only account cache', async () => {
     const view = render(<Chat />);
     await tick();
     send('Do not lose this message');
     await tick();
+    await act(async () => { emit('turn_start'); });
+    await tick(100);
+    expect(screen.getByTestId('user').textContent).toBe('Do not lose this message');
     view.unmount();
-    expect(context.patchSession).toHaveBeenCalledWith('one', {
-      messages: [{ role: 'user', text: 'Do not lose this message' }],
-    });
+    expect(context.patchSession.mock.calls.some(([, patch]) => patch.messages?.some((m: { text: string }) => m.text === 'Do not lose this message'))).toBe(false);
     await act(async () => { stream.close(); });
     await tick(500);
   });
 
-  it('hydrates newer server history without changing the active session', async () => {
+  it('retains newer legacy archive records without hydrating the canonical conversation', async () => {
     context.active = session('one', 'First message');
     context.sessions = [context.active];
     const view = render(<Chat />);
@@ -148,33 +175,30 @@ describe('chat transcript ownership', () => {
     context.sessions = [context.active];
     view.rerender(<Chat />);
     await tick();
-    expect(screen.getByTestId('assistant').textContent).toBe('Reply from another device');
+    expect(screen.getByText('Reply from another device')).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Reply from another device');
+    expect(screen.queryByTestId('assistant')).toBeNull();
   });
 
-  it('sends to the originating project when the user switches sessions while attachment is pending', async () => {
-    let attached!: (response: Response) => void;
+  it('keeps an unadmitted draft unsent when the user switches before initial attachment and replay', async () => {
+    const attached = new Map<string, (response: Response) => void>();
     const originalFetch = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation((url, init) => String(url) === '/api/chat/attach'
-      ? new Promise(resolve => { attached = resolve; }) : originalFetch(url, init));
+      ? new Promise(resolve => { attached.set(JSON.parse(String(init?.body)).sid, resolve); }) : originalFetch(url, init));
     context.sessions = [session('one'), session('two')]; context.active = context.sessions[0];
-    const view = render(<Chat />);
-    await tick();
-    send('work on project one');
-    await tick();
-    context.active = context.sessions[1];
-    view.rerender(<Chat />);
-    await tick();
-    await act(async () => { attached(json({ attach_id: 'attachment' })); });
+    const view = render(<Chat />); await tick();
+    send('work on project one'); await tick();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    context.active = context.sessions[1]; view.rerender(<Chat />); await tick();
+    await act(async () => { attached.get('one')!(json({ session_id: 'one', attach_id: 'attachment' })); });
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect(screen.getByPlaceholderText(/Type a message/)).toHaveProperty('value', 'work on project one');
+    context.active = context.sessions[0]; view.rerender(<Chat />); await tick();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    send('work on project one'); await tick();
     const request = vi.mocked(fetch).mock.calls.find(([url]) => url === '/api/chat/send');
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ aimee_session_id: 'one', cwd: '/work/one' });
-    await act(async () => {
-      emit('turn_start'); emit('text', { content: 'Finished project one' }); emit('turn_end'); stream.close();
-    });
-    await tick(500);
-    expect(screen.queryByTestId('assistant')).toBeNull();
-    context.active = context.sessions[0];
-    view.rerender(<Chat />);
-    await tick();
-    expect(screen.getByTestId('assistant').textContent).toBe('Finished project one');
+    await act(async () => { emit('turn_start'); emit('text', { content: 'Finished project one' }); emit('turn_end'); stream.close(); });
+    await tick(500); expect(screen.getByTestId('assistant').textContent).toBe('Finished project one');
   });
 });

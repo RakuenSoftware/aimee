@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 )
 
 // The frame aimee and the postgres module agreed.
@@ -142,6 +143,7 @@ const (
 // answers when a statement arrives outside a live transaction.
 const (
 	sqlStateNoActiveTransaction = "25P01"
+	sqlStateConnectionClass     = "08"
 	sqlStateInFailedTransaction = "25P02"
 )
 
@@ -537,6 +539,14 @@ func decodeReply(body []byte, op string) (*storeReply, error) {
 			// transaction is still live. Reported as ErrTxClosed so a caller
 			// that already handles a finished transaction handles this too.
 			return nil, fmt.Errorf("%w: %w", ErrTxClosed, e)
+		}
+		if strings.HasPrefix(sqlstate, sqlStateConnectionClass) {
+			// Class 08 is a connection exception: the store answered, but its
+			// database is not reachable from it right now -- an outage or a
+			// store still starting, not a verdict on this statement. Reported as
+			// ErrStoreUnavailable so callers that wait for the store wait for
+			// this too, with the store's reason attached.
+			return nil, fmt.Errorf("%w: %w", ErrStoreUnavailable, e)
 		}
 		return nil, e
 	}

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/control-web/policy"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func authorizationWire(target uint32, method, path string) []byte {
@@ -60,9 +60,9 @@ func TestProxyRouteAuthorizationParity(t *testing.T) {
 			if shared != test.want {
 				t.Fatalf("shared policy = %v, want %v", shared, test.want)
 			}
-			response, status := Handle(bus.ModuleInvocation{StageID: StageAuthorize},
+			response, status := Handle(ring.ModuleInvocation{StageID: StageAuthorize},
 				authorizationWire(test.target, test.method, test.path))
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("handler status = %d", status)
 			}
 			if got := responseAllowed(t, response); got != test.want {
@@ -105,11 +105,11 @@ func TestProxyRouteAuthorizationRejectsMalformedWire(t *testing.T) {
 	pathPadding[requestPathOff+len("/v1/enrollments")] = 1
 	tests = append(tests, pathPadding)
 	for index, request := range tests {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageAuthorize}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageAuthorize}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("malformed request %d status = %d", index, status)
 		}
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageAuthorize + 1}, valid()); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageAuthorize + 1}, valid()); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong-stage status = %d", status)
 	}
 }
@@ -117,15 +117,15 @@ func TestProxyRouteAuthorizationRejectsMalformedWire(t *testing.T) {
 func TestProxyRouteAuthorizationWireBoundsAndCancellation(t *testing.T) {
 	maximum := authorizationWire(TargetConsoleAdmin, strings.Repeat("M", methodMax),
 		"/"+strings.Repeat("p", pathMax-1))
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageAuthorize}, maximum); status != bus.ModuleStatusOK {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageAuthorize}, maximum); status != ring.ModuleStatusOK {
 		t.Fatalf("maximum canonical wire status = %d", status)
 	}
-	invocation := bus.ModuleInvocation{StageID: StageAuthorize, DeadlineNS: 1}
+	invocation := ring.ModuleInvocation{StageID: StageAuthorize, DeadlineNS: 1}
 	valid := authorizationWire(TargetFleet, "GET", "/v1/servers")
-	if _, status := Handle(invocation, valid); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(invocation, valid); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
-	if _, status := Handle(invocation, nil); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(invocation, nil); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed expired-request status = %d", status)
 	}
 }

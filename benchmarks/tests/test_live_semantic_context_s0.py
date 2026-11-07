@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import unittest
@@ -144,7 +145,11 @@ class LiveSemanticContextS0Test(unittest.TestCase):
         provider_job = workflow.split("  lsp-real-providers:", 1)[1].split(
             "\n  unit-tests:", 1
         )[0]
-        self.assertIn("- os: macos-latest", provider_job)
+        # Linux only: the LSP client is part of aimee proper, which macOS and
+        # Windows do not build. Every event runs the same single leg.
+        matrix = re.search(r"include: (\[.+?\])\n", provider_job)
+        self.assertIsNotNone(matrix)
+        self.assertEqual(json.loads(matrix[1]), [{"os": "ubuntu-24.04", "artifact": "linux"}])
         self.assertIn("runs-on: ${{ matrix.os }}", provider_job)
         self.assertIn("--assert-baseline", provider_job)
         self.assertIn("run_s1_candidate_probe.py", provider_job)

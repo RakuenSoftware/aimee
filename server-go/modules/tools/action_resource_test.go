@@ -2,7 +2,7 @@ package tools
 
 import (
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"os"
 	"path/filepath"
 	"testing"
@@ -109,18 +109,18 @@ func TestGovernedResourceRejectsDanglingLink(t *testing.T) {
 
 func TestGovernedResourceWireRequiresAuthenticatedHost(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{"tool": "write_file", "arguments": map[string]string{"path": "target"}, "directory": t.TempDir()})
-	wire, err := bus.EncodeCommandWithContext("describe", args, bus.CommandContext{Authenticated: true, Principal: "alice"})
+	wire, err := ring.EncodeCommandWithContext("describe", args, ring.CommandContext{Authenticated: true, Principal: "alice"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageActionResource}, wire); status != bus.ModuleStatusOK {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageActionResource}, wire); status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageActionResource, PrincipalRef: 73}, wire); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageActionResource, PrincipalRef: 73}, wire); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("plugin supplied host resource authority")
 	}
-	wire, _ = bus.EncodeCommand("describe", args)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageActionResource}, wire); status != bus.ModuleStatusInvalidRequest {
+	wire, _ = ring.EncodeCommand("describe", args)
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageActionResource}, wire); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("missing authenticated context accepted")
 	}
 }

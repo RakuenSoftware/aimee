@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestWorkflowSignals(t *testing.T) {
@@ -92,8 +92,8 @@ func TestWorkflowObserverPlansAndReceipts(t *testing.T) {
 			t.Fatal(request)
 		}
 		for _, op := range []string{"workflow-plan", "workflow-result"} {
-			frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"`+op+`"}`))
-			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+			frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"`+op+`"}`))
+			if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 				t.Fatal(op, status)
 			}
 		}

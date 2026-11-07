@@ -8,6 +8,7 @@
  * to the caller's teams. */
 
 #include "kb_http_team.h"
+#include "kb_http_common.h"
 
 #include "admin_grant.h"
 #include "cJSON.h"
@@ -21,29 +22,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int emit(cJSON *root, char *out, int cap, int status)
-{
-   char *s = cJSON_PrintUnformatted(root);
-   cJSON_Delete(root);
-   if (!s || (int)strlen(s) >= cap)
-   {
-      free(s);
-      snprintf(out, (size_t)cap, "{\"error\":\"response too large\"}");
-      return 500;
-   }
-   snprintf(out, (size_t)cap, "%s", s);
-   free(s);
-   return status;
-}
-
-static int err(char *out, int cap, int status, const char *msg)
-{
-   char b[256];
-   snprintf(b, sizeof(b), "{\"error\":\"%s\"}", msg);
-   snprintf(out, (size_t)cap, "%s", b);
-   return status;
-}
-
 /* A team/project name is printable text of bounded length: reject control chars,
  * DEL, and over-length so a name can't smuggle control bytes into stored state. */
 static int name_is_clean(const char *s)
@@ -55,37 +33,6 @@ static int name_is_clean(const char *s)
       if ((unsigned char)s[i] < 0x20 || (unsigned char)s[i] == 0x7f)
          return 0;
    return 1;
-}
-
-/* Map a tenant-scope/kb_store return into an HTTP status. */
-static int tenant_http_status(int rc)
-{
-   if (rc == KB_STORE_ERR_TENANT_REQUIRES_PG)
-      return 503; /* tenancy needs the Postgres tier */
-   if (rc == KB_STORE_ERR_TENANT_UNAUTHENTICATED)
-      return 401;
-   if (rc == KB_STORE_ERR_TENANT_DENIED)
-      return 403;
-   return 500;
-}
-
-/* Open a bootstrap/admin tenant scope for the current actor (team 0 = principal
- * only). Returns 0 on success or an HTTP status (>0) written into out. */
-static int begin_actor_scope(char *out, int cap, int *http_out)
-{
-   const kb_principal_t *actor = kb_reqctx_actor();
-   if (!actor)
-   {
-      *http_out = err(out, cap, 401, "authentication required");
-      return -1;
-   }
-   int rc = kb_store_tenant_scope_begin(actor, 0);
-   if (rc != 0)
-   {
-      *http_out = err(out, cap, tenant_http_status(rc), "tenant scope failed");
-      return -1;
-   }
-   return 0;
 }
 
 static cJSON *team_json(const kb_store_team_row_t *t)
@@ -108,48 +55,48 @@ static int handle_team(const char *method, const char *body, char *out, int cap)
       if (!cJSON_IsString(name) || !name->valuestring[0])
       {
          cJSON_Delete(b);
-         return err(out, cap, 400, "name required");
+         return kb_http_error(out, cap, 400, "name required");
       }
       char nm[128];
       snprintf(nm, sizeof(nm), "%s", name->valuestring);
       cJSON_Delete(b);
       if (!name_is_clean(nm))
-         return err(out, cap, 400, "invalid team name (printable, 1-100 chars)");
-      if (begin_actor_scope(out, cap, &http) != 0)
+         return kb_http_error(out, cap, 400, "invalid team name (printable, 1-100 chars)");
+      if (kb_http_begin_actor_scope(out, cap, &http) != 0)
          return http;
       int64_t id = 0;
       int rc = kb_store_team_create(nm, "", &id);
       if (rc != 0)
       {
          kb_store_tenant_scope_rollback();
-         return err(out, cap, 403, "not authorized to create a team");
+         return kb_http_error(out, cap, 403, "not authorized to create a team");
       }
       if (kb_store_tenant_scope_commit() != 0)
-         return err(out, cap, 500, "commit failed");
+         return kb_http_error(out, cap, 500, "commit failed");
       cJSON *o = cJSON_CreateObject();
       cJSON_AddNumberToObject(o, "id", (double)id);
       cJSON_AddStringToObject(o, "name", nm);
-      return emit(o, out, cap, 201);
+      return kb_http_emit(o, out, cap, 201);
    }
    /* GET /v1/team -> list the caller's visible teams. */
    if (strcmp(method, "GET") == 0)
    {
-      if (begin_actor_scope(out, cap, &http) != 0)
+      if (kb_http_begin_actor_scope(out, cap, &http) != 0)
          return http;
       kb_store_team_row_t rows[128];
       int n = kb_store_team_list(rows, (int)(sizeof(rows) / sizeof(rows[0])));
       if (kb_store_tenant_scope_commit() != 0)
-         return err(out, cap, 500, "commit failed");
+         return kb_http_error(out, cap, 500, "commit failed");
       if (n < 0)
-         return err(out, cap, 500, "list failed");
+         return kb_http_error(out, cap, 500, "list failed");
       cJSON *arr = cJSON_CreateArray();
       for (int i = 0; i < n; ++i)
          cJSON_AddItemToArray(arr, team_json(&rows[i]));
       cJSON *o = cJSON_CreateObject();
       cJSON_AddItemToObject(o, "teams", arr);
-      return emit(o, out, cap, 200);
+      return kb_http_emit(o, out, cap, 200);
    }
-   return err(out, cap, 405, "method not allowed");
+   return kb_http_error(out, cap, 405, "method not allowed");
 }
 
 static int handle_member(const char *method, const char *body, char *out, int cap)
@@ -162,7 +109,7 @@ static int handle_member(const char *method, const char *body, char *out, int ca
    if (!cJSON_IsNumber(team) || !cJSON_IsString(idk) || !idk->valuestring[0])
    {
       cJSON_Delete(b);
-      return err(out, cap, 400, "team (number) and identity_key required");
+      return kb_http_error(out, cap, 400, "team (number) and identity_key required");
    }
    int64_t team_id = (int64_t)team->valuedouble;
    /* identity_key may be up to 600 chars (kb_team_membership CHECK); reject an
@@ -170,7 +117,7 @@ static int handle_member(const char *method, const char *body, char *out, int ca
    if (strlen(idk->valuestring) > 600)
    {
       cJSON_Delete(b);
-      return err(out, cap, 400, "identity_key too long");
+      return kb_http_error(out, cap, 400, "identity_key too long");
    }
    char key[640];
    snprintf(key, sizeof(key), "%s", idk->valuestring);
@@ -178,7 +125,7 @@ static int handle_member(const char *method, const char *body, char *out, int ca
    cJSON_Delete(b);
 
    int http = 0;
-   if (begin_actor_scope(out, cap, &http) != 0)
+   if (kb_http_begin_actor_scope(out, cap, &http) != 0)
       return http;
    int rc;
    if (strcmp(method, "POST") == 0)
@@ -193,18 +140,18 @@ static int handle_member(const char *method, const char *body, char *out, int ca
    else
    {
       kb_store_tenant_scope_rollback();
-      return err(out, cap, 405, "method not allowed");
+      return kb_http_error(out, cap, 405, "method not allowed");
    }
    if (rc != 0)
    {
       kb_store_tenant_scope_rollback();
-      return err(out, cap, 403, "not authorized to modify membership");
+      return kb_http_error(out, cap, 403, "not authorized to modify membership");
    }
    if (kb_store_tenant_scope_commit() != 0)
-      return err(out, cap, 500, "commit failed");
+      return kb_http_error(out, cap, 500, "commit failed");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddBoolToObject(o, "ok", 1);
-   return emit(o, out, cap, 200);
+   return kb_http_emit(o, out, cap, 200);
 }
 
 static int handle_project(const char *method, const char *query_string, const char *body, char *out,
@@ -220,7 +167,7 @@ static int handle_project(const char *method, const char *query_string, const ch
       if (!cJSON_IsNumber(parent) || !cJSON_IsString(name) || !name->valuestring[0])
       {
          cJSON_Delete(b);
-         return err(out, cap, 400, "parent (number) and name required");
+         return kb_http_error(out, cap, 400, "parent (number) and name required");
       }
       int64_t parent_id = (int64_t)parent->valuedouble;
       char nm[128], am[16];
@@ -229,26 +176,26 @@ static int handle_project(const char *method, const char *query_string, const ch
                (cJSON_IsString(mode) && mode->valuestring[0]) ? mode->valuestring : "team-open");
       cJSON_Delete(b);
       if (!name_is_clean(nm))
-         return err(out, cap, 400, "invalid project name (printable, 1-100 chars)");
+         return kb_http_error(out, cap, 400, "invalid project name (printable, 1-100 chars)");
       if (strcmp(am, "team-open") != 0 && strcmp(am, "restricted") != 0)
-         return err(out, cap, 400, "access_mode must be 'team-open' or 'restricted'");
-      if (begin_actor_scope(out, cap, &http) != 0)
+         return kb_http_error(out, cap, 400, "access_mode must be 'team-open' or 'restricted'");
+      if (kb_http_begin_actor_scope(out, cap, &http) != 0)
          return http;
       int64_t id = 0;
       int rc = kb_store_project_create(parent_id, nm, am, "", &id);
       if (rc != 0)
       {
          kb_store_tenant_scope_rollback();
-         return err(out, cap, 403, "not authorized to create a project");
+         return kb_http_error(out, cap, 403, "not authorized to create a project");
       }
       if (kb_store_tenant_scope_commit() != 0)
-         return err(out, cap, 500, "commit failed");
+         return kb_http_error(out, cap, 500, "commit failed");
       cJSON *o = cJSON_CreateObject();
       cJSON_AddNumberToObject(o, "id", (double)id);
       cJSON_AddNumberToObject(o, "parent", (double)parent_id);
       cJSON_AddStringToObject(o, "name", nm);
       cJSON_AddStringToObject(o, "access_mode", am);
-      return emit(o, out, cap, 201);
+      return kb_http_emit(o, out, cap, 201);
    }
    if (strcmp(method, "GET") == 0)
    {
@@ -272,17 +219,17 @@ static int handle_project(const char *method, const char *query_string, const ch
          char *end = NULL;
          long long v = strtoll(tq, &end, 10);
          if (end == tq || (*end != '\0' && *end != '&') || v < 0)
-            return err(out, cap, 400, "invalid team parameter");
+            return kb_http_error(out, cap, 400, "invalid team parameter");
          parent_id = (int64_t)v;
       }
-      if (begin_actor_scope(out, cap, &http) != 0)
+      if (kb_http_begin_actor_scope(out, cap, &http) != 0)
          return http;
       kb_store_project_row_t rows[128];
       int n = kb_store_project_list(parent_id, rows, (int)(sizeof(rows) / sizeof(rows[0])));
       if (kb_store_tenant_scope_commit() != 0)
-         return err(out, cap, 500, "commit failed");
+         return kb_http_error(out, cap, 500, "commit failed");
       if (n < 0)
-         return err(out, cap, 500, "list failed");
+         return kb_http_error(out, cap, 500, "list failed");
       cJSON *arr = cJSON_CreateArray();
       for (int i = 0; i < n; ++i)
       {
@@ -295,9 +242,9 @@ static int handle_project(const char *method, const char *query_string, const ch
       }
       cJSON *o = cJSON_CreateObject();
       cJSON_AddItemToObject(o, "projects", arr);
-      return emit(o, out, cap, 200);
+      return kb_http_emit(o, out, cap, 200);
    }
-   return err(out, cap, 405, "method not allowed");
+   return kb_http_error(out, cap, 405, "method not allowed");
 }
 
 int kb_http_team_route(const char *method, const char *path, const char *query_string,

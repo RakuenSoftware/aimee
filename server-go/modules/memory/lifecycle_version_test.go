@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -30,9 +30,9 @@ func TestLifecycleVersionValidation(t *testing.T) {
 
 // The shipping schema and restricted runtime role exercise RLS, revision
 // triggers, rejection tombstones, and the actual public command transaction.
-func exerciseLifecycleVersionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseLifecycleVersionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
-	caller := bus.CommandContext{Authenticated: true, Principal: "user:lifecycle-version", UserAuthority: true, TransportIdentity: "cert:fixture"}
+	caller := ring.CommandContext{Authenticated: true, Principal: "user:lifecycle-version", UserAuthority: true, TransportIdentity: "cert:fixture"}
 	invoke := func(verb string, args map[string]any) map[string]any {
 		t.Helper()
 		raw, err := json.Marshal(args)
@@ -40,7 +40,7 @@ func exerciseLifecycleVersionReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 			t.Fatal(err)
 		}
 		out, status := invokeContextCommand(t, handler, 0, caller, verb, string(raw))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(verb, status, out)
 		}
 		return out

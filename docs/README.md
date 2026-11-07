@@ -70,6 +70,7 @@ Architecture figures live in `docs/images/architecture/`. Regenerate their SVGs 
 - [Benchmarks](BENCHMARKS.md)
 - [Change the KB embedder](runbooks/change-embedder.md)
 - [Vault key rotation](runbooks/vault-master-key-rotation.md)
+- [Org-vault credential rotation](runbooks/org-vault-credential-rotation.md)
 - [Witness evidence and egress gate](runbooks/witness-evidence-and-egress-gate.md)
 - [Workflow autonomy](wfe-autonomy-runbook.md)
 - [Observability security](runbooks/observability-security.md)
@@ -87,8 +88,9 @@ Architecture figures live in `docs/images/architecture/`. Regenerate their SVGs 
 - [Core C libraries](core/connection.md): [event bus](core/event-bus.md) and
   [repository extraction](core/repository-extraction.md)
 - [Turn integrity](architecture/turn-integrity.md)
-- [Event bus decisions](dev/EVENT_BUS_DECISIONS.md), [feature tree](dev/EVENT_BUS_FEATURE_TREE.md),
-  and [arena payloads](dev/EVENT_BUS_ARENA_GUIDE.md)
+- [Ring decisions](https://github.com/RakuenSoftware/ouroboros-ring/blob/main/spec/decisions.md)
+  and [arena payloads](https://github.com/RakuenSoftware/ouroboros-ring/blob/main/docs/arena-payloads.md),
+  in the ring's repository
 - [Fold pipeline order](dev/fold-pipeline-order.md)
 - [Go rewrite direction](dev/GO_REWRITE.md)
 - [Workflow ownership](dev/WFE_OWNERSHIP.md)

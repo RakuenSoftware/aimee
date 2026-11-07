@@ -16,7 +16,8 @@
     "src/modules/audit/audit_ledger.c",
     "src/modules/audit/audit_replay.c",
     "src/modules/audit/audit_worm.c",
-    "src/modules/audit/audit_worm_chain.c"
+    "src/modules/audit/audit_worm_chain.c",
+    "src/modules/audit/instance_identity.c"
   ],
   "public_headers": [
     "src/modules/audit/include/aimee/audit/audit_action.h",
@@ -24,13 +25,15 @@
     "src/modules/audit/include/aimee/audit/audit_ledger.h",
     "src/modules/audit/include/aimee/audit/audit_replay.h",
     "src/modules/audit/include/aimee/audit/audit_worm.h",
-    "src/modules/audit/include/aimee/audit/audit_worm_chain.h"
+    "src/modules/audit/include/aimee/audit/audit_worm_chain.h",
+    "src/modules/audit/include/aimee/audit/instance_identity.h"
   ],
   "tests": [
     "src/tests/test_audit_action.c",
     "src/tests/test_audit_ledger.c",
     "src/tests/test_audit_worm.c",
-    "src/tests/test_audit_worm_chain.c"
+    "src/tests/test_audit_worm_chain.c",
+    "src/tests/test_instance_identity.c"
   ],
   "docs": [
     "docs/modules/audit.md"

@@ -2,7 +2,7 @@ package memory
 
 import (
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 )
@@ -36,18 +36,18 @@ func TestProcedureExposureUsesRetainedVersionAndAcknowledgement(t *testing.T) {
 func TestLegacyExposureRetainsExactIDsWithoutClaimingDelivery(t *testing.T) {
 	args := sourceReleaseArgs(map[string]any{"turn_id": "turn", "surfaced_ids": []any{"9007199254743001", 1, 0, -1}})
 	raw, status := legacyExposurePlan(args)
-	body, err := bus.DecodeCommandResult(raw)
+	body, err := ring.DecodeCommandResult(raw)
 	var result struct {
 		Status string   `json:"status"`
 		IDs    []string `json:"surfaced_ids"`
 		State  string   `json:"exposure_state"`
 	}
-	if status != bus.ModuleStatusOK || err != nil || json.Unmarshal(body, &result) != nil || len(result.IDs) != 2 || result.IDs[0] != "9007199254743001" || result.State != "retrieved_unverified" {
+	if status != ring.ModuleStatusOK || err != nil || json.Unmarshal(body, &result) != nil || len(result.IDs) != 2 || result.IDs[0] != "9007199254743001" || result.State != "retrieved_unverified" {
 		t.Fatal(string(body), err)
 	}
 	args["surfaced_ids"] = json.RawMessage(`[1.5]`)
 	raw, _ = legacyExposurePlan(args)
-	body, _ = bus.DecodeCommandResult(raw)
+	body, _ = ring.DecodeCommandResult(raw)
 	if json.Unmarshal(body, &result) != nil || result.Status != "error" {
 		t.Fatal("fractional identity accepted")
 	}

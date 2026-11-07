@@ -15,7 +15,6 @@ import (
 func main() {
 	root := flag.String("root", "..", "repository root")
 	check := flag.Bool("check", false, "check generated files without writing")
-	kbStore := flag.String("kb-store-output", "", "write only the KB_STORE compatibility file")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "unexpected positional arguments")
@@ -25,15 +24,8 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	if *kbStore != "" {
-		if err = os.WriteFile(*kbStore, []byte(artifacts["kb_store"]), 0644); err != nil {
-			fail(err)
-		}
-		return
-	}
 	outputs := map[string]string{
 		"server-go/modules/memory/testdata/ontology_seed.tsv": artifacts["tsv"],
-		"src/modules/kb/support/rel_seed_primitives.c":        artifacts["kb_store"],
 	}
 	for _, item := range []struct{ path, start, end, key string }{
 		{"src/rel_types.c", "/* BEGIN GO MEMORY ONTOLOGY SEED */", "/* END GO MEMORY ONTOLOGY SEED */", "native"},

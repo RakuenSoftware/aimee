@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const EventActionResource uint32 = 6914
@@ -13,13 +13,13 @@ const StageActionResource uint32 = 2
 
 // The resource resolver runs at the tool owner. Its result is transient: raw
 // effective arguments are carried to dispatch and never stored in the journal.
-func handleActionResource(invocation bus.ModuleInvocation, raw []byte) ([]byte, bus.ModuleStatus) {
+func handleActionResource(invocation ring.ModuleInvocation, raw []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.PrincipalRef != 0 || len(raw) > 65536 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
-	verb, args, caller, err := bus.DecodeCommandWithContext(raw)
+	verb, args, caller, err := ring.DecodeCommandWithContext(raw)
 	if err != nil || (verb != "describe" && verb != "verify") || caller == nil || !caller.Authenticated {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	var req struct {
 		Tool          string          `json:"tool"`
@@ -31,7 +31,7 @@ func handleActionResource(invocation bus.ModuleInvocation, raw []byte) ([]byte, 
 	decoder := json.NewDecoder(bytes.NewReader(args))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&req) != nil || decoder.Decode(new(any)) != io.EOF {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	var resource any
 	if verb == "verify" {
@@ -40,15 +40,15 @@ func handleActionResource(invocation bus.ModuleInvocation, raw []byte) ([]byte, 
 		resource, err = DescribeGovernedAction(req.Tool, req.Arguments, req.Directory)
 	}
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	body, err := json.Marshal(resource)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	framed, err := bus.EncodeCommandResult(body)
+	framed, err := ring.EncodeCommandResult(body)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return framed, bus.ModuleStatusOK
+	return framed, ring.ModuleStatusOK
 }

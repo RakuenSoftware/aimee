@@ -76,7 +76,7 @@ int main(void)
    r = wfe_autonomous_clamp("hotfix", 1, &clamped);
    assert(strcmp(r, WFE_AUTONOMOUS_FLOOR) == 0 && clamped == 1);
 
-   module_bus_stub_fail(AIMEE_MODULE_CALL_DEADLINE_EXCEEDED); /* module too slow */
+   module_bus_stub_fail(OURO_MODULE_CALL_DEADLINE_EXCEEDED); /* module too slow */
    clamped = -1;
    r = wfe_autonomous_clamp("hotfix", 1, &clamped);
    assert(strcmp(r, WFE_AUTONOMOUS_FLOOR) == 0 && clamped == 1);

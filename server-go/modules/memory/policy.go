@@ -1,7 +1,7 @@
 package memory
 
 import (
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"sort"
 	"strings"
 )
@@ -139,7 +139,7 @@ func ontologyRules() []OntologyRule {
 	return rules
 }
 
-func handleSchemaCommand(_ handlerOptions, _ bus.ModuleInvocation, _ string, _ commandArgs) ([]byte, bus.ModuleStatus) {
+func handleSchemaCommand(_ handlerOptions, _ ring.ModuleInvocation, _ string, _ commandArgs) ([]byte, ring.ModuleStatus) {
 	rules := ontologyRules()
 	rows := make([]map[string]any, 0, len(rules))
 	for _, r := range rules {

@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "aimee.h"
+#include "primary_session_adapter.h"
 #include "db1_client/db1_module_api.h"
 #include "support/module_bus_stub.h"
 #include "db1_client/db1.h"
@@ -58,16 +59,19 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 }
 static char *hook_test_exec(const workspace_provider_t *p, const char *cmd, int *rc)
 {
-   assert(p->kind == WS_PROVIDER_DETACHED && g_hook_bound);
+   assert(p->kind == (g_hook_remote == 2 ? WS_PROVIDER_SHARED : WS_PROVIDER_DETACHED) &&
+          g_hook_bound);
    assert(strcmp(cmd, "git rev-parse --show-toplevel") == 0);
-   assert(strcmp(g_hook_exec_cwd, g_hook_bound_cwd) == 0);
+   assert(strcmp(g_hook_exec_cwd,
+                 g_hook_remote == 2 ? "/server/approved/repo" : g_hook_bound_cwd) == 0);
    g_hook_probe_calls++;
    *rc = 0;
    return strdup("/client/only/repo\n");
 }
 static const workspace_provider_t g_hook_provider = {.kind = WS_PROVIDER_DETACHED,
                                                      .exec_shell = hook_test_exec};
-static const workspace_provider_t g_hook_shared = {.kind = WS_PROVIDER_SHARED};
+static const workspace_provider_t g_hook_shared = {.kind = WS_PROVIDER_SHARED,
+                                                   .exec_shell = hook_test_exec};
 int workspace_turn_bind_active(const char *cwd)
 {
    snprintf(g_hook_bound_cwd, sizeof(g_hook_bound_cwd), "%s", cwd ? cwd : "");
@@ -80,7 +84,62 @@ void workspace_turn_unbind_active(void)
 }
 const workspace_provider_t *workspace_provider_active(void)
 {
-   return g_hook_bound ? &g_hook_provider : &g_hook_shared;
+   return g_hook_bound && g_hook_remote != 2 ? &g_hook_provider : &g_hook_shared;
+}
+struct workspace_turn_scope
+{
+   int previous;
+};
+int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out)
+{
+   *out = NULL;
+   if (g_hook_remote < 0)
+      return -1;
+   *out = calloc(1, sizeof **out);
+   assert(*out);
+   (*out)->previous = g_hook_bound;
+   return workspace_turn_bind_active(cwd);
+}
+int workspace_turn_scope_end(workspace_turn_scope_t *scope)
+{
+   if (scope)
+   {
+      g_hook_bound = scope->previous;
+      free(scope);
+   }
+   return 0;
+}
+const char *workspace_turn_active_cwd(void)
+{
+   return g_hook_bound && g_hook_remote == 2 ? "/server/approved/repo" : NULL;
+}
+/* This dispatcher fixture has no approved filesystem custody. Scoped learning
+ * must decline; its real ownership/receipt behavior has a dedicated fixture. */
+int workspace_turn_resource_identity(const char *cwd, int *fd, char digest[65])
+{
+   (void)cwd;
+   *fd = -1;
+   digest[0] = '\0';
+   return -1;
+}
+int workspace_turn_source_identity(const char *cwd, int *fd, char digest[65])
+{
+   return workspace_turn_resource_identity(cwd, fd, digest);
+}
+
+int server_learning_project_from_cwd(const char *cwd, char *out, size_t cap)
+{
+   (void)cwd;
+   if (cap)
+      out[0] = '\0';
+   return -1;
+}
+int workspace_turn_workspace_authorized(const char *cwd, char *out, size_t cap)
+{
+   if (!cwd || !g_hook_bound || g_hook_remote != 2 || strcmp(cwd, "/server/approved/repo"))
+      return 0;
+   snprintf(out, cap, "%s", cwd);
+   return 1;
 }
 const char *run_cmd_get_cwd(void)
 {
@@ -118,6 +177,7 @@ static char g_git_repo_root_value[MAX_PATH_LEN];
  * test exercises method routing only; pretend every cwd is outside a git
  * repo by default so the GC paths short-circuit. */
 #include "../worktree_gc.h"
+#include "support/config_test_setters.h"
 int git_repo_root(const char *dir, char *out, size_t cap)
 {
    if (dir && g_git_repo_root_prefix[0] && g_git_repo_root_value[0])
@@ -213,13 +273,6 @@ static int stub_handler(server_conn_t *conn, const char *name)
    return rc;
 }
 
-int platform_evloop_del(platform_evloop_t *loop, int fd)
-{
-   (void)loop;
-   (void)fd;
-   return 0;
-}
-
 /* Instrumented so test_conn_update_events_null_evloop can assert the invariant
  * that conn_update_events never hands a NULL loop to the event layer (a NULL
  * loop here means epoll_ctl(loop->epoll_fd,...) would dereference NULL and
@@ -237,27 +290,9 @@ int platform_evloop_mod(platform_evloop_t *loop, int fd, uint32_t events)
    return 0;
 }
 
-int platform_evloop_add(platform_evloop_t *loop, int fd, uint32_t events)
-{
-   (void)loop;
-   (void)fd;
-   (void)events;
-   return 0;
-}
-
 int platform_evloop_create(platform_evloop_t *loop)
 {
    (void)loop;
-   return 0;
-}
-
-int platform_evloop_wait(platform_evloop_t *loop, platform_event_t *events, int max_events,
-                         int timeout_ms)
-{
-   (void)loop;
-   (void)events;
-   (void)max_events;
-   (void)timeout_ms;
    return 0;
 }
 
@@ -615,7 +650,25 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out)
 /* handle_hooks_session_start now registers a server_sessions row; stub the two
  * db1 accessors it uses so this dispatch-routing test need not link the db1
  * layer. get -> miss (so create is attempted), create -> success. */
-int db1_server_session_get(const char *id, db1_server_session_t *out)
+/* This dispatch-only fixture does not open canonical browser streams. */
+int primary_session_history_open(const char *session, const char *actor)
+{
+   (void)session;
+   (void)actor;
+   assert(0 && "unexpected browser history opening in dispatch-only fixture");
+   return -1;
+}
+int db1_session_ir_cancel(const char *actor, const char *session, const char *turn,
+                          char sequence[32])
+{
+   (void)actor;
+   (void)session;
+   (void)turn;
+   (void)sequence;
+   assert(0 && "unexpected browser cancellation in dispatch-only fixture");
+   return -1;
+}
+int db1_server_session_owner_get(const char *id, db1_server_session_owner_t *out)
 {
    (void)id;
    (void)out;
@@ -1469,6 +1522,10 @@ int handle_agent_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "model.stats");
 }
+int handle_agent_generate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "model.generate");
+}
 int handle_agent_draft(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "model.draft");
@@ -1497,6 +1554,11 @@ int handle_agent_cli_oauth_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
 int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "mcp.tools_list");
+}
+
+int handle_mcp_tools_wait(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "mcp.tools_wait");
 }
 
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -1635,6 +1697,13 @@ const char *worktree_for_cwd(const session_state_t *state, const char *cwd)
    return NULL;
 }
 
+int pre_tool_check_registered_tool(const char *tool_name, const char *tool_input,
+                                   session_state_t *state, const char *mode, const char *cwd,
+                                   char *message, size_t size)
+{
+   return pre_tool_check(tool_name, tool_input, state, mode, cwd, message, size);
+}
+
 int pre_tool_check(const char *tool_name, const char *tool_input, session_state_t *state,
                    const char *guardrail_mode, const char *cwd, char *msg, size_t msg_len)
 {
@@ -1652,6 +1721,7 @@ int pre_tool_check(const char *tool_name, const char *tool_input, session_state_
    if (g_hook_remote)
    {
       assert(g_hook_bound);
+      assert(!strcmp(cwd, g_hook_remote == 2 ? "/server/approved/repo" : g_hook_bound_cwd));
       int ec = -1;
       const workspace_provider_t *p = workspace_provider_active();
       char *out = p->exec_shell(p, "git rev-parse --show-toplevel", &ec);
@@ -1665,11 +1735,13 @@ int pre_tool_check(const char *tool_name, const char *tool_input, session_state_
 
 static int g_policy_session_calls;
 static int g_policy_session_reject;
+static char g_policy_attempt[512], g_policy_arguments[1024];
 int policy_check_session_tool(const char *session, const char *tool, const char *arguments,
                               const char *attempt, char *reason, size_t reason_len)
 {
    assert(session && tool && arguments);
-   (void)attempt;
+   snprintf(g_policy_attempt, sizeof g_policy_attempt, "%s", attempt ? attempt : "");
+   snprintf(g_policy_arguments, sizeof g_policy_arguments, "%s", arguments);
    g_policy_session_calls++;
    if (g_policy_session_reject)
       snprintf(reason, reason_len, "session policy denied");
@@ -2412,6 +2484,39 @@ static void test_hooks_pre_remote_workspace_scope(void)
             cJSON_Delete(req);
          }
    assert(g_hook_probe_calls == 30);
+   g_hook_remote = 2;
+   g_hook_bound = 1; /* A native callback already holds its producer's source. */
+   g_hook_guard_result = 0;
+   run_cmd_set_cwd("/previous/request");
+   const char *mirror = "{\"method\":\"hooks.pre\",\"session_id\":\"mirror-hook-test\","
+                        "\"cwd\":\"/client/only/repo\",\"tool_name\":\"Read\",\"tool_input\":{}}";
+   cJSON *mirror_reply = dispatch_json(ctx, conn, mirror, strlen(mirror));
+   assert(cJSON_GetObjectItem(mirror_reply, "exit_code")->valueint == 0);
+   assert(g_hook_bound == 1 && g_hook_probe_calls == 31);
+   assert(!strcmp(run_cmd_get_cwd(), "/previous/request"));
+   cJSON_Delete(mirror_reply);
+   const char *held = "{\"method\":\"hooks.pre\",\"session_id\":\"held-hook-test\","
+                      "\"cwd\":\"/server/approved/repo\",\"tool_name\":\"Read\",\"tool_input\":{}}";
+   mirror_reply = dispatch_json(ctx, conn, held, strlen(held));
+   assert(cJSON_GetObjectItem(mirror_reply, "exit_code")->valueint == 0);
+   assert(g_hook_bound == 1 && g_hook_probe_calls == 32);
+   cJSON_Delete(mirror_reply);
+   g_hook_bound = 0;
+   g_hook_remote = -1; /* A registered mirror failed reconstruction. */
+   g_pre_tool_seen_state = 0;
+   g_session_state_save_calls = 0;
+   run_cmd_set_cwd("/previous/request");
+   const char *failed = "{\"method\":\"hooks.pre\",\"session_id\":\"remote-hook-test\","
+                        "\"cwd\":\"/client/only/repo\",\"tool_name\":\"Read\","
+                        "\"tool_input\":{},\"request_id\":\"failed-mirror\"}";
+   cJSON *refused = dispatch_json(ctx, conn, failed, strlen(failed));
+   assert(cJSON_GetObjectItem(refused, "exit_code")->valueint == 2);
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(refused, "request_id")), "failed-mirror"));
+   assert(!g_pre_tool_seen_state && !g_session_state_save_calls && !g_hook_bound);
+   assert(g_hook_probe_calls == 32);
+   assert(!strcmp(run_cmd_get_cwd(), "/previous/request"));
+   cJSON_Delete(refused);
    g_hook_remote = g_hook_guard_result = 0;
    assert(config_client_set_value("require_aimee_git",
                                   saved_git_policy ? saved_git_policy : cJSON_CreateTrue()) == 0);
@@ -2461,6 +2566,40 @@ static void test_hook_identity_session_binding(void)
    cJSON_Delete(json);
    g_policy_session_reject = 0;
 
+   /* The canonical transport must retain the real policy attempt identity and
+    * use the same authenticated harness/session decision owner. */
+   cJSON *canonical = cJSON_Parse(pre);
+   cJSON_DeleteItemFromObjectCaseSensitive(canonical, "tool_name");
+   cJSON_DeleteItemFromObjectCaseSensitive(canonical, "tool_input");
+   assert(cJSON_AddNumberToObject(canonical, "ir_version", 1));
+   cJSON *intent = cJSON_AddObjectToObject(canonical, "hook");
+   cJSON *call = cJSON_AddObjectToObject(intent, "call");
+   assert(cJSON_AddStringToObject(call, "type", "tool_use"));
+   assert(cJSON_AddStringToObject(call, "name", "Read"));
+   char opaque_id[401];
+   memset(opaque_id, 'x', 400);
+   opaque_id[400] = 0;
+   assert(cJSON_AddStringToObject(call, "tool_id", opaque_id));
+   assert(cJSON_AddItemToObject(call, "input", cJSON_Parse("{\"value\":9007199254740993}")));
+   char *encoded = cJSON_PrintUnformatted(canonical);
+   json = dispatch_json(ctx, conn, encoded, strlen(encoded));
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(json, "exit_code")) == 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "hook_identity")), "trusted"));
+   assert(g_policy_session_calls == 3);
+   assert(!strcmp(g_policy_attempt, opaque_id));
+   assert(strstr(g_policy_arguments, "9007199254740993"));
+   cJSON_Delete(json);
+   free(encoded);
+   assert(cJSON_AddStringToObject(call, "namespace", "foreign"));
+   encoded = cJSON_PrintUnformatted(canonical);
+   g_session_state_save_calls = 0;
+   json = dispatch_json(ctx, conn, encoded, strlen(encoded));
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(json, "exit_code")) == 2);
+   assert(g_policy_session_calls == 3 && !g_session_state_save_calls);
+   cJSON_Delete(json);
+   free(encoded);
+   cJSON_Delete(canonical);
+
    /* The same secret cannot claim a different harness or session. */
    char mismatch[1024];
    snprintf(mismatch, sizeof(mismatch),
@@ -2473,7 +2612,7 @@ static void test_hook_identity_session_binding(void)
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_identity")),
                  "untrusted") == 0);
    assert(g_client_non_git_workspace == 0);
-   assert(g_policy_session_calls == 2);
+   assert(g_policy_session_calls == 3);
    cJSON_Delete(json);
 
    hook_session_token_registry_reset();

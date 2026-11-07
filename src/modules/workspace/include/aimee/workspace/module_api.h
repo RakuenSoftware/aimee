@@ -69,6 +69,22 @@ static inline int aimee_workspace_request_encode(const char *ref, size_t ref_len
 #define AIMEE_WS_RUNNER_REQUEST_LEN    (8u + AIMEE_WS_RUNNER_PATH_MAX)
 #define AIMEE_WS_RUNNER_RESPONSE_LEN   (8u + AIMEE_WS_RUNNER_ID_MAX)
 
+/* A runner channel: one client's private rendezvous, "runner:" and 32 lowercase
+ * hex digits the client chose. Ops sent on it are run by that client only. */
+#define AIMEE_WS_RUNNER_CHANNEL_PREFIX "runner:"
+#define AIMEE_WS_RUNNER_CHANNEL_LEN    39u
+
+static inline int aimee_ws_runner_channel_valid(const char *id)
+{
+   if (!id || strlen(id) != AIMEE_WS_RUNNER_CHANNEL_LEN ||
+       strncmp(id, AIMEE_WS_RUNNER_CHANNEL_PREFIX, 7) != 0)
+      return 0;
+   for (const char *c = id + 7; *c; ++c)
+      if (!((*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'f')))
+         return 0;
+   return 1;
+}
+
 #define AIMEE_WS_RUNNER_OP_REGISTER   1u
 #define AIMEE_WS_RUNNER_OP_UNREGISTER 2u
 #define AIMEE_WS_RUNNER_OP_RESOLVE    3u

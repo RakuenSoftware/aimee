@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"os"
 	"path/filepath"
 )
@@ -168,7 +168,7 @@ SELECT jsonb_build_object('status','ok','schema_version','1','exported_at',to_ch
 	return json.Marshal(result)
 }
 
-func handleFilteredExport(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleFilteredExport(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	for _, field := range []string{"workspace", "kind", "since"} {
 		if raw, exists := args[field]; exists {
 			var value string
@@ -190,15 +190,15 @@ func handleFilteredExport(options handlerOptions, invocation bus.ModuleInvocatio
 	commandScope(args, &r)
 	encoded, err := json.Marshal(r)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	raw, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

@@ -4,6 +4,7 @@
   "dependencies": [
     "audit",
     "config",
+    "egress",
     "execution-policy",
     "ir",
     "module-runtime",
@@ -31,8 +32,7 @@
     "src/modules/delegates/include/aimee/delegates/delegate_source_authority.h",
     "src/modules/delegates/include/aimee/delegates/delegate_xml_fallback.h",
     "src/modules/delegates/include/aimee/delegates/gw_orch_delegates.h",
-    "src/modules/delegates/include/aimee/delegates/module_api.h",
-    "src/modules/delegates/include/aimee/delegates/panel_provider.h"
+    "src/modules/delegates/include/aimee/delegates/module_api.h"
   ],
   "runtime_toggle": {
     "supported": false
@@ -61,13 +61,12 @@
     "src/modules/delegates/delegate_source_authority.c",
     "src/modules/delegates/delegate_verify.c",
     "src/modules/delegates/delegate_xml_fallback.c",
-    "src/modules/delegates/gw_orch_delegates.c",
-    "src/modules/delegates/panel_provider.c",
-    "src/modules/delegates/module_adapter.c"
+    "src/modules/delegates/gw_orch_delegates.c"
   ],
   "go_sources": [
     "server-go/modules/delegates/delegates.go",
     "server-go/modules/delegates/executor.go",
+    "server-go/modules/delegates/host_executor.go",
     "server-go/modules/delegates/capabilities.go",
     "server-go/modules/delegates/chain.go",
     "server-go/modules/delegates/paths.go",
@@ -111,11 +110,16 @@
     "server-go/modules/delegates/worktreeplan_stage.go",
     "server-go/modules/delegates/launchargs_stage.go",
     "server-go/modules/delegates/containername.go",
-    "server-go/modules/delegates/proxyguard.go"
+    "server-go/modules/delegates/verification_profile.go",
+    "server-go/modules/delegates/verification_executor.go",
+    "server-go/modules/delegates/verification_owner_linux.go",
+    "server-go/modules/delegates/verification_owner_unsupported.go"
   ],
   "go_tests": [
     "server-go/modules/delegates/delegates_test.go",
     "server-go/modules/delegates/executor_test.go",
+    "server-go/modules/delegates/executor_ir_test.go",
+    "server-go/modules/delegates/generic_retirement_test.go",
     "server-go/modules/delegates/executor_roster_test.go",
     "server-go/modules/delegates/capabilities_test.go",
     "server-go/modules/delegates/chain_test.go",
@@ -159,7 +163,11 @@
     "server-go/modules/delegates/worktreeplan_stage_test.go",
     "server-go/modules/delegates/launchargs_stage_test.go",
     "server-go/modules/delegates/containername_test.go",
-    "server-go/modules/delegates/proxyguard_test.go"
+    "server-go/modules/delegates/verification_profile_linux_test.go",
+    "server-go/modules/delegates/verification_executor_contract_linux_test.go",
+    "server-go/modules/delegates/verification_executor_linux_test.go",
+    "server-go/modules/delegates/verification_executor_docker_linux_test.go",
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/parent_lifetime_linux_test.go"
   ],
   "tests": [
     "src/tests/test_aimee_ir_rescue.c",
@@ -175,10 +183,10 @@
     "src/tests/test_delegate_plan.c",
     "src/tests/test_delegate_role.c",
     "src/tests/test_delegate_sandbox_image.c",
-    "src/tests/test_gw_orch_delegates.c",
-    "src/tests/test_panel_provider.c"
+    "src/tests/test_gw_orch_delegates.c"
   ],
   "docs": [
     "docs/modules/delegates.md"
-  ]
+  ],
+  "private_headers": []
 }

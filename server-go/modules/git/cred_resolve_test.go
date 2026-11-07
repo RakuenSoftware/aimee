@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The hash keys the mirror tier's server-side trees, and C derives it too
@@ -114,8 +114,8 @@ func TestHandleCredResolveAnswersBothQuestions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, status := Handle(bus.ModuleInvocation{StageID: StageCredResolve}, request)
-	if status != bus.ModuleStatusOK {
+	body, status := Handle(ring.ModuleInvocation{StageID: StageCredResolve}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	var decoded CredResolveResponse
@@ -138,8 +138,8 @@ func TestHandleCredResolveAnswersBothQuestions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, status = Handle(bus.ModuleInvocation{StageID: StageCredResolve}, request)
-	if status != bus.ModuleStatusOK {
+	body, status = Handle(ring.ModuleInvocation{StageID: StageCredResolve}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	decoded = CredResolveResponse{}
@@ -150,7 +150,7 @@ func TestHandleCredResolveAnswersBothQuestions(t *testing.T) {
 		t.Fatalf("detached must not run here nor name a workspace, got %+v", decoded)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageCredResolve}, []byte("{")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageCredResolve}, []byte("{")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed JSON must be rejected, got %v", status)
 	}
 }

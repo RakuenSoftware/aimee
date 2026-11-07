@@ -1,6 +1,7 @@
 /* audit_worm.c: per-service WORM audit store (SQLite). S0 = store + hash-chain +
  * triggers; S1 = dedicated chain key + MAC checkpoints + verify. See audit_worm.h. */
 #include <limits.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <linux/fs.h> /* FS_IOC_GETFLAGS/SETFLAGS, FS_IMMUTABLE_FL */
 #include <pthread.h>
@@ -214,7 +215,8 @@ static int worm_open_locked_default(void)
          return -1;
       }
       /* Explicit operator recovery creates a separate chain; the damaged
-       * ledger remains untouched. API verification retains historical RED. */
+       * ledger remains untouched. API verification remains RED until restored history independently
+       * verifies. */
       snprintf(path, sizeof path, "%s/audit/worm-recovery-%s.db", aimee_home(), epoch);
    }
    else
@@ -679,6 +681,136 @@ int audit_worm_verify_file(const char *db_path, char *err, size_t errlen)
    int rc = worm_verify_db(db, err, errlen);
    sqlite3_close(db);
    return rc;
+}
+
+/* Recovered history is a separate sealed archive, never the active epoch or
+ * damaged original. Cache only a fully checked file identity: replacing or
+ * modifying the archive invalidates the result, as do SQLite sidecars. */
+static pthread_mutex_t g_history_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct stat g_history_stat, g_history_key_stat;
+static int g_history_cached = 0;
+static int g_history_status = AUDIT_WORM_VERIFY_RED;
+static long g_history_head = 0, g_history_checkpoint = 0;
+
+static int worm_same_file(const struct stat *a, const struct stat *b)
+{
+   return a->st_dev == b->st_dev && a->st_ino == b->st_ino && a->st_size == b->st_size &&
+          a->st_mode == b->st_mode && a->st_mtim.tv_sec == b->st_mtim.tv_sec &&
+          a->st_mtim.tv_nsec == b->st_mtim.tv_nsec && a->st_ctim.tv_sec == b->st_ctim.tv_sec &&
+          a->st_ctim.tv_nsec == b->st_ctim.tv_nsec;
+}
+
+int audit_worm_verify_restored_history(char *err, size_t errlen, long *head, long *checkpoint)
+{
+   if (err && errlen)
+      err[0] = 0;
+   if (head)
+      *head = 0;
+   if (checkpoint)
+      *checkpoint = 0;
+   const char *epoch = getenv("AIMEE_AUDIT_RECOVERY_EPOCH");
+   if (!epoch || !epoch[0] || strlen(epoch) > 64 || strspn(epoch, "0123456789-") != strlen(epoch))
+   {
+      if (err && errlen)
+         snprintf(err, errlen, "no valid recovery epoch for restored history");
+      return AUDIT_WORM_VERIFY_RED;
+   }
+   char path[1024], sidecar[1040], key_path[1024];
+   snprintf(path, sizeof path, "%s/audit/worm-restored-%s.db", aimee_home(), epoch);
+   struct stat before, after, key_before, key_after;
+   sqlite3 *db = NULL;
+   int status = AUDIT_WORM_VERIFY_RED;
+   pthread_mutex_lock(&g_history_mu);
+   if (lstat(path, &before) != 0 || !S_ISREG(before.st_mode) || (before.st_mode & 0222))
+   {
+      if (err && errlen)
+         snprintf(err, errlen, "restored history is absent or not a sealed regular file");
+      goto done;
+   }
+   const char *suffixes[] = {"-wal", "-journal"};
+   for (size_t i = 0; i < sizeof suffixes / sizeof suffixes[0]; i++)
+   {
+      snprintf(sidecar, sizeof sidecar, "%s%s", path, suffixes[i]);
+      if (lstat(sidecar, &after) == 0 || errno != ENOENT)
+      {
+         if (err && errlen)
+            snprintf(err, errlen, "restored history has an unresolved SQLite sidecar");
+         goto done;
+      }
+   }
+   snprintf(key_path, sizeof key_path, "%s/.audit-chain-key", aimee_home());
+   if (lstat(key_path, &key_before) != 0 || !S_ISREG(key_before.st_mode) ||
+       key_before.st_size != 32)
+   {
+      if (err && errlen)
+         snprintf(err, errlen, "historical checkpoint key is unavailable");
+      goto done;
+   }
+   if (g_history_cached && worm_same_file(&before, &g_history_stat) &&
+       worm_same_file(&key_before, &g_history_key_stat))
+   {
+      status = g_history_status;
+      if (head)
+         *head = g_history_head;
+      if (checkpoint)
+         *checkpoint = g_history_checkpoint;
+      goto done;
+   }
+   if (sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOFOLLOW, NULL) != SQLITE_OK)
+      goto done;
+   sqlite3_stmt *q = NULL;
+   int standalone = 0;
+   if (sqlite3_prepare_v2(db, "PRAGMA journal_mode", -1, &q, NULL) == SQLITE_OK &&
+       sqlite3_step(q) == SQLITE_ROW)
+   {
+      const char *mode = (const char *)sqlite3_column_text(q, 0);
+      standalone = mode && strcmp(mode, "delete") == 0;
+   }
+   sqlite3_finalize(q);
+   q = NULL;
+   if (!standalone || worm_verify_db(db, err, errlen) != 0)
+      goto done;
+   long hi = 0, ckpt = 0;
+   if (sqlite3_prepare_v2(db,
+                          "SELECT COALESCE(MAX(seq),0),COALESCE(MAX(CASE WHEN "
+                          "action='chain.checkpoint' THEN seq END),0) FROM audit_event",
+                          -1, &q, NULL) == SQLITE_OK &&
+       sqlite3_step(q) == SQLITE_ROW)
+   {
+      hi = (long)sqlite3_column_int64(q, 0);
+      ckpt = (long)sqlite3_column_int64(q, 1);
+   }
+   sqlite3_finalize(q);
+   if (hi <= 0 || ckpt <= 0 || lstat(path, &after) != 0 || !worm_same_file(&before, &after) ||
+       lstat(key_path, &key_after) != 0 || !worm_same_file(&key_before, &key_after))
+   {
+      if (err && errlen)
+         snprintf(err, errlen,
+                  "restored history is empty, unattested or changed during verification");
+      goto done;
+   }
+   status = ckpt >= hi ? AUDIT_WORM_VERIFY_GREEN : AUDIT_WORM_VERIFY_AMBER;
+   g_history_stat = after;
+   g_history_key_stat = key_after;
+   g_history_status = status;
+   g_history_head = hi;
+   g_history_checkpoint = ckpt;
+   g_history_cached = 1;
+   if (head)
+      *head = hi;
+   if (checkpoint)
+      *checkpoint = ckpt;
+done:
+   if (db)
+      sqlite3_close(db);
+   if (status == AUDIT_WORM_VERIFY_RED)
+   {
+      g_history_cached = 0;
+      if (err && errlen && !err[0])
+         snprintf(err, errlen, "restored history verification failed");
+   }
+   pthread_mutex_unlock(&g_history_mu);
+   return status;
 }
 
 /* Best-effort OS immutability for a sealed segment via the FS immutable flag.

@@ -5,9 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <sys/mman.h>
-#endif
 
 #define RUNTIME_SECRET_MAX       1024
 #define RUNTIME_SECRET_NAME_MAX  128
@@ -35,9 +33,7 @@ static void secret_free(runtime_secret_entry_t *entry)
    if (!entry || !entry->value)
       return;
    runtime_secret_wipe(entry->value, entry->len);
-#ifndef _WIN32
    (void)munlock(entry->value, entry->len + 1);
-#endif
    free(entry->value);
    memset(entry, 0, sizeof(*entry));
 }
@@ -53,11 +49,9 @@ int runtime_secret_store(const char *name, const char *value)
    if (!copy)
       return -1;
    memcpy(copy, value, len + 1);
-#ifndef _WIN32
    (void)mlock(copy, len + 1);
 #ifdef MADV_DONTDUMP
    (void)madvise(copy, len + 1, MADV_DONTDUMP);
-#endif
 #endif
 
    pthread_mutex_lock(&g_lock);
@@ -76,9 +70,7 @@ int runtime_secret_store(const char *name, const char *value)
    {
       pthread_mutex_unlock(&g_lock);
       runtime_secret_wipe(copy, len);
-#ifndef _WIN32
       (void)munlock(copy, len + 1);
-#endif
       free(copy);
       return -1;
    }

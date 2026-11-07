@@ -6,7 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -106,8 +106,8 @@ func exerciseDerivedTextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	}
 	firstCounts := ""
 	for i := 0; i < 2; i++ {
-		r, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "reindex", args)
-		if status != bus.ModuleStatusOK || r["status"] != "ok" || r["rebuilt"] != float64(expected) {
+		r, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "reindex", args)
+		if status != ring.ModuleStatusOK || r["status"] != "ok" || r["rebuilt"] != float64(expected) {
 			t.Fatal(r, status)
 		}
 		if i == 0 {
@@ -148,8 +148,8 @@ func exerciseDerivedTextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	if err != nil || len(summaries) != 0 {
 		t.Fatal("stale summaries survived parent edit", summaries, err)
 	}
-	r, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "reindex", args)
-	if status != bus.ModuleStatusOK || r["status"] != "ok" {
+	r, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "reindex", args)
+	if status != ring.ModuleStatusOK || r["status"] != "ok" {
 		t.Fatal(r, status)
 	}
 	summaries, err = backend.Summaries(ctx, id, 10)
@@ -163,7 +163,7 @@ func exerciseDerivedTextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	if _, err := tx.Exec(ctx, `RESET ROLE; REVOKE INSERT ON memory_chunks FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`); err != nil {
 		t.Fatal(err)
 	}
-	if _, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "reindex", args); status == bus.ModuleStatusOK {
+	if _, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "reindex", args); status == ring.ModuleStatusOK {
 		t.Fatal("rebuild accepted denied chunk write")
 	}
 	if after := counts(); after != before {

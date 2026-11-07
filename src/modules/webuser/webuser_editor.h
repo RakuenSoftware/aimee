@@ -49,6 +49,13 @@ int webuser_editor_reap_idle(long idle_secs);
  * when reaping is disabled). Single-threaded caller. */
 void webuser_editor_reap_tick(void);
 
+/* How often the park loop reaps idle editors while any are running. */
+#define WEBUSER_EDITOR_REAP_EVERY_SECS 30
+
+/* Editors running now. While none are, the park loop has nothing to reap and
+ * sleeps until woken. */
+int webuser_editor_running(void);
+
 /* Configured idle-reap timeout in seconds, from AIMEE_WEBCHAT_EDITOR_IDLE_SECS
  * (default 1800 = 30 min; 0 disables idle reaping; malformed → default). The
  * server's park loop calls webuser_editor_reap_idle(webuser_editor_idle_secs())

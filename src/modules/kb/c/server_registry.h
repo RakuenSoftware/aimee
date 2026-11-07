@@ -27,7 +27,6 @@ typedef struct
    int64_t revocation_generation;
 } kb_store_server_snapshot_t;
 int kb_store_server_registry_list(int64_t, kb_store_server_row_t *, int);
-int kb_store_server_registry_get(int64_t, const char *, kb_store_server_row_t *);
 int kb_store_server_registry_pending(const kb_store_server_pending_t *, char *, size_t);
 int kb_store_server_registry_finalize(const char *, const char *, const char *,
                                       const kb_store_server_cert_identity_t *,
@@ -40,6 +39,4 @@ int kb_store_server_registry_client_match(const char *, int64_t, const char *, c
                                           const char *);
 /* 0 row loaded, 1 authoritative absence, -1 database/protocol failure. */
 int kb_store_server_registry_snapshot(int64_t, const char *, kb_store_server_snapshot_t *);
-int kb_store_management_status_lookup(const char *, const char *, const char *, const char *,
-                                      const char *, int64_t *, char *, size_t);
 #endif

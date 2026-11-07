@@ -4,15 +4,15 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // actionEvidence is an observation for execution policy, not an action permit.
 // It commits the exact retained source set and provider receipt, and is emitted
 // only after a guarded revalidation. The host holds the corresponding owner
 // guards through its durable dispatch decision and releases them afterwards.
-func (s *sourceReleaseState) actionEvidence(entry *sourceReleaseEntry) ([]byte, bus.ModuleStatus) {
-	unavailable := func() ([]byte, bus.ModuleStatus) {
+func (s *sourceReleaseState) actionEvidence(entry *sourceReleaseEntry) ([]byte, ring.ModuleStatus) {
+	unavailable := func() ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("unavailable", "current guarded action evidence unavailable"))
 	}
 	now := time.Now().UTC()

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type publicDiagnostic struct {
@@ -22,7 +22,7 @@ func (args commandArgs) boolean(name string) bool {
 	return json.Unmarshal(args[name], &value) == nil && value
 }
 
-func handleDiagnosticCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleDiagnosticCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	query, ok := args.stringValue("query")
 	if !ok {
 		return commandResult(commandError("invalid_argument", "missing query"))
@@ -50,19 +50,19 @@ func handleDiagnosticCommand(options handlerOptions, invocation bus.ModuleInvoca
 	}
 	encoded, _ := json.Marshal(request)
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInternal || status == bus.ModuleStatusCapabilityAbsent {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInternal || status == ring.ModuleStatusCapabilityAbsent {
 			return commandResult(commandError("unavailable", "memory retrieval unavailable or id missing"))
 		}
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if request.IngressPreview {
 		if !response.PreviewProjection.valid(response.MemoryPreviews) {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		if response.MemoryPreviews == nil {
 			response.MemoryPreviews = []ingressMemoryPreview{}
@@ -87,7 +87,7 @@ func handleDiagnosticCommand(options handlerOptions, invocation bus.ModuleInvoca
 		result := map[string]any{"status": "ok", "memory": map[string]any{"id": m.ID, "tier": m.Tier, "kind": m.Kind, "headline": m.Headline, "content": m.Content}, "score_evidence": p.ScoreEvidence, "ranking_steps": p.RankingSteps, "scores": map[string]any{"lexical": p.Lexical, "semantic": p.Semantic, "entity": p.Entity, "temporal": p.Temporal, "evidence": p.Evidence, "confidence": p.Confidence, "salience": p.Salience, "graph_score": p.GraphScore, "hybrid_total": p.HybridTotal, "blended_total": p.BlendedTotal, "total": p.Total}}
 		output, err := json.Marshal(result)
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return commandResult(map[string]any{"status": "ok", "output": string(output)})
 	}
@@ -203,7 +203,7 @@ func diagnosticTraceRows(diagnostics []Diagnostic, rows []publicDiagnostic) []ma
 	return results
 }
 
-func attachDiagnosticTrace(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs, scope Scope, diagnostics []Diagnostic, rows []publicDiagnostic, result map[string]any) {
+func attachDiagnosticTrace(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs, scope Scope, diagnostics []Diagnostic, rows []publicDiagnostic, result map[string]any) {
 	caller := options.commandContext
 	if caller == nil || !caller.Authenticated {
 		result["trace_status"] = "authenticated actor required"

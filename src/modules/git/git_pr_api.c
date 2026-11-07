@@ -302,8 +302,9 @@ static int gh_get(const gh_ctx_t *cx, const char *path, char **resp)
  * was passed and the local origin/HEAD cache is unset/stale. Returns 0 with buf
  * filled, or -1 — callers must NOT fall back to guessing "main": a repo whose
  * default is e.g. "testing" would get its PR opened against the wrong branch. */
-#define FORGE_STAGE_MAX_BODY   (1024u * 1024u)
-#define FORGE_STAGE_TIMEOUT_MS 25000
+#define FORGE_STAGE_MAX_BODY         (1024u * 1024u)
+#define FORGE_STAGE_TIMEOUT_MS       25000
+#define FORGE_MERGE_STAGE_TIMEOUT_MS 60000
 
 /* Run one forge operation in the git module (bus stage 4,
  * server-go/modules/git/forge_request.go). Which endpoint, which method and
@@ -351,8 +352,9 @@ static cJSON *forge_stage(const gh_ctx_t *cx, const char *op, cJSON *extra)
       }
       cJSON_Delete(extra);
    }
-   return aimee_module_json_call(AIMEE_GIT_EVENT_FORGE_REQUEST, AIMEE_GIT_STAGE_FORGE_REQUEST,
-                                 request, FORGE_STAGE_MAX_BODY, FORGE_STAGE_TIMEOUT_MS, NULL);
+   return aimee_module_json_call(
+       AIMEE_GIT_EVENT_FORGE_REQUEST, AIMEE_GIT_STAGE_FORGE_REQUEST, request, FORGE_STAGE_MAX_BODY,
+       strcmp(op, "pr_merge") == 0 ? FORGE_MERGE_STAGE_TIMEOUT_MS : FORGE_STAGE_TIMEOUT_MS, NULL);
 }
 
 static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
@@ -376,26 +378,6 @@ static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
    cJSON_Delete(reply);
    if (rc != 0)
       buf[0] = '\0';
-   return rc;
-}
-
-int git_pr_default_branch_via_api(const char *principal, const char *repo_dir, char *out,
-                                  size_t out_cap, char *err, size_t errlen)
-{
-   if (out && out_cap)
-      out[0] = '\0';
-   if (err && errlen)
-      err[0] = '\0';
-   gh_ctx_t cx;
-   if (!out || out_cap == 0 || gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
-      return -1;
-   int rc = gh_default_branch(&cx, out, out_cap);
-   gh_ctx_done(&cx);
-   if (rc != 0)
-   {
-      out[0] = '\0';
-      snprintf(err, errlen, "cannot resolve authoritative default branch");
-   }
    return rc;
 }
 
@@ -823,27 +805,6 @@ static void gh_elapsed(const char *started, const char *completed, int completed
       snprintf(out, cap, "%llds", d);
 }
 
-/* GitHub's conclusion vocabulary mapped to the four words gh printed. Anything
- * unrecognised reports "pending" rather than inventing a word: a caller polling
- * for completion keeps polling, which is the safe direction to be wrong in. */
-static const char *gh_check_word(const char *status, const char *conclusion)
-{
-   if (!status || strcmp(status, "completed") != 0)
-      return "pending";
-   if (!conclusion)
-      return "pending";
-   if (strcmp(conclusion, "success") == 0)
-      return "pass";
-   if (strcmp(conclusion, "failure") == 0 || strcmp(conclusion, "timed_out") == 0 ||
-       strcmp(conclusion, "action_required") == 0 || strcmp(conclusion, "startup_failure") == 0 ||
-       strcmp(conclusion, "cancelled") == 0)
-      return "fail";
-   if (strcmp(conclusion, "neutral") == 0 || strcmp(conclusion, "skipped") == 0 ||
-       strcmp(conclusion, "stale") == 0)
-      return "skipping";
-   return "pending";
-}
-
 /* By name, then by url.
  *
  * This is OUR order, not a reproduction of gh's. gh was observed grouping skipped
@@ -926,7 +887,7 @@ int git_pr_checks_via_api_slug(const char *principal, const char *slug, int numb
       memset(row, 0, sizeof(*row));
       snprintf(row->name, sizeof(row->name), "%s", name->valuestring);
       snprintf(row->status, sizeof(row->status), "%s",
-               gh_check_word(status_s, cJSON_IsString(concl) ? concl->valuestring : NULL));
+               git_pr_check_status(status_s, cJSON_IsString(concl) ? concl->valuestring : NULL));
       gh_elapsed(cJSON_IsString(started) ? started->valuestring : NULL,
                  cJSON_IsString(done) ? done->valuestring : NULL,
                  status_s && strcmp(status_s, "completed") == 0, row->elapsed,
@@ -1002,6 +963,50 @@ static void gh_failed_step(const gh_ctx_t *cx, long job_id, char *name, size_t n
    cJSON_Delete(j);
 }
 
+/* Logs share one budget for the whole call. The reply goes back through the
+ * server's loopback relay, which gives up after 30 s and hands the CLI a cut-off
+ * reply ("rpc response too large or malformed"). With a 20 s timeout on each of a
+ * log's two requests, one slow log took the whole answer down: count=2 on PR
+ * #3064 ran 52 s (2026-10-27). A log the budget cannot cover reports as
+ * unavailable; the job and its failed step still come back. */
+#define GH_LOG_BUDGET_MS 20000
+#define GH_LOG_MIN_MS    1000
+
+static int gh_log_timeout_ms(long long deadline_ms)
+{
+   long long left = deadline_ms - util_now_ms();
+   if (left < GH_LOG_MIN_MS)
+      return 0;
+   return left > 10000 ? 10000 : (int)left;
+}
+
+/* The window read ahead of the failing step's end, in multiples of tail_bytes. */
+#define GH_LOG_WINDOW_FACTOR 16
+
+/* Cut a fetched log down to the `tail_bytes` that explain the failure, in place.
+ *
+ * The end of a job log is not where its error is. After the failed step come the
+ * post-job steps (checkout cleanup, service-container logs), and on PR #3064
+ * (2026-10-27) they filled the whole 6000-byte tail, so three failing jobs showed
+ * only Postgres teardown. The failed step ends at the runner's last "##[error]"
+ * line; the tail is taken from there. Blob storage may also ignore Range and send
+ * the whole log (1.9 MB for those eight jobs, which overran the relay), so the
+ * size is bounded here rather than trusted to the request. */
+static char *gh_log_keep_tail(char *body, long tail_bytes)
+{
+   char *end = body + strlen(body);
+   for (char *p = strstr(body, "##[error]"); p; p = strstr(p + 1, "##[error]"))
+   {
+      char *nl = strchr(p, '\n');
+      end = nl ? nl + 1 : body + strlen(body);
+   }
+   *end = '\0';
+   size_t len = (size_t)(end - body);
+   if (len > (size_t)tail_bytes)
+      memmove(body, end - tail_bytes, (size_t)tail_bytes + 1);
+   return body;
+}
+
 /* The last `tail_bytes` of a job's log.
  *
  * Two requests, deliberately. The forge's log endpoint answers 302 to pre-signed
@@ -1010,9 +1015,11 @@ static void gh_failed_step(const gh_ctx_t *cx, long job_id, char *name, size_t n
  * Authorization header, because that would hand the forge token to a third-party
  * host. Range asks for the tail so a multi-megabyte log costs one small read, and
  * the tail is where the error is. Returns malloc'd text, or NULL. */
-static char *gh_job_log_tail(const gh_ctx_t *cx, long job_id, long tail_bytes)
+static char *gh_job_log_tail(const gh_ctx_t *cx, long job_id, long tail_bytes,
+                             long long deadline_ms)
 {
-   if (tail_bytes <= 0)
+   int timeout_ms = gh_log_timeout_ms(deadline_ms);
+   if (tail_bytes <= 0 || timeout_ms <= 0)
       return NULL;
 
    char url[512];
@@ -1027,12 +1034,12 @@ static char *gh_job_log_tail(const gh_ctx_t *cx, long job_id, long tail_bytes)
 
    char location[1024] = "";
    char *body = NULL;
-   int st = agent_http_get_location(url, hdrs, location, sizeof(location), &body, 20000);
+   int st = agent_http_get_location(url, hdrs, location, sizeof(location), &body, timeout_ms);
    wipe(hdrs, sizeof(hdrs));
 
    /* Some deployments answer the log inline instead of redirecting. */
    if (st >= 200 && st < 300 && body && body[0])
-      return body;
+      return gh_log_keep_tail(body, tail_bytes);
    free(body);
    body = NULL;
    if (st < 300 || st >= 400 || !location[0])
@@ -1040,15 +1047,16 @@ static char *gh_job_log_tail(const gh_ctx_t *cx, long job_id, long tail_bytes)
 
    /* Signed URL: Range only. No Authorization — see above. */
    char range[64];
-   snprintf(range, sizeof(range), "Range: bytes=-%ld", tail_bytes);
-   int st2 = agent_http_get(location, range, &body, 20000);
+   snprintf(range, sizeof(range), "Range: bytes=-%ld", tail_bytes * GH_LOG_WINDOW_FACTOR);
+   timeout_ms = gh_log_timeout_ms(deadline_ms);
+   int st2 = timeout_ms > 0 ? agent_http_get(location, range, &body, timeout_ms) : -1;
    wipe(location, sizeof(location));
    if ((st2 != 200 && st2 != 206) || !body)
    {
       free(body);
       return NULL;
    }
-   return body;
+   return gh_log_keep_tail(body, tail_bytes);
 }
 
 int git_pr_failures_via_api_slug(const char *principal, const char *slug, int number, int max,
@@ -1101,6 +1109,7 @@ int git_pr_failures_via_api_slug(const char *principal, const char *slug, int nu
    }
 
    int n = 0;
+   const long long log_deadline_ms = util_now_ms() + GH_LOG_BUDGET_MS;
    const cJSON *r = NULL;
    cJSON_ArrayForEach(r, runs)
    {
@@ -1132,7 +1141,7 @@ int git_pr_failures_via_api_slug(const char *principal, const char *slug, int nu
          gh_failed_step(&cx, job_id, row->failed_step, sizeof(row->failed_step),
                         &row->failed_step_number);
          if (n < logs_for)
-            row->log_tail = gh_job_log_tail(&cx, job_id, tail_bytes);
+            row->log_tail = gh_job_log_tail(&cx, job_id, tail_bytes, log_deadline_ms);
       }
       n++;
    }

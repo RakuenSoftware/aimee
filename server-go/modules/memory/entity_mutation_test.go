@@ -10,38 +10,38 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/audit"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
 func TestEntityMutationBoundary(t *testing.T) {
-	operator := bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "operator:test"}
+	operator := ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "operator:test"}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, nil))
 	for _, op := range []string{"entity-review", "entity-mutate"} {
 		args := `{"operation":"` + op + `","action":"merge","from_id":1,"into_id":2}`
-		if _, status := invokeContextCommand(t, handler, 73, operator, "runtime", args); status != bus.ModuleStatusInvalidRequest {
+		if _, status := invokeContextCommand(t, handler, 73, operator, "runtime", args); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
-		if _, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementServer, nil)), 0, operator, "runtime", args); status != bus.ModuleStatusCapabilityAbsent {
+		if _, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementServer, nil)), 0, operator, "runtime", args); status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal(status)
 		}
 	}
-	for _, caller := range []bus.CommandContext{{}, {Authenticated: true, Principal: "user"}} {
+	for _, caller := range []ring.CommandContext{{}, {Authenticated: true, Principal: "user"}} {
 		r, status := invokeContextCommand(t, handler, 0, caller, "runtime", `{"operation":"entity-review","action":"merge","from_id":1,"into_id":2,"actor":{"rank":40}}`)
-		if status != bus.ModuleStatusOK || r["http_status"] != float64(403) {
+		if status != ring.ModuleStatusOK || r["http_status"] != float64(403) {
 			t.Fatal(r, status)
 		}
 	}
 	for _, id := range []string{`0`, `-1`, `1.5`, `9007199254740992`, `true`, `null`, `"+1"`, `"01"`, `"0"`, `"-1"`, `"9223372036854775808"`, `"1.5"`} {
 		r, status := invokeContextCommand(t, handler, 0, operator, "runtime", `{"operation":"entity-review","action":"merge","from_id":`+id+`,"into_id":2}`)
-		if status != bus.ModuleStatusOK || r["http_status"] != float64(400) {
+		if status != ring.ModuleStatusOK || r["http_status"] != float64(400) {
 			t.Fatal(id, r, status)
 		}
 	}
 	for _, body := range []string{`{"operation":"entity-review","action":"merge","from_id":1,"into_id":1}`, `{"operation":"entity-mutate","action":"unmerge"}`, `{"operation":"entity-mutate","action":"delete"}`} {
 		r, status := invokeContextCommand(t, handler, 0, operator, "runtime", body)
-		if status != bus.ModuleStatusOK || r["http_status"] != float64(400) {
+		if status != ring.ModuleStatusOK || r["http_status"] != float64(400) {
 			t.Fatal(body, r, status)
 		}
 	}
@@ -70,12 +70,12 @@ func exerciseEntityMutationReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	observed := *backend
 	observed.auditAction = func(_ context.Context, a audit.Action) error { observations = append(observations, a); return nil }
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &observed))
-	operator := bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "operator:entity", TransportIdentity: "verified:console"}
+	operator := ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "operator:entity", TransportIdentity: "verified:console"}
 	call := func(op, action string, from, into, mid int64, want int) map[string]json.RawMessage {
 		t.Helper()
 		args, _ := json.Marshal(map[string]any{"operation": op, "action": action, "from_id": strconv.FormatInt(from, 10), "into_id": strconv.FormatInt(into, 10), "merge_id": strconv.FormatInt(mid, 10), "actor": map[string]any{"rank": 40, "principal": "forged"}})
 		out, status := invokeContextCommand(t, handler, 0, operator, "runtime", string(args))
-		if status != bus.ModuleStatusOK || out["http_status"] != float64(want) {
+		if status != ring.ModuleStatusOK || out["http_status"] != float64(want) {
 			t.Fatalf("%s: %v %v", args, out, status)
 		}
 		var result map[string]json.RawMessage

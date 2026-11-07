@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <limits.h>
 #include <stdio.h>
 #include "http_retry.h"
 #include "agent_exec.h"
@@ -230,6 +231,7 @@ typedef struct
    const char *provider, *model;
    char attempt[33];
    void *send_guard_state;
+   int transport_attempts;
 } wire_attempt_t;
 
 extern int ingress_preinject_acquire_send_guard(void **) __attribute__((weak));
@@ -297,9 +299,23 @@ refused:
    return -1;
 }
 
-static void wire_attempt_after(void *opaque, int status, const char *response, size_t length)
+static _Thread_local wire_fence_transport_observer_t transport_observer;
+wire_fence_transport_observer_t
+wire_fence_transport_observer_bind(wire_fence_transport_observer_t observer)
 {
-   wire_attempt_t *attempt = opaque;
+   wire_fence_transport_observer_t previous = transport_observer;
+   transport_observer = observer;
+   return previous;
+}
+static void wire_transport_completed(int status)
+{
+   if (status != HTTP_RETRY_ADMISSION_REFUSED && transport_observer.completed)
+      transport_observer.completed(transport_observer.context, status);
+}
+
+static void wire_attempt_receipt(wire_attempt_t *attempt, int status, const char *response,
+                                 size_t length)
+{
    if (attempt->attempt[0] &&
        (!ingress_preinject_observe_attempt ||
         ingress_preinject_observe_attempt(attempt->attempt, status, response, length) != 0))
@@ -307,11 +323,20 @@ static void wire_attempt_after(void *opaque, int status, const char *response, s
           "provider receipt observation unavailable; admitted attempt outcome remains unresolved\n",
           stderr);
 }
+static void wire_attempt_after(void *opaque, int status, const char *response, size_t length)
+{
+   wire_attempt_t *attempt = opaque;
+   wire_transport_completed(status);
+   if (status != HTTP_RETRY_ADMISSION_REFUSED && attempt->transport_attempts < INT_MAX)
+      attempt->transport_attempts++;
+   wire_attempt_receipt(attempt, status, response, length);
+}
 
-int wire_fence_post(const char *url, const char *auth_header, const void *body, size_t body_len,
-                    char **response_buf, int timeout_ms, const char *extra_headers,
-                    int max_attempts, int base_ms, int max_ms, const char *provider,
-                    const char *model, const char *session_id, wire_fence_route_t route)
+int wire_fence_post_observed(const char *url, const char *auth_header, const void *body,
+                             size_t body_len, char **response_buf, int timeout_ms,
+                             const char *extra_headers, int max_attempts, int base_ms, int max_ms,
+                             const char *provider, const char *model, const char *session_id,
+                             wire_fence_route_t route, wire_fence_observation_t *observation)
 {
    wire_attempt_t attempt = {.route = route, .provider = provider, .model = model};
    agent_http_send_guard_t guard = {.context = &attempt,
@@ -322,9 +347,22 @@ int wire_fence_post(const char *url, const char *auth_header, const void *body, 
                                      .before = wire_attempt_before,
                                      .after = wire_attempt_after,
                                      .send_guard = wire_send_guard_required() ? &guard : NULL};
-   return http_retry_post_observed_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
-                                         extra_headers, max_attempts, base_ms, max_ms, provider,
-                                         model, session_id, NULL, &observer);
+   int status = http_retry_post_observed_bytes(
+       url, auth_header, body, body_len, response_buf, timeout_ms, extra_headers, max_attempts,
+       base_ms, max_ms, provider, model, session_id, NULL, &observer);
+   if (observation)
+      observation->transport_attempts = attempt.transport_attempts;
+   return status;
+}
+
+int wire_fence_post(const char *url, const char *auth_header, const void *body, size_t body_len,
+                    char **response_buf, int timeout_ms, const char *extra_headers,
+                    int max_attempts, int base_ms, int max_ms, const char *provider,
+                    const char *model, const char *session_id, wire_fence_route_t route)
+{
+   return wire_fence_post_observed(url, auth_header, body, body_len, response_buf, timeout_ms,
+                                   extra_headers, max_attempts, base_ms, max_ms, provider, model,
+                                   session_id, route, NULL);
 }
 
 extern int ingress_preinject_observe_commitment(const char *, int, const char *, size_t,
@@ -355,13 +393,17 @@ int wire_fence_post_stream(const char *url, const char *auth_header, const void 
    if (wire_attempt_before(&attempt, body, body_len) != 0)
       return HTTP_RETRY_ADMISSION_REFUSED;
    if (!attempt.attempt[0])
-      return agent_http_post_stream_bytes(url, auth_header, body, body_len, callback, userdata,
-                                          timeout_ms, extra_headers);
+   {
+      int status = agent_http_post_stream_bytes(url, auth_header, body, body_len, callback,
+                                                userdata, timeout_ms, extra_headers);
+      wire_transport_completed(status);
+      return status;
+   }
    wire_stream_t stream = {.digest = EVP_MD_CTX_new(), .callback = callback, .context = userdata};
    if (!stream.digest || EVP_DigestInit_ex(stream.digest, EVP_sha256(), NULL) != 1)
    {
       EVP_MD_CTX_free(stream.digest);
-      wire_attempt_after(&attempt, -1, NULL, 0);
+      wire_attempt_receipt(&attempt, -1, NULL, 0);
       last_error = "unavailable";
       return HTTP_RETRY_ADMISSION_REFUSED;
    }
@@ -376,6 +418,7 @@ int wire_fence_post_stream(const char *url, const char *auth_header, const void 
                                                   extra_headers, &guard)
            : agent_http_post_stream_bytes(url, auth_header, body, body_len, wire_stream_chunk,
                                           &stream, timeout_ms, extra_headers);
+   wire_transport_completed(status);
    unsigned char raw[32];
    unsigned int length = 0;
    char digest[65];

@@ -1,321 +1,131 @@
-/* test_ir_shadow_response.c -- the response-side shadow comparator.
- *
- * aimee_ir_shadow_compare_response parses a provider response through the IR backend
- * parser and records whether it agrees with the legacy translator's
- * parsed_response_t. This is the evidence that must show parity before the response
- * translators can be retired, so the test's job is to prove the comparator actually
- * DISTINGUISHES agreement from each kind of divergence -- not just that it counts a
- * match when handed two identical things. Every mismatch axis is exercised, and each
- * assertion is one the comparator would fail if it stopped checking that axis. */
+/* Native response admission regressions after retirement of the flat shadow.
+ * These use the production codecs and retain the owned response throughout. */
+#include <aimee/translation/aimee_frontend.h>
+#include <aimee/translation/aimee_backend.h>
+#include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "aimee.h" /* MAX_PATH_LEN et al: agent_types.h depends on it */
-
-#include <aimee/ir/aimee_ir_metrics.h>
-#include "aimee_ir_shadow.h"
-#include "agent_protocol.h"
-#include "cJSON.h"
-
-static cJSON *text_resp(const char *text)
+static void refuse_frame(const char *frame, size_t length, aimee_wire_t wire)
 {
-   cJSON *r = cJSON_CreateObject();
-   cJSON_AddStringToObject(r, "stop_reason", "end_turn");
-   cJSON *content = cJSON_AddArrayToObject(r, "content");
-   cJSON *blk = cJSON_CreateObject();
-   cJSON_AddStringToObject(blk, "type", "text");
-   cJSON_AddStringToObject(blk, "text", text);
-   cJSON_AddItemToArray(content, blk);
-   return r;
+   aimee_response_t refused = {0};
+   char error[256] = "";
+   int rc = aimee_backend_parse_wire(frame, length, wire, &refused, error, sizeof error);
+   assert(rc == -1 && !refused.content && !refused.model && !refused.n_content && error[0]);
+   aimee_response_free(&refused);
 }
 
-static cJSON *tool_resp(const char *name, cJSON *input)
+static void roundtrip(aimee_wire_t wire, aimee_stop_reason_t stop)
 {
-   cJSON *r = cJSON_CreateObject();
-   cJSON_AddStringToObject(r, "stop_reason", "tool_use");
-   cJSON *content = cJSON_AddArrayToObject(r, "content");
-   cJSON *blk = cJSON_CreateObject();
-   cJSON_AddStringToObject(blk, "type", "tool_use");
-   cJSON_AddStringToObject(blk, "id", "t1");
-   cJSON_AddStringToObject(blk, "name", name);
-   cJSON_AddItemToObject(blk, "input", input);
-   cJSON_AddItemToArray(content, blk);
-   return r;
+   aimee_response_t expected = {.stop_reason = stop,
+                                .n_content = 41,
+                                .model = strdup("native-model"),
+                                .id = strdup("native-reply"),
+                                .usage_in = 99,
+                                .usage_out = 33,
+                                .usage_cache_read = 22};
+   expected.content = calloc((size_t)expected.n_content, sizeof *expected.content);
+   assert(expected.content);
+   char *text = malloc(20001);
+   assert(text);
+   memset(text, 'x', 20000);
+   memcpy(text, "  exact whitespace\n", 19);
+   text[19999] = '\n';
+   text[20000] = 0;
+   expected.content[0] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = text};
+   for (int i = 1; i < expected.n_content; i++)
+   {
+      char id[512];
+      memset(id, 'z', 400);
+      snprintf(id + 400, sizeof id - 400, "-%d", i);
+      expected.content[i] = (aimee_block_t){
+          .type = AIMEE_BLK_TOOL_USE,
+          .tool_id = strdup(id),
+          .tool_name = strdup("lookup"),
+          .tool_input =
+              cJSON_Parse("{\"query\":\"雪\\nquoted \\\"value\\\"\",\"number\":9007199254740993}")};
+      assert(expected.content[i].tool_input);
+   }
+   cJSON *native = wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_frontend_render(&expected)
+                   : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_frontend_render(&expected)
+                                                    : responses_frontend_render(&expected);
+   assert(native);
+   char *frame = cJSON_PrintUnformatted(native);
+   assert(frame);
+   aimee_response_t actual = {0};
+   char error[256] = "";
+   assert(!aimee_backend_parse_wire(frame, strlen(frame), wire, &actual, error, sizeof error));
+   assert(actual.n_content == 41 && actual.stop_reason == stop);
+   assert(actual.usage_in == 99 && actual.usage_out == 33 && actual.usage_cache_read == 22);
+   assert(actual.model && !strcmp(actual.model, expected.model));
+   assert(actual.content[0].type == AIMEE_BLK_TEXT && !strcmp(actual.content[0].text, text));
+   for (int i = 1; i < actual.n_content; i++)
+   {
+      assert(actual.content[i].type == AIMEE_BLK_TOOL_USE);
+      assert(!strcmp(actual.content[i].tool_id, expected.content[i].tool_id));
+      assert(!strcmp(actual.content[i].tool_name, expected.content[i].tool_name));
+      char *arguments = cJSON_PrintUnformatted(actual.content[i].tool_input);
+      assert(arguments && strstr(arguments, "9007199254740993"));
+      assert(cJSON_Compare(actual.content[i].tool_input, expected.content[i].tool_input, 1));
+      free(arguments);
+   }
+   aimee_response_free(&actual);
+   const char *model_at = strstr(frame, "native-model");
+   assert(model_at);
+   const char *escaped_nul = "before\\u0000after";
+   size_t prefix = (size_t)(model_at - frame), suffix = strlen(model_at + strlen("native-model"));
+   size_t malformed_length = prefix + strlen(escaped_nul) + suffix;
+   char *malformed = malloc(malformed_length + 1);
+   assert(malformed);
+   memcpy(malformed, frame, prefix);
+   memcpy(malformed + prefix, escaped_nul, strlen(escaped_nul));
+   memcpy(malformed + prefix + strlen(escaped_nul), model_at + strlen("native-model"), suffix + 1);
+   refuse_frame(malformed, malformed_length, wire);
+   free(malformed);
+   if (wire == AIMEE_WIRE_RESPONSES && stop == AIMEE_STOP_TOOL_USE)
+   {
+      cJSON *completed = cJSON_CreateObject();
+      assert(completed);
+      cJSON_AddStringToObject(completed, "type", "response.completed");
+      cJSON_AddItemToObject(completed, "response", cJSON_Duplicate(native, 1));
+      char *payload = cJSON_PrintUnformatted(completed);
+      cJSON_Delete(completed);
+      assert(payload);
+      size_t capacity = strlen(payload) + 64;
+      char *sse = malloc(capacity);
+      assert(sse);
+      int bytes = snprintf(sse, capacity, "event: response.completed\ndata: %s\n\n", payload);
+      free(payload);
+      assert(bytes > 0 && (size_t)bytes + 3 < capacity);
+      assert(!aimee_backend_parse_wire(sse, (size_t)bytes, wire, &actual, error, sizeof error));
+      assert(actual.n_content == expected.n_content);
+      aimee_response_free(&actual);
+      sse[bytes] = 0;
+      sse[bytes + 1] = '{';
+      sse[bytes + 2] = '}';
+      /* A valid SSE prefix must not launder an invalid full byte response. */
+      refuse_frame(sse, (size_t)bytes + 3, wire);
+      free(sse);
+   }
+   aimee_response_free(&expected);
+   cJSON_Delete(native);
+   free(frame);
 }
-
-static long mism(void)
-{
-   return aimee_ir_metric_total(AIMEE_IR_M_RESP_MISMATCH);
-}
-static long match(void)
-{
-   return aimee_ir_metric_total(AIMEE_IR_M_RESP_MATCH);
-}
-
 int main(void)
 {
-   /* The comparator is a no-op unless shadow mode is on -- turn it on. */
-   setenv("AIMEE_IR_SHADOW", "1", 1);
-   printf("ir-shadow-response:\n");
-
-   /* 1. Identical text -> match. */
+   for (int wire = AIMEE_WIRE_ANTHROPIC; wire <= AIMEE_WIRE_RESPONSES; wire++)
    {
-      aimee_ir_metrics_reset();
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.content = strdup("hello world");
-      cJSON *r = text_resp("hello world");
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_ANTHROPIC);
-      assert(match() == 1 && mism() == 0);
-      cJSON_Delete(r);
-      free(lg.content);
-      printf("  PASS: identical text counts a match\n");
+      roundtrip((aimee_wire_t)wire, AIMEE_STOP_TOOL_USE);
+      roundtrip((aimee_wire_t)wire, AIMEE_STOP_MAX_TOKENS);
+      aimee_response_t refused = {0};
+      char error[256] = "";
+      assert(aimee_backend_parse_wire("not json", 8, (aimee_wire_t)wire, &refused, error,
+                                      sizeof error));
+      aimee_response_free(&refused);
    }
-
-   /* 2. Different text -> mismatch. If the comparator ignored text, this would be a
-    * false match and parity would look proven when it is not. */
-   {
-      aimee_ir_metrics_reset();
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.content = strdup("hello world");
-      cJSON *r = text_resp("something else entirely");
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_ANTHROPIC);
-      assert(mism() == 1 && match() == 0);
-      cJSON_Delete(r);
-      free(lg.content);
-      printf("  PASS: divergent text counts a mismatch\n");
-   }
-
-   /* 2b. A response longer than the old fixed 8 KB text buffer must still MATCH:
-    * the buffer used to truncate the IR text and every long response was a false
-    * mismatch (legacy full-length vs IR text cut at the cap). */
-   {
-      aimee_ir_metrics_reset();
-      size_t big = 20000;
-      char *longtext = malloc(big + 1);
-      memset(longtext, 'a', big);
-      longtext[big] = '\0';
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.content = strdup(longtext);
-      cJSON *r = text_resp(longtext);
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_ANTHROPIC);
-      assert(match() == 1 && mism() == 0);
-      cJSON_Delete(r);
-      free(lg.content);
-      free(longtext);
-      printf("  PASS: a >8KB response text is a match (no truncation false-positive)\n");
-   }
-
-   /* 3. Whitespace-only difference is NOT a divergence. */
-   {
-      aimee_ir_metrics_reset();
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.content = strdup("  hello world\n");
-      cJSON *r = text_resp("hello world");
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_ANTHROPIC);
-      assert(match() == 1 && mism() == 0);
-      cJSON_Delete(r);
-      free(lg.content);
-      printf("  PASS: trim-only text difference is a match\n");
-   }
-
-   /* 4. Same tool call (name + args) -> match. */
-   {
-      aimee_ir_metrics_reset();
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.is_tool_call = 1;
-      lg.call_count = 1;
-      strncpy(lg.calls[0].name, "bash", sizeof(lg.calls[0].name) - 1);
-      lg.calls[0].arguments = strdup("{\"cmd\":\"ls\"}");
-      cJSON *input = cJSON_CreateObject();
-      cJSON_AddStringToObject(input, "cmd", "ls");
-      cJSON *r = tool_resp("bash", input);
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_ANTHROPIC);
-      assert(match() == 1 && mism() == 0);
-      cJSON_Delete(r);
-      free(lg.calls[0].arguments);
-      printf("  PASS: identical tool call (name+args) counts a match\n");
-   }
-
-   /* 5. Same shape but different tool NAME -> mismatch. */
-   {
-      aimee_ir_metrics_reset();
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.is_tool_call = 1;
-      lg.call_count = 1;
-      strncpy(lg.calls[0].name, "grep", sizeof(lg.calls[0].name) - 1);
-      lg.calls[0].arguments = strdup("{\"cmd\":\"ls\"}");
-      cJSON *input = cJSON_CreateObject();
-      cJSON_AddStringToObject(input, "cmd", "ls");
-      cJSON *r = tool_resp("bash", input);
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_ANTHROPIC);
-      assert(mism() == 1 && match() == 0);
-      cJSON_Delete(r);
-      free(lg.calls[0].arguments);
-      printf("  PASS: differing tool name counts a mismatch\n");
-   }
-
-   /* 6. Same name, different ARGS -> mismatch (semantic, not string). */
-   {
-      aimee_ir_metrics_reset();
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.is_tool_call = 1;
-      lg.call_count = 1;
-      strncpy(lg.calls[0].name, "bash", sizeof(lg.calls[0].name) - 1);
-      lg.calls[0].arguments = strdup("{\"cmd\":\"rm -rf /\"}");
-      cJSON *input = cJSON_CreateObject();
-      cJSON_AddStringToObject(input, "cmd", "ls");
-      cJSON *r = tool_resp("bash", input);
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_ANTHROPIC);
-      assert(mism() == 1 && match() == 0);
-      cJSON_Delete(r);
-      free(lg.calls[0].arguments);
-      printf("  PASS: differing tool arguments counts a mismatch\n");
-   }
-
-   /* 7. Key ORDER in args must NOT read as a divergence (semantic compare). */
-   {
-      aimee_ir_metrics_reset();
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.is_tool_call = 1;
-      lg.call_count = 1;
-      strncpy(lg.calls[0].name, "bash", sizeof(lg.calls[0].name) - 1);
-      lg.calls[0].arguments = strdup("{\"a\":1,\"b\":2}");
-      cJSON *input = cJSON_CreateObject();
-      cJSON_AddNumberToObject(input, "b", 2);
-      cJSON_AddNumberToObject(input, "a", 1);
-      cJSON *r = tool_resp("bash", input);
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_ANTHROPIC);
-      assert(match() == 1 && mism() == 0);
-      cJSON_Delete(r);
-      free(lg.calls[0].arguments);
-      printf("  PASS: argument key order is not a divergence\n");
-   }
-
-   /* 8. text-vs-tool disagreement -> mismatch: legacy says tool, IR sees text. */
-   {
-      aimee_ir_metrics_reset();
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.is_tool_call = 1;
-      lg.call_count = 1;
-      strncpy(lg.calls[0].name, "bash", sizeof(lg.calls[0].name) - 1);
-      lg.calls[0].arguments = strdup("{}");
-      cJSON *r = text_resp("no tool here");
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_ANTHROPIC);
-      assert(mism() == 1 && match() == 0);
-      cJSON_Delete(r);
-      free(lg.calls[0].arguments);
-      printf("  PASS: tool-vs-text disagreement counts a mismatch\n");
-   }
-
-   /* 9. Disabled by default: with the flag off, the comparator records nothing. */
-   {
-      unsetenv("AIMEE_IR_SHADOW");
-      aimee_ir_metrics_reset();
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.content = strdup("hello");
-      cJSON *r = text_resp("hello");
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_ANTHROPIC);
-      assert(match() == 0 && mism() == 0);
-      cJSON_Delete(r);
-      free(lg.content);
-      setenv("AIMEE_IR_SHADOW", "1", 1);
-      printf("  PASS: off unless AIMEE_IR_SHADOW is set\n");
-   }
-
-   /* compare_bodies is SEMANTIC (parsed JSON), not byte-exact: two provider bodies
-    * with the same fields in a different key ORDER are a MATCH -- the provider sees
-    * identical requests, and requiring byte-identical serialization would flag
-    * legitimate ordering differences between the IR and legacy builders. */
-   {
-      aimee_ir_metrics_reset();
-      const char *ir_body = "{\"model\":\"m\",\"max_tokens\":16,\"messages\":[]}";
-      const char *legacy_body = "{\"model\":\"m\",\"messages\":[],\"max_tokens\":16}";
-      aimee_ir_shadow_compare_bodies(ir_body, legacy_body, AIMEE_WIRE_ANTHROPIC);
-      assert(aimee_ir_metric_total(AIMEE_IR_M_BODY_MATCH) == 1);
-      assert(aimee_ir_metric_total(AIMEE_IR_M_BODY_MISMATCH) == 0);
-      printf("  PASS: reordered keys are a body MATCH (semantic, not byte-exact)\n");
-   }
-
-   /* But a genuine divergence -- a field one side has and the other omits (exactly
-    * the temperature-default gap the shadow caught) -- is still a MISMATCH. */
-   {
-      aimee_ir_metrics_reset();
-      const char *ir_body = "{\"model\":\"m\",\"max_tokens\":16}";
-      const char *legacy_body = "{\"model\":\"m\",\"max_tokens\":16,\"temperature\":1.0}";
-      aimee_ir_shadow_compare_bodies(ir_body, legacy_body, AIMEE_WIRE_ANTHROPIC);
-      assert(aimee_ir_metric_total(AIMEE_IR_M_BODY_MISMATCH) == 1);
-      assert(aimee_ir_metric_total(AIMEE_IR_M_BODY_MATCH) == 0);
-      printf("  PASS: a missing/extra field is still a body MISMATCH\n");
-   }
-
-   /* A NULL body (the IR could not build it) is a divergence, not a skip. */
-   {
-      aimee_ir_metrics_reset();
-      aimee_ir_shadow_compare_bodies(NULL, "{\"model\":\"m\"}", AIMEE_WIRE_ANTHROPIC);
-      assert(aimee_ir_metric_total(AIMEE_IR_M_BODY_MISMATCH) == 1);
-      printf("  PASS: a NULL body counts as a mismatch\n");
-   }
-
-   /* Responses/codex wire (AIMEE_WIRE_RESPONSES): the caller hands the response
-    * OBJECT extracted from the SSE. A message with output_text matches legacy text. */
-   {
-      aimee_ir_metrics_reset();
-      cJSON *r = cJSON_CreateObject();
-      cJSON *output = cJSON_AddArrayToObject(r, "output");
-      cJSON *msg = cJSON_CreateObject();
-      cJSON_AddStringToObject(msg, "type", "message");
-      cJSON *content = cJSON_AddArrayToObject(msg, "content");
-      cJSON *part = cJSON_CreateObject();
-      cJSON_AddStringToObject(part, "type", "output_text");
-      cJSON_AddStringToObject(part, "text", "hello there");
-      cJSON_AddItemToArray(content, part);
-      cJSON_AddItemToArray(output, msg);
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.content = strdup("hello there");
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_RESPONSES);
-      assert(match() == 1 && mism() == 0);
-      cJSON_Delete(r);
-      free(lg.content);
-      printf("  PASS: responses/codex wire text matches (parity extended to SSE wire)\n");
-   }
-
-   /* Responses wire, function_call: name + args must agree with the legacy call. */
-   {
-      aimee_ir_metrics_reset();
-      cJSON *r = cJSON_CreateObject();
-      cJSON *output = cJSON_AddArrayToObject(r, "output");
-      cJSON *fc = cJSON_CreateObject();
-      cJSON_AddStringToObject(fc, "type", "function_call");
-      cJSON_AddStringToObject(fc, "name", "bash");
-      cJSON_AddStringToObject(fc, "arguments", "{\"cmd\":\"ls\"}");
-      cJSON_AddStringToObject(fc, "call_id", "c1");
-      cJSON_AddItemToArray(output, fc);
-      parsed_response_t lg;
-      memset(&lg, 0, sizeof(lg));
-      lg.is_tool_call = 1;
-      lg.call_count = 1;
-      strncpy(lg.calls[0].name, "bash", sizeof(lg.calls[0].name) - 1);
-      lg.calls[0].arguments = strdup("{\"cmd\":\"ls\"}");
-      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_RESPONSES);
-      assert(match() == 1 && mism() == 0);
-      cJSON_Delete(r);
-      free(lg.calls[0].arguments);
-      printf("  PASS: responses/codex wire function_call matches\n");
-   }
-
-   printf("ir-shadow-response: ok\n");
+   puts("native response codecs: long text/IDs, dynamic tools, exact arguments, usage and stop "
+        "reasons passed");
    return 0;
 }

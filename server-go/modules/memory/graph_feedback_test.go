@@ -6,7 +6,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -122,15 +122,15 @@ func exerciseGraphFeedbackReplay(t *testing.T, ctx context.Context, tx pgx.Tx, b
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &s))
 	path := []GraphPathEntry{{Node: "symbol:credit:visible", Relation: "defines", Hop: 1}, {Node: "credit:second", Relation: "calls", Hop: 2}}
 	args := map[string]any{"operation": "feedback-path", "path": path, "success": true, "scope_context": true, "project": "credit-project"}
-	call := func(peer uint32) (map[string]any, bus.ModuleStatus) {
+	call := func(peer uint32) (map[string]any, ring.ModuleStatus) {
 		t.Helper()
 		raw, _ := json.Marshal(args)
-		return invokeContextCommand(t, handler, peer, bus.CommandContext{}, "runtime", string(raw))
+		return invokeContextCommand(t, handler, peer, ring.CommandContext{}, "runtime", string(raw))
 	}
-	if _, status := call(200); status != bus.ModuleStatusInvalidRequest {
+	if _, status := call(200); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("public path injection", status)
 	}
-	if r, status := call(0); status != bus.ModuleStatusOK || r["updated"] != true {
+	if r, status := call(0); status != ring.ModuleStatusOK || r["updated"] != true {
 		t.Fatal(r, status)
 	}
 	value := func(source, relation string) float64 {
@@ -148,7 +148,7 @@ func exerciseGraphFeedbackReplay(t *testing.T, ctx context.Context, tx pgx.Tx, b
 		t.Fatal("semantic mutation bypass", v)
 	}
 	args["path"] = []GraphPathEntry{{Node: "symbol:credit:hidden", Relation: "calls", Hop: 1}}
-	if r, status := call(0); status != bus.ModuleStatusOK || r["updated"] != true {
+	if r, status := call(0); status != ring.ModuleStatusOK || r["updated"] != true {
 		t.Fatal(r, status)
 	}
 	if v := value("symbol:credit:hidden", "calls"); v != 0 {
@@ -156,7 +156,7 @@ func exerciseGraphFeedbackReplay(t *testing.T, ctx context.Context, tx pgx.Tx, b
 	}
 	args["path"] = path
 	args["success"] = false
-	if r, status := call(0); status != bus.ModuleStatusOK || r["updated"] != true {
+	if r, status := call(0); status != ring.ModuleStatusOK || r["updated"] != true {
 		t.Fatal(r, status)
 	}
 	if v := value("symbol:credit:visible", "calls"); math.Abs(v) > 1e-9 {
@@ -164,7 +164,7 @@ func exerciseGraphFeedbackReplay(t *testing.T, ctx context.Context, tx pgx.Tx, b
 	}
 	sql(`UPDATE entity_edges SET utility_score=5 WHERE source='symbol:credit:visible' AND relation='calls'`)
 	args["success"] = true
-	if _, status := call(0); status != bus.ModuleStatusOK {
+	if _, status := call(0); status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
 	if v := value("symbol:credit:visible", "calls"); v != 5 {

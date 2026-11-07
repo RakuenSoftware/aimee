@@ -33,6 +33,7 @@ extern "C"
       OPENAI_RUN_COMPLETED,
       OPENAI_RUN_CANCELLED,
       OPENAI_RUN_FAILED,
+      OPENAI_RUN_INCOMPLETE,
    } openai_run_status_t;
 
    /* Canonical lowercase wire string for a status ("queued", "in_progress",
@@ -63,6 +64,10 @@ extern "C"
     * the initial GET snapshot. Returns 1 on success, 0 if run_id/run_json is
     * empty or a record with run_id already exists. */
    int openai_runs_store_create(const char *run_id, const char *run_json);
+   /* Production records have an attested owner. The unowned constructor above
+    * remains for isolated fixtures. -1 missing, 0 foreign, 1 owner/unowned. */
+   int openai_runs_store_create_owned(const char *run_id, const char *run_json, const char *owner);
+   int openai_runs_store_access(const char *run_id, const char *owner);
 
    /* Replace the GET snapshot (the JSON returned by GET /v1/runs/{id}) without
     * changing status. The worker calls this when it has reshaped the run object

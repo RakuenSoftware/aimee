@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -98,16 +98,16 @@ func TestCorrectionProposalRuntimeReplay(t *testing.T) {
 	}
 	exec("SELECT 1")
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
-	user := bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "user:proposal-review", TransportIdentity: "cert:operator"}
-	model := bus.CommandContext{Authenticated: true, Principal: "model:proposal-writer", TransportIdentity: "cert:model"}
-	invoke := func(caller bus.CommandContext, verb string, args map[string]any) map[string]any {
+	user := ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "user:proposal-review", TransportIdentity: "cert:operator"}
+	model := ring.CommandContext{Authenticated: true, Principal: "model:proposal-writer", TransportIdentity: "cert:model"}
+	invoke := func(caller ring.CommandContext, verb string, args map[string]any) map[string]any {
 		t.Helper()
 		raw, e := json.Marshal(args)
 		if e != nil {
 			t.Fatal(e)
 		}
 		out, status := invokeContextCommand(t, handler, 0, caller, verb, string(raw))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(verb, status, out)
 		}
 		return out
@@ -377,7 +377,7 @@ func TestCorrectionProposalConcurrentReview(t *testing.T) {
 			if e = create.Commit(ctx); e != nil {
 				t.Fatal(e)
 			}
-			caller := &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "user:concurrent-review", TransportIdentity: "cert:review"}
+			caller := &ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "user:concurrent-review", TransportIdentity: "cert:review"}
 			request := correctionReviewRequest{ProposalID: p.ID, Digest: p.Digest, Expected: p.Target, Action: "approve"}
 			a, e := first.Begin(ctx)
 			if e != nil {

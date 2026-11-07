@@ -464,17 +464,6 @@ func (m *Metadata) request(operation string, a object) (object, error) {
 		return object{"model": object{"context_window": m.contextWindow(id)}}, nil
 	case "metadata.refresh":
 		return object{"status": "ok", "count": len(m.entries), "message": "model metadata refreshed"}, nil
-	case "metadata.detect":
-		return object{"status": "ok", "provider": m.detectProvider(str(a, "model"))}, nil
-	case "metadata.alias":
-		v := m.alias(str(a, "name"))
-		return object{"status": "ok", "model": v}, nil
-	case "metadata.aliases":
-		out := []object{}
-		for _, row := range m.aliases {
-			out = append(out, object{"provider": row[1], "model": row[2]})
-		}
-		return object{"status": "ok", "models": out, "count": len(out)}, nil
 	case "metadata.list":
 		required := flag(str(a, "capability"))
 		if str(a, "capability") != "" && required == 0 {
@@ -497,7 +486,7 @@ func (m *Metadata) request(operation string, a object) (object, error) {
 			}
 		}
 		return object{"status": "ok", "models": out, "count": total}, nil
-	default:
+	case "metadata.show", "metadata.max_output":
 		provider, id := str(a, "provider"), str(a, "model")
 		if ref := str(a, "name"); ref != "" {
 			if alias := m.alias(ref); alias != nil {
@@ -515,6 +504,8 @@ func (m *Metadata) request(operation string, a object) (object, error) {
 			return nil, errors.New("model required")
 		}
 		return object{"status": "ok", "model": m.lookup(provider, id)}, nil
+	default:
+		return nil, fmt.Errorf("unknown metadata operation %q", operation)
 	}
 }
 

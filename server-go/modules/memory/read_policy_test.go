@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestMemoryReadPolicyRejectsUnimplementedSemantics(t *testing.T) {
@@ -28,11 +28,11 @@ func TestMemoryReadPolicyRejectsUnimplementedSemantics(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// No datastore: validation must precede any read or mutation.
-			raw, status := handleData(handlerOptions{placement: tc.placement}, bus.ModuleInvocation{}, dataRequest(t, DataRequest{
+			raw, status := handleData(handlerOptions{placement: tc.placement}, ring.ModuleInvocation{}, dataRequest(t, DataRequest{
 				Operation: tc.operation, ID: 42, AsOf: tc.asOf, ReadPolicy: &tc.policy,
 			}))
 			var got DataResponse
-			if status != bus.ModuleStatusOK || json.Unmarshal(raw, &got) != nil || got.Read == nil || got.Read.ErrorCode != tc.want || len(got.Records) != 0 {
+			if status != ring.ModuleStatusOK || json.Unmarshal(raw, &got) != nil || got.Read == nil || got.Read.ErrorCode != tc.want || len(got.Records) != 0 {
 				t.Fatalf("status=%v response=%s", status, raw)
 			}
 		})

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/audit"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -20,7 +20,7 @@ func TestMutationAuditFields(t *testing.T) {
 	secret := "DO-NOT-PUBLISH-alice@example.com"
 	req := DataRequest{Operation: "insert-epistemic", Key: secret, Content: secret, Reason: secret, SessionID: "session\n1"}
 	response := DataResponse{Records: []Record{{ID: math.MaxInt64, Tier: "L2", Kind: "fact", Key: secret, Content: secret, Confidence: .88}}}
-	a, ok := mutationAudit(req, response, bus.ModuleStatusOK)
+	a, ok := mutationAudit(req, response, ring.ModuleStatusOK)
 	if !ok || a.Tool != "memory.insert" || a.TaskID != math.MaxInt64 || a.Mode != "L2" || a.Reason != "conf=0.88" || a.Verdict != "ok" || !strings.HasPrefix(a.Command, "mk:") || len(a.Command) != 15 {
 		t.Fatal(a, ok)
 	}
@@ -35,11 +35,11 @@ func TestMutationAuditFields(t *testing.T) {
 	other := response
 	other.Records = append([]Record(nil), response.Records...)
 	other.Records[0].Key = secret + "-other"
-	b, _ := mutationAudit(req, other, bus.ModuleStatusOK)
+	b, _ := mutationAudit(req, other, ring.ModuleStatusOK)
 	if a.Command == b.Command {
 		t.Fatal("fingerprint collision")
 	}
-	failed, _ := mutationAudit(req, response, bus.ModuleStatusInternal)
+	failed, _ := mutationAudit(req, response, ring.ModuleStatusInternal)
 	if failed.Verdict != "fail" || failed.TaskID != 0 || failed.Command != "" || failed.Mode != "" {
 		t.Fatal("uncommitted row leaked", failed)
 	}
@@ -55,15 +55,15 @@ func TestMutationAuditFields(t *testing.T) {
 		{"reject", DataResponse{Updated: true}, "ok", 42}, {"restore", DataResponse{}, "fail", 42},
 		{"delete-as", DataResponse{Deleted: true}, "ok", 42}, {"delete", DataResponse{}, "fail", 42},
 	} {
-		got, ok := mutationAudit(DataRequest{Operation: c.operation, ID: 42}, c.response, bus.ModuleStatusOK)
+		got, ok := mutationAudit(DataRequest{Operation: c.operation, ID: 42}, c.response, ring.ModuleStatusOK)
 		if !ok || got.Verdict != c.want || got.TaskID != c.id {
 			t.Fatal(c, got)
 		}
 	}
-	if _, ok := mutationAudit(DataRequest{Operation: "supersede"}, DataResponse{Records: response.Records, MutationReceipt: &MemoryMutationReceipt{Replayed: true}}, bus.ModuleStatusOK); ok {
+	if _, ok := mutationAudit(DataRequest{Operation: "supersede"}, DataResponse{Records: response.Records, MutationReceipt: &MemoryMutationReceipt{Replayed: true}}, ring.ModuleStatusOK); ok {
 		t.Fatal("idempotent replay counted as a new mutation")
 	}
-	if _, ok := mutationAudit(DataRequest{Operation: "get"}, DataResponse{}, bus.ModuleStatusOK); ok {
+	if _, ok := mutationAudit(DataRequest{Operation: "get"}, DataResponse{}, ring.ModuleStatusOK); ok {
 		t.Fatal("read emitted mutation")
 	}
 }
@@ -80,7 +80,7 @@ func TestMutationAuditDeliveryFailureIsVisibleAndContentFree(t *testing.T) {
 			t.Fatal("unbounded delivery")
 		}
 		return errors.New("transport message containing SENSITIVE-DETAIL")
-	}, DataRequest{Operation: "delete", ID: 42}, DataResponse{Deleted: true}, bus.ModuleStatusOK)
+	}, DataRequest{Operation: "delete", ID: 42}, DataResponse{Deleted: true}, ring.ModuleStatusOK)
 	if calls != 1 || !strings.Contains(logs.String(), "memory.delete id=42 delivery failed") || strings.Contains(logs.String(), "SENSITIVE") {
 		t.Fatal(calls, logs.String())
 	}
@@ -113,11 +113,11 @@ func exerciseMutationAuditReplay(t *testing.T, ctx context.Context, tx pgx.Tx, b
 	}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &observed))
 	client := clientForHandler(t, handler)
-	caller := bus.CommandContext{Authenticated: true, Principal: "operator:audit", UserAuthority: true, TransportIdentity: "cert:audit"}
+	caller := ring.CommandContext{Authenticated: true, Principal: "operator:audit", UserAuthority: true, TransportIdentity: "cert:audit"}
 	call := func(verb, args string) map[string]any {
 		t.Helper()
 		r, status := invokeContextCommand(t, handler, 0, caller, verb, args)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status)
 		}
 		return r

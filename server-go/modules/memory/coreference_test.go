@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -108,8 +108,8 @@ func exerciseCoreferenceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	args := `{"scope_context":true,"project":"coref-visible"}`
 	call := func() {
 		t.Helper()
-		r, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "reindex", args)
-		if status != bus.ModuleStatusOK || r["status"] != "ok" {
+		r, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "reindex", args)
+		if status != ring.ModuleStatusOK || r["status"] != "ok" {
 			t.Fatal(r, status)
 		}
 	}
@@ -184,7 +184,7 @@ func exerciseCoreferenceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	if _, err := tx.Exec(ctx, `RESET ROLE; REVOKE INSERT ON memory_coref_audit FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`); err != nil {
 		t.Fatal(err)
 	}
-	if _, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "reindex", args); status == bus.ModuleStatusOK {
+	if _, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "reindex", args); status == ring.ModuleStatusOK {
 		t.Fatal("accepted denied coreference audit")
 	}
 	check(target, "alice", "bound")

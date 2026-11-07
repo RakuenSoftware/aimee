@@ -41,7 +41,7 @@ static int header_token(const char *start, const char *end, const char *token)
    return 0;
 }
 
-static int response_headers_parse(aimee_core_http1_response_t *response)
+int aimee_core_http1_headers_parse(aimee_core_http1_response_t *response, int allow_chunked)
 {
    const char *data = response->data;
    const char *headers_end = data + response->header_length - 2;
@@ -78,7 +78,12 @@ static int response_headers_parse(aimee_core_http1_response_t *response)
          value++;
       if (name_length == sizeof("transfer-encoding") - 1 &&
           ascii_equal_ci(line, "transfer-encoding", name_length))
-         return -1;
+      {
+         if (!allow_chunked || response->transfer_chunked || (size_t)(next - value) != 7 ||
+             !ascii_equal_ci(value, "chunked", 7))
+            return -1;
+         response->transfer_chunked = 1;
+      }
       if (name_length == sizeof("content-length") - 1 &&
           ascii_equal_ci(line, "content-length", name_length))
       {
@@ -99,7 +104,7 @@ static int response_headers_parse(aimee_core_http1_response_t *response)
          response->connection_close = 1;
       line = next + 2;
    }
-   return 0;
+   return response->transfer_chunked && response->has_content_length ? -1 : 0;
 }
 
 static int buffer_grow(char **buffer, size_t *capacity, size_t required, size_t maximum)
@@ -164,7 +169,8 @@ int aimee_core_http1_response_read(const aimee_core_http1_io_t *io, size_t heade
             response->data = buffer;
             response->length = length;
             response->header_length = (size_t)(terminator + 4 - buffer);
-            if (response->header_length > header_max || response_headers_parse(response) != 0 ||
+            if (response->header_length > header_max ||
+                aimee_core_http1_headers_parse(response, 0) != 0 ||
                 (require_content_length && !response->has_content_length) ||
                 (response->has_content_length &&
                  response->content_length > response_max - response->header_length))

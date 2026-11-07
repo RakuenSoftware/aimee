@@ -374,12 +374,24 @@ static int revoke_step(const kb_principal_t *caller, int64_t team_id,
 {
    char actor[576], op[128], receipt[KB_STORE_VAULT_ROTATION_REF_MAX + 1] = "";
    int64_t token = 0;
-   if (!row->old_vendor_ref[0] || operation_key(row->id, "revoke-old", op) != 0 ||
+   if (operation_key(row->id, "revoke-old", op) != 0 ||
        claim(caller, team_id, row->id, "activated", owner, ttl, &token, actor) != 0)
       return KB_VAULT_OP_RETRY;
-   rotation_lease_ctx_t lease_ctx = {caller, team_id, row->id, owner, token, ttl};
-   kb_vault_rotation_lease_t lease = lease_for(&lease_ctx);
-   int rc = provider->revoke(ctx, op, row, &lease, row->old_vendor_ref, receipt, sizeof(receipt));
+   int rc;
+   if (!row->old_vendor_ref[0])
+   {
+      /* The driver checkpoints the old reference before it stages anything, so
+       * an activated rotation without one was adopted (or bootstrapped by hand):
+       * its predecessor was never a vendor credential, and nothing is revoked. */
+      snprintf(receipt, sizeof(receipt), "no-predecessor");
+      rc = KB_VAULT_OP_OK;
+   }
+   else
+   {
+      rotation_lease_ctx_t lease_ctx = {caller, team_id, row->id, owner, token, ttl};
+      kb_vault_rotation_lease_t lease = lease_for(&lease_ctx);
+      rc = provider->revoke(ctx, op, row, &lease, row->old_vendor_ref, receipt, sizeof(receipt));
+   }
    if (rc != KB_VAULT_OP_OK || !bounded_string(receipt, sizeof(receipt)))
    {
       release_best_effort(caller, team_id, row->id, owner, token);
@@ -462,7 +474,15 @@ int kb_vault_rotation_ops_remediate(const kb_principal_t *caller, int64_t team_i
    rotation_lease_ctx_t lease_ctx = {caller, team_id, rotation_id, owner, token, ttl_seconds};
    kb_vault_rotation_lease_t lease = lease_for(&lease_ctx);
    int rc;
-   if (row.new_vendor_ref[0])
+   if (!row.old_vendor_ref[0] && !row.new_vendor_ref[0])
+   {
+      /* provision_step checkpoints the old reference before the vendor is asked
+       * for anything, so with neither reference recorded nothing was vendored
+       * (an adoption, or a provision that never resolved): nothing to revoke. */
+      snprintf(evidence, sizeof(evidence), "nothing-vendored");
+      rc = KB_VAULT_OP_OK;
+   }
+   else if (row.new_vendor_ref[0])
    {
       rc = provider.revoke(ctx, revoke_op, &row, &lease, row.new_vendor_ref, evidence,
                            sizeof(evidence));

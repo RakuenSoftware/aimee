@@ -32,8 +32,7 @@ model invocation, persistence, and artifact acceptance. Production `aimee-kb` sh
 `kb_curator_grounding.c`, batches an unbounded structural call graph into the bounded 64-callee wire
 contract, and calls the process only through its local event bus. A missing module, malformed response,
 or transport failure rolls back the artifact transaction and retries the extraction; there is no local
-grounding-policy fallback. The C `module_adapter.c` remains a process-parity fixture only and is not a
-second curator worker.
+grounding-policy fallback.
 
 ## Dependencies and consumers
 

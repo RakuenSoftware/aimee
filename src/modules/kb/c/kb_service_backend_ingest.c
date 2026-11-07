@@ -428,37 +428,3 @@ int kb_store_kb_file_index_delete_current_project(const char *project)
    aimee_pg_finalize(s);
    return rc == AIMEE_PG_DONE ? deleted : -1;
 }
-
-cJSON *kb_store_kb_file_index_snapshot_json(const char *project)
-{
-   void *conn = kb_store_conn();
-   if (!conn || !project || !project[0])
-      return cJSON_CreateArray();
-
-   char proj[256];
-   kb_store_kb_resolve_project(project, proj, sizeof(proj));
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *s =
-       aimee_pg_prepare(conn,
-                        "SELECT k.file_path,k.file_hash,k.ingested_at FROM kb_file_index k"
-                        " JOIN projects p ON p.name=k.project WHERE k.project=?1"
-                        " AND p.lifecycle_state='current' AND k.generation=p.current_generation",
-                        err, sizeof(err));
-   if (!s)
-      return cJSON_CreateArray();
-
-   aimee_pg_bind_text(s, "?1", proj);
-
-   cJSON *arr = cJSON_CreateArray();
-   while (aimee_pg_step(s, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      cJSON *entry = cJSON_CreateObject();
-      cJSON_AddStringToObject(entry, "rel_path", col_text_or_empty(s, 0));
-      cJSON_AddStringToObject(entry, "hash", col_text_or_empty(s, 1));
-      cJSON_AddStringToObject(entry, "ingested_at", col_text_or_empty(s, 2));
-      cJSON_AddItemToArray(arr, entry);
-   }
-   aimee_pg_finalize(s);
-   return arr;
-}

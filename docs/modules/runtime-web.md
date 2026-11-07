@@ -20,8 +20,7 @@ and unclassified faults as `502 Bad Gateway`. The server obtains that decision t
 and includes the returned status in the existing error envelope. The physical `aimee-runtime-web`
 provider consumes the status without importing or reimplementing the classification policy; a missing
 or invalid status remains a generic `502 Bad Gateway`. Listener, TLS, authentication, sessions, route
-dispatch, proxy I/O, and assets remain in the physical provider; the C `module_adapter.c` exists only
-as a wire-parity fixture.
+dispatch, proxy I/O, and assets remain in the physical provider.
 
 ## Dependencies and consumers
 

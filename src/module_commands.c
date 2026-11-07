@@ -4,7 +4,7 @@
 #endif
 
 #include "headers/module_commands.h"
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 
 #include "aimee/audit/obs_bus.h"
 #include "aimee_sha256.h"
@@ -65,7 +65,7 @@
 #define INVOKE_RESPONSE_MAGIC  0x53504d43u /* "CMPS" */
 #define INVOKE_REQUEST_HEADER  16u
 #define INVOKE_RESPONSE_HEADER 12u
-#define INVOKE_MAX_RESPONSE    AIMEE_MODULE_MESSAGE_MAX_BODY
+#define INVOKE_MAX_RESPONSE    OURO_MODULE_MESSAGE_MAX_BODY
 #define INVOKE_TIMEOUT_MS      60000
 
 /* One registered command's owned backing.
@@ -208,7 +208,7 @@ static cJSON *command_call_timeout(uint32_t event_kind, uint32_t stage_id, const
    size_t header_len = context ? 20 : INVOKE_REQUEST_HEADER;
    size_t verb_len = strlen(verb);
    size_t request_len = header_len + verb_len + args_len + context_len;
-   if (request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || context_len > 4096)
+   if (request_len > OURO_MODULE_MESSAGE_MAX_BODY || context_len > 4096)
    {
       free(context_json);
       free(args_json);
@@ -243,15 +243,14 @@ static cJSON *command_call_timeout(uint32_t event_kind, uint32_t stage_id, const
       return NULL;
    }
    uint32_t response_len = 0;
-   aimee_module_call_result_t rc = obs_bus_module_call(
+   ouro_module_call_result_t rc = obs_bus_module_call(
        event_kind, stage_id, 0, aimee_module_call_deadline_ns(timeout_ms), request,
        (uint32_t)request_len, response, INVOKE_MAX_RESPONSE, &response_len, NULL, NULL);
    free(request);
 
-   if (rc != AIMEE_MODULE_CALL_OK)
+   if (rc != OURO_MODULE_CALL_OK)
    {
-      LOG_WARN("commands", "command %s: invoke failed: %s", verb,
-               aimee_module_call_result_name(rc));
+      LOG_WARN("commands", "command %s: invoke failed: %s", verb, ouro_module_call_result_name(rc));
       free(response);
       return NULL;
    }
@@ -294,6 +293,15 @@ static cJSON *command_call_timeout(uint32_t event_kind, uint32_t stage_id, const
    }
    free(body);
    return parsed;
+}
+
+cJSON *aimee_module_command_call_context_timeout(uint32_t event_kind, uint32_t stage_id,
+                                                 const char *verb, const cJSON *args,
+                                                 const cJSON *context, int timeout_ms)
+{
+   return timeout_ms > 0
+              ? command_call_timeout(event_kind, stage_id, verb, args, context, timeout_ms, 0)
+              : NULL;
 }
 
 cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id, const char *verb,
@@ -463,20 +471,30 @@ static int admit_pending(uint32_t declare_kind, const char *module_id, const uns
    if (!ack)
       return 0;
    uint32_t out_len = 0;
-   aimee_module_call_result_t rc = obs_bus_module_call(
+   ouro_module_call_result_t rc = obs_bus_module_call(
        declare_kind, AIMEE_PLUGIN_STAGE_DECLARE, 0, aimee_module_call_deadline_ns(60000), request,
        sizeof request, ack, DECL_MAX_RESPONSE, &out_len, NULL, NULL);
    free(ack);
-   if (rc != AIMEE_MODULE_CALL_OK)
+   if (rc != OURO_MODULE_CALL_OK)
    {
       LOG_WARN("commands", "module %s: admission verdict not delivered: %s", module_id,
-               aimee_module_call_result_name(rc));
+               ouro_module_call_result_name(rc));
       return 0;
    }
    LOG_INFO("commands", "module %s: plugin %s by the OSV gate", module_id,
             blocked ? "REFUSED" : "admitted");
    return 1;
 }
+
+/* Weak so unit binaries that stub the bus without it link; with no fingerprint
+ * the registry falls back to its time-to-live alone. */
+uint64_t obs_bus_slot_fingerprint(void) __attribute__((weak));
+
+static uint64_t g_last_collect_ms;
+/* The bus's slot fingerprint when the registry was last collected, and whether
+ * some module failed to answer then (so the next refresh asks again). */
+static uint64_t g_last_collect_fingerprint;
+static int g_collect_incomplete;
 
 static int collect_one(uint32_t declare_kind, uint32_t declare_stage, uint32_t invoke_kind,
                        uint32_t version, const char *module_id, aimee_plugin_state_t *state_out,
@@ -498,19 +516,20 @@ static int collect_one(uint32_t declare_kind, uint32_t declare_stage, uint32_t i
     * and the second is the declaration that follows it. One retry only -- a
     * module that keeps asking is misbehaving, and looping would spin the gate. */
    int rounds = 0;
-   aimee_module_call_result_t rc;
+   ouro_module_call_result_t rc;
    for (;;)
    {
       response_len = 0;
       rc = obs_bus_module_call(declare_kind, declare_stage, 0, aimee_module_call_deadline_ns(5000),
                                request, sizeof request, response, DECL_MAX_RESPONSE, &response_len,
                                NULL, NULL);
-      if (rc != AIMEE_MODULE_CALL_OK)
+      if (rc != OURO_MODULE_CALL_OK)
       {
+         g_collect_incomplete = 1; /* ask this module again on the next refresh */
          LOG_WARN("commands", "module %s declaration failed: %s", module_id,
-                  aimee_module_call_result_name(rc));
+                  ouro_module_call_result_name(rc));
          if (err_out)
-            snprintf(err_out, err_cap, "declaration failed: %s", aimee_module_call_result_name(rc));
+            snprintf(err_out, err_cap, "declaration failed: %s", ouro_module_call_result_name(rc));
          free(response);
          return -1;
       }
@@ -802,7 +821,6 @@ static uint64_t now_ms(void)
    return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
 }
 
-static uint64_t g_last_collect_ms;
 static pthread_mutex_t g_collect_lock = PTHREAD_MUTEX_INITIALIZER;
 
 int aimee_module_commands_refresh(int ttl_ms)
@@ -811,13 +829,27 @@ int aimee_module_commands_refresh(int ttl_ms)
       ttl_ms = 0;
    pthread_mutex_lock(&g_collect_lock);
    uint64_t now = now_ms();
+   /* What modules declare can only change when one attaches or leaves. While
+    * that has not happened and the last collection heard from every module, the
+    * registry is current: asking every module again -- which this used to do
+    * every two seconds of tool traffic -- would only return the same answer.
+    * ttl_ms still paces retries after a collection some module did not answer. */
+   uint64_t fingerprint = obs_bus_slot_fingerprint ? obs_bus_slot_fingerprint() : 0;
+   if (g_last_collect_ms != 0 && fingerprint != 0 && fingerprint == g_last_collect_fingerprint &&
+       !g_collect_incomplete)
+   {
+      pthread_mutex_unlock(&g_collect_lock);
+      return 0;
+   }
    if (now != 0 && g_last_collect_ms != 0 && now - g_last_collect_ms < (uint64_t)ttl_ms)
    {
       pthread_mutex_unlock(&g_collect_lock);
       return 0;
    }
+   g_collect_incomplete = 0;
    int registered = aimee_module_commands_collect();
    g_last_collect_ms = now;
+   g_last_collect_fingerprint = fingerprint;
    pthread_mutex_unlock(&g_collect_lock);
    return registered;
 }

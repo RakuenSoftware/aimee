@@ -6,14 +6,14 @@ import (
 	"math"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Public prospective commands retain the KB envelopes. Request fields are
 // selected explicitly; a public caller cannot inject a data operation or scope.
-func handleProspectiveCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleProspectiveCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{Operation: strings.ReplaceAll(verb, "_", "-"), IncludeAll: true}
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	nativeLimit, err := nativeRecallLimit(args)
@@ -67,19 +67,19 @@ func handleProspectiveCommand(options handlerOptions, invocation bus.ModuleInvoc
 	case "prospective_sweep_expired":
 		request.Operation = "prospective-sweep"
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	result := map[string]any{"status": "ok"}
 	switch verb {
@@ -89,7 +89,7 @@ func handleProspectiveCommand(options handlerOptions, invocation bus.ModuleInvoc
 			encoded, _ := json.Marshal(item)
 			var row map[string]json.RawMessage
 			if json.Unmarshal(encoded, &row) != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			// The established public envelope does not expose the internal session.
 			delete(row, "source_session")
@@ -119,12 +119,12 @@ func handleProspectiveCommand(options handlerOptions, invocation bus.ModuleInvoc
 			result["block"] = block.String()
 		case "prospective_dashboard":
 			data, status := handleData(options, invocation, []byte(`{"operation":"prospective-count","include_all":true}`))
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				return nil, status
 			}
 			var counts DataResponse
 			if json.Unmarshal(data, &counts) != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			for _, row := range rows {
 				delete(row, "updated_at")
@@ -137,7 +137,7 @@ func handleProspectiveCommand(options handlerOptions, invocation bus.ModuleInvoc
 					"expired_since_start": metrics.Expired, "match_calls_since_start": metrics.Calls, "match_ms_avg": metrics.AverageMS, "match_ms_max": metrics.MaximumMS}}
 		case "prospective_create":
 			if len(rows) != 1 {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			result["prospective"] = rows[0]
 		case "prospective_list":

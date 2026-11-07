@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestTracePatterns(t *testing.T) {
@@ -88,7 +88,7 @@ func TestTracePatternHostBoundary(t *testing.T) {
 			args := commandArgs{}
 			json.Unmarshal([]byte(input), &args)
 			encoded, status := handleTracePatterns(args)
-			if status != bus.ModuleStatusOK || !strings.Contains(string(encoded), `invalid_argument`) {
+			if status != ring.ModuleStatusOK || !strings.Contains(string(encoded), `invalid_argument`) {
 				t.Fatal(input, string(encoded), status)
 			}
 		}
@@ -96,8 +96,8 @@ func TestTracePatternHostBoundary(t *testing.T) {
 		if result["status"] != "ok" || len(result["patterns"].([]any)) != 0 {
 			t.Fatal(result)
 		}
-		frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"trace-patterns","traces":[]}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 9}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"trace-patterns","traces":[]}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 9}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("peer admitted", status)
 		}
 		// Full tool names/results survive Go transport, including error evidence
@@ -124,7 +124,7 @@ func TestTracePatternCapacityAndRefusal(t *testing.T) {
 	} {
 		raw, _ := json.Marshal(rows)
 		encoded, status := handleTracePatterns(commandArgs{"traces": raw})
-		if status != bus.ModuleStatusOK || !strings.Contains(string(encoded), "invalid_argument") || strings.Contains(string(encoded), `"patterns"`) {
+		if status != ring.ModuleStatusOK || !strings.Contains(string(encoded), "invalid_argument") || strings.Contains(string(encoded), `"patterns"`) {
 			t.Fatal(string(encoded), status)
 		}
 	}

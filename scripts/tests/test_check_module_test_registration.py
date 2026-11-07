@@ -23,7 +23,7 @@ class RegistrationTests(unittest.TestCase):
     def repo(self) -> tempfile.TemporaryDirectory[str]:
         tmp = tempfile.TemporaryDirectory()
         root = Path(tmp.name)
-        for relative in (checker.CMAKE_TESTS, checker.MAKE_RULES, checker.BASELINE):
+        for relative in (checker.MAKE_RULES, checker.BASELINE):
             target = root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO_ROOT / relative, target)
@@ -45,171 +45,41 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual(report, checker.report(REPO_ROOT))
 
     def test_known_registration_facts(self) -> None:
-        """The exact facts slices 35 and 36 originally got wrong."""
+        """Tests CTest alone used to register now register under Make."""
         rows = {(r["module"], Path(r["test"]).stem): r for r in checker.report(REPO_ROOT)["tests"]}
-        self.assertTrue(rows[("module-runtime", "test_plugin_c_hook")]["ctest"])
-
-    def test_ctest_registration_is_read_from_the_test_subdirectory(self) -> None:
-        """The original audit error was reading only the top-level CMakeLists.txt."""
-        sources = checker.ctest_sources(REPO_ROOT)
-        self.assertIn("src/tests/test_plugin_c_hook.c", sources)
-
-    def test_registration_is_bound_to_the_source_not_the_target_name(self) -> None:
-        """Re-pointing a registered target at another source must count as drift."""
-        tmp = self.repo()
-        try:
-            root = Path(tmp.name)
-            path = root / checker.CMAKE_TESTS
-            path.write_text(
-                path.read_text(encoding="utf-8").replace(
-                    "aimee_add_test(test_plugin_c_hook test_plugin_c_hook.c)",
-                    "aimee_add_test(test_plugin_c_hook test_something_else.c)",
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_plugin_c_hook"):
-                checker.check(root)
-        finally:
-            tmp.cleanup()
+        for key in (("audit", "test_audit_action"), ("git", "test_git_org_repos")):
+            with self.subTest(key=key):
+                self.assertTrue(rows[key]["make"])
+                self.assertEqual(set(rows[key]), {"module", "test", "make"})
 
     def test_same_basename_in_another_directory_is_not_the_declared_source(self) -> None:
-        """Source identity is the path, not the basename."""
+        """Source identity is the path under src/tests, not the basename."""
         tmp = self.repo()
         try:
             root = Path(tmp.name)
-            path = root / checker.CMAKE_TESTS
+            path = root / checker.MAKE_RULES
             path.write_text(
                 path.read_text(encoding="utf-8").replace(
-                    "aimee_add_test(test_plugin_c_hook test_plugin_c_hook.c)",
-                    "aimee_add_test(test_plugin_c_hook ../other/test_plugin_c_hook.c)",
+                    "$(OBJDIR)/tests/test_gateway_policy.o", "$(OBJDIR)/other/test_gateway_policy.o"
                 ),
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_plugin_c_hook"):
+            with self.assertRaisesRegex(checker.RegistrationError, "test_gateway_policy"):
                 checker.check(root)
         finally:
             tmp.cleanup()
 
-    def test_a_bracket_commented_source_does_not_count(self) -> None:
-        """CMake bracket comments span lines; their contents are not arguments."""
-        for opener, closer in (("#[[", "]]"), ("#[=[", "]=]")):
-            tmp = self.repo()
-            try:
-                root = Path(tmp.name)
-                path = root / checker.CMAKE_TESTS
-                path.write_text(
-                    path.read_text(encoding="utf-8").replace(
-                        "aimee_add_test(test_plugin_c_hook test_plugin_c_hook.c)",
-                        f"aimee_add_test(test_plugin_c_hook\n"
-                        f"    {opener}\n    test_plugin_c_hook.c\n    {closer}\n"
-                        f"    test_something_else.c)",
-                    ),
-                    encoding="utf-8",
-                )
-                with self.subTest(opener=opener), self.assertRaisesRegex(
-                    checker.RegistrationError, "test_plugin_c_hook"
-                ):
-                    checker.check(root)
-            finally:
-                tmp.cleanup()
-
-    def test_a_commented_out_source_does_not_count(self) -> None:
+    def test_adding_a_make_registration_fails(self) -> None:
         tmp = self.repo()
         try:
             root = Path(tmp.name)
-            path = root / checker.CMAKE_TESTS
-            path.write_text(
-                path.read_text(encoding="utf-8").replace(
-                    "aimee_add_test(test_plugin_c_hook test_plugin_c_hook.c)",
-                    "aimee_add_test(test_plugin_c_hook\n"
-                    "    # test_plugin_c_hook.c\n"
-                    "    test_something_else.c)",
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_plugin_c_hook"):
-                checker.check(root)
-        finally:
-            tmp.cleanup()
-
-    def test_a_case_running_another_target_binds_to_that_target(self) -> None:
-        """add_test COMMAND names the target; the case name need not match it."""
-        tmp = self.repo()
-        try:
-            root = Path(tmp.name)
-            path = root / checker.CMAKE_TESTS
+            path = root / checker.MAKE_RULES
             path.write_text(
                 path.read_text(encoding="utf-8")
-                + "\nadd_executable(audit_worm_bin test_audit_worm.c)\n"
-                + "add_test(NAME unrelated_case COMMAND audit_worm_bin)\n",
+                + "\nunit-test-x: $(OBJDIR)/tests/test_postgres_local_session.o\n",
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_audit_worm.c"):
-                checker.check(root)
-        finally:
-            tmp.cleanup()
-
-    def test_an_executable_without_add_test_is_not_registered(self) -> None:
-        """Building a test binary is not registering it as a CTest case."""
-        tmp = self.repo()
-        try:
-            root = Path(tmp.name)
-            path = root / checker.CMAKE_TESTS
-            path.write_text(
-                path.read_text(encoding="utf-8") + "\nadd_executable(test_audit_worm test_audit_worm.c)\n",
-                encoding="utf-8",
-            )
-            checker.check(root)
-            path.write_text(
-                path.read_text(encoding="utf-8")
-                + "add_test(NAME test_audit_worm COMMAND test_audit_worm)\n",
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_audit_worm"):
-                checker.check(root)
-        finally:
-            tmp.cleanup()
-
-    def test_unbalanced_call_is_a_closed_error(self) -> None:
-        tmp = self.repo()
-        try:
-            root = Path(tmp.name)
-            path = root / checker.CMAKE_TESTS
-            path.write_text(
-                path.read_text(encoding="utf-8") + "\nadd_executable(broken broken.c\n",
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(checker.RegistrationError, "unbalanced"):
-                checker.check(root)
-        finally:
-            tmp.cleanup()
-
-    def test_dropping_a_ctest_registration_fails(self) -> None:
-        tmp = self.repo()
-        try:
-            root = Path(tmp.name)
-            path = root / checker.CMAKE_TESTS
-            path.write_text(
-                path.read_text(encoding="utf-8").replace(
-                    "aimee_add_test(test_plugin_c_hook test_plugin_c_hook.c)", ""
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(checker.RegistrationError, "drifted"):
-                checker.check(root)
-        finally:
-            tmp.cleanup()
-
-    def test_adding_a_ctest_registration_fails(self) -> None:
-        tmp = self.repo()
-        try:
-            root = Path(tmp.name)
-            path = root / checker.CMAKE_TESTS
-            path.write_text(
-                path.read_text(encoding="utf-8") + "\naimee_add_test(test_audit_worm test_audit_worm.c)\n",
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_audit_worm"):
+            with self.assertRaisesRegex(checker.RegistrationError, "test_postgres_local_session"):
                 checker.check(root)
         finally:
             tmp.cleanup()
@@ -260,7 +130,7 @@ class RegistrationTests(unittest.TestCase):
         tmp = self.repo()
         try:
             root = Path(tmp.name)
-            (root / checker.CMAKE_TESTS).unlink()
+            (root / checker.MAKE_RULES).unlink()
             with self.assertRaisesRegex(checker.RegistrationError, "cannot read"):
                 checker.check(root)
         finally:

@@ -1,3 +1,5 @@
+#include <aimee/core/codec/base64.h>
+#include <limits.h>
 /* vault_store.c: the 0600 per-principal file substrate for the credential vault
  * (WP-C.1). Stores only ciphertext (envelope per vault_crypto). The filename is
  * the URL-safe base64 of the principal so an attacker-influenced webuser name
@@ -52,78 +54,32 @@ static void remove_cred(cJSON *creds, cJSON *entry)
    }
 }
 
-/* ── URL-safe base64 (no padding), binary-safe ───────────────────────────── */
-static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
-/* Encode len bytes into a malloc'd NUL-terminated string (caller frees), or NULL
- * on OOM. */
+/* Vault records keep their historical unpadded URL decoding profile. */
 static char *b64url_encode(const uint8_t *in, size_t len)
 {
-   size_t olen = (len + 2) / 3 * 4;
-   char *out = malloc(olen + 1);
+   size_t capacity = aimee_codec_base64_capacity(len, AIMEE_BASE64_URL), written = 0;
+   if (!capacity)
+      return NULL;
+   char *out = malloc(capacity);
    if (!out)
       return NULL;
-   size_t o = 0;
-   for (size_t i = 0; i < len;)
+   if (!aimee_codec_base64_encode(in, len, out, capacity, AIMEE_BASE64_URL, &written))
    {
-      uint32_t a = in[i++];
-      uint32_t b = i < len ? in[i++] : 0;
-      uint32_t c = i < len ? in[i++] : 0;
-      uint32_t triple = (a << 16) | (b << 8) | c;
-      out[o++] = B64[(triple >> 18) & 0x3f];
-      out[o++] = B64[(triple >> 12) & 0x3f];
-      out[o++] = B64[(triple >> 6) & 0x3f];
-      out[o++] = B64[triple & 0x3f];
+      free(out);
+      return NULL;
    }
-   /* Trim the padding chars implied by the input length (no '=' in url-safe). */
-   size_t rem = len % 3;
-   if (rem == 1)
-      o -= 2;
-   else if (rem == 2)
-      o -= 1;
-   out[o] = '\0';
    return out;
 }
 
-static int b64_val(char c)
-{
-   if (c >= 'A' && c <= 'Z')
-      return c - 'A';
-   if (c >= 'a' && c <= 'z')
-      return c - 'a' + 26;
-   if (c >= '0' && c <= '9')
-      return c - '0' + 52;
-   if (c == '-')
-      return 62;
-   if (c == '_')
-      return 63;
-   return -1;
-}
-
-/* Decode into out (size out_cap). Returns the decoded byte count, or -1 on
- * malformed input / overflow. */
 static int b64url_decode(const char *in, uint8_t *out, size_t out_cap)
 {
-   size_t ilen = strlen(in);
-   size_t o = 0;
-   uint32_t acc = 0;
-   int bits = 0;
-   for (size_t i = 0; i < ilen; i++)
-   {
-      int v = b64_val(in[i]);
-      if (v < 0)
-         return -1;
-      acc = (acc << 6) | (uint32_t)v;
-      bits += 6;
-      if (bits >= 8)
-      {
-         bits -= 8;
-         if (o >= out_cap)
-            return -1;
-         out[o++] = (uint8_t)((acc >> bits) & 0xff);
-      }
-   }
-   return (int)o;
+   size_t written = 0;
+   if (!in ||
+       !aimee_codec_base64_decode(in, strlen(in), out, out_cap, AIMEE_BASE64_URL_COMPAT,
+                                  &written) ||
+       written > INT_MAX)
+      return -1;
+   return (int)written;
 }
 
 /* ── Vault file path ──────────────────────────────────────────────────────── */
@@ -394,42 +350,20 @@ static int add_b64_field(cJSON *obj, const char *name, const uint8_t *bin, size_
    char *enc = b64url_encode(bin, len);
    if (!enc)
       return -1;
-   cJSON_AddStringToObject(obj, name, enc);
+   int rc = cJSON_AddStringToObject(obj, name, enc) ? 0 : -1;
    free(enc);
-   return 0;
+   return rc;
 }
 
 /* Shared set implementation. `kek` (user wrap) and `server_kek` (server wrap,
  * "wrapped_dek_server", WP-C.4 dual-access) are each optional, but at least one
  * must be present: kek-only = vault_store_set, both = _set_dual, server_kek-only
  * = _set_server (a server-readable cred set with no user KEK / unlock). */
-static int vault_store_set_impl(const char *principal, const uint8_t *kek,
-                                const uint8_t *server_kek, const char *agent, const char *cred,
-                                const char *secret, int only_if_absent)
+static int vault_stage_credential(cJSON *root, const char *principal, const uint8_t *kek,
+                                  const uint8_t *server_kek, const char *agent, const char *cred,
+                                  const char *secret)
 {
-   if (!principal || (!kek && !server_kek) || !agent || !agent[0] || !cred || !cred[0] || !secret)
-      return -1;
    size_t pt_len = strlen(secret);
-   if (pt_len > VAULT_SECRET_MAX)
-      return -1;
-
-   int lock_fd = vault_write_lock();
-   if (lock_fd < 0)
-      return -1;
-   cJSON *root = load_vault(principal);
-   if (!root) /* must be unlocked/created first */
-   {
-      vault_write_unlock(lock_fd);
-      return -1;
-   }
-
-   if (only_if_absent && find_cred(root, agent, cred))
-   {
-      cJSON_Delete(root);
-      vault_write_unlock(lock_fd);
-      return -1;
-   }
-
    int rc = -1;
    uint8_t dek[VAULT_DEK_LEN] = {0};
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], wrapped_server[VAULT_WRAPPED_DEK_LEN],
@@ -464,9 +398,9 @@ static int vault_store_set_impl(const char *principal, const uint8_t *kek,
       cJSON *obj = cJSON_CreateObject();
       if (!obj)
          goto out;
-      cJSON_AddStringToObject(obj, "agent", agent);
-      cJSON_AddStringToObject(obj, "cred", cred);
-      if ((kek && add_b64_field(obj, "wrapped_dek", wrapped, sizeof(wrapped)) != 0) ||
+      if (!cJSON_AddStringToObject(obj, "agent", agent) ||
+          !cJSON_AddStringToObject(obj, "cred", cred) ||
+          (kek && add_b64_field(obj, "wrapped_dek", wrapped, sizeof(wrapped)) != 0) ||
           add_b64_field(obj, "nonce", nonce, sizeof(nonce)) != 0 ||
           add_b64_field(obj, "ciphertext", ct, pt_len) != 0 ||
           add_b64_field(obj, "tag", tag, sizeof(tag)) != 0 ||
@@ -476,9 +410,13 @@ static int vault_store_set_impl(const char *principal, const uint8_t *kek,
          cJSON_Delete(obj);
          goto out;
       }
-      cJSON_AddItemToArray(creds, obj);
+      if (!cJSON_AddItemToArray(creds, obj))
+      {
+         cJSON_Delete(obj);
+         goto out;
+      }
    }
-   rc = write_vault_file(principal, root);
+   rc = 0;
 
 out:
    OPENSSL_cleanse(dek, sizeof(dek));
@@ -488,6 +426,38 @@ out:
          OPENSSL_cleanse(ct, pt_len);
       free(ct);
    }
+   return rc;
+}
+
+static int vault_store_set_impl(const char *principal, const uint8_t *kek,
+                                const uint8_t *server_kek, const char *agent, const char *cred,
+                                const char *secret, int only_if_absent)
+{
+   if (!principal || (!kek && !server_kek) || !agent || !agent[0] || !cred || !cred[0] || !secret)
+      return -1;
+   if (strlen(secret) > VAULT_SECRET_MAX)
+      return -1;
+
+   int lock_fd = vault_write_lock();
+   if (lock_fd < 0)
+      return -1;
+   cJSON *root = load_vault(principal);
+   if (!root) /* must be unlocked/created first */
+   {
+      vault_write_unlock(lock_fd);
+      return -1;
+   }
+
+   if (only_if_absent && find_cred(root, agent, cred))
+   {
+      cJSON_Delete(root);
+      vault_write_unlock(lock_fd);
+      return -1;
+   }
+
+   int rc = vault_stage_credential(root, principal, kek, server_kek, agent, cred, secret);
+   if (!rc)
+      rc = write_vault_file(principal, root);
    cJSON_Delete(root);
    vault_write_unlock(lock_fd);
    return rc;
@@ -519,18 +489,10 @@ static int jsonfile_set_server(void *ctx, const char *principal,
    return vault_store_set_impl(principal, NULL, server_kek, agent, cred, secret, 0);
 }
 
-static int jsonfile_get(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN],
-                        const char *agent, const char *cred, char *out, size_t out_len)
+static int jsonfile_get_from_snapshot(cJSON *root, const char *principal,
+                                      const uint8_t kek[VAULT_KEK_LEN], const char *agent,
+                                      const char *cred, char *out, size_t out_len)
 {
-   if (out && out_len)
-      out[0] = '\0';
-   if (!principal || !kek || !agent || !cred || !out || !out_len)
-      return -1;
-
-   cJSON *root = load_vault(principal);
-   if (!root)
-      return vault_file_missing(principal) ? VAULT_STORE_NO_ENTRY : -1;
-
    int rc = -1;
    uint8_t dek[VAULT_DEK_LEN] = {0};
    uint8_t *pt = NULL;
@@ -595,6 +557,22 @@ out:
    }
    if (rc != 0 && out && out_len)
       OPENSSL_cleanse(out, out_len);
+   return rc;
+}
+
+static int jsonfile_get(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                        const char *agent, const char *cred, char *out, size_t out_len)
+{
+   if (out && out_len)
+      out[0] = '\0';
+   if (!principal || !kek || !agent || !cred || !out || !out_len)
+      return -1;
+
+   cJSON *root = load_vault(principal);
+   if (!root)
+      return vault_file_missing(principal) ? VAULT_STORE_NO_ENTRY : -1;
+
+   int rc = jsonfile_get_from_snapshot(root, principal, kek, agent, cred, out, out_len);
    cJSON_Delete(root);
    return rc;
 }
@@ -1199,6 +1177,101 @@ int vault_store_add_server_wraps(const char *principal, const uint8_t user_kek[V
 {
    const vault_store_backend_t *backend = store_for(principal);
    return backend->add_server_wraps(backend->ctx, principal, user_kek, server_kek);
+}
+
+int vault_store_write_batch(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                            const char *agent, const vault_store_write_t *writes, size_t count)
+{
+   if (!principal || !principal[0] || !kek || !agent || !agent[0] || !writes || !count ||
+       count > 16)
+      return -1;
+   for (size_t i = 0; i < count; i++)
+   {
+      if (!writes[i].credential || !writes[i].credential[0] ||
+          (writes[i].secret && strlen(writes[i].secret) > VAULT_SECRET_MAX))
+         return -1;
+      for (size_t j = 0; j < i; j++)
+         if (!strcmp(writes[i].credential, writes[j].credential))
+            return -1;
+   }
+   if (store_for(principal) != &jsonfile_backend)
+      return VAULT_STORE_BATCH_UNSUPPORTED;
+   int lock_fd = vault_write_lock();
+   if (lock_fd < 0)
+      return -1;
+   cJSON *root = load_vault(principal);
+   int rc = -1;
+   if (!root)
+      goto done;
+   for (size_t i = 0; i < count; i++)
+   {
+      if (writes[i].secret)
+      {
+         if (vault_stage_credential(root, principal, kek, NULL, agent, writes[i].credential,
+                                    writes[i].secret))
+            goto done;
+      }
+      else
+      {
+         cJSON *creds = creds_array(root);
+         if (!creds)
+            goto done;
+         remove_cred(creds, find_cred(root, agent, writes[i].credential));
+      }
+   }
+   rc = write_vault_file(principal, root);
+done:
+   cJSON_Delete(root);
+   vault_write_unlock(lock_fd);
+   return rc;
+}
+
+int vault_store_read_snapshot(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                              const char *agent, vault_store_read_t *reads, size_t count)
+{
+   if (!reads || !count || count > 16)
+      return -1;
+   int valid = principal && kek && agent;
+   for (size_t i = 0; i < count; i++)
+   {
+      reads[i].present = 0;
+      if (reads[i].value && reads[i].capacity)
+         OPENSSL_cleanse(reads[i].value, reads[i].capacity);
+      else
+         valid = 0;
+      if (!reads[i].credential || !reads[i].credential[0])
+         valid = 0;
+   }
+   if (!valid)
+      return -1;
+   /* Server instance credentials use this local file owner even when tenant
+    * secrets use another backend. Never emulate atomicity with separate reads. */
+   if (store_for(principal) != &jsonfile_backend)
+      return VAULT_STORE_SNAPSHOT_UNSUPPORTED;
+   cJSON *root = load_vault(principal);
+   if (!root)
+      return vault_file_missing(principal) ? 0 : -1;
+   int rc = 0;
+   for (size_t i = 0; i < count; i++)
+   {
+      int read_rc = jsonfile_get_from_snapshot(root, principal, kek, agent, reads[i].credential,
+                                               reads[i].value, reads[i].capacity);
+      if (read_rc == 0)
+         reads[i].present = 1;
+      else if (read_rc != VAULT_STORE_NO_ENTRY)
+      {
+         rc = -1;
+         break;
+      }
+   }
+   cJSON_Delete(root);
+   if (rc)
+      for (size_t i = 0; i < count; i++)
+      {
+         OPENSSL_cleanse(reads[i].value, reads[i].capacity);
+         reads[i].present = 0;
+      }
+   return rc;
 }
 
 int vault_store_get(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,

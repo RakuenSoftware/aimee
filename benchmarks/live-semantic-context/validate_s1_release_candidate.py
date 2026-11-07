@@ -22,6 +22,10 @@ import sys
 import tempfile
 from typing import Any
 
+# The ring's include flag, relative or absolute, for any installation under the
+# build tree's deps/ouroboros-ring.
+RING_INCLUDE_FLAG = re.compile(r"-I\S*deps/ouroboros-ring/\S*")
+
 
 ROOT = Path(__file__).resolve().parents[2]
 CANDIDATE_BASE = "cccb1490560810a3da92691f381f9ab59040bb7c"
@@ -92,6 +96,19 @@ def build_files_match(candidate_commit: str) -> bool:
     if any(p.is_file() for p in (ROOT / "src/modules/memory/include").rglob("*")):
         return False
     candidate[0] = candidate[0].replace(" -Imodules/memory/include", "")
+    # Oct 29: the dead roadmap dispatch loop and its module directory were
+    # removed; roadmap.h, its one header, moved to src/kb. The probe includes
+    # nothing from it. Remove only that obsolete flag, and only while the
+    # directory is truly gone.
+    if (ROOT / "src/modules/roadmap").exists():
+        return False
+    candidate[0] = candidate[0].replace(" -Imodules/roadmap", "")
+    # Oct 29: the aimee-gateway delivery binary and src/gateway were retired.
+    # The probe includes nothing from it. Remove only that obsolete test
+    # include flag, and only while the directory is truly gone.
+    if (ROOT / "src/gateway").exists():
+        return False
+    candidate[1] = candidate[1].replace(" -Igateway", "")
     # KB_STORE retirement relocates the same knowledge headers and removes libpq
     # from native linking. This SQLite-backed probe has no PostgreSQL calls.
     # Normalize only those two reviewed changes; retain every other build input.
@@ -102,8 +119,55 @@ def build_files_match(candidate_commit: str) -> bool:
     # a platform-specific -L directory as well as -lpq. Do not discard other
     # linker directories or libraries from either expanded command.
     candidate[0] = candidate[0].replace(" $(PQ_LIB)", "")
+    # Oct 18 cleanup: the platform facade moved byte-for-byte, and the probe's
+    # existing util wrappers now link the portable Base64 archive. Model the
+    # exact added include paths, archive rule and dependency in the frozen build;
+    # compare every other command/flag/input as before (no Makefile exemption).
+    candidate[0] = candidate[0].replace("posix/platform_net.c", "shared/platform_net.c").replace(
+        "windows/platform_net.c", "shared/platform_net.c")
+    candidate[0] = candidate[0].replace(
+        " -Icore/connection/include", " -Icore/codec/include -Icore/types/include -Icore/connection/include")
+    codec = """CORE_CODEC_SRCS = core/codec/base64.c
+CORE_CODEC_OBJS = $(CORE_CODEC_SRCS:%.c=$(OBJDIR)/%.o)
+CORE_CODEC_LIB = $(OBJDIR)/libaimee-core-codec.a
+$(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
+\t$(AR) rcs $@ $^
+"""
+    candidate[0] = candidate[0].replace("include tests/Rules.mk", codec + "\ninclude tests/Rules.mk")
+    candidate[0] = re.sub(
+        r"^(L_MINIMAL|L_CORE)(\s*=.*)$",
+        lambda match: match[0] + " $(CORE_CODEC_LIB)", candidate[0], flags=re.MULTILINE)
+    candidate[1] = candidate[1].replace(
+        "$(TEST_TARGETS): | $(CORE_CONNECTION_LIB)",
+        "$(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)")
+    # The eight accessor shards are now one table-expanded implementation;
+    # all 1,122 preprocessed function bodies were checked against their originals.
+    for index in range(8):
+        for suffix in (".c", ".o"):
+            old = f"config_client_accessors_{index}{suffix}"
+            replacement = f"config_client_accessors{suffix}" if index == 0 else ""
+            for file in range(2):
+                candidate[file] = candidate[file].replace(
+                    "$(OBJDIR)/" + old, "$(OBJDIR)/" + replacement if replacement else "")
+                candidate[file] = candidate[file].replace(old, replacement)
     frozen_plan = build_plan(*candidate)
-    return [line.rstrip() for line in frozen_plan] == [line.rstrip() for line in build_plan(*current)]
+    # Oct 27: the ring moved to github.com/RakuenSoftware/ouroboros-ring and is
+    # linked as an installed package under build/deps/ouroboros-ring. Its include
+    # path replaced core/event_bus/include in C_FLAGS, and thin-client objects
+    # (platform, dstr) no longer carry it at all because CLIENT_C_FLAGS is fixed
+    # before the ring include is added. The probe's 42 sources include no ring
+    # header directly. Drop exactly the ring's include flag, wherever the
+    # installation it names lives, and the old core one.
+    # Oct 27: GCC builds add -fno-ipa-bit-cp to compile and LTO link (GCC 15.2
+    # miscompiles a live int parameter as constant 0). It disables one
+    # optimization pass and adds no input; drop exactly that token.
+    # Every other flag, input and command must still match.
+    def without_ring_include(plan: list[str]) -> list[str]:
+        return [" ".join(token for token in line.split()
+                         if token not in ("-Icore/event_bus/include", "-fno-ipa-bit-cp")
+                         and not RING_INCLUDE_FLAG.fullmatch(token))
+                for line in plan]
+    return without_ring_include(frozen_plan) == without_ring_include(build_plan(*current))
 # The proxy adds a thin-client source and a separate test prerequisite. Neither
 # changes the LSP probe's inputs or recipe. Do not exempt entire Makefiles:
 # removing an LSP object, changing flags, or weakening a test must still fail.
@@ -153,6 +217,35 @@ def reviewed_memory_equivalent(path: str, frozen: str, current: str) -> bool:
             return False
         current = current.replace(release_text, frozen_text, 1)
     return current.strip() == frozen.strip()
+
+
+# Exact IR host integrations after the reviewed testing release: Git family
+# resolution before tool admission and its catalog-test regressions/scratch
+# initialization, tools-owner metadata assertions and primary orchestration
+# wrappers over the same MCP catalog.
+# No LSP implementation, schema, golden signature, or probe input
+# is excluded. Reverse these blocks, then retain the complete frozen comparison.
+REVIEWED_HOST_INTEGRATIONS = json.loads(
+    Path(__file__).with_name("s1-host-integration.json").read_text()
+)
+
+
+def host_integration_base(path: str, current: str) -> str | None:
+    blocks = REVIEWED_HOST_INTEGRATIONS.get(path)
+    if not blocks:
+        return None
+    for block in blocks:
+        if current.count(block["release_text"]) != 1:
+            return None
+        current = current.replace(block["release_text"], block["frozen_text"], 1)
+    return current
+
+
+def reviewed_host_equivalent(path: str, frozen: str, current: str) -> bool:
+    base = host_integration_base(path, current)
+    return base is not None and (
+        base.strip() == frozen.strip() or reviewed_memory_equivalent(path, frozen, base)
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -230,6 +323,13 @@ def validate(
                 changed = [path for path in changed if path not in BUILD_PATHS]
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             errors.append(f"could not verify semantic-context build contract: {exc}")
+    reviewed_host_paths = [
+        path for path in changed if reviewed_host_equivalent(
+            path, git_output("show", f"{candidate_commit}:{path}"),
+            (ROOT / path).read_text(),
+        )
+    ]
+    changed = [path for path in changed if path not in reviewed_host_paths]
     reviewed_memory_paths = [
         path for path in changed if reviewed_memory_equivalent(
             path, git_output("show", f"{candidate_commit}:{path}"),
@@ -277,6 +377,7 @@ def validate(
         "changed_protected_paths": changed,
         "reviewed_build_integration_paths": reviewed_build_paths,
         "reviewed_memory_integration_paths": reviewed_memory_paths,
+        "reviewed_host_integration_paths": reviewed_host_paths,
         "untracked_protected_paths": untracked,
         "cold_starts_per_provider": cold_starts,
         "release_candidate_matched": not errors,
@@ -301,7 +402,12 @@ def main() -> int:
         args.output.write_text(rendered)
     else:
         sys.stdout.write(rendered)
-    return 1 if args.assert_release_candidate and result["release_candidate_errors"] else 0
+    if args.assert_release_candidate and result["release_candidate_errors"]:
+        # The report may be written to a file CI never prints; say why here.
+        for error in result["release_candidate_errors"]:
+            print(f"validate_s1_release_candidate: {error}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

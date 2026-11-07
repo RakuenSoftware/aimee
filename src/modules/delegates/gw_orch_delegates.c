@@ -1,5 +1,5 @@
 /* gw_orch_delegates.c -- see gw_orch_delegates.h. The module is thin (mirrors
- * gw_response_run_governance): a toggle, one hook, and a wrapper that runs the single-hook
+ * gw_ir_response_run_governance): a toggle, one hook, and a wrapper that runs the single-hook
  * catalog through the seam. The coord-specific capability adapter that actually spawns lives
  * at the producer (server_coord_dispatcher.c); this module only decides whether the module is
  * enabled and drives the runner, so it stays I/O-free and unit-testable with a fake caps. */
@@ -22,7 +22,7 @@ int gw_orch_delegates_enabled(void)
 typedef struct
 {
    const char *role;
-   const char *brief;
+   const aimee_message_t *message;
 } delegate_hook_args_t;
 
 /* The delegates hook: spawn a delegate through the narrow capability handle, then continue.
@@ -40,16 +40,16 @@ static gw_orch_result_t delegates_hook(const gw_turn_snapshot_t *turn,
       r.status = GW_ORCH_FAIL;
       return r;
    }
-   caps->spawn_delegate(caps->ctx, a->role, a->brief);
+   caps->spawn_delegate(caps->ctx, a->role, a->message);
    return r;
 }
 
 int gw_orch_delegates_run(const gw_turn_capabilities_t *caps, const char *turn_id, const char *role,
-                          const char *brief, int enabled)
+                          const aimee_message_t *message, int enabled)
 {
    if (!caps)
       return -1;
-   delegate_hook_args_t args = {role, brief};
+   delegate_hook_args_t args = {role, message};
    gw_orch_hook_slot_t slots[] = {
        {"delegates", delegates_hook, &args, enabled},
    };

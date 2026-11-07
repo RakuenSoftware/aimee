@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -342,10 +342,10 @@ func exerciseFactWorkerReplay(t *testing.T, ctx context.Context, tx pgx.Tx, s *p
 	sql(`SET LOCAL ROLE aimee_store_runtime`)
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
 	request := DataRequest{Operation: "memory-facts-complete", FactWork: blocked, Success: true, Content: `{"facts":[{"subject":"user","relation":"works_for","object":"Rollback Corp","source_start":0,"source_end":13}]}`}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageData, PrincipalRef: 200}, dataRequest(t, request)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageData, PrincipalRef: 200}, dataRequest(t, request)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("peer supplied extraction completion", status)
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != bus.ModuleStatusInternal {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != ring.ModuleStatusInternal {
 		t.Fatal("unsealed extraction accepted", status)
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM entity_edges WHERE target='Rollback Corp'`).Scan(&count); err != nil || count != 0 {

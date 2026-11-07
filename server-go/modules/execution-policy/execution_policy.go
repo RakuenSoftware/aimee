@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -27,10 +27,11 @@ type computerUsePolicy struct {
 }
 
 type request struct {
-	Tool        string            `json:"tool"`
-	SideEffect  string            `json:"side_effect"`
-	Arguments   json.RawMessage   `json:"arguments"`
-	ComputerUse computerUsePolicy `json:"computer_use"`
+	PolicyCategories []string          `json:"policy_categories,omitempty"`
+	Tool             string            `json:"tool"`
+	SideEffect       string            `json:"side_effect"`
+	Arguments        json.RawMessage   `json:"arguments"`
+	ComputerUse      computerUsePolicy `json:"computer_use"`
 }
 
 type response struct {
@@ -280,6 +281,26 @@ func evaluate(req request, policy *operatorPolicy) response {
 }
 
 func evaluateBaseline(req request, policy *operatorPolicy) response {
+	// Evaluate every owned category against one loaded operator policy. Calling
+	// the owner once per label could combine permissions from different files.
+	if len(req.PolicyCategories) > 0 && req.SideEffect == "" {
+		return response{Reason: "tool policy label is missing"}
+	}
+	if len(req.PolicyCategories) > 7 {
+		return response{Reason: "invalid tool policy categories"}
+	}
+	seen := map[string]bool{}
+	for _, category := range req.PolicyCategories {
+		switch category {
+		case "read", "write", "filesystem", "network", "external", "execution", "control":
+		default:
+			return response{Reason: "invalid tool policy category"}
+		}
+		if seen[category] {
+			return response{Reason: "duplicate tool policy category"}
+		}
+		seen[category] = true
+	}
 	var arguments map[string]any
 	if err := json.Unmarshal(req.Arguments, &arguments); err != nil || arguments == nil {
 		return response{Reason: "tool arguments are invalid JSON"}
@@ -310,25 +331,30 @@ func evaluateBaseline(req request, policy *operatorPolicy) response {
 		}
 	}
 approval:
+	for _, category := range req.PolicyCategories {
+		if policy.ApprovalLevels[category] == "block" {
+			return response{Reason: "policy blocks " + category + " operations"}
+		}
+	}
 	if policy.ApprovalLevels[req.SideEffect] == "block" {
 		return response{Reason: "policy blocks " + req.SideEffect + " operations"}
 	}
 	return response{Allowed: true, Reason: "operator policy allows the action"}
 }
 
-func newHandler(load policyLoader) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func newHandler(load policyLoader) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 		if invocation.StageID != StageTool || invocation.Cancelled() {
 			if invocation.Cancelled() {
-				return nil, bus.ModuleStatusCancelled
+				return nil, ring.ModuleStatusCancelled
 			}
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var req request
 		decoder := json.NewDecoder(bytes.NewReader(body))
 		decoder.DisallowUnknownFields()
 		if err := decodeSingle(decoder, &req); err != nil || req.Tool == "" || len(req.Arguments) == 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		policy, err := load()
 		decision := response{}
@@ -339,9 +365,9 @@ func newHandler(load policyLoader) bus.ModuleHandler {
 		}
 		encoded, err := json.Marshal(decision)
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 }
 

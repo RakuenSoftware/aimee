@@ -2,10 +2,8 @@
  * CORE layer: cJSON + config + guardrails only; no DB, network, or agent state. */
 #include "aimee.h" /* size macros for agent_types.h (MAX_PATH_LEN) */
 #include <aimee/gateway/gateway_policy.h>
-#include "cJSON.h"
 #include "config.h"
-#include "json_fluent.h" /* jo_cstr */
-#include <stdlib.h>      /* free — for the dropped-entry arguments cleanup in P2c */
+#include <stdlib.h> /* free — for the dropped-entry arguments cleanup in P2c */
 #include <string.h>
 
 /* From guardrails (guardrails_orchestrator.c). Forward-declared rather than
@@ -41,167 +39,43 @@ int gateway_prevent_subagents_enabled(void)
    return config_gateway_prevent_subagents() ? 1 : 0;
 }
 
-static int pin_model_enabled(void)
+static int police_ir_catalog(aimee_tool_t *tools, int *count)
 {
-   return config_gateway_pin_model() ? 1 : 0;
-}
-
-/* A tool entry's name, regardless of API shape. */
-static const char *tool_entry_name(const cJSON *tool, int openai_shape)
-{
-   if (openai_shape)
-      return jo_cstr(cJSON_GetObjectItemCaseSensitive((cJSON *)tool, "function"), "name");
-   return jo_cstr(tool, "name");
-}
-
-/* The name a tool_choice object forces, or "" if it does not force a named tool. */
-static const char *tool_choice_name(const cJSON *tc, int openai_shape)
-{
-   if (!cJSON_IsObject(tc))
-      return "";
-   if (openai_shape)
-      return jo_cstr(cJSON_GetObjectItemCaseSensitive((cJSON *)tc, "function"), "name");
-   return jo_cstr(tc, "name");
-}
-
-int gateway_policy_strip_tools(cJSON *tools, int tools_openai_shape)
-{
-   cJSON *t;
-   int stripped = 0;
-
-   if (!cJSON_IsArray(tools) || !gateway_prevent_subagents_enabled())
-      return 0;
-
-   for (t = tools->child; t;)
+   int removed = 0;
+   for (int i = *count - 1; i >= 0; i--)
    {
-      cJSON *next = t->next;
-      const char *name = tool_entry_name(t, tools_openai_shape);
-      if (name && name[0] && is_subagent_tool_name(name))
+      aimee_tool_t *tool = &tools[i];
+      if (tool->kind == AIMEE_TOOL_NAMESPACE)
+         removed += police_ir_catalog(tool->children, &tool->n_children);
+      if ((tool->name && is_subagent_tool_name(tool->name)) ||
+          (tool->kind == AIMEE_TOOL_NAMESPACE && !tool->n_children))
       {
-         cJSON_DetachItemViaPointer(tools, t);
-         cJSON_Delete(t);
-         stripped++;
+         aimee_tool_free(tool);
+         memmove(tool, tool + 1, (size_t)(*count - i - 1) * sizeof *tool);
+         (*count)--;
+         memset(&tools[*count], 0, sizeof *tool);
+         removed++;
       }
-      t = next;
    }
-   return stripped;
+   return removed;
 }
-
-int gateway_policy_apply_request(cJSON *req, int tools_openai_shape)
+int gateway_policy_apply_ir(aimee_request_t *request)
 {
-   cJSON *tools;
-   int stripped;
-
-   if (!req)
+   if (!request || !gateway_prevent_subagents_enabled())
       return 0;
-
-   tools = cJSON_GetObjectItemCaseSensitive(req, "tools");
-   stripped = gateway_policy_strip_tools(tools, tools_openai_shape);
-   if (!stripped)
+   int removed = police_ir_catalog(request->tools, &request->n_tools);
+   if (!removed)
       return 0;
-
-   if (cJSON_GetArraySize(tools) == 0)
+   if (!request->n_tools ||
+       (request->tool_choice == AIMEE_TOOL_CHOICE_TOOL && request->tool_choice_name &&
+        is_subagent_tool_name(request->tool_choice_name)))
    {
-      /* No tools left: drop the empty array (providers reject `tools: []`) AND any
-       * tool_choice — a forced/`any`/`required` choice with no tools is a 400
-       * upstream, so leaving it would break the request. */
-      cJSON_DeleteItemFromObjectCaseSensitive(req, "tools");
-      cJSON_DeleteItemFromObjectCaseSensitive(req, "tool_choice");
+      request->tool_choice = request->n_tools ? AIMEE_TOOL_CHOICE_AUTO : AIMEE_TOOL_CHOICE_UNSET;
+      if (!request->n_tools)
+         request->has_parallel_tool_calls = 0;
+      free(request->tool_choice_name);
+      request->tool_choice_name = NULL;
    }
-   else
-   {
-      /* Tools remain: relax tool_choice only if it forced a removed tool (absent
-       * = auto). `auto`/`any`/`required` and choices naming a surviving tool are
-       * left untouched. */
-      cJSON *tc = cJSON_GetObjectItemCaseSensitive(req, "tool_choice");
-      const char *forced = tool_choice_name(tc, tools_openai_shape);
-      if (forced && forced[0] && is_subagent_tool_name(forced))
-         cJSON_DeleteItemFromObjectCaseSensitive(req, "tool_choice");
-   }
-
-   return stripped;
-}
-
-int gateway_policy_pin_model(cJSON *req, const char *agent_model)
-{
-   const char *cur;
-
-   if (!req || !agent_model || !agent_model[0] || !pin_model_enabled())
-      return 0;
-   cur = jo_cstr(req, "model");
-   if (cur && strcmp(cur, agent_model) == 0)
-      return 0; /* already the pinned model — nothing to change */
-   cJSON_DeleteItemFromObjectCaseSensitive(req, "model");
-   cJSON_AddStringToObject(req, "model", agent_model);
-   return 1;
-}
-
-/* Response-side (P2c). Same canonical mapping and config gate as the request
- * side, exposed as a predicate so the buffered/streamed paths can gate cheaply
- * (the predicate does the legacy_config_read + canonical-name lookup, so the call
- * site stays one line). */
-int gateway_policy_is_denied_tool(const char *name)
-{
-   if (!name || !name[0])
-      return 0;
-   if (!gateway_prevent_subagents_enabled())
-      return 0;
-   return is_subagent_tool_name(name);
-}
-
-/* Response-side tool policing: memmove-compact denied entries out of `p->calls[]`
- * and finalize `p->stop_reason` so it agrees with the wire emitted by
- * `anthropic_response_from_parsed`. See gateway_policy.h for the stop-reason
- * rules and the full set of fields the function does NOT touch. */
-int gateway_policy_police_parsed_response(parsed_response_t *p)
-{
-   int drops = 0;
-   int n, i, w;
-
-   if (!p)
-      return 0;
-   if (!gateway_prevent_subagents_enabled())
-      return 0;
-
-   n = p->call_count;
-   if (n <= 0)
-      return 0;
-
-   /* Single pass: read index `i`, write index `w`. Surviving entries are
-    * shifted down to the front of the array in their original order. Dropped
-    * entries' `arguments` strings are freed eagerly — the slot is then
-    * overwritten by the next survivor, so `agent_free_parsed_response`'s
-    * 0..call_count-1 sweep would otherwise leak the dropped strings. */
-   w = 0;
-   for (i = 0; i < n; i++)
-   {
-      const parsed_tool_call_t *src = &p->calls[i];
-      if (is_subagent_tool_name(src->name))
-      {
-         free(src->arguments);
-         p->calls[i].arguments = NULL;
-         drops++;
-         continue;
-      }
-      if (w != i)
-         p->calls[w] = *src;
-      w++;
-   }
-   p->call_count = w;
-   /* Stop-reason finalization: if the upstream did not set a reason
-    * (stop_reason[0] == '\0'), derive from the surviving call_count so the
-    * audit row and the renderer's fallback (line 435 of anthropic_ingress.c,
-    * `parsed->stop_reason[0] ? parsed->stop_reason : n_calls > 0 ? "tool_use"
-    * : "end_turn"`) agree on a non-empty value. If the upstream DID set a
-    * reason (e.g. "max_tokens" for a truncated reply, or "stop_sequence" /
-    * "refusal"), preserve it verbatim — see the doc comment above for the
-    * partial-drop preservation rationale. The all-dropped case always
-    * rewrites to "end_turn" because the wire's "tool_use" reply became an
-    * "end_turn" reply (the model emitted a tool_use reply; the police
-    * removed every block; the client now sees end_turn). */
-   if (p->stop_reason[0] == '\0' || w == 0)
-   {
-      snprintf(p->stop_reason, sizeof(p->stop_reason), "%s", w > 0 ? "tool_use" : "end_turn");
-   }
-   return drops;
+   request->mutated = 1;
+   return removed;
 }

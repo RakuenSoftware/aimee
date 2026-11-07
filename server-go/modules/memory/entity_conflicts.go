@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The former internal registry queue is a private host operation, not a public
 // RPC. Re-observing an ambiguity increments priority without reopening it.
-func handleEntityConflicts(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleEntityConflicts(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if options.placement != PlacementKB {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	request := DataRequest{Operation: "entity-conflicts", State: args.stringOr("action", ""), Entity: args.stringOr("name", ""), Kind: args.stringOr("status", "")}
 	switch request.State {
@@ -35,12 +35,12 @@ func handleEntityConflicts(options handlerOptions, invocation bus.ModuleInvocati
 	}
 	body, _ := json.Marshal(request)
 	raw, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

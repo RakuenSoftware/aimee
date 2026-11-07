@@ -5,7 +5,11 @@ with disposable `AIMEE_MEMORY_EVAL_URL`, `AIMEE_KB_STORE_REPLAY_URL`,
 `AIMEE_TEST_PG_URL` and `AIMEE_DB_TEST_URL` databases. Bootstrap the KB_STORE replay
 store from `src/modules/kb/c/schema.sql`. Use distinct DB1/KB_STORE stores, a role able
 to create disposable evaluation databases, and serialize their test runners.
-The required `memory-retrieval-eval` CI job provisions these stores.
+In CI the required `postgres-knowledge-replay` job provisions these stores and runs
+the check after `memory-owner-replay-check`. It passes that run's `go test -json`
+record with `--go-events`, so packages the replay already executed with `-race` are
+verified from the record. Only packages missing from the record run again. A record
+that does not end with the package result counts as missing, not as a pass.
 
 `tests/eval/memory_reliability_release_v1.json` freezes twelve adversarial groups,
 ordered test identities, source/fixture hashes and promotion thresholds. It

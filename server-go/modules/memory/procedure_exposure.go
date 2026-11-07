@@ -2,7 +2,7 @@ package memory
 
 import (
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strconv"
 )
 
@@ -36,7 +36,7 @@ func procedureExposures(receipt *providerReceiptEvent, acknowledged bool) []map[
 
 // Historical retrieval artifacts remain availability evidence. Go owns memory
 // exposure normalization; the C adapter only persists the returned identifiers.
-func legacyExposurePlan(args commandArgs) ([]byte, bus.ModuleStatus) {
+func legacyExposurePlan(args commandArgs) ([]byte, ring.ModuleStatus) {
 	turn := args.stringOr("turn_id", "")
 	if turn == "" || len(turn) > 256 {
 		return commandResult(commandError("invalid_argument", "turn_id required"))
@@ -54,7 +54,7 @@ func legacyExposurePlan(args commandArgs) ([]byte, bus.ModuleStatus) {
 		var quoted string
 		if len(text) > 0 && text[0] == '"' {
 			if json.Unmarshal(raw, &quoted) != nil {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			text = quoted
 		}

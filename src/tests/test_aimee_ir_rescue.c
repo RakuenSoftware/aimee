@@ -155,6 +155,140 @@ int main(void)
       printf("  PASS: multiple calls count as one rescue recovery\n");
    }
 
+   /* Dynamic canonical recovery retains whole call groups and identities. */
+   {
+      char name[301];
+      memset(name, 'n', sizeof name - 1);
+      name[sizeof name - 1] = 0;
+      size_t capacity = 40 * (sizeof name + 256), used = 0;
+      char *text = calloc(capacity, 1);
+      assert(text);
+      for (int i = 0; i < 40; i++)
+      {
+         int n = snprintf(text + used, capacity - used,
+                          "<tool_call><name>%s</name><arguments>{\"id\":9007199254740993}</"
+                          "arguments></tool_call>",
+                          name);
+         assert(n > 0 && (size_t)n < capacity - used);
+         used += (size_t)n;
+      }
+      aimee_response_t *r = resp_of(AIMEE_BLK_TEXT, text);
+      free(text);
+      r->content[0].cache_control = strdup("ephemeral");
+      r->content[0].cache_ttl = strdup("1h");
+      r->content[0].context.origin = AIMEE_CTX_ORIGIN_MODEL;
+      assert(aimee_ir_rescue_tool_calls(r, 0) == 40 && r->n_content == 40);
+      for (int i = 0; i < 40; i++)
+      {
+         assert(!strcmp(r->content[i].tool_name, name));
+         char *input = cJSON_PrintUnformatted(r->content[i].tool_input);
+         assert(input && strstr(input, "9007199254740993"));
+         free(input);
+         assert(r->content[i].context.origin == AIMEE_CTX_ORIGIN_MODEL);
+      }
+      assert(!strcmp(r->content[39].cache_ttl, "1h"));
+      resp_destroy(r);
+   }
+   /* Prepare/validate every recovery before changing any original content. */
+   {
+      aimee_response_t *r = resp_of(AIMEE_BLK_TEXT, XMLCALL);
+      r->content = realloc(r->content, 2 * sizeof *r->content);
+      assert(r->content);
+      memset(&r->content[1], 0, sizeof r->content[1]);
+      r->n_content = 2;
+      r->content[1].type = AIMEE_BLK_TEXT;
+      r->content[1].text = strdup(
+          "<tool_call><name>bash</name><arguments>{\"x\":1} trailing</arguments></tool_call>");
+      assert(aimee_ir_rescue_tool_calls(r, 0) == -1);
+      assert(r->n_content == 2 && r->content[0].type == AIMEE_BLK_TEXT &&
+             !strcmp(r->content[0].text, XMLCALL));
+      resp_destroy(r);
+   }
+   /* Provider terminal authority survives text compatibility rescue. The same
+    * XML is executable only in an ordinary successful response (case 1). */
+   for (int mode = 0; mode < 4; mode++)
+   {
+      aimee_ir_metrics_reset();
+      aimee_response_t *r = resp_of(AIMEE_BLK_TEXT, XMLCALL);
+      r->stop_reason = mode < 2 ? AIMEE_STOP_CONTENT_FILTER : AIMEE_STOP_ERROR;
+      r->raw_stop_reason = strdup(mode < 2 ? "refusal" : "error");
+      if (mode == 1)
+      {
+         r->refusal = calloc(1, sizeof *r->refusal);
+         assert(r->refusal);
+         r->refusal->category = strdup("future_category");
+         r->refusal->explanation = strdup("provider diagnostic");
+      }
+      if (mode == 3)
+      {
+         r->stop_reason = AIMEE_STOP_END_TURN;
+         r->error_message = strdup("provider failure");
+      }
+      aimee_stop_reason_t stop = r->stop_reason;
+      aimee_block_t *content = r->content;
+      aimee_refusal_details_t *refusal = r->refusal;
+      char *raw = r->raw_stop_reason, *error = r->error_message;
+      assert(aimee_ir_rescue_tool_calls(r, 0) == 0);
+      assert(r->content == content && r->n_content == 1);
+      assert(r->content[0].type == AIMEE_BLK_TEXT && !strcmp(r->content[0].text, XMLCALL));
+      assert(r->stop_reason == stop && r->raw_stop_reason == raw);
+      assert(r->refusal == refusal && r->error_message == error);
+      assert(!aimee_ir_response_has_tool_use(r));
+      assert(aimee_ir_metric_total(AIMEE_IR_M_RESCUE_RECOVERIES) == 0);
+      resp_destroy(r);
+   }
+   puts("  PASS: refused and failed responses cannot acquire rescued tool authority");
+
+   /* Truncated/unknown/tool-pending observations cannot acquire execution by
+    * being reclassified as a rescued tool turn. Preserve source ownership. */
+   const aimee_stop_reason_t incomplete[] = {AIMEE_STOP_MAX_TOKENS, AIMEE_STOP_UNKNOWN,
+                                             AIMEE_STOP_TOOL_USE};
+   for (size_t i = 0; i < sizeof incomplete / sizeof *incomplete; i++)
+   {
+      aimee_response_t *r = resp_of(AIMEE_BLK_TEXT, XMLCALL);
+      r->stop_reason = incomplete[i];
+      r->raw_stop_reason = strdup("original-stop");
+      r->usage_in = 37;
+      aimee_block_t *blocks = r->content;
+      char *text = r->content[0].text, *raw = r->raw_stop_reason;
+      assert(!aimee_ir_rescue_tool_calls(r, 1));
+      assert(r->content == blocks && r->content[0].text == text && r->raw_stop_reason == raw &&
+             r->stop_reason == incomplete[i]);
+      assert(r->n_content == 1 && !aimee_ir_response_has_tool_use(r) && r->usage_in == 37);
+      resp_destroy(r);
+   }
+
+   /* Admission precedes recovery. Invalid source IR must not be sanitized by
+    * replacing its text block or terminal reason, including non-refusal errors. */
+   for (int mode = 0; mode < 3; mode++)
+   {
+      aimee_ir_metrics_reset();
+      aimee_response_t *r = resp_of(AIMEE_BLK_TEXT, XMLCALL);
+      if (mode == 0)
+      {
+         r->stop_reason = AIMEE_STOP_UNKNOWN;
+         r->refusal = calloc(1, sizeof *r->refusal);
+         assert(r->refusal);
+         r->refusal->category = strdup("future_category");
+      }
+      else if (mode == 1)
+         r->usage_in = -1;
+      else
+         r->content[0].message_group = 4097;
+      aimee_block_t *content = r->content;
+      char *text = r->content[0].text;
+      aimee_refusal_details_t *refusal = r->refusal;
+      aimee_stop_reason_t stop = r->stop_reason;
+      assert(aimee_ir_rescue_tool_calls(r, 0) == -1);
+      assert(r->content == content && r->content[0].text == text && r->n_content == 1);
+      assert(r->refusal == refusal && r->stop_reason == stop);
+      assert(r->usage_in == (mode == 1 ? -1 : 0));
+      assert(r->content[0].message_group == (mode == 2 ? 4097 : 0));
+      assert(aimee_ir_metric_total(AIMEE_IR_M_RESCUE_RECOVERIES) == 0);
+      resp_destroy(r);
+   }
+   puts("  PASS: malformed source IR cannot be sanitized by compatibility recovery");
+
    /* 7. Degenerate input must not crash. */
    assert(aimee_ir_rescue_tool_calls(NULL, 0) == 0);
    printf("  PASS: NULL response is a no-op\n");

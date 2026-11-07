@@ -42,38 +42,23 @@ RULES = Path("src/tests/Rules.mk")
 # Shrinking this list is the fix. An entry that stops being orphaned must be
 # removed, which the check below enforces so the list cannot rot into a place
 # things hide.
-UNBUILT_SOURCES = {
-    "test_audit_action.c",
-    "test_audit_action_log.c",
-    "test_audit_ledger.c",
-    "test_bus_arena_tsan.c",
-    "test_bus_plugin_process.c",
-    "test_bus_plugin_scale.c",
-    "test_code_vectors.c",
-    "test_context_assembly.c",
-    "test_embedder_probe_register.c",
-    "test_feedback_shadow.c",
-    "test_git_oauth_device.c",
-    "test_git_oauth_gh.c",
-    "test_git_oauth_github.c",
-    "test_git_org_repos.c",
-    "test_graph_fusion.c",
-    "test_identity_authority_facade_pg.c",
-    "test_kb_mgmt_status_peer.c",
-    "test_kb_mgmt_token_authority_client_commit.c",
-    "test_kb_mgmt_token_authority_daemon_stop.c",
-    "test_learning_metrics.c",
-    "test_learning_regret.c",
-    "test_memory_advanced.c",
-    "test_memory_embed_http_auth.c",
-    "test_memory_recall_pivot.c",
-    "test_memory_retrieval_eval.c",
-    "test_panel_ir_contract.c",
-    "test_plugin_grant_provisioning.c",
-    "test_pgvec_neardup.c",
-    "test_self_update.c",
-    "test_session_briefing.c",
-    "test_workspace_memory.c",
+def source_is_named(stem: str, rules: str) -> bool:
+    """Whether Rules.mk names this test source as a whole word. A substring
+    test let test_kb.c hide behind every test_kb_* target and test_curiosity.c
+    behind test_curiosity_resolve."""
+    return re.search(r"(?<![\w-])" + re.escape(stem) + r"(?:\.[co]\b|(?![\w-]))", rules) is not None
+
+
+UNBUILT_SOURCES: set[str] = set()
+
+# Test sources a script builds and runs instead of a Rules.mk target. Each entry
+# names the script; the check below requires that the script names the test and
+# that a make target runs the script, so an entry cannot outlive either.
+SCRIPT_BUILT = {
+    "test_kb_mgmt_token_authority_client_commit.c":
+        "scripts/run-p5c2d-token-authority-regressions.sh",
+    "test_kb_mgmt_token_authority_daemon_stop.c":
+        "scripts/run-p5c2d-token-authority-regressions.sh",
 }
 
 # Targets the ordinary suite cannot run, and the reason. A -pg target needs a
@@ -102,8 +87,6 @@ INFRASTRUCTURE = {
     # program another script drives rather than a test that runs itself. The
     # script that drives it is named, so "who runs this" has an answer that can
     # be checked instead of assumed.
-    "bus-conformance-host": "the C half; test_bus_conformance.sh, run by make go-unit-tests",
-    "bus-bench": "a measurement; scripts/check_bus_perf_gate.sh drives it",
     "kb-store-test-template": "builds the Postgres test template; unit-tests-pg drives it",
     "aimee-witness-boot-tpm-harness": "needs swtpm; scripts/run-p7-witness-boot-tpm.sh drives it",
     "aimee-witness-cadence-harness": "needs a live daemon; scripts/run-p7-witness-*.sh drive it",
@@ -125,7 +108,6 @@ INFRASTRUCTURE = {
     "unit-test-server-management-listener-live": "needs a live listener",
     "unit-test-server-ready": "drives a server process directly",
     "unit-test-memory-audit-hook": "driven by the memory-audit job",
-    "unit-test-panel-provider": "driven by the panel-provider job",
 }
 
 # Built only under a sanitizer configuration, where the suite adds them itself.
@@ -135,6 +117,20 @@ SANITIZE = re.compile(r"^unit-test-kb-store-[a-z-]+-support-sanitize$")
 def fail(message: str) -> int:
     print(f"check_tests_are_run: error: {message}", file=sys.stderr)
     return 1
+
+
+def selected_tests(text: str) -> set[str]:
+    joined = re.sub(r"\\\n", " ", text)
+    frozen = re.search(r"^UNIT_TEST_TARGETS\s*:=.*\$\(TEST_TARGETS\)", joined, re.M)
+    if frozen is None:
+        raise ValueError("cannot locate the unit-suite selection of TEST_TARGETS")
+    run: set[str] = set()
+    for match in re.finditer(r"^TEST_TARGETS\s*[:+]?=(.*)$", joined, re.M):
+        if match.start() > frozen.start():
+            raise ValueError("TEST_TARGETS changes after UNIT_TEST_TARGETS is frozen; "
+                             "move registrations before suite/shard selection")
+        run.update(re.findall(r"unit-test-[a-z0-9-]+", match.group(1)))
+    return run
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -190,9 +186,10 @@ def main(argv: list[str] | None = None) -> int:
     # run list -- it exists to order an archive dependency -- which is exactly
     # the confusion that let these hide: they were named in a variable, so they
     # looked listed.
-    run: set[str] = set()
-    for match in re.finditer(r"^TEST_TARGETS\s*[:+]?=(.*)$", joined, re.M):
-        run.update(re.findall(r"unit-test-[a-z0-9-]+", match.group(1)))
+    try:
+        run = selected_tests(joined)
+    except ValueError as error:
+        return fail(str(error))
 
     unrun = sorted(
         name for name in defined - run
@@ -222,10 +219,15 @@ def main(argv: list[str] | None = None) -> int:
     # and nothing compiles it. That is a weaker position than an unrun target,
     # which at least still builds.
     sources = sorted((args.root / "src/tests").glob("test_*.c"))
-    orphans = sorted(
-        path.name for path in sources
-        if path.stem not in joined and path.name not in joined
-    )
+    named = lambda stem: source_is_named(stem, joined)
+    makefile = (args.root / "src/Makefile").read_text(encoding="utf-8")
+    for name, script in SCRIPT_BUILT.items():
+        body = (args.root / script).read_text(encoding="utf-8") if (args.root / script).is_file() else ""
+        if name not in body or Path(script).name not in makefile:
+            return fail(f"SCRIPT_BUILT entry {name}: {script} must build it and a make "
+                        "target must run that script")
+    orphans = sorted(path.name for path in sources
+                     if not named(path.stem) and path.name not in SCRIPT_BUILT)
     unexpected = [name for name in orphans if name not in UNBUILT_SOURCES]
     if unexpected:
         listing = "\n".join(f"    src/tests/{name}" for name in unexpected)

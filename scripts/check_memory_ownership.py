@@ -14,6 +14,8 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/modules/memory-ownership.json")
+RETIREMENT = Path("tests/baselines/modules/cli-native-retirement.json")
+RETIREMENT_SOURCE = "6600e422f93f95e20393afc6df27578267f198f3"
 spec = importlib.util.spec_from_file_location("native_inventory", ROOT / "scripts/check_memory_go_only.py")
 assert spec and spec.loader
 inventory = importlib.util.module_from_spec(spec)
@@ -42,6 +44,28 @@ def validate(root: Path) -> None:
         raise ValueError("missing original file disposition")
     if set(ledger["original_symbols"]) != set(manifest["native_symbols"]):
         raise ValueError("missing original symbol disposition")
+    # The separate source snapshot preserves every reviewed external finding,
+    # including its original disposition, symbols and content hash.
+    snapshot = json.loads((root / RETIREMENT).read_text())
+    if snapshot.get("source_commit") != RETIREMENT_SOURCE:
+        raise ValueError("original external retirement source reference changed")
+    retired = ledger.get("retired_external_files", {})
+    if set(retired) != set(snapshot["files"]):
+        raise ValueError("missing retired external finding disposition")
+    for path, row in retired.items():
+        original = {key: value for key, value in row.items() if key != "retirement"}
+        if original != snapshot["files"][path]:
+            raise ValueError(f"retired external finding changed: {path}")
+        if path in ledger["external_files"] or path in ledger.get("generated_files", {}):
+            raise ValueError(f"retired external finding still active: {path}")
+        if (root / path).exists():
+            raise ValueError(f"retired external file restored: {path}")
+        proof = row.get("retirement", {})
+        if not proof.get("reason") or not proof.get("evidence"):
+            raise ValueError(f"missing external retirement proof: {path}")
+        for evidence in proof["evidence"]:
+            if not (root / evidence).is_file():
+                raise ValueError(f"missing external retirement evidence: {path}: {evidence}")
     actual = findings(root, manifest)
     # Build products are absent in clean lint checkouts. They remain reviewed
     # findings when present; pin both output and generator/input content.
@@ -69,7 +93,7 @@ def validate(root: Path) -> None:
                 raise ValueError(f"missing replacement owner: {path}: {replacement}")
         if (root / path).exists():
             raise ValueError(f"retired native file restored: {path}")
-    for section in ("original_files", "original_symbols", "external_files", "generated_files"):
+    for section in ("original_files", "original_symbols", "external_files", "generated_files", "retired_external_files"):
         for name, row in ledger.get(section, {}).items():
             group = ledger["dispositions"].get(row["disposition"])
             if not group or not group.get("owner") or not group.get("contract") or not group.get("reason") or not group.get("cutover_dependency"):

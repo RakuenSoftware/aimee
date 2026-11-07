@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type clientCallFunc func(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error)
@@ -21,7 +21,7 @@ func (f clientCallFunc) Call(ctx context.Context, event, stage uint32, trace uin
 	return f(ctx, event, stage, trace, timeout, body)
 }
 
-func clientForHandler(t *testing.T, handler bus.ModuleHandler) *Client {
+func clientForHandler(t *testing.T, handler ring.ModuleHandler) *Client {
 	t.Helper()
 	client, err := NewClient(clientCallFunc(func(ctx context.Context, event, stage uint32, trace uint64, timeout time.Duration, body []byte) ([]byte, error) {
 		if event != 5888+stage || stage < 1 || stage > 8 {
@@ -30,9 +30,9 @@ func clientForHandler(t *testing.T, handler bus.ModuleHandler) *Client {
 		if trace != 73 || timeout <= 0 || timeout > time.Second {
 			t.Errorf("lost call metadata: trace=%d timeout=%s", trace, timeout)
 		}
-		response, status := handler(bus.ModuleInvocation{StageID: stage, TraceID: trace, PrincipalClass: 1, PrincipalRef: 200}, body)
-		if status != bus.ModuleStatusOK {
-			return nil, &bus.ModuleCallStatusError{Status: status}
+		response, status := handler(ring.ModuleInvocation{StageID: stage, TraceID: trace, PrincipalClass: 1, PrincipalRef: 200}, body)
+		if status != ring.ModuleStatusOK {
+			return nil, &ring.ModuleCallStatusError{Status: status}
 		}
 		return response, nil
 	}), time.Second)
@@ -155,8 +155,8 @@ func TestClientDataPreservesPlacementAndLargeIDs(t *testing.T) {
 			}
 			request.Scope = test.denied
 			_, err = client.Data(context.Background(), 73, request)
-			var status *bus.ModuleCallStatusError
-			if !errors.As(err, &status) || status.Status != bus.ModuleStatusInvalidRequest {
+			var status *ring.ModuleCallStatusError
+			if !errors.As(err, &status) || status.Status != ring.ModuleStatusInvalidRequest {
 				t.Fatalf("cross-placement call: %v", err)
 			}
 		})
@@ -223,7 +223,7 @@ func clientOperations(c *Client) map[string]func(context.Context) error {
 }
 
 func TestClientNoFallbackOrRetriesOnTransportFailure(t *testing.T) {
-	for _, failure := range []error{bus.ErrModuleCallCapabilityAbsent, bus.ErrModuleCallRejected, bus.ErrModuleCallDeadline, bus.ErrModuleCallCancelled, &bus.ModuleCallStatusError{Status: bus.ModuleStatusInternal}} {
+	for _, failure := range []error{ring.ErrModuleCallCapabilityAbsent, ring.ErrModuleCallRejected, ring.ErrModuleCallDeadline, ring.ErrModuleCallCancelled, &ring.ModuleCallStatusError{Status: ring.ModuleStatusInternal}} {
 		calls := 0
 		client, _ := NewClient(clientCallFunc(func(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error) {
 			calls++
@@ -276,8 +276,8 @@ func TestClientRejectsCorruptBinaryReplies(t *testing.T) {
 	handler := NewHandler(nil)
 	for _, mutation := range []string{"truncated", "trailing", "magic", "count-or-enum", "version-or-value"} {
 		client, _ := NewClient(clientCallFunc(func(_ context.Context, _, stage uint32, _ uint64, _ time.Duration, body []byte) ([]byte, error) {
-			reply, status := handler(bus.ModuleInvocation{StageID: stage}, body)
-			if status != bus.ModuleStatusOK {
+			reply, status := handler(ring.ModuleInvocation{StageID: stage}, body)
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("fixture failed: %v", status)
 			}
 			switch mutation {
@@ -376,9 +376,9 @@ func TestClientPinnedWireRequests(t *testing.T) {
 				if event != test.event || stage != test.stage || !bytes.Equal(request, want) {
 					t.Fatalf("wire %d/%d %x; want %d/%d %x", event, stage, request, test.event, test.stage, want)
 				}
-				return nil, bus.ErrModuleCallCapabilityAbsent
+				return nil, ring.ErrModuleCallCapabilityAbsent
 			}), 0)
-			if err := clientOperations(client)[test.name](context.Background()); !errors.Is(err, bus.ErrModuleCallCapabilityAbsent) {
+			if err := clientOperations(client)[test.name](context.Background()); !errors.Is(err, ring.ErrModuleCallCapabilityAbsent) {
 				t.Fatal(err)
 			}
 		})
@@ -391,7 +391,7 @@ func TestSensitivityRejectsImpossibleCountBeforeAllocation(t *testing.T) {
 	binary.LittleEndian.PutUint32(request[4:], wireVersion)
 	for _, count := range []uint32{1, 100, 1<<31 - 1, ^uint32(0)} {
 		binary.LittleEndian.PutUint32(request[8:], count)
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageRetrieve}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Fatalf("count %d accepted: %v", count, status)
 		}
 	}
@@ -427,7 +427,7 @@ func FuzzClientResponseDecoders(f *testing.F) {
 }
 
 func TestClientFactFailureCannotLookAccepted(t *testing.T) {
-	for _, failure := range []error{nil, bus.ErrModuleCallCapabilityAbsent} {
+	for _, failure := range []error{nil, ring.ErrModuleCallCapabilityAbsent} {
 		client, _ := NewClient(clientCallFunc(func(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error) {
 			return nil, failure
 		}), 0)

@@ -114,7 +114,7 @@ def documented_manual() -> set[str]:
 # LINT_CHECKS turns on a gate whose failure mode nobody has read, and adding one
 # that then fails is how a whole lint target gets disabled.
 #
-#   cmd-srcs-compile-check, config-schema-drift-check, config-uninitialized-check
+#   config-schema-drift-check, config-uninitialized-check
 #     -- config surfaces. Prerequisites of nothing but .PHONY.
 #   token-authority-isolation-check, token-authority-regression-check
 #     -- both gate token-authority-core, which NOTHING builds: no Dockerfile, no
@@ -132,7 +132,6 @@ def documented_manual() -> set[str]:
 # removed, which the check below enforces so the list cannot rot into a place
 # things hide.
 UNREACHED = {
-    "cmd-srcs-compile-check",
     "config-schema-drift-check",
     "config-uninitialized-check",
     "coverage-check",

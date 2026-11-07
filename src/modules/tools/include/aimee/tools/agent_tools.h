@@ -1,10 +1,12 @@
 #ifndef DEC_AGENT_TOOLS_H
 #define DEC_AGENT_TOOLS_H 1
 
-#include "agent_protocol.h"
+struct aimee_response;
 #include "agent_types.h"
 #include "cJSON.h"
 #include <stdint.h>
+#include <aimee/ir/aimee_ir.h>
+#include <aimee/tools/module_api.h>
 
 /* Tool execution (Unix only) */
 char *tool_bash(const char *command, int timeout_ms);
@@ -56,7 +58,6 @@ char *tool_find_symbol(const char *identifier);
 char *tool_create_note(const char *title, const char *content, const char *tags);
 char *tool_list_notes(const char *tag, int limit);
 char *tool_search_notes(const char *query);
-char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
 
 /* Server registration seam for the separately supervised event-bus tool
  * classifier. classification values are the AIMEE_TOOL_CLASS_* constants.
@@ -64,50 +65,68 @@ char *dispatch_tool_call(const char *name, const char *arguments_json, int timeo
  * leaves the tool unclassified. */
 typedef int (*agent_tool_classifier_fn)(const char *name, int *classification);
 void agent_tools_register_classifier(agent_tool_classifier_fn classifier);
+/* Registration occurs with the existing supervised tools owner at startup.
+ * Missing/unknown metadata refuses; it never becomes an implicit read. */
+typedef int (*agent_tool_metadata_fn)(const char *name, aimee_tool_metadata_t *metadata);
+void agent_tools_register_metadata(agent_tool_metadata_fn provider);
+int agent_tools_metadata(const char *name, aimee_tool_metadata_t *metadata);
+
 typedef int (*agent_tool_action_begin_fn)(const char *, struct cJSON **, const char *, const char *,
                                           int);
-typedef char *(*agent_tool_action_finish_fn)(const char *, char *);
+/* The final flag starts with execution's classification. Only this trusted
+ * owner may update it from its durable receipt; it is not model-provided data. */
+typedef char *(*agent_tool_action_finish_fn)(const char *, char *, int *);
 void agent_tools_register_action_owner(agent_tool_action_begin_fn begin,
                                        agent_tool_action_finish_fn finish);
+/* True only when dispatch will enter the registered governed-action owner.
+ * Its final policy gate runs on owner-canonical arguments before any effect. */
+int agent_tools_action_managed(const char *name, const struct cJSON *arguments);
 
 /* Bind a successful execution-policy decision to the next dispatch on this
  * thread. External mutations and unknown remote tools refuse execution without
  * this trusted caller signal; model-provided arguments cannot set it. */
 void agent_tools_set_effect_authorized(int authorized);
 
-/* Tool definition builders */
-struct cJSON *build_tools_array(void);
-struct cJSON *build_tools_array_responses(void);
-struct cJSON *build_tools_array_anthropic(void);
-struct cJSON *delegate_respond_spec(void);
-int agent_tools_append_delegate_respond_tool(struct cJSON *tools);
-int agent_tools_strip_delegate_respond(parsed_response_t *parsed);
-int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name);
-void agent_tools_filter_for_role(struct cJSON *tools, const char *role);
+struct aimee_tool;
+/* Execute the canonical input object held in IR using its admitted definition.
+ * Borrows the input; execution owns a clone. Refuses schema-changing arguments. */
+char *dispatch_tool_call_ir_ctx_status(const struct aimee_tool *admitted,
+                                       const struct cJSON *canonical_arguments, int timeout_ms,
+                                       int *is_error);
+/* Fresh owned definition from the current execution owner. Unregistered or
+ * unavailable capabilities refuse; no process-global schema cache is used. */
+int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
 
-/* Look up a tool's parameter schema (the `function.parameters` object) by
+/* Host-only shell environment. Prepared/owned by the caller until the shell
+ * joins; only the forked child installs it. Never changes process environ.
+ * Container/detached providers do not inherit host transport capabilities. */
+char *const *agent_tools_bind_bash_environment(char *const environment[]);
+
+/* Complete registry-owned canonical catalog. Exposure preserves the selected
+ * provider's established inventory; only explicit egress renders native JSON. */
+int agent_tools_catalog(aimee_wire_t exposure, aimee_request_t *out);
+int agent_tools_catalog_filter(aimee_request_t *catalog, const char *role);
+int agent_tools_catalog_respond(aimee_request_t *catalog);
+int agent_tools_catalog_sanitize(aimee_request_t *catalog, const char *provider);
+int agent_tools_catalog_sanitize_for_agent(aimee_request_t *catalog, const agent_t *agent);
+int agent_ir_strip_delegate_respond(struct aimee_response *response);
+int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name);
+
+/* Look up a tool's canonical parameter schema by
  * tool name. Returns a borrowed pointer into a process-lifetime cache; the
  * caller MUST NOT cJSON_Delete it. Returns NULL if the tool is not in the
  * registry. The cache is built lazily on the first call from
- * build_tools_array() and is safe to call concurrently — first caller
+ * the canonical registry owner and is safe to call concurrently — first caller
  * wins; subsequent callers reuse the same pointer. */
-struct cJSON *agent_tool_get_schema_cached(const char *tool_name);
 
 /* Write up to `max` built-in tool names into `out`, returning how many.
  * The names are borrowed from the process-lifetime schema cache. */
 int agent_tool_known_names(const char **out, int max);
 
-/* Walk an OpenAI-format tools array (each element {type:"function",
- * function:{name, description, parameters}}) and rewrite each tool's
- * `function.parameters` schema in place via tool_schema_sanitize for
- * the given provider. No-op for providers that pass schemas through
- * unchanged (openai, openrouter, codex, gemini). Active for
- * llama_native, llama-eval, and ollama. The array is modified in place; ownership
- * unchanged. */
-void agent_tools_sanitize_for_provider(struct cJSON *tools, const char *provider_name);
-void agent_tools_sanitize_for_agent(struct cJSON *tools, const agent_t *agent);
+/* Same dispatch and owned text result, plus the tool owner's authoritative
+ * semantic failure flag, including refusals and unconfirmed action receipts.
+ * Consumers must not infer success by parsing or matching the result text. */
 
-char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms);
 void agent_tools_set_dispatch_role(const char *role);
 
 /* The toolset THIS THREAD's turn resolves against, overriding the role. Thread-local
@@ -185,7 +204,7 @@ void agent_tools_set_mcp_provider(agent_mcp_call_fn call, agent_mcp_advert_fn ad
 agent_mcp_call_fn agent_tools_mcp_call_provider(void);
 
 /* Declare an MCP tool as part of aimee's native surface. Idempotent. Must be
- * called before the first build_tools_array() so the schema cache sees it. */
+ * called before the first the canonical registry owner so the schema cache sees it. */
 void agent_tools_register_mcp_tool(const char *name);
 
 /* 1 if `name` was registered above and so dispatches through the MCP provider. */
@@ -211,7 +230,7 @@ agent_shell_git_gate_fn agent_tools_shell_git_gate(void);
 
 /* Tool-call lifecycle hook. A streaming chat worker or a /v1/runs worker
  * installs a thread-local callback (NULL by default — every other caller is
- * unaffected) before running a turn; dispatch_tool_call_ctx fires it as each
+ * unaffected) before running a turn; canonical dispatch fires it as each
  * tool starts and completes so the turn's tool activity can be surfaced to the
  * chat SSE / ACP session/update stream and to /v1/runs events. `phase` is
  * "started" or "completed". Mirrors the agent_tools_set_dispatch_role pattern. */
@@ -222,7 +241,7 @@ void agent_tools_set_tool_event_cb(agent_tool_event_cb_t cb, void *ud);
  * above: this is a PROCESS-GLOBAL, NULL-by-default hook (like the vault/sandbox
  * audit hooks) that the server installs ONCE at startup so a bridge can record
  * every completed tool dispatch's OUTCOME on the audit bus. It fires exactly once
- * per dispatch_tool_call_ctx, after execution, on every return path (success,
+ * per canonical dispatch, after execution, on every return path (success,
  * error, timeout, refused). It carries ONLY classified enums + the principal —
  * never argument or result content, and never the raw error text an MCP server
  * returned. A thin client that links the tools module but not the bus leaves the
@@ -234,9 +253,9 @@ typedef struct
    const char *verdict;     /* "ok" | "error" | "timeout" | "refused" */
    const char *reason_code; /* "" | "guardrail" | "role" | "cancelled" | "tool_error" | */
                             /* "timeout" | "unknown_tool" | "bad_args" | "policy" |       */
-                            /* "effect_contract" | "precondition" | "postcondition"        */
-   const char *mode;        /* "internal" | "outbound" | "outbound:stdio" | */
-                            /* "outbound:sse" | "served"                    */
+   /* "effect_contract" | "precondition" | "postcondition" | "effects_unknown" */
+   const char *mode; /* "internal" | "outbound" | "outbound:stdio" | */
+                     /* "outbound:sse" | "served"                    */
 } agent_tool_completion_t;
 typedef void (*agent_tool_completion_cb_t)(const char *tool, const agent_tool_completion_t *outcome,
                                            void *ud);
@@ -259,6 +278,27 @@ void agent_tools_begin_turn(int turn);
 int agent_tools_get_turn(void);
 int64_t agent_tools_get_snap_id(void);
 void agent_tools_set_snap_id(int64_t id);
+
+/* Host execution handoff. A bookmark borrows the current deny list and stays
+ * on its originating call stack. An owned snapshot deep-copies it and may be
+ * shared read-only by joined native callback workers. No callbacks, credentials
+ * or per-call effect authorization are carried. Restore before destroying an
+ * owned snapshot; all bound workers must have joined first. */
+typedef struct
+{
+   char role[64], toolset[128], session[128];
+   char read_only_root[MAX_PATH_LEN], write_root[MAX_PATH_LEN];
+   int turn, write_capable, knowledge_write, shell, isolated;
+   int64_t snapshot_id;
+   const char *const *denied;
+   int denied_count;
+   char **owned_denied;
+} agent_tools_scope_snapshot_t;
+void agent_tools_scope_bookmark(agent_tools_scope_snapshot_t *out);
+int agent_tools_scope_capture_owned(agent_tools_scope_snapshot_t *out);
+void agent_tools_scope_restore(const agent_tools_scope_snapshot_t *scope);
+void agent_tools_scope_destroy_owned(agent_tools_scope_snapshot_t *scope);
+int agent_tools_scope_isolated(void);
 
 /* Delegate parent-worktree write guard.
  * read_only_root remains readable but must not be writable through local tools.
@@ -307,6 +347,20 @@ int agent_tools_shell_allowed(void);
 
 void agent_tools_knowledge_write_set(int allowed);
 int agent_tools_knowledge_write_allowed(void);
+
+/* Query the current captured role/toolset/deny-list and shell/knowledge ceiling.
+ * Call after resolving any family/bridge aliases to the actual callable name.
+ * This is permission admission only; callers still own path, effect and human
+ * approval enforcement. The error helper returns an owned string (NULL if allowed). */
+typedef enum
+{
+   AGENT_TOOL_PERMISSION_ALLOWED = 0,
+   AGENT_TOOL_PERMISSION_SHELL,
+   AGENT_TOOL_PERMISSION_ROLE,
+   AGENT_TOOL_PERMISSION_KNOWLEDGE
+} agent_tool_permission_t;
+agent_tool_permission_t agent_tools_permission_check(const char *name, const cJSON *args);
+char *agent_tools_permission_error(agent_tool_permission_t permission);
 
 /* Read-only-delegate gate (backend-agnostic write capability). A delegate that
  * is not write-capable (see the write_capable field, derived once at dispatch

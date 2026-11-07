@@ -134,7 +134,9 @@ func (s *postgresDataStore) pageRankNeighbors(ctx context.Context, req DataReque
 	}
 	neighbors := []Record{}
 	relations, _ := json.Marshal(req.pageRankConfig.request.Relations)
-	rows, err := s.db.Query(ctx, `WITH visible AS NOT MATERIALIZED (`+graphVisibleSQL(true)+`)
+	// Eligibility includes lineage checks. Evaluate it once before joining
+	// both endpoints and the returned neighbor, as graph fusion does.
+	rows, err := s.db.Query(ctx, `WITH visible AS MATERIALIZED (`+graphVisibleSQL(true)+`)
  SELECT n.id,n.scope_type,n.scope_value,n.tier,n.kind,n.key,n.content,n.confidence,
  (SELECT owner_id::text FROM memory_collection_owner WHERE id=1),n.record_revision::text
  FROM memory_links l JOIN visible a ON a.id=l.source_id JOIN visible b ON b.id=l.target_id

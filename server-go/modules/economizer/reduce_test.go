@@ -24,30 +24,16 @@ func appendTurn(m *JSONValue, k int) {
 	id := fmt.Sprintf("call_%03d", k)
 	m.Append(mkUser("keep going on the migration and report what changed"))
 
-	a := NewObject()
-	a.Set("role", NewString("assistant"))
-	tcs := NewArray()
-	tc := NewObject()
-	tc.Set("id", NewString(id))
-	tc.Set("type", NewString("function"))
-	fn := NewObject()
-	fn.Set("name", NewString("read_file"))
-	fn.Set("arguments", NewString("{}"))
-	tc.Set("function", fn)
-	tcs.Append(tc)
-	a.Set("tool_calls", tcs)
-	m.Append(a)
+	m.Append(mkCall(id, "read_file", NewObject()))
 
 	var body strings.Builder
 	for body.Len()+48 < 900-96 {
 		body.WriteString("filler output bytes here and on; ")
 	}
 	fmt.Fprintf(&body, "tail at /work/src/stage_%d.c done", k)
-	tr := NewObject()
-	tr.Set("role", NewString("tool"))
-	tr.Set("tool_call_id", NewString(id))
-	tr.Set("content", NewString(body.String()))
-	m.Append(tr)
+	result := mkToolResult(id, body.String())
+	result.Set("role", NewString("tool"))
+	m.Append(result)
 
 	m.Append(mkAsst("read the stage file and applied the change; moving to the next one " +
 		"now that the previous edit is confirmed good"))
@@ -58,25 +44,10 @@ func appendTurn(m *JSONValue, k int) {
 // call followed by its tool result, with no new user message.
 func appendAutonomousToolTurn(m *JSONValue, k int) {
 	id := fmt.Sprintf("auto_%03d", k)
-	a := NewObject()
-	a.Set("role", NewString("assistant"))
-	tcs := NewArray()
-	tc := NewObject()
-	tc.Set("id", NewString(id))
-	tc.Set("type", NewString("function"))
-	fn := NewObject()
-	fn.Set("name", NewString("read_file"))
-	fn.Set("arguments", NewString(fmt.Sprintf(`{"path":"src/file_%d.c"}`, k)))
-	tc.Set("function", fn)
-	tcs.Append(tc)
-	a.Set("tool_calls", tcs)
-	m.Append(a)
-
-	tr := NewObject()
-	tr.Set("role", NewString("tool"))
-	tr.Set("tool_call_id", NewString(id))
-	tr.Set("content", NewString(strings.Repeat("source line and compiler output; ", 80)))
-	m.Append(tr)
+	m.Append(mkCall(id, "read_file", ParseJSON(fmt.Sprintf(`{"path":"src/file_%d.c"}`, k))))
+	result := mkToolResult(id, strings.Repeat("source line and compiler output; ", 80))
+	result.Set("role", NewString("tool"))
+	m.Append(result)
 }
 
 func TestReduceAutonomousToolLoopFoldsAndReusesBoundary(t *testing.T) {
@@ -310,9 +281,9 @@ func TestReduceRecallHintOnRetouch(t *testing.T) {
 	const coord = "src/modules/git/retry.c"
 	build := func() *JSONValue {
 		m := makeMessages(20)
-		m.At(1).Set("content", NewString(
+		m.At(1).Get("blocks").At(0).Set("text", NewString(
 			"the retry backoff lives in "+coord+" and needs care"))
-		m.At(m.Len()-1).Set("content", NewString(
+		m.At(m.Len()-1).Get("blocks").At(0).Set("text", NewString(
 			"remind me what we concluded about "+coord+" before"))
 		return m
 	}
@@ -340,8 +311,8 @@ func TestReduceRecallHintOnRetouch(t *testing.T) {
 func TestReduceRecallInjectAppendsNotice(t *testing.T) {
 	const coord = "src/modules/git/retry.c"
 	m := makeMessages(20)
-	m.At(1).Set("content", NewString("the retry backoff lives in "+coord+" and needs care"))
-	m.At(m.Len()-1).Set("content", NewString("remind me about "+coord+" before"))
+	m.At(1).Get("blocks").At(0).Set("text", NewString("the retry backoff lives in "+coord+" and needs care"))
+	m.At(m.Len()-1).Get("blocks").At(0).Set("text", NewString("remind me about "+coord+" before"))
 
 	cfg := &ReduceConfig{DelegateSeam: true, HistoryFold: true, RecallEnabled: true,
 		RecallInject: true, Fold: FoldConfig{Closet: ClosetConfig{Enabled: true}}}
@@ -352,8 +323,8 @@ func TestReduceRecallInjectAppendsNotice(t *testing.T) {
 	}
 	body := ""
 	for _, message := range out.Messages.Items {
-		if message.GetString("role") == "assistant" && strings.Contains(message.GetString("content"), "context notice") {
-			body = message.GetString("content")
+		if message.GetString("role") == "assistant" && strings.Contains(fixtureText(message), "context notice") {
+			body = fixtureText(message)
 		}
 	}
 	if out.Messages.At(out.Messages.Len()-1).GetString("role") != m.At(m.Len()-1).GetString("role") {
@@ -365,7 +336,7 @@ func TestReduceRecallInjectAppendsNotice(t *testing.T) {
 	if !strings.Contains(body, coord) {
 		t.Error("notice does not carry the coordinate")
 	}
-	if strings.Contains(out.Messages.At(0).GetString("content"), "context notice") {
+	if strings.Contains(fixtureText(out.Messages.At(0)), "context notice") {
 		t.Error("the notice must not land in the cache-stable prefix")
 	}
 }

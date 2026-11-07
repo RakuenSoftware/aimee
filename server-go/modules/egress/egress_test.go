@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type fixedResolver []net.IPAddr
@@ -19,15 +19,15 @@ const digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 func TestHandlerBindsCallerPurposeAndResolvedAddress(t *testing.T) {
 	handler := newHandler(fixedResolver{{IP: net.ParseIP("140.82.121.3")}})
 	body := []byte(`{"target_url":"https://api.github.com/repos/o/r","purpose":"forge","method":"GET","request_sha256":"` + digest + `","credential_present":true}`)
-	reply, status := handler(bus.ModuleInvocation{StageID: StageAuthorize, PrincipalClass: 1,
+	reply, status := handler(ring.ModuleInvocation{StageID: StageAuthorize, PrincipalClass: 1,
 		PrincipalRef: GitClientRef}, body)
-	if status != bus.ModuleStatusOK || !containsAll(string(reply), `"allowed":true`, `"140.82.121.3"`, PolicyRevision) {
+	if status != ring.ModuleStatusOK || !containsAll(string(reply), `"allowed":true`, `"140.82.121.3"`, PolicyRevision) {
 		t.Fatalf("status=%d reply=%s", status, reply)
 	}
 
-	reply, status = handler(bus.ModuleInvocation{StageID: StageAuthorize, PrincipalClass: 1,
+	reply, status = handler(ring.ModuleInvocation{StageID: StageAuthorize, PrincipalClass: 1,
 		PrincipalRef: MemoryClientRef}, body)
-	if status != bus.ModuleStatusOK || !containsAll(string(reply), `"allowed":false`, "caller is not allowed") {
+	if status != ring.ModuleStatusOK || !containsAll(string(reply), `"allowed":false`, "caller is not allowed") {
 		t.Fatalf("cross-purpose status=%d reply=%s", status, reply)
 	}
 }
@@ -35,13 +35,13 @@ func TestHandlerBindsCallerPurposeAndResolvedAddress(t *testing.T) {
 func TestHandlerDeniesPrivateMCPResolutionButAllowsLocalEmbedder(t *testing.T) {
 	handler := newHandler(fixedResolver{{IP: net.ParseIP("127.0.0.1")}})
 	mcp := []byte(`{"target_url":"https://mcp.example.test/sse","purpose":"mcp_sse","method":"GET","request_sha256":"` + digest + `"}`)
-	reply, _ := handler(bus.ModuleInvocation{StageID: StageAuthorize, PrincipalClass: 1,
+	reply, _ := handler(ring.ModuleInvocation{StageID: StageAuthorize, PrincipalClass: 1,
 		PrincipalRef: 200 + PluginClientOffset}, mcp)
 	if !containsAll(string(reply), `"allowed":false`, "non-public") {
 		t.Fatalf("private MCP reply=%s", reply)
 	}
 	embed := []byte(`{"target_url":"http://localhost:8080/embed","purpose":"embedding","method":"POST","request_sha256":"` + digest + `"}`)
-	reply, _ = handler(bus.ModuleInvocation{StageID: StageAuthorize, PrincipalClass: 1,
+	reply, _ = handler(ring.ModuleInvocation{StageID: StageAuthorize, PrincipalClass: 1,
 		PrincipalRef: MemoryClientRef}, embed)
 	if !containsAll(string(reply), `"allowed":true`, "127.0.0.1") {
 		t.Fatalf("local embed reply=%s", reply)

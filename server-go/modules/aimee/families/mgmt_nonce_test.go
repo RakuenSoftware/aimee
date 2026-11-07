@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // --- a challenge-store-shaped fake -------------------------------------------
@@ -135,8 +135,8 @@ func nonceCall(t *testing.T, db store.DB, op uint32, fields []string) (uint32, [
 		t.Fatalf("encode: %v", err)
 	}
 	response, status := MgmtNonce.Handler(db)(
-		bus.ModuleInvocation{StageID: StageMgmtNonce}, frame)
-	if status != bus.ModuleStatusOK {
+		ring.ModuleInvocation{StageID: StageMgmtNonce}, frame)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("wire status = %v, want OK", status)
 	}
 	inBand, cells, err := wire.DecodeFields(response)

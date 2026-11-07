@@ -18,6 +18,16 @@
 /* When set, the recall stubs return nothing so ingress_preinject_build → NULL
  * (the "pre-injection off / recall empty" path). */
 static int g_no_recall = 0;
+/* Independent configured-test receipts are qualified by their owner suites.
+ * This IR plan fixture has no authenticated historical execution source. */
+char *db1_execution_test_grade_recall(const char *principal, const char *project,
+                                      const char *sources_json)
+{
+   (void)principal;
+   (void)project;
+   (void)sources_json;
+   return NULL;
+}
 static int g_test_placement =
     0; /* drives ingress_cache_placement_enabled in legacy_config_read stub */
 
@@ -40,6 +50,7 @@ static int fixture_session_start = 1;
 static const char *fixture_query = "deploy matrix";
 static const char *fixture_remove_tools = "[]";
 static int fixture_transport_result = 1;
+static int fixture_real_policy;
 static const char *fixture_gate;
 static int fixture_audits;
 static const char *const *fixture_provided_resources;
@@ -51,7 +62,7 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    const char *operation =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
    assert(operation);
-   if (strncmp(operation, "ingress-", 8) == 0)
+   if (fixture_real_policy || strncmp(operation, "ingress-", 8) == 0)
       return module_runtime_fixture_call(request, result);
    *result = cJSON_CreateObject();
    cJSON_AddStringToObject(*result, "status", "ok");
@@ -66,14 +77,22 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    }
    else
       assert(!provided);
-   if (strcmp(phase, "text") != 0)
    {
-      const cJSON *roles = cJSON_GetObjectItemCaseSensitive(request, "roles");
-      const cJSON *tools = cJSON_GetObjectItemCaseSensitive(request, "tools");
-      assert(cJSON_IsArray(roles) && cJSON_IsArray(tools));
-      assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(roles, 0)), "user") == 0);
+      const cJSON *view = cJSON_GetObjectItemCaseSensitive(request, "request");
+      const cJSON *messages = cJSON_GetObjectItemCaseSensitive(view, "messages");
+      const cJSON *tools = cJSON_GetObjectItemCaseSensitive(view, "tools");
+      assert(view && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(view, "view")),
+                             "gateway_policy"));
+      assert(!cJSON_GetObjectItemCaseSensitive(request, "roles") &&
+             !cJSON_GetObjectItemCaseSensitive(request, "tools"));
+      assert(cJSON_IsArray(messages) && cJSON_IsArray(tools));
+      assert(!strcmp(cJSON_GetStringValue(
+                         cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, 0), "role")),
+                     "user"));
       if (!fixture_session_start)
-         assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(roles, 1)), "assistant") == 0);
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                            cJSON_GetArrayItem(messages, 1), "role")),
+                        "assistant"));
    }
    if (fixture_gate)
    {
@@ -86,15 +105,15 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    {
       cJSON *step = cJSON_CreateObject();
       cJSON_AddStringToObject(step, "kind", "remove_tools");
-      cJSON_AddItemToObject(step, "indices", cJSON_Parse(fixture_remove_tools));
+      cJSON_AddItemToObject(step, "paths", cJSON_Parse(fixture_remove_tools));
       cJSON_AddItemToArray(steps, step);
    }
    else
    {
       const char *supplied =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "provided_query"));
-      const char *fallback =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "last_user_text"));
+      const char *fallback = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+          cJSON_GetObjectItemCaseSensitive(request, "request"), "last_user_text"));
       assert((supplied && strcmp(supplied, fixture_query) == 0) ||
              (fallback && strcmp(fallback, fixture_query) == 0));
       cJSON *step = cJSON_Parse(
@@ -147,10 +166,6 @@ static int apply_tools(aimee_request_t *ir, void *unused)
 {
    (void)unused;
    return apply_plan(ir, NULL, "tools");
-}
-static char *render_text(const char *query)
-{
-   return server_ir_plan_text("memory.runtime", "gateway-plan", "text", query);
 }
 int learning_evidence_write_retrieval_event(const char *fingerprint, const char *role,
                                             const int64_t *ids, int count, char *out, int cap)
@@ -320,17 +335,7 @@ const char *config_default_dir(void)
    snprintf(directory, sizeof(directory), "%s/aimee-test", platform_tmpdir());
    return directory;
 }
-int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
-                                            const char *query_fingerprint, const int64_t *ids,
-                                            int n_ids)
-{
-   (void)turn_id;
-   (void)role;
-   (void)query_fingerprint;
-   (void)ids;
-   (void)n_ids;
-   return 0;
-}
+
 int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
                                                const char *query_fingerprint, const int64_t *ids,
                                                int n_ids, char *event_id_out, size_t event_id_len)
@@ -373,31 +378,6 @@ int platform_random_bytes(void *buf, size_t len)
 {
    memset(buf, 0x5a, len);
    return 0;
-}
-
-/* OPENAI_SYSTEM_PROMPT: render_text(q) == ingress_preinject_build(q,0)
- * byte-for-byte (the raw env, no trailing "\n\n"). */
-static void test_system_prompt_raw_env(void)
-{
-   char *sys = render_text("deploy matrix");
-   char *direct = ingress_preinject_build("deploy matrix", 0);
-   assert(sys != NULL && direct != NULL);
-   assert(strcmp(sys, direct) == 0);
-   /* The legacy contract: NOT apply()-merged, so no trailing blank line. */
-   size_t n = strlen(sys);
-   assert(!(n >= 2 && sys[n - 1] == '\n' && sys[n - 2] == '\n'));
-   free(sys);
-   free(direct);
-   printf("system_prompt_raw_env OK\n");
-}
-
-/* Pre-injection off / recall empty: every target is a byte-identical no-op. */
-static void test_disabled_noop(void)
-{
-   g_no_recall = 1;
-   assert(render_text("deploy matrix") == NULL);
-   g_no_recall = 0;
-   printf("disabled_noop OK\n");
 }
 
 /* Build a minimal IR carrying a single last-user text block (heap-owned so
@@ -550,7 +530,7 @@ static void test_first_turn_withholds_shell(void)
    mk_tool(&ir, "exec_command");
    mk_tool(&ir, "apply_patch");
    mk_tool(&ir, "mcp__aimee__find_symbol");
-   fixture_remove_tools = "[0]";
+   fixture_remove_tools = "[[0]]";
    assert(apply_tools(&ir, NULL) == 1);
    assert(!has_tool(&ir, "exec_command"));           /* the shell is withheld */
    assert(has_tool(&ir, "apply_patch"));             /* editing is untouched */
@@ -631,19 +611,26 @@ static void test_tool_patch_validation(void)
    mk_user_ir(&ir, "fix the cache");
    mk_tool(&ir, "exec_command");
    mk_tool(&ir, "apply_patch");
-   const char *invalid[] = {
-       "[1,0,0]", "[0,1]", "[1,-1]", "[1,0.5]", "[1,999999999999999999999999999999]", "null"};
+   const char *invalid[] = {"[[1],[0],[0]]",
+                            "[[0],[1]]",
+                            "[[1],[-1]]",
+                            "[[1],[0.5]]",
+                            "[[1],[999999999999999999999999999999]]",
+                            "null",
+                            "[0]",
+                            "[[0],[0,0]]",
+                            "[[0,0]]"};
    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
    {
       fixture_remove_tools = invalid[i];
       assert(apply_tools(&ir, NULL) == 0);
       assert(ir.n_tools == 2 && has_tool(&ir, "exec_command") && has_tool(&ir, "apply_patch"));
    }
-   fixture_remove_tools = "[0]";
+   fixture_remove_tools = "[[0]]";
    fixture_transport_result = -1;
    assert(apply_tools(&ir, NULL) == 0 && ir.n_tools == 2);
    fixture_transport_result = 1;
-   fixture_remove_tools = "[1,0]";
+   fixture_remove_tools = "[[1],[0]]";
    assert(apply_tools(&ir, NULL) == 1 && ir.n_tools == 0);
    aimee_request_free(&ir);
 }
@@ -654,9 +641,12 @@ static void test_gate_reply_and_audit(void)
        "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"audit\",\"args\":{"
        "\"role\":\"RecallGateEnforcedSkip/"
        "acknowledgement\",\"query_fingerprint\":\"opaque-digest\"}}],\"result\":\"evidence\"}";
-   assert(render_text("private query") == NULL && fixture_audits == 1);
+   aimee_request_t ir;
+   mk_user_ir(&ir, "private query");
+   assert(apply_context(&ir, NULL) == 0 && fixture_audits == 1 && ir.n_system == 0);
    fixture_gate = "{\"status\":\"error\",\"steps\":[]}";
-   assert(render_text("deploy matrix") == NULL);
+   assert(apply_context(&ir, NULL) == 0 && ir.n_system == 0);
+   aimee_request_free(&ir);
    fixture_gate = NULL;
 }
 
@@ -670,7 +660,7 @@ static void test_invalid_plans_have_no_effects(void)
        "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"audit\",\"args\":{"
        "\"role\":\"RecallGateEnforcedSkip/"
        "acknowledgement\",\"query_fingerprint\":\"opaque-digest\"}},{\"kind\":\"unknown\"}]}",
-       "{\"status\":\"ok\",\"steps\":[{\"kind\":\"remove_tools\",\"indices\":[0]},{\"kind\":"
+       "{\"status\":\"ok\",\"steps\":[{\"kind\":\"remove_tools\",\"paths\":[[0]]},{\"kind\":"
        "\"invoke\",\"binding\":\"undeclared\",\"args\":{}}]}",
        "{\"status\":\"ok\",\"steps\":[{\"kind\":\"append_context\",\"resource\":\"guidance\","
        "\"context\":{\"origin\":\"retrieval\",\"authority\":\"task_instruction\",\"trust\":"
@@ -695,27 +685,21 @@ static void test_required_plan_failure_is_request_scoped(void)
        "{\"status\":\"ok\",\"steps\":[]}",
    };
    request_context_t context = {0};
-   for (int surface = 0; surface < 2; surface++)
-      for (int scenario = 0; scenario < 4; scenario++)
-      {
-         request_context_set(&context);
-         fixture_gate = plans[scenario < 3 ? scenario : 2];
-         fixture_transport_result = scenario == 3 ? -1 : 1;
-         if (surface == 0)
-            assert(render_text("deploy matrix") == NULL);
-         else
-         {
-            aimee_request_t ir;
-            mk_user_ir(&ir, "deploy matrix");
-            assert(apply_context(&ir, NULL) == 0 && ir.n_system == 0);
-            aimee_request_free(&ir);
-         }
-         assert(request_context_get()->context_refused == (scenario != 2));
-         if (scenario != 2)
-            assert(!strcmp(request_context_get()->context_refusal_kind,
-                           scenario == 0 ? "protected_context_overflow" : "unavailable"));
-         request_context_clear();
-      }
+   for (int scenario = 0; scenario < 4; scenario++)
+   {
+      request_context_set(&context);
+      fixture_gate = plans[scenario < 3 ? scenario : 2];
+      fixture_transport_result = scenario == 3 ? -1 : 1;
+      aimee_request_t ir;
+      mk_user_ir(&ir, "deploy matrix");
+      assert(apply_context(&ir, NULL) == 0 && ir.n_system == 0);
+      aimee_request_free(&ir);
+      assert(request_context_get()->context_refused == (scenario != 2));
+      if (scenario != 2)
+         assert(!strcmp(request_context_get()->context_refusal_kind,
+                        scenario == 0 ? "protected_context_overflow" : "unavailable"));
+      request_context_clear();
+   }
    fixture_gate = NULL;
    fixture_transport_result = 1;
    puts("required plan failures preserve owner kind; successful empty plans remain valid");
@@ -743,17 +727,11 @@ static void test_generic_bindings_full_text_and_epoch(void)
        {"payload", payload_binding}, {"clock", clock_binding}, {NULL, NULL}};
    aimee_ir_module_plan_t config = {.method = "memory.runtime",
                                     .operation = "gateway-plan",
-                                    .phase = "text",
+                                    .phase = "context",
                                     .bindings = bindings,
                                     .context = &opaque_payload};
-   fixture_gate = "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"payload\","
-                  "\"args\":{},\"output\":\"value\"}],\"result\":\"value\"}";
-   char *text = aimee_ir_module_plan_text(&config);
-   assert(text && strcmp(text, payload) == 0);
-   free(text);
    aimee_request_t ir;
    mk_user_ir(&ir, "deploy matrix");
-   config.phase = "context";
    fixture_gate =
        "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"payload\",\"args\":{},"
        "\"output\":\"value\"},{\"kind\":\"invoke\",\"binding\":\"clock\",\"args\":{},\"output\":"
@@ -769,13 +747,71 @@ static void test_generic_bindings_full_text_and_epoch(void)
    aimee_request_free(&ir);
 }
 
+static void test_real_go_namespace_policy(void)
+{
+   aimee_request_t ir;
+   mk_user_ir(&ir, "inspect the typed catalog");
+   ir.tools = calloc(5, sizeof *ir.tools);
+   assert(ir.tools);
+   ir.n_tools = 5;
+   const char *names[] = {"functions", "mcp__aimee"};
+   for (int i = 0; i < 2; i++)
+   {
+      aimee_tool_t *group = &ir.tools[i];
+      group->kind = AIMEE_TOOL_NAMESPACE;
+      group->name = strdup(names[i]);
+      group->children = calloc(2, sizeof *group->children);
+      group->n_children = 2;
+      assert(group->children);
+      group->children[0].name = strdup("exec_command");
+      group->children[1].name = strdup(i ? "index" : "apply_patch");
+      group->children[1].schema = cJSON_Parse("{\"type\":\"object\",\"host_only_schema\":true}");
+   }
+   ir.tools[2] = (aimee_tool_t){.kind = AIMEE_TOOL_HOSTED,
+                                .provider_wire = AIMEE_WIRE_RESPONSES,
+                                .native_type = strdup("local_shell")};
+   ir.tools[3].name = strdup("Bash");
+   ir.tools[4] = (aimee_tool_t){.kind = AIMEE_TOOL_HOSTED,
+                                .provider_wire = AIMEE_WIRE_RESPONSES,
+                                .native_type = strdup("web_search")};
+   ir.tool_choice = AIMEE_TOOL_CHOICE_TOOL;
+   ir.tool_choice_name = strdup("Bash");
+   fixture_real_policy = 1;
+   assert(apply_tools(&ir, NULL) == 1);
+   fixture_real_policy = 0;
+   assert(ir.n_tools == 3 && ir.tools[0].n_children == 1 && ir.tools[1].n_children == 2);
+   assert(!strcmp(ir.tools[0].children[0].name, "apply_patch"));
+   assert(cJSON_IsTrue(
+       cJSON_GetObjectItemCaseSensitive(ir.tools[0].children[0].schema, "host_only_schema")));
+   assert(!strcmp(ir.tools[1].children[0].name, "exec_command"));
+   assert(!strcmp(ir.tools[2].native_type, "web_search"));
+   assert(ir.tool_choice == AIMEE_TOOL_CHOICE_AUTO && !ir.tool_choice_name);
+   aimee_request_free(&ir);
+   mk_user_ir(&ir, "inspect before using a shell");
+   ir.tools = calloc(1, sizeof *ir.tools);
+   ir.n_tools = 1;
+   ir.tools[0].kind = AIMEE_TOOL_NAMESPACE;
+   ir.tools[0].name = strdup("functions");
+   ir.tools[0].children = calloc(1, sizeof *ir.tools[0].children);
+   ir.tools[0].n_children = 1;
+   ir.tools[0].children[0].name = strdup("exec_command");
+   ir.tool_choice = AIMEE_TOOL_CHOICE_ANY;
+   ir.has_parallel_tool_calls = 1;
+   fixture_real_policy = 1;
+   assert(apply_tools(&ir, NULL) == 1);
+   fixture_real_policy = 0;
+   assert(ir.n_tools == 0 && ir.tool_choice == AIMEE_TOOL_CHOICE_UNSET &&
+          !ir.has_parallel_tool_calls);
+   aimee_request_free(&ir);
+   puts("real Go policy: namespaced native shells removed; MCP identities, schemas and hosted "
+        "search retained");
+}
+
 int main(void)
 {
    printf("test_ir_module_plan:\n");
-   test_system_prompt_raw_env();
    test_gate_reply_and_audit();
    test_required_plan_failure_is_request_scoped();
-   test_disabled_noop();
    test_ir_stage_appends_system_block();
    const char *const provided[] = {"guidance", NULL};
    fixture_provided_resources = provided;
@@ -791,6 +827,7 @@ int main(void)
    test_generic_bindings_full_text_and_epoch();
    test_shell_returns_after_first_turn();
    test_persona_prepends_first_user_message_once();
+   test_real_go_namespace_policy();
    printf("all IR module plan tests passed\n");
    return 0;
 }

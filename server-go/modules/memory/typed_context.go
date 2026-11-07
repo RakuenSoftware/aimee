@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type typedContextOptions struct {
@@ -143,29 +143,29 @@ func typedOptions(args commandArgs) *typedContextOptions {
 	}
 	return out
 }
-func handleTypedContext(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleTypedContext(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	return handleTypedContextResult(options, invocation, args, true)
 }
 
-func handleTypedContextResult(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs, envelope bool) ([]byte, bus.ModuleStatus) {
+func handleTypedContextResult(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs, envelope bool) ([]byte, ring.ModuleStatus) {
 	if options.placement != PlacementKB {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	query, ok := args.stringValue("query")
 	if !ok || query == "" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	cfg := typedOptions(args)
 	if raw, present := args["execute_recovery"]; present {
 		if string(raw) == "null" || json.Unmarshal(raw, &cfg.ExecuteRecovery) != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	if raw, present := args["evidence_requirements"]; present {
 		var err error
 		cfg.Requirements, err = decodeEvidenceRequirements(raw)
 		if err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	if cfg.ExecuteRecovery {
@@ -185,7 +185,7 @@ func handleTypedContextResult(options handlerOptions, invocation bus.ModuleInvoc
 	}
 	if raw, present := args["context_limits"]; present {
 		if json.Unmarshal(raw, &cfg.ContextLimits) != nil || cfg.ContextLimits == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	if _, err := cfg.ContextLimits.byteLimit(maxDataBody); err != nil {
@@ -197,20 +197,20 @@ func handleTypedContextResult(options handlerOptions, invocation bus.ModuleInvoc
 			}
 			return encoded, status
 		}
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	request := DataRequest{Operation: "typed-context", Query: query, Limit: 32, TypedContext: cfg, Assertions: &assertionSearchRequest{ValidAt: args.stringOr("valid_at", ""), BelievedAt: args.stringOr("believed_at", ""), Historical: cfg.Flags["historical_assertions"], Hops: min(2, max(0, args.integer("max_hops", 0)))}, Project: args.stringOr("project", ""), Workspace: args.stringOr("workspace", ""), IncludeAll: args.boolean("include_all")}
 	if raw, ok := args["scope"]; ok && json.Unmarshal(raw, &request.Scope) != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	body, _ := json.Marshal(request)
 	raw, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if !envelope {
 		return commandResult(response.Payload)

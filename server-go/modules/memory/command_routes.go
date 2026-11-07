@@ -1,12 +1,12 @@
 package memory
 
-import "github.com/JBailes/aimee/server-go/bus"
+import "github.com/RakuenSoftware/ouroboros-ring/go/ring"
 
 // A route is declared and invoked from the same table. Internal view builders
 // remain callable on the authenticated module bus without becoming RPC actions.
 type commandRoute struct {
 	group, verb, summary string
-	handler              func(handlerOptions, bus.ModuleInvocation, string, commandArgs) ([]byte, bus.ModuleStatus)
+	handler              func(handlerOptions, ring.ModuleInvocation, string, commandArgs) ([]byte, ring.ModuleStatus)
 	public               bool
 }
 
@@ -96,7 +96,7 @@ var kbCommandRoutes = []commandRoute{
 	{"memory", "tag_workspace", "Tag workspace memories.", handleScopeCommand, true},
 	{"memory", "tag_scope", "Tag scope memories.", handleScopeCommand, true},
 
-	{"memory", "recall", "Recall memories for the current turn.", func(o handlerOptions, i bus.ModuleInvocation, _ string, a commandArgs) ([]byte, bus.ModuleStatus) {
+	{"memory", "recall", "Recall memories for the current turn.", func(o handlerOptions, i ring.ModuleInvocation, _ string, a commandArgs) ([]byte, ring.ModuleStatus) {
 		return handleRecallCommand(o, i, a)
 	}, true},
 	{"memory", "maintenance_run", "Run memory maintenance.", handleMaintenanceCommand, true},
@@ -140,11 +140,11 @@ var kbCommandRoutes = []commandRoute{
 	{"memory", "effectiveness_stats", "Read memory effectiveness.", handleQueryCommand, true},
 }
 
-func describeCommandRoutes(options handlerOptions, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func describeCommandRoutes(options handlerOptions, invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
-	commands := []bus.CommandDefinition{{Group: "memory", Verb: "embed_text", Summary: "Embed trusted host input."}, {Group: "memory", Verb: "runtime", Summary: "Read host runtime views."}}
+	commands := []ring.CommandDefinition{{Group: "memory", Verb: "embed_text", Summary: "Embed trusted host input."}, {Group: "memory", Verb: "runtime", Summary: "Read host runtime views."}}
 	// The Server's shared-KB transport is still being migrated. Do not shadow
 	// those handlers with private-only commands under the same public name.
 	routes := sharedCommandRoutes
@@ -162,12 +162,12 @@ func describeCommandRoutes(options handlerOptions, invocation bus.ModuleInvocati
 	}
 	for _, r := range routes {
 		if r.public {
-			commands = append(commands, bus.CommandDefinition{Group: r.group, Verb: r.verb, Summary: r.summary, Surfaces: SurfaceRPC, Visibility: MCPDiscoverable})
+			commands = append(commands, ring.CommandDefinition{Group: r.group, Verb: r.verb, Summary: r.summary, Surfaces: SurfaceRPC, Visibility: MCPDiscoverable})
 		}
 	}
-	response, err := bus.EncodeCommandDeclaration(request, StageCommand, commands)
+	response, err := ring.EncodeCommandDeclaration(request, StageCommand, commands)
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

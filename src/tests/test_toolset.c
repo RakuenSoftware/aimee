@@ -39,6 +39,7 @@ static void test_full_stack_resolves_union(void)
    assert(has_tool(tools, n, "bash"));
    assert(has_tool(tools, n, "git_status"));
    assert(has_tool(tools, n, "read_file"));
+   assert(has_tool(tools, n, "request_input"));
    assert(has_tool(tools, n, "search_memory"));
    /* edit_file is a write-capable tool the code role must expose (delegates
     * need surgical edits, not just whole-file write_file). */
@@ -56,10 +57,29 @@ static void test_full_stack_resolves_union(void)
    printf("  code_roles_resolve_edit_file: ok\n");
 }
 
+static void test_primary_orchestration(void)
+{
+   toolset_register_native_tool("delegate", "primary");
+   toolset_register_native_tool("delegate_status", "primary");
+   toolset_registry_t registry;
+   toolset_registry_init(&registry);
+   char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX], error[TOOLSET_ERROR_MAX] = "";
+   int count = toolset_resolve(&registry, "primary", tools, TOOLSET_MAX_TOOLS, error, sizeof error);
+   assert(count > 0 && has_tool(tools, count, "delegate"));
+   assert(has_tool(tools, count, "delegate_status") && has_tool(tools, count, "read_file"));
+   const char *roles[] = {"code", "full_stack", "review", "review_indexed", "readonly"};
+   for (size_t i = 0; i < sizeof roles / sizeof roles[0]; i++)
+   {
+      count = toolset_resolve(&registry, roles[i], tools, TOOLSET_MAX_TOOLS, error, sizeof error);
+      assert(count > 0 && !has_tool(tools, count, "delegate"));
+      assert(!has_tool(tools, count, "delegate_status"));
+   }
+}
+
 /* A coding delegate must resolve the git WRITE tools, and a reviewer must not.
  *
  * Registering a tool is not the same as a role being able to call it:
- * agent_tools_filter_for_role drops anything the role's toolset does not name. A
+ * agent_tools_catalog_filter drops anything the role's toolset does not name. A
  * live delegate reported "there is no git_commit tool in my available toolset"
  * while the builtin registry carried it and the server had it wired — the tools
  * were being filtered straight back out here. require_aimee_git tells delegates to
@@ -114,7 +134,7 @@ static void test_find_callers_reaches_reviewers_and_coders(void)
     * would. That is the point of the check: the mechanism must carry a tool all the
     * way from one declaration to a resolved role, through BOTH gates that used to
     * need hand-editing (KNOWN_TOOLS, which silently pruned git_write's four tools,
-    * and toolset membership, which agent_tools_filter_for_role enforces). */
+    * and toolset membership, which agent_tools_catalog_filter enforces). */
    toolset_register_native_tool("index_find_callers", "core");
    toolset_register_native_tool("index_find_callers", "review_indexed");
 
@@ -306,6 +326,7 @@ int main(void)
 {
    printf("test_toolset:\n");
    test_full_stack_resolves_union();
+   test_primary_orchestration();
    test_git_write_tools_reach_coding_roles_only();
    test_find_callers_reaches_reviewers_and_coders();
    test_review_indexed_read_tools_gated_no_write();

@@ -3,8 +3,8 @@ package memory
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The memory module declares the commands it owns.
@@ -99,7 +99,7 @@ func DeclaredCommands() []Command { return declaredCommands }
 func appendString(buf []byte, s string) []byte { return append(buf, s...) }
 
 // handleDeclareCommands answers the declaration request.
-func handleDeclareCommands(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleDeclareCommands(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != commandsRequestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != commandsRequestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion {
@@ -107,10 +107,10 @@ func handleDeclareCommands(invocation bus.ModuleInvocation, request []byte) ([]b
 		// declaration that is accepted anyway would register a partial command
 		// surface, and a MISSING command is invisible -- it reads as "aimee cannot
 		// do that" rather than as an error.
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	out := make([]byte, 0, 12+len(declaredCommands)*64)
@@ -133,5 +133,5 @@ func handleDeclareCommands(invocation bus.ModuleInvocation, request []byte) ([]b
 		out = appendString(out, c.Verb)
 		out = appendString(out, c.Summary)
 	}
-	return out, bus.ModuleStatusOK
+	return out, ring.ModuleStatusOK
 }

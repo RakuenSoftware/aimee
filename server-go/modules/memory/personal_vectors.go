@@ -36,6 +36,30 @@ type personalVectors struct {
 	db       store.Store
 	ready    atomic.Bool
 	wake     chan struct{}
+	// batched counts the rows the last pass's batches picked up; a full batch
+	// means there is more to do now.
+	batched atomic.Int64
+}
+
+// indexBatchSize is how many rows one batch takes; a batch this full means
+// another may be waiting.
+const indexBatchSize = 16
+
+// indexRetry is how soon a pass that failed is tried again. Rows that failed
+// to embed carry their own next attempt time, so this bounds a pause rather
+// than polling.
+const indexRetry = 30 * time.Second
+
+// Wake has the indexer look for work now: a record was written, or the model
+// configuration may have changed.
+func (p *personalVectors) Wake() {
+	if p == nil {
+		return
+	}
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
 }
 
 // StartPersonalIndex attaches embedding to the local owner. Empty endpoint is
@@ -53,6 +77,9 @@ func StartPersonalIndex(ctx context.Context, data DataStore, executor egress.Exe
 	p := &personalVectors{code: s, endpoint: endpoint, executor: executor, db: db, wake: make(chan struct{}, 1)}
 	if configured, ok := s.db.(interface{ EmbeddingEndpoint() (string, error) }); ok {
 		p.settings = configured.EmbeddingEndpoint
+	}
+	if watched, ok := s.db.(interface{ OnConfigChange(func()) }); ok {
+		watched.OnConfigChange(p.Wake)
 	}
 	s.personal = p
 	go p.run(ctx)
@@ -85,21 +112,43 @@ func (p *personalVectors) serving(ctx context.Context, endpoint string, expected
 	}
 	return result.ServingID, nil
 }
+
+// run indexes what needs it whenever it is woken -- a write, a config change --
+// and otherwise sleeps. It used to look every five seconds whether or not
+// anything had changed.
 func (p *personalVectors) run(ctx context.Context) {
-	timer := time.NewTicker(5 * time.Second)
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		<-timer.C
+	}
 	defer timer.Stop()
 	for {
+		p.batched.Store(0)
 		attempt, cancel := context.WithTimeout(ctx, 60*time.Second)
 		err := errors.Join(p.indexBatch(attempt), p.indexCodeBatch(attempt))
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			log.Printf("local memory/code embedding pending: %v", err)
 		}
+		if err == nil && p.batched.Load() >= indexBatchSize {
+			continue // a full batch: there may be more now
+		}
+		var due <-chan time.Time
+		if err != nil {
+			timer.Reset(indexRetry)
+			due = timer.C
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-timer.C:
+		case <-due:
 		case <-p.wake:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 		}
 	}
 }
@@ -169,6 +218,7 @@ func (p *personalVectors) indexBatch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	p.batched.Add(int64(len(items)))
 	var workErr error
 	for _, r := range items {
 		if result := p.indexRetainedVersion(ctx, endpoint, serving, generation, r.id, r.revision, r.key, r.content, r.fingerprint); result.Error != "" {

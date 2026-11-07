@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Judging whether a container the runtime just started is actually isolated.
@@ -29,25 +29,25 @@ const (
 // handleIsolation reads the probe report and returns the verdict.
 //
 // The report arrives as content: the module never runs a container runtime.
-func handleIsolation(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleIsolation(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < isolationReqHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != isolationRequestMagic ||
 		request[4] != wireVersion || request[5] > 3 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	probeFailed := request[5]&isolationFlagProbeFailed != 0
 
 	reportLen := int(binary.LittleEndian.Uint32(request[8:12]))
 	if reportLen > isolationReportMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	c := &economicsCursor{buf: request, at: isolationReqHeaderLen}
 	report := c.str(reportLen)
 	if c.bad || c.at != len(request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	verdict := JudgeIsolation(ParseIsolationProbe(report, probeFailed))
@@ -61,5 +61,5 @@ func handleIsolation(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 	putBool(response[8:12], false)
 	putBool(response[12:16], verdict.Refuse)
 	response = append(response, verdict.Reason...)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

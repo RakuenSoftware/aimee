@@ -10,7 +10,7 @@
 #include "canonical_index_internal.h"
 #include "code_index.h"
 #include "cross_repo_resolver.h" /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
-#include "../support/kb_store_runtime_config.h"
+#include "config.h"
 #include "css_graph.h" /* CSS migration assistant: style graph + component join (WP-C/D) */
 #include "kb_store.h"
 #include "kb_store_bounded_text.h"
@@ -20,7 +20,7 @@
 #include "kb_runtime_state.h" /* kb_store_kb_purge_fence_active: commit-point fence check */
 #include "aimee.h"
 #include "db_postgres.h"
-#include "../support/kb_store_log.h"
+#include "log.h"
 #include <ctype.h>
 #include <stdatomic.h>
 #include <stdio.h>

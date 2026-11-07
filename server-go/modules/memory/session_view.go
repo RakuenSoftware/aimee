@@ -7,12 +7,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Hosts supply a remaining byte budget. Selection, fallback and memory-specific
 // rendering belong to this owner; a host never reconstructs or re-ranks rows.
-func sessionMemoryView(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs, request DataRequest, records []publicMemoryRecord) ([]byte, bus.ModuleStatus) {
+func sessionMemoryView(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs, request DataRequest, records []publicMemoryRecord) ([]byte, ring.ModuleStatus) {
 	budget := args.limit("budget_bytes", 8192, 1<<20)
 	if n, ok := args.number("budget_bytes"); ok && n == 0 {
 		budget = 0
@@ -43,12 +43,12 @@ func sessionMemoryView(options handlerOptions, invocation bus.ModuleInvocation, 
 		if len(records) > 0 {
 			raw, _ := json.Marshal(rankRequest)
 			body, status := handleData(options, invocation, raw)
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				return nil, status
 			}
 			var result DataResponse
 			if json.Unmarshal(body, &result) != nil || len(result.ScopeRanks) != len(records) {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			for _, r := range result.ScopeRanks {
 				ranks[r.ID] = r.Rank
@@ -68,12 +68,12 @@ func sessionMemoryView(options handlerOptions, invocation bus.ModuleInvocation, 
 			fallback.Pattern, fallback.Limit = "%"+request.Project+"%", 5
 			raw, _ := json.Marshal(fallback)
 			body, status := handleData(options, invocation, raw)
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				return nil, status
 			}
 			var result DataResponse
 			if json.Unmarshal(body, &result) != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			records = result.PublicRecords
 			header = fmt.Sprintf("# Project Context (%s)", request.Project)

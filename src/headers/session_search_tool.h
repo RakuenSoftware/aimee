@@ -10,7 +10,7 @@ extern "C"
 
    /* Build the structured result for the zero-LLM session_search MCP tool.
     * The caller owns the returned cJSON object. */
-   cJSON *session_search_tool_result(cJSON *args);
+   cJSON *session_search_tool_result_for_principal(const cJSON *args, const char *principal);
    cJSON *session_search_tool_result_for_uid(cJSON *args, unsigned uid);
    cJSON *session_search_mcp_tool(void);
 

@@ -331,8 +331,68 @@ int main(void)
       assert(persona_install_defaults(dir) == 0);
    }
 
+   /* Project links may resolve inside the project, never to a sibling tree. */
+   {
+      char project[PATH_MAX], sibling[PATH_MAX], directory[PATH_MAX];
+      char inside[PATH_MAX], outside[PATH_MAX], link[PATH_MAX], resolved[PERSONA_PATH_MAX];
+      snprintf(project, sizeof project, "%s/project", home);
+      snprintf(sibling, sizeof sibling, "%s/project-other", home);
+      snprintf(directory, sizeof directory, "%s/.aimee/personas", project);
+      int rc = platform_mkdir_p(directory, 0755);
+      assert(!rc);
+      rc = platform_mkdir_p(sibling, 0755);
+      assert(!rc);
+      snprintf(inside, sizeof inside, "%s/inside.md", project);
+      snprintf(outside, sizeof outside, "%s/outside.md", sibling);
+      write_file(inside, "---\nname: linked-safe\n---\n\n## Persona\nSAFE_PERSONA\n");
+      write_file(outside, "---\nname: linked-escape\n---\n\n## Persona\nESCAPED_PERSONA\n");
+      snprintf(link, sizeof link, "%s/linked-safe.md", directory);
+      rc = platform_test_symlink_file(inside, link);
+      assert(!rc);
+      rc = persona_path(project, "linked-safe", resolved, sizeof resolved);
+      assert(!rc && !strcmp(resolved, link));
+      persona_t p;
+      rc = persona_load(project, "linked-safe", &p);
+      assert(!rc && !p.builtin && p.persona_text && strstr(p.persona_text, "SAFE_PERSONA"));
+      persona_free(&p);
+      remove(link);
+      snprintf(link, sizeof link, "%s/linked-escape.md", directory);
+      rc = platform_test_symlink_file(outside, link);
+      assert(!rc);
+      rc = persona_exists(project, "linked-escape");
+      assert(!rc);
+      rc = persona_path(project, "linked-escape", resolved, sizeof resolved);
+      assert(rc < 0 && !resolved[0]);
+      rc = persona_load(project, "linked-escape", &p);
+      assert(!rc && p.builtin && !strcmp(p.name, "engineer"));
+      persona_free(&p);
+      rc = platform_path_is_beneath(project, outside);
+      assert(!rc);
+      rc = platform_path_is_beneath(inside, inside);
+      assert(!rc); /* The root must be a directory. */
+      remove(link);
+      remove(inside);
+      remove(outside);
+   }
+
    /* --- persona_name_valid: filename-safe single segment --- */
    {
+      char outside[PATH_MAX], resolved[PERSONA_PATH_MAX];
+      snprintf(outside, sizeof outside, "%s/outside.md", home);
+      write_file(outside, "---\nname: outside\n---\n\n## Persona\nOUTSIDE_PERSONA\n");
+      int exists = persona_exists(NULL, "../outside");
+      assert(!exists);
+      int found = persona_path(NULL, "../outside", resolved, sizeof resolved);
+      assert(found < 0 && !resolved[0]);
+      char existing[PATH_MAX];
+      snprintf(existing, sizeof existing, "%s/personas/noir.md", home);
+      found = persona_path(NULL, "noir.md-extra", resolved, strlen(existing) + 1);
+      assert(found < 0 && !resolved[0]); /* Do not load an existing truncated prefix. */
+      persona_t fallback;
+      int loaded = persona_load(NULL, "../outside", &fallback);
+      assert(!loaded && fallback.builtin && !strcmp(fallback.name, "engineer"));
+      persona_free(&fallback);
+      remove(outside);
       assert(persona_name_valid("engineer"));
       assert(persona_name_valid("staff-eng_2.0"));
       assert(!persona_name_valid(""));

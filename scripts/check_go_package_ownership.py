@@ -72,11 +72,6 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "and benchmarks modules own the observable evaluation operations. "
         "Keeping this arithmetic outside both avoids a cyclic module dependency.",
     ),
-    "server-go/bus": (
-        "substrate",
-        "The event bus client, module runtime and wire. Every module imports it; "
-        "it cannot itself be a module.",
-    ),
     "server-go/cmd/aimee-module": (
         "host",
         "The multicall binary module processes are spawned as, and the dispatch "
@@ -105,6 +100,13 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "contract",
         "Implementation-independent memory caller framing, wire types and pure "
         "embedding identity commitments. No storage, ranking, policy or admission.",
+    ),
+    "server-go/thinclient": (
+        "contract",
+        "Caller-side Go binding to the existing C thinclient transport. Owns "
+        "only request-scoped connections, not domain state, authorization policy "
+        "or module dispatch. Requests retain their server-owned API methods and "
+        "caller identity; the binding is not a separately executing module.",
     ),
     "server-go/delegate": (
         "contract",
@@ -143,6 +145,11 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "Test support for the slice above; carried with it.",
     ),
 }
+
+# Existing modules also own exact public, pure wire-contract packages. This is
+# ownership, not an exemption or a new process: the declared module identity
+# must exist, and every non-test source in the exact package is accounted for.
+PUBLIC_MODULE_CONTRACT_PACKAGES: dict[str, str] = {"server-go/ir": "ir"}
 
 # Directories whose contents are fixtures rather than shipped code.
 FIXTURE_MARKERS = ("/testdata/",)
@@ -208,6 +215,13 @@ def go_files_outside_modules(root: Path) -> tuple[list[str], int]:
 def run(root: Path) -> str:
     declared = module_declared_go_files(root)
     files, skipped = go_files_outside_modules(root)
+    module_ids = set()
+    for descriptor in sorted((root / "src/modules").glob("*/module.yaml")):
+        data = json.loads(descriptor.read_text(encoding="utf-8"))
+        module_ids.add(data.get("id"))
+    for package, owner in PUBLIC_MODULE_CONTRACT_PACKAGES.items():
+        if owner not in module_ids or package in UNOWNED_PACKAGES:
+            raise SystemExit(f"{NAME}: error: public contract {package} has unknown or conflicting owner {owner}")
 
     # A check that compared NOTHING must not report ok.
     #
@@ -236,11 +250,19 @@ def run(root: Path) -> str:
     errors: list[str] = []
     matched_entries: set[str] = set()
     covered = 0
+    matched_contracts: set[str] = set()
 
     for path in files:
         package = path.rsplit("/", 1)[0]
         entry = UNOWNED_PACKAGES.get(package)
         owners = declared.get(path, [])
+        contract_owner = PUBLIC_MODULE_CONTRACT_PACKAGES.get(package)
+        if contract_owner:
+            if owners and owners != [contract_owner]:
+                errors.append(f"{path}: conflicting public contract owners {owners} vs {contract_owner}")
+            matched_contracts.add(package)
+            covered += 1
+            continue
 
         if entry and owners:
             errors.append(
@@ -280,6 +302,10 @@ def run(root: Path) -> str:
                 f"The code moved and the exemption did not; remove or repoint it."
             )
 
+    for package in sorted(PUBLIC_MODULE_CONTRACT_PACKAGES):
+        if package not in matched_contracts:
+            errors.append(f"{package}: declared public contract has no non-test Go source")
+
     if errors:
         for error in errors:
             print(f"{NAME}: error: {error}", file=sys.stderr)
@@ -289,7 +315,7 @@ def run(root: Path) -> str:
     return (
         f"{NAME}: ok ({covered} of {len(files)} file(s) outside {MODULES_TREE}/ "
         f"accounted for, {skipped} skipped as fixtures; "
-        f"{len(UNOWNED_PACKAGES)} named non-module package(s), {debts} of them debt)"
+        f"{len(PUBLIC_MODULE_CONTRACT_PACKAGES)} module-owned public contract(s), {len(UNOWNED_PACKAGES)} named non-module package(s), {debts} of them debt)"
     )
 
 

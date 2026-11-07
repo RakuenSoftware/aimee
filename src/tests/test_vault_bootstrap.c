@@ -453,30 +453,6 @@ static void test_no_plaintext_at_rest(void)
  * remove them -- unsetting mid-walk skips entries. */
 #define TEST_ENV_NAME_MAX 128 /* mirrors ENV_NAME_MAX, private to the module */
 
-static void scrub_inherited_credential_env(void)
-{
-   extern char **environ;
-   char names[64][TEST_ENV_NAME_MAX];
-   int n = 0;
-
-   for (char **entry = environ; *entry && n < (int)(sizeof(names) / sizeof(names[0])); entry++)
-   {
-      const char *eq = strchr(*entry, '=');
-      if (!eq || eq == *entry)
-         continue;
-      size_t len = (size_t)(eq - *entry);
-      if (len >= TEST_ENV_NAME_MAX)
-         continue;
-      memcpy(names[n], *entry, len);
-      names[n][len] = '\0';
-      if (vault_env_name_is_any_credential(names[n]))
-         n++;
-   }
-
-   for (int i = 0; i < n; i++)
-      unsetenv(names[i]);
-}
-
 static void test_postgres_luks_vault_only(void)
 {
    const char *volume = "1108ba28-9dc6-46f9-a0ae-cb8f510e9ec6";
@@ -548,7 +524,6 @@ static void test_scoped_store_migration(void)
 
 int main(void)
 {
-   scrub_inherited_credential_env();
    assert(vault_env_egress_parent_path_ok("/usr/local/libexec/aimee-modules/aimee-module-egress"));
    assert(!vault_env_egress_parent_path_ok(
        "/usr/local/libexec/aimee-modules/aimee-module-egress-evil"));

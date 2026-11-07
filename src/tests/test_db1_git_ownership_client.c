@@ -15,14 +15,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <aimee/core/event_bus/module_client.h>
+#include <ouroboros/module_client.h>
 #include "db1_client/db1_module_api.h"
 #include "db1_client/git_ownership.h"
 
 /* --- the stubbed bus ------------------------------------------------------ */
 
 static int stub_available = 1;
-static aimee_module_call_result_t stub_result = AIMEE_MODULE_CALL_OK;
+static ouro_module_call_result_t stub_result = OURO_MODULE_CALL_OK;
 static uint32_t stub_status = AIMEE_DB1_STATUS_OK;
 static const char *stub_value = "";
 static int stub_calls;
@@ -41,11 +41,11 @@ int obs_bus_module_available(uint32_t event_kind)
    return stub_available;
 }
 
-aimee_module_call_result_t
+ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
                     uint32_t response_capacity, uint32_t *response_len,
-                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+                    ouro_module_cancelled_fn cancelled, void *cancel_context)
 {
    (void)trace_id;
    (void)cancelled;
@@ -61,7 +61,7 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    stub_request_len = request_len < sizeof stub_request ? request_len : 0;
    if (stub_request_len)
       memcpy(stub_request, request_body, stub_request_len);
-   if (stub_result != AIMEE_MODULE_CALL_OK)
+   if (stub_result != OURO_MODULE_CALL_OK)
       return stub_result;
 
    /* status | field_count | (len | bytes) * count.
@@ -78,35 +78,35 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    if (answers_with_a_value && stub_drop_the_value)
    {
       if (response_capacity < 8u)
-         return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+         return OURO_MODULE_CALL_RESPONSE_TOO_LARGE;
       aimee_db1_put_u32(out, stub_status);
       aimee_db1_put_u32(out + 4u, 0u);
       *response_len = 8u;
-      return AIMEE_MODULE_CALL_OK;
+      return OURO_MODULE_CALL_OK;
    }
    if (!answers_with_a_value)
    {
       if (response_capacity < 8u)
-         return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+         return OURO_MODULE_CALL_RESPONSE_TOO_LARGE;
       aimee_db1_put_u32(out, stub_status);
       aimee_db1_put_u32(out + 4u, 0u);
       *response_len = 8u;
-      return AIMEE_MODULE_CALL_OK;
+      return OURO_MODULE_CALL_OK;
    }
    if (response_capacity < 12u + value_len)
-      return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+      return OURO_MODULE_CALL_RESPONSE_TOO_LARGE;
    aimee_db1_put_u32(out, stub_status);
    aimee_db1_put_u32(out + 4u, 1u);
    aimee_db1_put_u32(out + 8u, stub_lie_about_length ? value_len + 7u : value_len);
    memcpy(out + 12u, stub_value, value_len);
    *response_len = 12u + value_len;
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 
 static void reset(void)
 {
    stub_available = 1;
-   stub_result = AIMEE_MODULE_CALL_OK;
+   stub_result = OURO_MODULE_CALL_OK;
    stub_status = AIMEE_DB1_STATUS_OK;
    stub_value = "";
    stub_calls = 0;
@@ -191,9 +191,9 @@ static void test_an_unreachable_module_is_an_error_not_an_absence(void)
    for (int i = 0; i < 3; ++i)
    {
       reset();
-      stub_result = (i == 0)   ? AIMEE_MODULE_CALL_DEADLINE_EXCEEDED
-                    : (i == 1) ? AIMEE_MODULE_CALL_CAPABILITY_DENIED
-                               : AIMEE_MODULE_CALL_INTERNAL;
+      stub_result = (i == 0)   ? OURO_MODULE_CALL_DEADLINE_EXCEEDED
+                    : (i == 1) ? OURO_MODULE_CALL_CAPABILITY_DENIED
+                               : OURO_MODULE_CALL_INTERNAL;
       assert(db1_git_ownership_get_owner("/repo", "feature", owner, sizeof owner) == -1);
       assert(db1_git_ownership_upsert("/repo", "feature", "sess-1") == -1);
    }

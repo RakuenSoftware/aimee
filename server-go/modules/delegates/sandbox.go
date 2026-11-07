@@ -127,9 +127,11 @@ type SandboxRequest struct {
 // SandboxSpec is the container specification. NetworkMode is not a field the
 // caller can set: it is always none.
 type SandboxSpec struct {
-	Mounts   []SandboxMount
-	Env      []SandboxEnv
-	ReadOnly bool // the role does not write, so nothing is mounted writable
+	// privateTest has no parent control channel and is constructed only by the verifier.
+	privateTest bool
+	Mounts      []SandboxMount
+	Env         []SandboxEnv
+	ReadOnly    bool // the role does not write, so nothing is mounted writable
 	// User is "<uid>:<gid>", empty to keep the image's own user.
 	User string
 }
@@ -337,6 +339,12 @@ func ValidateSandboxSpec(spec SandboxSpec) error {
 				return fmt.Errorf("AIMEE_API_ENDPOINT must be exactly %s", ControlEndpoint)
 			}
 		}
+	}
+	if spec.privateTest {
+		if controlMounts != 0 || controlEnv != 0 || len(spec.Mounts) != 1 || spec.Mounts[0].Kind != SandboxWorkspace {
+			return fmt.Errorf("private tests require only their self-contained workspace")
+		}
+		return nil
 	}
 	if controlMounts != 1 || controlEnv != 1 {
 		return fmt.Errorf("sandbox requires exactly one control socket mount and endpoint")

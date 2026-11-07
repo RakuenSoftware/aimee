@@ -548,12 +548,6 @@ static int serve_mutation(int fd, uint16_t wire_opcode, uint32_t payload_len, in
    return write_mutation_response(fd, result, &status);
 }
 
-int kb_vault_operator_serve_connection_mutations(int fd, kb_vault_operator_status_fn read_status,
-                                                 kb_vault_operator_mutation_fn mutate, void *opaque)
-{
-   return kb_vault_operator_serve_connection_mutations_ex(fd, read_status, mutate, NULL, opaque);
-}
-
 int kb_vault_operator_serve_connection_mutations_ex(int fd, kb_vault_operator_status_fn read_status,
                                                     kb_vault_operator_mutation_fn mutate,
                                                     kb_vault_operator_post_wipe_fn post_wipe,
@@ -766,22 +760,6 @@ static void *service_main(void *opaque)
       (void)pthread_detach(worker);
    }
    return NULL;
-}
-
-kb_vault_operator_service_t *
-kb_vault_operator_service_start(int inherited_fd, kb_vault_operator_status_fn read_status,
-                                void *opaque)
-{
-   return kb_vault_operator_service_start_mutations_ex(inherited_fd, read_status, NULL, NULL,
-                                                       opaque);
-}
-
-kb_vault_operator_service_t *
-kb_vault_operator_service_start_mutations(int inherited_fd, kb_vault_operator_status_fn read_status,
-                                          kb_vault_operator_mutation_fn mutate, void *opaque)
-{
-   return kb_vault_operator_service_start_mutations_ex(inherited_fd, read_status, mutate, NULL,
-                                                       opaque);
 }
 
 kb_vault_operator_service_t *kb_vault_operator_service_start_mutations_ex(

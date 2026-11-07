@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -76,13 +76,13 @@ func exerciseNegationReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backen
 	enabled := true
 	backend.settings = func() (map[string]any, error) { return map[string]any{"memory_negation_enabled": enabled}, nil }
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
-	if r, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "reindex", `{"scope_context":true,"project":"neg-visible"}`); status != bus.ModuleStatusOK || r["status"] != "ok" {
+	if r, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "reindex", `{"scope_context":true,"project":"neg-visible"}`); status != ring.ModuleStatusOK || r["status"] != "ok" {
 		t.Fatal(r, status)
 	}
 	search := func(query string) []int64 {
 		t.Helper()
-		r, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "find_facts_visible", fmt.Sprintf(`{"query":%q,"project":"neg-visible","limit":8}`, query))
-		if status != bus.ModuleStatusOK || r["status"] != "ok" {
+		r, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "find_facts_visible", fmt.Sprintf(`{"query":%q,"project":"neg-visible","limit":8}`, query))
+		if status != ring.ModuleStatusOK || r["status"] != "ok" {
 			t.Fatal(r, status)
 		}
 		ids := []int64{}
@@ -194,8 +194,8 @@ func exerciseNegationReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backen
 	if _, err := tx.Exec(ctx, "UPDATE memories SET valid_until='tomorrow' WHERE id=$1", extra); err != nil {
 		t.Fatal(err)
 	}
-	malformed, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "find_facts_visible", `{"query":"sentinelRedis not disk","project":"neg-visible","limit":8}`)
-	if status != bus.ModuleStatusOK || malformed["kind"] != "unavailable" {
+	malformed, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "find_facts_visible", `{"query":"sentinelRedis not disk","project":"neg-visible","limit":8}`)
+	if status != ring.ModuleStatusOK || malformed["kind"] != "unavailable" {
 		t.Fatal("malformed validity accepted", malformed, status)
 	}
 	if _, err := tx.Exec(ctx, "UPDATE memories SET valid_from='',valid_until='' WHERE id=$1", extra); err != nil {

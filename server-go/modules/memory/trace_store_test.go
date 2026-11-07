@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
-func exerciseTraceStoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseTraceStoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -26,15 +26,15 @@ func exerciseTraceStoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 	exec(`RESET ROLE; TRUNCATE trace_mining_log; SELECT set_config('aimee.memory_scope_all','1',true)`)
 	exec(`INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES('L0','procedure','recovery:trace-read->trace-search','private','project','trace-private')`)
 	exec(`SET LOCAL ROLE aimee_store_runtime`)
-	call := func(op string, batch *traceMiningBatch) (map[string]any, bus.ModuleStatus) {
+	call := func(op string, batch *traceMiningBatch) (map[string]any, ring.ModuleStatus) {
 		t.Helper()
 		raw, _ := json.Marshal(map[string]any{"operation": op, "batch": batch, "project": "trace-visible", "session_id": "trace-session"})
-		frame, _ := bus.EncodeCommand("runtime", raw)
-		encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status != bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand("runtime", raw)
+		encoded, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
-		body, err := bus.DecodeCommandResult(encoded)
+		body, err := ring.DecodeCommandResult(encoded)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -45,7 +45,7 @@ func exerciseTraceStoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 		return result, status
 	}
 	state, status := call("trace-state", nil)
-	if status != bus.ModuleStatusOK || state["last_id"] != "0" {
+	if status != ring.ModuleStatusOK || state["last_id"] != "0" {
 		t.Fatal(state, status)
 	}
 	const start int64 = 9007199254741507
@@ -57,7 +57,7 @@ func exerciseTraceStoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 		row(4, 1, 2, "trace-search", "ok"), row(5, 2, 3, "trace-read", "error"), row(6, 2, 4, "trace-search", "ok"),
 	}}
 	result, status := call("trace-apply", batch)
-	if status != bus.ModuleStatusOK || result["status"] != "ok" || result["emitted"] != float64(2) || result["last_id"] != strconv.FormatInt(start+6, 10) {
+	if status != ring.ModuleStatusOK || result["status"] != "ok" || result["emitted"] != float64(2) || result["last_id"] != strconv.FormatInt(start+6, 10) {
 		t.Fatal(result, status)
 	}
 	var count int
@@ -67,7 +67,7 @@ func exerciseTraceStoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 		t.Fatal(count, err)
 	}
 	result, status = call("trace-apply", batch)
-	if status != bus.ModuleStatusOK || result["status"] != "error" {
+	if status != ring.ModuleStatusOK || result["status"] != "error" {
 		t.Fatal("stale batch accepted", result, status)
 	}
 	// Fail the final cursor insert after both the anti-pattern and canonical
@@ -77,19 +77,19 @@ func exerciseTraceStoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 	failed := &traceMiningBatch{AfterID: start + 6, Rows: []traceMiningRow{
 		row(7, 3, 1, "trace-fail", "error"), row(8, 3, 2, "trace-fail", "error"), row(9, 3, 3, "trace-fail", "error"), row(10, 3, 4, "trace-recover", "ok"),
 	}}
-	if _, status = call("trace-apply", failed); status != bus.ModuleStatusInternal {
+	if _, status = call("trace-apply", failed); status != ring.ModuleStatusInternal {
 		t.Fatal("failed cursor accepted", status)
 	}
 	if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM memories WHERE key='recovery:trace-fail->trace-recover')+(SELECT count(*) FROM anti_patterns WHERE pattern LIKE 'Retry loop: trace-fail%')`).Scan(&count); err != nil || count != 0 {
 		t.Fatal("partial finding committed", count, err)
 	}
 	state, status = call("trace-state", nil)
-	if status != bus.ModuleStatusOK || state["last_id"] != strconv.FormatInt(start+6, 10) {
+	if status != ring.ModuleStatusOK || state["last_id"] != strconv.FormatInt(start+6, 10) {
 		t.Fatal(state, status)
 	}
 	exec(`RESET ROLE; DROP TRIGGER reject_trace_cursor ON trace_mining_log; SET LOCAL ROLE aimee_store_runtime`)
 	result, status = call("trace-apply", failed)
-	if status != bus.ModuleStatusOK || result["emitted"] != float64(2) {
+	if status != ring.ModuleStatusOK || result["emitted"] != float64(2) {
 		t.Fatal(result, status)
 	}
 	// Advancing with the same patterns leaves their canonical records untouched.
@@ -98,13 +98,13 @@ func exerciseTraceStoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 	}
 	failed.AfterID = start + 10
 	result, status = call("trace-apply", failed)
-	if status != bus.ModuleStatusOK || result["emitted"] != float64(0) {
+	if status != ring.ModuleStatusOK || result["emitted"] != float64(0) {
 		t.Fatal(result, status)
 	}
 	failed.AfterID = start + 14
 	failed.Rows = []traceMiningRow{}
 	result, status = call("trace-apply", failed)
-	if status != bus.ModuleStatusOK || result["emitted"] != float64(0) {
+	if status != ring.ModuleStatusOK || result["emitted"] != float64(0) {
 		t.Fatal(result, status)
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM trace_mining_log`).Scan(&count); err != nil || count != 3 {
@@ -112,17 +112,17 @@ func exerciseTraceStoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 	}
 	// Read failure is not an empty cursor or permission to start from zero.
 	exec(`RESET ROLE; REVOKE SELECT ON trace_mining_log FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
-	if _, status = call("trace-state", nil); status != bus.ModuleStatusInternal {
+	if _, status = call("trace-state", nil); status != ring.ModuleStatusInternal {
 		t.Fatal(status)
 	}
 	exec(`RESET ROLE; GRANT SELECT ON trace_mining_log TO aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	for _, bad := range []*traceMiningBatch{nil, {AfterID: -1, Rows: []traceMiningRow{}}, {AfterID: start, Rows: []traceMiningRow{row(2, 1, 1, "a", ""), row(1, 1, 2, "b", "")}}} {
-		if _, status = call("trace-apply", bad); status != bus.ModuleStatusInvalidRequest {
+		if _, status = call("trace-apply", bad); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("bad trace batch", bad, status)
 		}
 	}
 	body := dataRequest(t, DataRequest{Operation: "trace-state"})
-	if _, status = handler(bus.ModuleInvocation{StageID: StageData, PrincipalRef: 99}, body); status != bus.ModuleStatusInvalidRequest {
+	if _, status = handler(ring.ModuleInvocation{StageID: StageData, PrincipalRef: 99}, body); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("peer read host cursor", status)
 	}
 }
@@ -136,9 +136,9 @@ func TestTraceBatchValidation(t *testing.T) {
 	}
 	for _, placement := range []Placement{PlacementServer, PlacementKB} {
 		handler := NewHandler(nil, WithDataStore(placement, nil))
-		frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"trace-state"}`))
-		_, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status == bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"trace-state"}`))
+		_, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status == ring.ModuleStatusOK {
 			t.Fatal(fmt.Sprint(placement), "invented cursor")
 		}
 	}

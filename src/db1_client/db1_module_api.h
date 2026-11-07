@@ -183,6 +183,16 @@
 #define AIMEE_DB1_EVENT_DELEGATION 11781u
 #define AIMEE_DB1_STAGE_DELEGATION 5u
 
+/* aimee-delegation-changed: the module announces each committed delegation or
+ * agent-work write (ouroboros ring D14), 4096 + 30*256 + 25, so the delegate
+ * monitor reacts instead of sweeping. */
+#define AIMEE_DB1_EVENT_DELEGATION_CHANGED 11801u
+
+/* aimee-learning-projection-pending: the module announces a commit that queued a
+ * learning projection, 4096 + 30*256 + 26, so the core's delivery worker claims
+ * it instead of polling the queue. */
+#define AIMEE_DB1_EVENT_LEARNING_PROJECTION_PENDING 11802u
+
 #define AIMEE_DB1_OP_DELEGATION_MESSAGE_RECORD               1u
 #define AIMEE_DB1_OP_DELEGATION_SPAWN_RECORD                 2u
 #define AIMEE_DB1_OP_DELEGATION_SPAWN_COMPLETE               3u
@@ -227,6 +237,7 @@
 #define AIMEE_DB1_OP_AGENT_LOG_ENTRY_LIST                    42u
 #define AIMEE_DB1_OP_DELEGATE_LEARNING_RECORD                43u
 #define AIMEE_DB1_OP_DELEGATE_LEARNING_INJECT_PROMPT         44u
+#define AIMEE_DB1_OP_AGENT_JOB_CANONICAL_OBSERVATION          45u
 
 /* Family 6: server and webchat session rows: who is talking, when they last
  * spoke, and what the conversation was called. */
@@ -243,17 +254,9 @@
 #define AIMEE_DB1_OP_SERVER_SESSION_COUNT                   7u
 #define AIMEE_DB1_OP_SERVER_SESSION_LIST_EXPIRED            8u
 #define AIMEE_DB1_OP_SERVER_SESSION_DELETE_EXPIRED          9u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_SAVE                   10u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_LOAD                   11u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_DELETE                 12u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_RECENT           13u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_SEARCH           14u
 #define AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST             15u
 #define AIMEE_DB1_OP_SESSION_WRITE_PATH_RECORD              16u
 #define AIMEE_DB1_OP_SESSION_STALE_READS                    17u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_GET             18u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_OWNED_BY_OTHER  19u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_BIND            20u
 #define AIMEE_DB1_OP_WEBCHAT_LIVE_SET                       21u
 #define AIMEE_DB1_OP_WEBCHAT_LIVE_GET                       22u
 #define AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_CLAIM  23u
@@ -261,6 +264,30 @@
 #define AIMEE_DB1_OP_SERVER_SESSION_LIST_BY_SUBJECT         25u
 #define AIMEE_DB1_OP_SERVER_SESSION_ERASE_SUBJECT           26u
 #define AIMEE_DB1_OP_SERVER_SESSION_ERASURE_RECEIPT         27u
+#define AIMEE_DB1_OP_SESSION_IR_APPEND                      28u
+#define AIMEE_DB1_OP_SESSION_IR_PAGE                        29u
+#define AIMEE_DB1_OP_SESSION_HARNESS_GET                    30u
+#define AIMEE_DB1_OP_SESSION_HARNESS_BIND                   31u
+#define AIMEE_DB1_OP_SESSION_IR_HISTORY_SAVE                32u
+#define AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD                33u
+#define AIMEE_DB1_OP_SESSION_HARNESS_COMPARE_SWAP           34u
+#define AIMEE_DB1_OP_SESSION_IR_RUNNING_HISTORY_LOAD        35u
+#define AIMEE_DB1_OP_SESSION_IR_APPEND_VERIFIED             36u
+#define AIMEE_DB1_OP_SESSION_IR_SEARCH                      37u
+#define AIMEE_DB1_OP_SESSION_NATIVE_OWNER_CLAIM             38u
+#define AIMEE_DB1_OP_SESSION_NATIVE_RECONCILE               39u
+#define AIMEE_DB1_OP_SESSION_NATIVE_RESERVE                 40u
+#define AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_RECONCILE   41u
+#define AIMEE_DB1_OP_SESSION_NATIVE_EPOCH                   42u
+#define AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_LOOKUP      43u
+#define AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_FINISH      44u
+#define AIMEE_DB1_OP_SESSION_NATIVE_HISTORY                 45u
+#define AIMEE_DB1_OP_SESSION_NATIVE_SOURCE_APPEND           47u
+#define AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_GET             48u
+#define AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_SET             49u
+#define AIMEE_DB1_OP_SESSION_IR_HISTORY_IMPORT              50u
+#define AIMEE_DB1_OP_SESSION_IR_CANCEL                      53u
+#define AIMEE_DB1_OP_SESSION_NATIVE_ACTIVE_OWNED            46u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */
@@ -403,14 +430,14 @@
 #define AIMEE_DB1_EVENT_GUARDRAIL_STATE 11785u
 #define AIMEE_DB1_STAGE_GUARDRAIL_STATE 9u
 
-#define AIMEE_DB1_OP_SESSION_STATE_LOAD         1u
-#define AIMEE_DB1_OP_SESSION_STATE_SAVE         2u
-#define AIMEE_DB1_OP_SESSION_STATE_DELETE       3u
-#define AIMEE_DB1_OP_SESSION_STATE_EXISTS       4u
-#define AIMEE_DB1_OP_SESSION_STATE_LIST         5u
-#define AIMEE_DB1_OP_SESSION_STATE_GET_SUMMARY  6u
-#define AIMEE_DB1_OP_SESSION_STATE_LIST_EXPIRED 7u
-#define AIMEE_DB1_OP_SESSION_EXPLORATION_APPLY  8u
+#define AIMEE_DB1_OP_SESSION_STATE_LOAD            1u
+#define AIMEE_DB1_OP_SESSION_STATE_SAVE            2u
+#define AIMEE_DB1_OP_SESSION_STATE_DELETE          3u
+#define AIMEE_DB1_OP_SESSION_STATE_EXISTS          4u
+#define AIMEE_DB1_OP_SESSION_STATE_LIST            5u
+#define AIMEE_DB1_OP_SESSION_STATE_GET_SUMMARY     6u
+#define AIMEE_DB1_OP_SESSION_STATE_LIST_EXPIRED    7u
+#define AIMEE_DB1_OP_SESSION_EXPLORATION_APPLY     8u
 #define AIMEE_DB1_OP_SESSION_TASK_PROJECTION_APPLY 9u
 #define AIMEE_DB1_OP_GOVERNED_ACTION_APPLY         10u
 
@@ -698,5 +725,16 @@ static inline uint32_t aimee_db1_get_u32(const uint8_t *p)
       value |= (uint32_t)p[i] << (i * 8u);
    return value;
 }
+
+/* Server-local immutable procedure experience (telemetry family). */
+#define AIMEE_DB1_OP_PROCEDURE_EVENT_LOAD                 59u
+#define AIMEE_DB1_OP_PROCEDURE_EVENT_APPEND               60u
+#define AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECORD          61u
+#define AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECALL          62u
+#define AIMEE_DB1_OP_DELEGATE_EXECUTION_EXPERIENCE_RECORD 63u
+#define AIMEE_DB1_OP_DELEGATE_EXECUTION_TERMINAL_LOOKUP   64u
+
+#define AIMEE_DB1_OP_LEARNING_PROJECTION_CLAIM 65u
+#define AIMEE_DB1_OP_LEARNING_PROJECTION_ACK   66u
 
 #endif /* AIMEE_DB1_MODULE_API_H */

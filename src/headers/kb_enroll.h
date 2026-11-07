@@ -64,21 +64,6 @@ extern "C"
    /* --- Single-use enrollment-token registry (in-memory; KB_STORE persistence is a
     *     later phase). Stores only token hashes + scope, never cleartext. --- */
 
-   /* Issue a fresh enrollment token bound to `scope` (e.g. "global",
-    * "project:X"): generate the token, record sha256(token)+scope as unconsumed,
-    * and return the cleartext token (the only time it is available) in out[cap]
-    * (cap >= KB_ENROLL_TOKEN_MAX). Returns 0 on success, -1 on error. */
-   int kb_enroll_registry_issue(const char *scope, char *out, size_t cap);
-
-   /* Verify and atomically consume a presented enrollment token. On the first
-    * presentation of a known, unconsumed token: returns 1 and copies its scope
-    * into scope_out[scope_cap]. On replay / unknown / already-consumed token:
-    * returns 0. Single-use is enforced under the registry lock. */
-   int kb_enroll_registry_consume(const char *token, char *scope_out, size_t scope_cap);
-
-   /* Drop all registry entries (test helper / shutdown). */
-   void kb_enroll_registry_reset(void);
-
    /* --- Vault-backed single-use enrollment-token store (persistent + process-
     *     shared). `path` identifies an empty flock inode; its hash namespaces an
     *     encrypted server-Vault record, so a token minted by `aimee-kb enroll`

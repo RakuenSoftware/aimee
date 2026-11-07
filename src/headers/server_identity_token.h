@@ -45,18 +45,7 @@ extern "C"
     * excludes the bare form. */
    int server_identity_subject_valid(const char *s);
 
-   typedef struct
-   {
-      char issuer[256];
-      char audience[128];
-      char subject[577];
-      int64_t team_id;
-      kb_identity_tier_t tier;
-      char jti[129];
-      char kid[65];
-      int64_t issued_at;
-      int64_t expires_at;
-   } server_identity_token_claims_t;
+   typedef aimee_identity_claims_t server_identity_token_claims_t;
 
    typedef enum
    {

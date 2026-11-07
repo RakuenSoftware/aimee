@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -475,11 +475,11 @@ SET LOCAL ROLE memory_domain_test;`)
 	for _, operation := range []string{"episode-list", "entity-profile"} {
 		handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
 		args := `{"operation":"` + operation + `","entity":"typed-only","query":"rank-episode","limit":1,"scope_context":true,"project":"app"}`
-		got, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "runtime", args)
-		if status != bus.ModuleStatusOK || got["status"] != "ok" {
+		got, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "runtime", args)
+		if status != ring.ModuleStatusOK || got["status"] != "ok" {
 			t.Fatal(got, status)
 		}
-		if _, status := invokeContextCommand(t, handler, 200, bus.CommandContext{}, "runtime", args); status != bus.ModuleStatusInvalidRequest {
+		if _, status := invokeContextCommand(t, handler, 200, ring.CommandContext{}, "runtime", args); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 		if operation == "episode-list" {

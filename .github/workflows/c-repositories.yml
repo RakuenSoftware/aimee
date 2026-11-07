@@ -1,6 +1,10 @@
-name: c-repository-pins
+name: Module exports and runtime validation
 
 on:
+  # Test GitHub's queued integration commit without updating the PR branch.
+  merge_group:
+    types: [checks_requested]
+    branches: [testing]
   # Standalone exports must build on integration changes as well as releases.
   # Bundled source snapshots and external dependency pins gate application releases.
   push:
@@ -16,14 +20,11 @@ on:
       - "src/modules/**"
       - "src/tests/**"
       - "docs/modules/**"
-      - "scripts/tests/test_export_c_process_build.py"
+      - "scripts/tests/test_export_module_repositories.py"
       - "scripts/export_c_repositories.py"
-      - "scripts/build_c_module_runtime_bundle.py"
-      - "scripts/generate_c_embedded_header.py"
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
       - "scripts/check_go_module_runtime_bundle.py"
-      - "server-go/bus/**"
       - "server-go/modules/**"
       - "server-go/cmd/aimee-module/**"
       - "Dockerfile"
@@ -42,14 +43,11 @@ on:
       - "src/modules/**"
       - "src/tests/**"
       - "docs/modules/**"
-      - "scripts/tests/test_export_c_process_build.py"
+      - "scripts/tests/test_export_module_repositories.py"
       - "scripts/export_c_repositories.py"
-      - "scripts/build_c_module_runtime_bundle.py"
-      - "scripts/generate_c_embedded_header.py"
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
       - "scripts/check_go_module_runtime_bundle.py"
-      - "server-go/bus/**"
       - "server-go/modules/**"
       - "server-go/cmd/aimee-module/**"
       - "Dockerfile"
@@ -60,15 +58,14 @@ permissions:
   contents: read
 
 jobs:
-  pins:
+  validate:
+    name: Export builds and runtime checks
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - run: python3 -I -S scripts/validate_module_process_contracts.py
-      - run: python3 -I scripts/tests/test_export_c_process_build.py -v
-      - run: python3 -I scripts/tests/test_generate_c_embedded_header.py -v
-      - run: python3 -I scripts/tests/test_build_c_module_runtime_bundle.py -v
+      - run: python3 -I scripts/tests/test_export_module_repositories.py -v
       - run: python3 -I scripts/check_go_module_runtime_bundle.py
       # SCOPE, stated because the list reads like a Go gate and is not one.
       # These are the Go pieces that ship in the module runtime bundle this
@@ -88,7 +85,7 @@ jobs:
       # ever the last one standing, replace it with `./...` rather than adding
       # an entry: an enumerated gate needs its own completeness check, and this
       # one has never had it.
-      - run: cd server-go && CGO_ENABLED=0 go test ./bus ./modules/... ./cmd/aimee-module
+      - run: cd server-go && CGO_ENABLED=0 go test ./modules/... ./cmd/aimee-module
       - name: Export standalone repositories
         run: |
           set -euo pipefail
@@ -98,11 +95,6 @@ jobs:
           cp dependencies/aimee-repositories.lock.json "$published_lock"
           trap 'cp "$published_lock" dependencies/aimee-repositories.lock.json' EXIT
           python3 scripts/export_c_repositories.py --output-root "$RUNNER_TEMP/aimee-repositories"
-      - name: Install exported C core
-        run: |
-          cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-core-c" -B "$RUNNER_TEMP/core-build" -DCMAKE_BUILD_TYPE=Release
-          cmake --build "$RUNNER_TEMP/core-build" --parallel 2
-          cmake --install "$RUNNER_TEMP/core-build" --prefix "$RUNNER_TEMP/prefix"
       - name: Build isolated role, memory, PostgreSQL and provider repositories
         run: |
           set -euo pipefail
@@ -120,4 +112,5 @@ jobs:
         run: python3 -I scripts/check_application_source_lock.py
       - name: Test application source-lock failure modes
         run: python3 -I scripts/tests/test_check_application_source_lock.py -v
-      - run: sh src/tests/test_module_supervisor.sh
+      - name: Module crash restart and shutdown
+        run: sh src/tests/test_module_supervisor.sh

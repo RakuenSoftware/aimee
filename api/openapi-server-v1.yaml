@@ -22,6 +22,35 @@ components:
         Required for `/v1/*` over TCP. Unix-domain-socket access is
         authorised by filesystem permissions and needs no token.
   schemas:
+    ProposalDraftRequest:
+      type: object
+      description: >
+        Internal clients supply message as canonical IR. Legacy external text
+        imports once at this public endpoint. Supplying both forms is refused.
+        The host assigns context authority and the proposal drafting policy.
+      oneOf:
+        - required: [message]
+          not: { required: [prompt] }
+        - required: [prompt]
+          not: { required: [message] }
+      properties:
+        message:
+          type: object
+          required: [role, blocks]
+          properties:
+            role: { type: string, enum: [user] }
+            blocks:
+              type: array
+              minItems: 1
+              maxItems: 1
+              items:
+                type: object
+                required: [type, text]
+                properties:
+                  type: { type: string, enum: [text] }
+                  text: { type: string, minLength: 1, description: At least 8 UTF-8 bytes }
+        model: { type: string, description: Optional configured HTTP delegate name }
+        prompt: { type: string, minLength: 1, deprecated: true, description: Legacy external text import only; at least 8 UTF-8 bytes }
     HealthResponse:
       type: object
       properties:
@@ -1263,7 +1292,17 @@ paths:
           description: No indexed project / no source files
   /runs:
     post:
-      summary: Create and run an inference run (synchronous); retrievable by id
+      summary: Queue an owned inference run using canonical input
+      description: >-
+        Pins the selected model registration and executes the server tool catalog.
+        Input accepts Responses-style ordered messages and content blocks, including
+        images and tool history; bare array strings are separate user messages.
+        Instructions, temperature and output limits are preserved. Unsupported
+        execution controls or client tool catalogs are rejected. Terminal snapshots
+        expose canonical_session_id for durable history; the live store is bounded.
+        A token-limited response has status incomplete. Runs are private to their
+        authenticated owner. Native Codex/Claude SDK runs require an absolute cwd;
+        workspace ownership and session isolation follow the browser tool path.
       requestBody:
         required: true
         content:
@@ -1273,12 +1312,17 @@ paths:
               required: [input]
               properties:
                 model: { type: string }
+                cwd:
+                  type: string
+                  description: Absolute host workspace path required for native Codex/Claude SDK execution.
                 input: {}
-                temperature: { type: number }
-                max_tokens: { type: integer }
+                instructions: { type: string }
+                temperature: { type: number, minimum: 0, maximum: 2 }
+                max_tokens: { type: integer, minimum: 1 }
+                max_output_tokens: { type: integer, minimum: 1 }
       responses:
         "200":
-          description: Completed run object
+          description: Queued run object
           content:
             application/json:
               schema: { type: object }
@@ -1344,7 +1388,7 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runs/{id}/stop:
     post:
-      summary: Stop a run (no-op for already-completed synchronous runs)
+      summary: Request cancellation of an owned run
       parameters:
         - name: id
           in: path
@@ -1352,7 +1396,7 @@ paths:
           schema: { type: string }
       responses:
         "200":
-          description: The (already-completed) run object
+          description: The run object with cancellation requested, or its existing terminal status
           content:
             application/json:
               schema: { type: object }
@@ -2138,7 +2182,12 @@ paths:
               schema: { type: object }
   /trajectory/export:
     post:
-      summary: Export a session trajectory
+      summary: Export owner-checked canonical session history
+      description: >-
+        Returns aimee.trajectory.v2 with canonical messages and explicit export
+        fidelity. Redaction and tool-result omissions never rewrite native tool
+        identities or signatures. No inferred outcome/reward or cross-session
+        audit overlay is included.
       requestBody:
         required: true
         content:
@@ -2606,9 +2655,15 @@ paths:
         "503": { description: Management control plane is not configured }
   /delegate/reply:
     post:
-      summary: Reply to a delegate
+      deprecated: true
+      summary: Refuse the retired delegate reply protocol
+      description: >
+        Compatibility endpoint only; no reply is delivered or acknowledged.
+        Canonical pending questions are answered by an authenticated browser
+        operator through /chat/control-reply using the exact session_id and
+        turn-qualified request_id. Delegation IDs do not authorize answers.
       requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Reply accepted, content: { application/json: { schema: { type: object } } } } }
+      responses: { "502": { description: Retired reply protocol is unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } } }
   /delegate/launch:
     post:
       summary: Launch a delegate job (async, returns job_id)
@@ -2722,7 +2777,8 @@ paths:
       responses: { "200": { description: Agent personas updated, content: { application/json: { schema: { type: object } } } } }
   /model/set:
     post:
-      summary: Surgically patch only the provided fields of an existing agent (model, endpoint, provider, cost_tier, max_turns, max_parallel, context_window, tools, roles, personas, enabled, key)
+      summary: Surgically patch only the provided fields of an existing agent (model, endpoint, provider, cost_tier, max_turns, max_parallel, context_window, tools, inject-respond-tool, roles, personas, enabled, key)
+      description: CLI-style args accept --inject-respond-tool on|off to explicitly set respond-tool injection independently of tools. This explicit value overrides coupling from a simultaneous --tools toggle. Without it, unchanged tools preserves the existing injection policy; an actual tools toggle retains legacy coupling.
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Updated agent record, content: { application/json: { schema: { type: object } } } } }
   /model/probe:
@@ -2741,8 +2797,19 @@ paths:
   /model/draft:
     post:
       summary: One-shot tool-free text generation (proposal drafting) via a non-CLI delegate
-      requestBody: { content: { application/json: { schema: { type: object } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProposalDraftRequest' } } } }
       responses: { "200": { description: "{text, agent}", content: { application/json: { schema: { type: object } } } } }
+  /model/generate:
+    post:
+      summary: One-shot tool-free canonical text completion for evaluation
+      description: >
+        Accepts {ir} with an aimee.request.v1 request containing one caller system
+        text block and one user text block, explicit max_tokens and temperature,
+        no tools, and tool_choice none. Caller instructions and retrieved evidence
+        must retain unverified provenance. Other controls are refused. Selects the
+        configured default HTTP delegate without hints, tool execution or feedback.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [ir], properties: { ir: { type: object } } } } } }
+      responses: { "200": { description: "{status, ir}; ir is a complete aimee.response.v1 text answer", content: { application/json: { schema: { type: object } } } } }
   /model/setup:
     post:
       summary: Set up an agent (async)
@@ -2828,7 +2895,7 @@ paths:
   /agent/draft:
     post:
       summary: Roster draft (deprecated alias of /model/draft)
-      requestBody: { content: { application/json: { schema: { type: object } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProposalDraftRequest' } } } }
       responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
   /agent/setup:
     post:
@@ -2881,8 +2948,8 @@ paths:
   /provider/save_connection:
     post:
       summary: Create or edit a saved provider connection
-      description: Connection names are unique. Editing preserves the credential when api_key is empty and updates inherited connection settings on its models.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, provider], properties: { name: { type: string }, provider: { type: string }, endpoint: { type: string }, api_key: { type: string, writeOnly: true }, auth_type: { type: string }, create: { type: boolean, default: false } } } } } }
+      description: Connection names are unique. Editing preserves the credential when api_key is empty and updates inherited connection settings on its models. A connection also owns its execution transport. Choose backend provider-cli with cli_kind codex to use the Codex agent, or backend http for the direct model API. Switching to http clears native execution settings.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, provider], properties: { name: { type: string }, provider: { type: string }, endpoint: { type: string }, api_key: { type: string, writeOnly: true }, auth_type: { type: string }, backend: { type: string, enum: [http, provider-cli] }, cli_kind: { type: string }, cli_cmd: { type: string }, session_reuse: { type: boolean }, create: { type: boolean, default: false } } } } } }
       responses: { "200": { description: Saved connection or typed error, content: { application/json: { schema: { type: object } } } } }
   /provider/remove_connection:
     post:
@@ -3149,9 +3216,26 @@ paths:
       responses: { "200": { description: Explanation, content: { application/json: { schema: { type: object } } } } }
   /trajectory/batch:
     post:
-      summary: Batch trajectory export
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Batch result, content: { application/json: { schema: { type: object } } } } }
+      summary: Export canonical histories from batch executions
+      description: >-
+        Executes under an owned parent session and exports each actual private
+        execution's canonical history. The transport-attested principal owns
+        the parent and child sessions; request data cannot select another owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, tasks_path]
+              properties:
+                session_id: { type: string, description: Existing session owned by the authenticated caller }
+                tasks_path: { type: string }
+                toolset_dist: { type: string }
+                out_dir: { type: string }
+                compress: { type: boolean }
+                max_result_bytes: { type: integer, minimum: 1 }
+      responses: { "200": { description: Batch result with canonical execution session references, content: { application/json: { schema: { type: object } } } } }
   /wm/context:
     post:
       summary: Working-memory context
@@ -3245,6 +3329,16 @@ paths:
     get:
       summary: List MCP tools
       responses: { "200": { description: MCP tools, content: { application/json: { schema: { type: object } } } } }
+  /mcp/tools_wait:
+    post:
+      summary: Wait for the MCP tool list to change
+      description: >
+        Answers once the tool-list generation differs from the caller's
+        `generation`, or after `timeout_ms` (at most 290000), so an MCP bridge
+        holds one request open instead of listing tools on a timer. A server
+        already holding its maximum of waiters answers at once with `busy`.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Current generation, content: { application/json: { schema: { type: object } } } } }
   /mcp/audit:
     post:
       summary: Audit MCP servers
@@ -5132,13 +5226,19 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
   /chat/stream:
     post:
-      summary: Native streaming chat (aimee event stream)
+      summary: Stream a native chat turn
       description: >
-        Stream a chat turn as newline-delimited aimee events
-        (turn_start / text / thinking / turn_end / session / retry_attempt / usage / done /
-        error), the same event shape the NDJSON socket emits. Used by the
-        first-party webchat UI; distinct from the OpenAI-shaped
-        /chat/completions. Requires CAP_CHAT (UDS, or an unscoped TCP bearer).
+        With ir_version=1, emits canonical session envelopes as NDJSON, committed
+        to the session log before delivery. Each envelope contains version (1),
+        session_id, decimal-string sequence, event_id, turn_id, actor, and event.
+        The event is a typed message, IR delta, harness control request/response,
+        or host execution lifecycle. Delta payload types are TURN_START,
+        BLOCK_START, BLOCK_DELTA, BLOCK_STOP, TURN_STOP, and ERROR. Whole messages
+        retain role and typed text/thinking/tool_use/tool_result/image/document
+        blocks. Tool results pair by opaque tool_id. The authenticated owner is
+        required; provider resume IDs are resolved server-side. Browser
+        disconnect does not cancel execution. Legacy callers without ir_version
+        retain the prior aimee event format. Requires CAP_CHAT.
       requestBody:
         required: true
         content:
@@ -5147,8 +5247,34 @@ paths:
               type: object
               required: [message]
               properties:
-                message: { type: string }
-                aimee_session_id: { type: string }
+                ir_version: { type: integer, enum: [1], description: Select the canonical durable session stream }
+                control_replies:
+                  type: boolean
+                  default: true
+                  description: >
+                    Set false for a caller without an interactive reply subscriber.
+                    Questions and permission requests then refuse instead of waiting.
+                    This only restricts existing capabilities; it grants no authority.
+                attach_id: { type: string, description: Server-minted presence attachment }
+                queue: { type: boolean, description: Wait for the session turn lock }
+                queue_wait_ms: { type: integer, minimum: 0, maximum: 120000 }
+                message:
+                  description: >
+                    Canonical user message retained through queue, capture and execution.
+                    Legacy external strings convert once at ingress. The host assigns
+                    context authority. User blocks are text, image or document.
+                  oneOf:
+                    - type: string
+                    - type: object
+                      required: [role, blocks]
+                      properties:
+                        role: { type: string, enum: [user] }
+                        blocks:
+                          type: array
+                          minItems: 1
+                          maxItems: 4096
+                          items: { type: object }
+                aimee_session_id: { type: string, description: Required stable session identity for ir_version=1 }
                 claude_session_id: { type: string }
                 cwd: { type: string }
                 clean_retry:
@@ -5165,7 +5291,7 @@ paths:
                     replace_constraints: { type: boolean }
       responses:
         "200":
-          description: Newline-delimited aimee chat events (read until close)
+          description: NDJSON canonical session envelopes with ir_version=1; otherwise legacy chat events
           content:
             application/x-ndjson:
               schema: { type: string }
@@ -5174,6 +5300,49 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /chat/graceful_cancel:
+    post:
+      summary: Stop an exact browser-owned chat turn
+      description: >
+        With session_id and turn_id, requires the root-UDS-attested browser operator
+        and matching durable session actor. A matching local turn is asked to stop;
+        stopping does not assert that effects are quiescent. If no local turn exists,
+        the canonical owner may cancel the exact abandoned non-native execution.
+        A different live turn, native custody, stale source or ownership mismatch
+        refuses. No message is queued. The browser waits for the canonical terminal
+        before submitting any new text. Bodies without turn_id retain the legacy
+        graceful-cancel RPC contract.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id: { type: string }
+                turn_id: { type: string }
+                aimee_session_id: { type: string, description: Legacy session selector without turn_id }
+      responses:
+        "200":
+          description: Exact stop requested or canonical cancellation committed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+                  session_id: { type: string }
+                  turn_id: { type: string }
+                  disposition: { type: string, enum: [stopping, cancelled] }
+                  terminal_sequence: { type: string, description: Present for committed canonical cancellation }
+        "400":
+          description: Invalid exact cancellation frame
+        "403":
+          description: Not an authenticated browser operator or durable owner
+        "409":
+          description: Stale turn or active native custody; no canonical cancellation committed
+        "503":
+          description: Durable ownership or cancellation unavailable
   /chat/interrupt:
     post:
       summary: Steer an in-flight chat turn
@@ -5182,7 +5351,8 @@ paths:
         the server auto-continues as the next, server-initiated turn (streamed
         to the session's /events presence stream). Owner-authorized like
         chat.graceful_cancel. When no turn is in flight, nothing is queued and
-        `interrupted` is false. Requires CAP_CHAT.
+        `interrupted` is false. Internal clients send canonical IR. Legacy external text imports once
+        at this public endpoint. The host assigns context authority. Requires CAP_CHAT.
       requestBody:
         required: true
         content:
@@ -5192,7 +5362,20 @@ paths:
               required: [aimee_session_id, message]
               properties:
                 aimee_session_id: { type: string }
-                message: { type: string }
+                message:
+                  oneOf:
+                    - type: string
+                      minLength: 1
+                      description: Legacy external text import only
+                    - type: object
+                      required: [role, blocks]
+                      properties:
+                        role: { type: string, enum: [user] }
+                        blocks:
+                          type: array
+                          minItems: 1
+                          maxItems: 4096
+                          items: { type: object, description: Canonical text, image or document block }
       responses:
         "200":
           description: Interrupt accepted
@@ -5209,6 +5392,48 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /chat/control-reply:
+    post:
+      summary: Reply to a pending harness permission or question
+      description: >
+        Queues a decision for the exact server-owned session and execution request.
+        Requires the root-UDS-attested browser user and matching session principal.
+        Model ingress and MCP credentials cannot approve requests. The owning
+        execution persists the correlated canonical response before writing to
+        its native control channel. Stale or already answered requests return 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, request_id, reply]
+              properties:
+                session_id: { type: string }
+                request_id: { type: string }
+                reply:
+                  type: object
+                  required: [decision]
+                  properties:
+                    decision: { type: string, enum: [allow, deny, cancel] }
+                    answers:
+                      type: object
+                      additionalProperties:
+                        type: array
+                        items: { type: string }
+      responses:
+        "200":
+          description: Decision queued for the owning execution
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  queued: { type: boolean }
+        "400": { description: Invalid request }
+        "403": { description: Browser identity or ownership refused }
+        "409": { description: Pending request is stale or already answered }
   /chat/live:
     post:
       summary: Poll the live (in-flight) turn for a session
@@ -5831,19 +6056,39 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
   /sessions/{id}/events:
     get:
-      summary: Stream presence events as Server-Sent Events
+      summary: Replay and tail canonical session events, or legacy presence
       description: >
         text/event-stream of presence events
         (turn_started / turn_delta / turn_done / busy and routed async events
-        such as delegate/cron/reflection completions).
+        such as delegate/cron/reflection completions) by default. With format=ir,
+        replays the durable canonical session log after cursor, then tails newly
+        committed events. Each SSE frame has event=ir, id=decimal sequence, and
+        data equal to the canonical envelope emitted by /chat/stream. Both roles
+        and tool results are retained. Last-Event-ID takes precedence over cursor
+        on reconnect; a fresh browser starts at zero. Access requires the attested
+        session owner. Keep-alive comments contain no conversation content.
       parameters:
         - name: id
           in: path
           required: true
           schema: { type: string }
+        - name: format
+          in: query
+          schema: { type: string, enum: [ir] }
+          description: Select canonical durable replay instead of legacy presence
+        - name: cursor
+          in: query
+          schema: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+          description: Exclusive decimal event sequence; default zero
+        - name: Last-Event-ID
+          in: header
+          schema: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+          description: Reconnect cursor; takes precedence over the query cursor
       responses:
         "200":
-          description: text/event-stream of presence events
+          description: SSE canonical envelopes with format=ir; otherwise presence events
+        "403":
+          description: Missing session actor or session ownership mismatch
         "404":
           description: No such session
           content:
@@ -7241,7 +7486,11 @@ paths:
         The filesystem-authority client serving a `detached` workspace polls for
         the next op the server needs run against its working tree. Returns
         immediately with have_op:false when nothing is pending (bounded wait);
-        the client re-polls. Capability: tool:execute.
+        the client re-polls. Capability: tool:execute. workspace_id is a
+        workspace root, or a CLI's private runner channel ("runner:" and 32
+        lowercase hex digits) that the CLI also sends as X-Aimee-Runner on its own
+        requests, so their ops are run by that CLI only. A channel opens on its
+        first poll; close:true closes it.
       requestBody:
         required: true
         content:
@@ -7251,6 +7500,7 @@ paths:
               required: [workspace_id]
               properties:
                 workspace_id: { type: string }
+                close: { type: boolean, description: "Close this runner channel instead of polling it." }
       responses:
         "200":
           description: An op to execute, or have_op:false

@@ -3,7 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 	"strings"
 	"testing"
@@ -106,7 +106,7 @@ func exerciseHeightCaptureReplay(t *testing.T, ctx context.Context, tx pgx.Tx, s
 	exec(`SAVEPOINT height_capture`)
 	defer func() { exec(`ROLLBACK TO SAVEPOINT height_capture; RELEASE SAVEPOINT height_capture`) }()
 	exec(`SELECT set_config('aimee.memory_scope_all','1',true),set_config('aimee.principal','test:height-caller',true),set_config('aimee.authority','operator',true),set_config('aimee.transport_identity','height-transport',true),set_config('aimee.correlation_id','height-parent',true)`)
-	caller := &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "test:height-source", TransportIdentity: "height-source-transport"}
+	caller := &ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "test:height-source", TransportIdentity: "height-source-transport"}
 	var sourceID int64
 	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES('L2','fact','height-initial','Kibukx is 6 feet tall, the Kibukx mountains are 69 feet tall; Kibukx can lift 500 pounds.','global','_global') RETURNING id`).Scan(&sourceID); err != nil {
 		t.Fatal(err)

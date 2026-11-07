@@ -16,7 +16,7 @@
 #include "vault_crypto.h"
 #include "vault_store.h"     /* VAULT_STORE_NO_ENTRY, vault_store_entry_t */
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX */
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
 #include <errno.h>

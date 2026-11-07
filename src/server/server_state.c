@@ -862,7 +862,8 @@ int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (agent_registry_find(agent, &agbuf) != 0)
       return server_send_error(conn, "no such agent", NULL);
 
-   session_primary_set(sid, agent);
+   if (session_primary_set(sid, agent) != 0)
+      return server_send_error(conn, "session primary selection unavailable", NULL);
    cJSON *resp = jo_ok();
    jo_add_str(resp, "agent", agent);
    return send_and_free(conn, resp);
@@ -877,7 +878,8 @@ int handle_primary_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "missing session_id", NULL);
 
    char agent[MAX_AGENT_NAME] = "";
-   session_primary_get(sid, agent, sizeof(agent));
+   if (session_primary_get(sid, agent, sizeof(agent)) < 0)
+      return server_send_error(conn, "session primary selection unavailable", NULL);
    cJSON *resp = jo_ok();
    jo_add_str(resp, "agent", agent);
    return send_and_free(conn, resp);
@@ -891,7 +893,8 @@ int handle_primary_clear(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (jo_need_str(req, "session_id", &sid) < 0)
       return server_send_error(conn, "missing session_id", NULL);
 
-   session_primary_clear(sid);
+   if (session_primary_clear(sid) != 0)
+      return server_send_error(conn, "session primary selection unavailable", NULL);
    cJSON *resp = jo_ok();
    jo_add_str(resp, "agent", "");
    return send_and_free(conn, resp);
@@ -1048,12 +1051,7 @@ int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_AddItemToObject(resp, "vector", status);
       free(json_str);
    }
-   /* Canonical-IR shadow counters. The refactor's roundtable (Q6) required these to
-    * "detect parity drift in shadow before flipping the flag" — but until now
-    * aimee_ir_metric_get had NO callers, so they were incremented and never read.
-    * Write-only metrics cannot gate a rollout: without this, an IR-build failure
-    * silently falls back to the legacy translator and nothing can measure how often.
-    * Totals across wires; ir_path vs the *_fail counters is the fallback rate. */
+   /* Active canonical model-path observations, summed across frontend wires. */
    {
       cJSON *ir = cJSON_AddObjectToObject(resp, "ir");
       if (ir)
@@ -2033,11 +2031,29 @@ int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       cJSON_AddStringToObject(resp, "live_verify", status);
       cJSON_AddStringToObject(resp, "recovery_epoch", epoch);
-      cJSON_AddStringToObject(resp, "historical_verify", "red");
-      cJSON_AddStringToObject(
-          resp, "detail",
-          "Historical audit continuity is broken; original evidence is preserved separately.");
-      status = "red";
+      char history_error[256] = "";
+      long history_head = 0, history_checkpoint = 0;
+      int history = audit_worm_verify_restored_history(history_error, sizeof history_error,
+                                                       &history_head, &history_checkpoint);
+      cJSON_AddStringToObject(resp, "historical_verify",
+                              history == AUDIT_WORM_VERIFY_GREEN
+                                  ? "green"
+                                  : (history == AUDIT_WORM_VERIFY_AMBER ? "amber" : "red"));
+      cJSON_AddNumberToObject(resp, "historical_head_seq", history_head);
+      cJSON_AddNumberToObject(resp, "historical_checkpoint_seq", history_checkpoint);
+      if (history == AUDIT_WORM_VERIFY_RED)
+      {
+         cJSON_AddStringToObject(resp, "historical_detail", history_error);
+         status = "red";
+      }
+      else
+      {
+         cJSON_AddStringToObject(
+             resp, "historical_detail",
+             "Restored historical archive verified separately; recovery epoch remains distinct.");
+         if (history == AUDIT_WORM_VERIFY_AMBER && st != AUDIT_WORM_VERIFY_RED)
+            status = "amber";
+      }
    }
    cJSON_AddStringToObject(resp, "verify", status);
    cJSON_AddNumberToObject(resp, "head_seq", head);

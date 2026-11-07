@@ -32,9 +32,44 @@ def verify_events(events, required):
     return {name: outcomes[name] for name in sorted(required)}
 
 
+def load_recorded_events(paths):
+    """Group recorded `go test -json` events by import path.
+
+    A recorded package counts only if its stream ends with the package-level
+    result; a truncated or interrupted record is not evidence of anything.
+    """
+    events, finished = {}, set()
+    for path in paths:
+        for line in Path(path).read_text(encoding='utf-8').splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict) or not event.get('Package'):
+                continue
+            events.setdefault(event['Package'], []).append(event)
+            if event.get('Action') in ('pass', 'fail', 'skip') and not event.get('Test'):
+                finished.add(event['Package'])
+    return {package: rows for package, rows in events.items() if package in finished}
+
+
+def import_path(package, module_root=ROOT / 'server-go'):
+    """`./modules/memory` -> `<module path>/modules/memory`, as `go test -json` names it."""
+    for line in (module_root / 'go.mod').read_text(encoding='utf-8').splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[0] == 'module':
+            relative = package[2:] if package.startswith('./') else package
+            return fields[1] + ('/' + relative.strip('/') if relative.strip('/.') else '')
+    raise ValueError('server-go/go.mod declares no module path')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--go-events', type=Path, action='append', default=[],
+                        help='`go test -json -race -count=1` record of a complete package run in '
+                             'this job; its required cases are verified from the record instead '
+                             'of being run a second time')
     args = parser.parse_args()
     manifest = json.loads(MANIFEST.read_text())
     if manifest['version'] != 1 or len(manifest['groups']) != 12:
@@ -69,9 +104,15 @@ sys.exit(0 if result.wasSuccessful() and not result.skipped and result.testsRun 
               'working_diff_sha256': hashlib.sha256(subprocess.check_output(['git', 'diff', 'HEAD'], cwd=ROOT)).hexdigest(),
               'packages': {}, 'python': python_result, 'groups': manifest['groups'],
               'promotion': 'unqualified: deterministic invariants do not measure live-model task quality or cost'}
+    recorded = load_recorded_events(args.go_events)
     # Databases and package tests are intentionally serialized. The memory tests
     # include a real non-owner role; the bootstrap connection is administrative.
     for package, required in packages.items():
+        prior = recorded.get(import_path(package)) if recorded else None
+        if prior is not None:
+            report['packages'][package] = verify_events(prior, required)
+            print(f'{package}: {len(required)} required tests passed (recorded run)', flush=True)
+            continue
         command = ['go', 'test', '-json', '-race', '-count=1', '-timeout=20m', package,
                    '-run', '^(' + '|'.join(sorted(required)) + ')$']
         result = subprocess.run(command, cwd=ROOT / 'server-go', text=True, capture_output=True, timeout=1260)

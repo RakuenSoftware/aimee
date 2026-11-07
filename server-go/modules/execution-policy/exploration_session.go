@@ -26,7 +26,7 @@ func sessionExploration(principal, session string, state, operationJSON []byte, 
 	var req sessionExplorationRequest
 	dec := json.NewDecoder(bytes.NewReader(operationJSON))
 	dec.DisallowUnknownFields()
-	if len(operationJSON) > 65536 || decodeSingle(dec, &req) != nil || principal == "" || session == "" || len(principal) > 128 || len(session) > 128 {
+	if len(operationJSON) > 65536 || decodeSingle(dec, &req) != nil || principal == "" || session == "" || len(principal) >= 160 || len(session) > 128 {
 		return nil, nil, errors.New("invalid host exploration request")
 	}
 	if req.Operation == "check_session" || req.Operation == "bind_session" {
@@ -146,7 +146,7 @@ func sessionExploration(principal, session string, state, operationJSON []byte, 
 		if loadErr != nil {
 			return nil, nil, loadErr
 		}
-		baseline := evaluate(request{Tool: req.Tool, SideEffect: req.SideEffect, Arguments: req.Arguments}, policy)
+		baseline := evaluate(request{Tool: req.Tool, SideEffect: req.SideEffect, PolicyCategories: req.PolicyCategories, Arguments: req.Arguments}, policy)
 		result = baseline
 		if !baseline.Allowed || baseline.Exploration == nil {
 			break
@@ -163,6 +163,9 @@ func sessionExploration(principal, session string, state, operationJSON []byte, 
 			return nil, nil, errors.New("invalid arguments")
 		}
 		action, _ := json.Marshal([]any{req.Tool, canonical})
+		if len(req.PolicyCategories) > 0 {
+			action, _ = json.Marshal([]any{req.Tool, canonical, req.SideEffect, req.PolicyCategories})
+		}
 		if req.Binding.IndexObservedCurrent && !req.IndexObservation.current(req.Binding) {
 			req.Binding.IndexObservedCurrent = false
 		}
@@ -333,6 +336,7 @@ type sessionExplorationState struct {
 	Tasks     map[string]explorationSnapshot `json:"tasks"`
 }
 type sessionExplorationRequest struct {
+	PolicyCategories []string                     `json:"policy_categories,omitempty"`
 	OwnerObservation *explorationOwnerObservation `json:"owner_observation,omitempty"`
 	IndexObservation *explorationIndexObservation `json:"index_observation,omitempty"`
 	TurnID           string                       `json:"turn_id,omitempty"`

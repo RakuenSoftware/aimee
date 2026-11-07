@@ -51,6 +51,7 @@
     {"model.probe", handle_agent_probe},
     {"model.stats", handle_agent_stats},
     {"model.draft", handle_agent_draft},
+    {"model.generate", handle_agent_generate},
     {"model.setup", handle_agent_setup},
     {"model.setup_poll", handle_agent_setup_poll},
     {"model.cli_oauth_start", handle_agent_cli_oauth_start},
@@ -270,6 +271,7 @@
     {"chat.send_stream", handle_chat_send_stream},
     /* MCP proxy */
     {"mcp.tools_list", handle_mcp_tools_list},
+    {"mcp.tools_wait", handle_mcp_tools_wait},
     {"mcp.audit", handle_mcp_audit},
     {"mcp.recheck", handle_mcp_recheck},
     {"mcp.call", handle_mcp_call},

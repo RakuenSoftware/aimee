@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -54,8 +54,8 @@ func exerciseDerivedRelationsReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	call := func() {
 		t.Helper()
-		r, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "reindex", `{}`)
-		if status != bus.ModuleStatusOK || r["status"] != "ok" {
+		r, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "reindex", `{}`)
+		if status != ring.ModuleStatusOK || r["status"] != "ok" {
 			t.Fatal(r, status)
 		}
 	}
@@ -335,7 +335,7 @@ func exerciseDerivedRelationsReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 	if _, err := tx.Exec(ctx, `RESET ROLE; REVOKE INSERT ON memory_relations FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`); err != nil {
 		t.Fatal(err)
 	}
-	if _, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "reindex", `{}`); status == bus.ModuleStatusOK {
+	if _, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "reindex", `{}`); status == ring.ModuleStatusOK {
 		t.Fatal("accepted denied relation write")
 	}
 	if after := snapshot(); after != before {

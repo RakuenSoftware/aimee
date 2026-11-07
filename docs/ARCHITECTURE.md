@@ -271,7 +271,8 @@ PostgreSQL and models remain separate service containers.
 
 ## Code boundaries
 
-- `src/core/event_bus/`: event transport, arena, host, client, capture.
+- `src/modules/audit/obs_bus.c`: aimee's embedding of the ouroboros ring, the event transport
+  (its own repository; aimee links a release, see [the ring](core/event-bus.md)).
 - `src/modules/`: owned C modules and public headers.
 - `src/server/`: C resource plane and `/v1` handlers.
 - `src/kb/`: KB resource host, knowledge adapters, and public routes.

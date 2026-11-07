@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/JBailes/aimee/server-go/bus"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +13,10 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/JBailes/aimee/server-go/modules/roundtable/panelwire"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 	"github.com/JBailes/aimee/server-go/internal/workflowstore"
@@ -267,6 +270,9 @@ func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request D
 	}
 	started := time.Now()
 	result, err := r.agents.Delegate(ctx, request)
+	if err == nil {
+		_, err = result.SemanticText()
+	}
 	return result, decorateDelegateLimitError(err, stageWallRemaining, request, time.Since(started))
 }
 
@@ -512,12 +518,12 @@ func (r *NativeRunner) custom(ctx context.Context, req StepRequest, block wfe.Bl
 			return StepResult{}, err
 		}
 	}
-	// Proposal is the historical wire name for the immutable workflow-entry request.
-	prompt := block.Prompt + "\n\nORIGINAL REQUEST:\n" + req.Proposal
-	for name, input := range req.Inputs {
-		prompt += "\n\nINPUT " + name + " (" + input.Type + "):\n" + string(input.Content)
-	}
 	if block.Executor == "command" {
+		// A custom process owns its explicit text stdin boundary.
+		prompt := block.Prompt + "\n\nORIGINAL REQUEST:\n" + req.Proposal
+		for name, input := range req.Inputs {
+			prompt += "\n\nINPUT " + name + " (" + input.Type + "):\n" + string(input.Content)
+		}
 		if len(block.Command) == 0 {
 			return StepResult{}, errors.New("custom command has no argv")
 		}
@@ -552,7 +558,13 @@ func (r *NativeRunner) custom(ctx context.Context, req StepRequest, block wfe.Bl
 		}
 		return StepResult{Status: StepAdvanced, ArtifactType: block.Produces, Artifact: string(output)}, nil
 	}
-	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: firstNonempty(paramString(req.Node, "persona", ""), block.Persona), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir, Tools: true})
+	persona := firstNonempty(paramString(req.Node, "persona", ""), block.Persona)
+	input := workflowRequest(persona, workflowOperatorTask(block.Prompt),
+		workflowOriginalTask("\n\nORIGINAL REQUEST:\n"+req.Proposal))
+	for name, artifact := range req.Inputs {
+		appendWorkflowBlocks(input, workflowArtifact("\n\nINPUT "+name+" ("+artifact.Type+"):\n"+string(artifact.Content)))
+	}
+	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: persona, Delegate: paramString(req.Node, "delegate", ""), Input: input, Workdir: workdir, Tools: true})
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -569,7 +581,7 @@ func (r *NativeRunner) custom(ctx context.Context, req StepRequest, block wfe.Bl
 		}
 		return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: head, CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 	}
-	return StepResult{Status: StepAdvanced, ArtifactType: block.Produces, Artifact: result.Response, CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
+	return StepResult{Status: StepAdvanced, ArtifactType: block.Produces, Artifact: delegateText(result), CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 }
 
 func (r *NativeRunner) author(ctx context.Context, req StepRequest, kind string) (StepResult, error) {
@@ -584,25 +596,29 @@ func (r *NativeRunner) author(ctx context.Context, req StepRequest, kind string)
 		"Work the request did not ask for but that you judge genuinely necessary is technical debt. Taking on documented technical debt is completely acceptable; the requirement is that it is written down. " +
 		"Name it under a Technical debt, Deferred follow-up, or Non-goals heading and do not plan it — that is a correct and expected outcome, not a failure to plan. " +
 		"Deferring it means planning none of it, including its groundwork: do not plan a store, fixture, format, or hook whose only purpose is to enable work this same plan defers. " +
-		"What is not acceptable is leaving it undocumented: debt you neither plan nor record is a gap that silently ships.\n\nORIGINAL REQUEST:\n" + string(proposal.Content)
+		"What is not acceptable is leaving it undocumented: debt you neither plan nor record is a gap that silently ships."
+	input := workflowRequest(paramString(req.Node, "persona", "architect"), workflowHostTask(prompt),
+		workflowOriginalTask("\n\nORIGINAL REQUEST:\n"+string(proposal.Content)))
 	if req.Feedback != nil {
 		encoded, _ := json.Marshal(req.Feedback)
-		prompt += "\n\nPRIOR REVIEW FEEDBACK TO RESOLVE:\n" + string(encoded)
+		appendWorkflowBlocks(input, workflowModelEvidence("\n\nPRIOR REVIEW FEEDBACK TO RESOLVE:\n"+string(encoded)))
 	}
-	result, err := r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: req.WorkItem.Repo})
+	result, err := r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Input: input, Workdir: req.WorkItem.Repo})
 	if err != nil {
 		return StepResult{}, err
 	}
-	if strings.TrimSpace(result.Response) == "" {
+	if strings.TrimSpace(delegateText(result)) == "" {
 		return StepResult{Status: StepChanges, Detail: "planner returned an empty artifact", CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 	}
-	return StepResult{Status: StepAdvanced, ArtifactType: kind, Artifact: result.Response, CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
+	return StepResult{Status: StepAdvanced, ArtifactType: kind, Artifact: delegateText(result), CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 }
 
 func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind string) (StepResult, error) {
 	var prompt string
+	var evidence []canonical.Block
 	if kind == "intent" {
-		prompt = "Scope the engineering task below. Return only JSON shaped {\"schema_version\":1,\"status\":\"unconfirmed\",\"summary\":\"...\",\"rationale\":\"...\",\"acceptance_criteria\":[\"...\"]}. Describe the task, never the bookkeeping record.\n\nTASK:\n" + req.Proposal
+		prompt = "Scope the engineering task below. Return only JSON shaped {\"schema_version\":1,\"status\":\"unconfirmed\",\"summary\":\"...\",\"rationale\":\"...\",\"acceptance_criteria\":[\"...\"]}. Describe the task, never the bookkeeping record."
+		evidence = append(evidence, workflowOriginalTask("\n\nTASK:\n"+req.Proposal))
 	} else {
 		source := inputText(req, "plan")
 		if source == "" {
@@ -640,11 +656,12 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 			"Return only JSON shaped {\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\",\"summary\":\"...\",\"target_blocks\":[\"implement\"],\"dependencies\":[],\"acceptance_criteria\":[\"...\"]}]}. " +
 			"Only create packets for repository changes that can be completed in this workflow run. Do not create packets for post-adoption measurements, future observation windows, operational follow-up, proposal bookkeeping, or manual verification. " +
 			"Tests and acceptance checks are criteria, not packets, unless the original request explicitly asks for a new reusable test artifact. Every packet must trace to an explicit requested deliverable; useful extra work is scope drift. " +
-			"Each summary becomes a pull request title: make it a concise reviewer-facing outcome that says what changes, not a process instruction such as inspect, only if necessary, or minimally update. Do not omit requested implementation work or truncate content.\n\n" +
-			"ORIGINAL REQUEST:\n" + req.Proposal + "\n\nAPPROVED PLAN:\n" + source
+			"Each summary becomes a pull request title: make it a concise reviewer-facing outcome that says what changes, not a process instruction such as inspect, only if necessary, or minimally update. Do not omit requested implementation work or truncate content."
+		evidence = append(evidence, workflowOriginalTask("\n\nORIGINAL REQUEST:\n"+req.Proposal),
+			workflowArtifact("\n\nAPPROVED PLAN:\n"+source))
 		if req.Feedback != nil {
 			encoded, _ := json.Marshal(req.Feedback)
-			prompt += "\n\nACCEPTANCE FEEDBACK THAT THE NEW PACKETS MUST RESOLVE:\n" + string(encoded)
+			evidence = append(evidence, workflowModelEvidence("\n\nACCEPTANCE FEEDBACK THAT THE NEW PACKETS MUST RESOLVE:\n"+string(encoded)))
 		}
 	}
 	var cost float64
@@ -652,14 +669,16 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 	var result DelegateResult
 	var content []byte
 	var validationErr error
+	input := workflowRequest(paramString(req.Node, "persona", "architect"), workflowHostTask(prompt))
+	appendWorkflowBlocks(input, evidence...)
 	for attempt := 1; attempt <= 3; attempt++ {
-		result, validationErr = r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: req.WorkItem.Repo})
+		result, validationErr = r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Input: input, Workdir: req.WorkItem.Repo})
 		if validationErr != nil {
 			return StepResult{}, validationErr
 		}
 		cost += result.CostUSD
 		costUnknown = costUnknown || result.CostUnknown
-		content, validationErr = extractJSONObject(result.Response)
+		content, validationErr = extractJSONObject(delegateText(result))
 		if validationErr == nil {
 			validationErr = validateStructured(kind, content)
 		}
@@ -672,7 +691,11 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 		// the artifact. The changed prompt is part of DelegateRequest and therefore
 		// receives a distinct durable job key. Do not byte-truncate the artifact:
 		// silent byte limits were the original non-convergence failure mode.
-		prompt += "\n\nYOUR PREVIOUS RESPONSE WAS INVALID (" + validationErr.Error() + "). Repair it and return one complete JSON object only. Do not truncate or omit any field.\n\nCOMPLETE INVALID RESPONSE:\n" + result.Response
+		nextInput, repairErr := canonical.RepairRequest(input, result.Output, "YOUR PREVIOUS RESPONSE WAS INVALID ("+validationErr.Error()+"). Repair the preceding assistant artifact and return one complete JSON object only. Do not truncate or omit any field.")
+		if repairErr != nil {
+			return StepResult{}, repairErr
+		}
+		input = nextInput
 	}
 	if validationErr != nil {
 		return StepResult{Status: StepChanges, Detail: "structured response remained invalid after corrective synthesis: " + validationErr.Error(), CostUSD: cost, CostUnknown: costUnknown}, nil
@@ -710,21 +733,23 @@ func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepRes
 	return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: wfe.Hash([]byte(branch))}, nil
 }
 
-// documentDelegatePrompt anchors documentation work to the same immutable
+// documentDelegateInput anchors documentation work to the same immutable
 // request and exact branch diff that the acceptance gate reviewed. A branch
 // name alone invites the delegate to mine unrelated history for undocumented
 // changes and expand the final PR after acceptance.
-func documentDelegatePrompt(ctx context.Context, req StepRequest, workdir string) (string, error) {
+func documentDelegateInput(ctx context.Context, req StepRequest, workdir, persona string) (*canonical.Request, error) {
 	acceptedDiff, err := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return "Document only the accepted implementation of the original request below. " +
+	procedure := "Document only the accepted implementation of the original request below. " +
 		"Do not infer work from unrelated repository history or document pre-existing changes. " +
 		"Update appropriate user or developer documentation and inline comments only when the " +
 		"accepted implementation needs it; if its documentation is already complete, leave the " +
-		"worktree unchanged.\n\nORIGINAL REQUEST:\n" + req.Proposal +
-		"\n\nACCEPTED IMPLEMENTATION DIFF:\n" + acceptedDiff, nil
+		"worktree unchanged."
+	return workflowRequest(persona, workflowHostTask(procedure),
+		workflowOriginalTask("\n\nORIGINAL REQUEST:\n"+req.Proposal),
+		workflowToolEvidence("\n\nACCEPTED IMPLEMENTATION DIFF:\n"+acceptedDiff)), nil
 }
 
 // The shared write-role guard reports a successful no-op as a partial result so
@@ -843,34 +868,38 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 				ContentHash: head, Detail: detail}, nil
 		}
 	}
-	prompt := implementationDelegatePrompt()
+	persona := paramString(req.Node, "persona", "engineer")
+	input := workflowRequest(persona, workflowHostTask(implementationDelegatePrompt()),
+		workflowOriginalTask("\n\nORIGINAL REQUEST:\n"+req.Proposal))
 	if docs {
-		prompt, err = documentDelegatePrompt(ctx, req, workdir)
+		input, err = documentDelegateInput(ctx, req, workdir, persona)
 		if err != nil {
 			return StepResult{}, err
 		}
 	}
 	if task := paramString(req.Node, "task", ""); task != "" {
-		prompt += "\n\nWORKFLOW STEP INSTRUCTIONS:\n" + task
+		appendWorkflowBlocks(input, workflowOperatorTask("\n\nWORKFLOW STEP INSTRUCTIONS:\n"+task))
 	}
-	for name, input := range req.Inputs {
-		prompt += "\n\nINPUT " + name + " (" + input.Type + "):\n" + string(input.Content)
+	for name, artifact := range req.Inputs {
+		appendWorkflowBlocks(input, workflowArtifact("\n\nINPUT "+name+" ("+artifact.Type+"):\n"+string(artifact.Content)))
 	}
 	if req.Feedback != nil {
 		encoded, _ := json.Marshal(req.Feedback)
-		prompt += "\n\nREVIEW FEEDBACK TO RESOLVE:\n" + string(encoded)
+		appendWorkflowBlocks(input, workflowModelEvidence("\n\nREVIEW FEEDBACK TO RESOLVE:\n"+string(encoded)))
 	}
 	if retryDetail := retryDetailForPrompt(req.RetryDetail); retryDetail != "" {
-		prompt += "\n\nPREVIOUS ATTEMPT FAILURE TO FIX:\n" + retryDetail
+		appendWorkflowBlocks(input, workflowToolEvidence("\n\nPREVIOUS ATTEMPT FAILURE TO FIX:\n"+retryDetail))
 	}
 	var cost float64
 	costUnknown := false
 	if !docs && paramBool(req.Node, "tdd") {
-		testPrompt := "Write the failing tests required by this task before implementation. Run them to confirm they fail for the intended reason, and leave the tests in the worktree.\n\n" + prompt
+		testPersona := paramString(req.Node, "test_persona", "qa")
+		testInput := workflowRequest(testPersona, workflowHostTask("Write the failing tests required by this task before implementation. Run them to confirm they fail for the intended reason, and leave the tests in the worktree.\n\n"))
+		appendWorkflowBlocks(testInput, input.Messages[0].Blocks...)
 		// implement/document are native branch-producing blocks regardless of the
 		// custom block registry's Produces metadata. This pre-step is committed here,
 		// and the completed implementation is verified before the step advances.
-		testResult, testErr := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "test_persona", "qa"), Delegate: paramString(req.Node, "test_delegate", ""), Prompt: testPrompt, Workdir: workdir, Tools: true, AcceptPartial: true})
+		testResult, testErr := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "test_persona", "qa"), Delegate: paramString(req.Node, "test_delegate", ""), Input: testInput, Workdir: workdir, Tools: true, AcceptPartial: true})
 		if testErr != nil {
 			return StepResult{}, testErr
 		}
@@ -882,13 +911,13 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		if err := r.commitChanges(ctx, workdir, req.Node.ID+" tests"); err != nil {
 			return StepResult{}, err
 		}
-		prompt += "\n\nTDD: failing tests have already been authored in the worktree. Make them pass without weakening or deleting their assertions."
+		appendWorkflowBlocks(input, workflowHostTask("\n\nTDD: failing tests have already been authored in the worktree. Make them pass without weakening or deleting their assertions."))
 	}
 	// acceptPartial is granted here on the contract that this block "is
 	// independently committed and verified by the Go native runner". Record the
 	// pre-delegate HEAD so that promise can actually be checked below.
 	baseHead, baseHeadErr := gitText(ctx, workdir, "rev-parse", "HEAD")
-	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "persona", "engineer"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir, Tools: true, AcceptPartial: true})
+	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "persona", "engineer"), Delegate: paramString(req.Node, "delegate", ""), Input: input, Workdir: workdir, Tools: true, AcceptPartial: true})
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -925,8 +954,8 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		// A document no-op is the requested outcome when the accepted diff is
 		// already documented. Freeze the exact unchanged HEAD so doc_freeze and
 		// doc_gate still review it; blocking review feedback overrides that exemption.
-		satisfiedNoop := (docs && delegatePartialIsNoChange(result.Response)) ||
-			(!docs && implementationPartialIsSatisfiedNoChange(result.Response))
+		satisfiedNoop := (docs && delegatePartialIsNoChange(delegateText(result))) ||
+			(!docs && implementationPartialIsSatisfiedNoChange(delegateText(result)))
 		blockingReviewUnchanged := false
 		if headErr == nil && head == baseHead && feedbackHasBlockingFinding(req.Feedback) &&
 			req.Feedback.ArtifactHash != "" {
@@ -939,7 +968,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		if headErr == nil && head == baseHead &&
 			(blockingReviewUnchanged || (!satisfiedNoop &&
 				!branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID))) {
-			detail := strings.TrimSpace(result.Response)
+			detail := strings.TrimSpace(delegateText(result))
 			if detail == "" {
 				detail = "delegate returned a partial result and produced no commit"
 			}
@@ -989,7 +1018,7 @@ func (r *NativeRunner) review(ctx context.Context, req StepRequest) (StepResult,
 		return StepResult{}, errors.New("review missing src input")
 	}
 	persona := paramString(req.Node, "persona", paramString(req.Node, "reviewer", "reviewer"))
-	prompt := "Review this complete artifact against the proposal. Return only JSON shaped {\"verdict\":\"approve\" or \"changes\" or \"blocked\",\"findings\":[{\"id\":\"...\",\"severity\":\"blocking\",\"location\":\"...\",\"summary\":\"...\",\"recommendation\":\"...\"}]}.\n\nPROPOSAL:\n" + req.Proposal + "\n\nARTIFACT:\n" + string(reviewed.Content)
+	procedure := "Review this complete artifact against the proposal. Return only JSON shaped {\"verdict\":\"approve\" or \"changes\" or \"blocked\",\"findings\":[{\"id\":\"...\",\"severity\":\"blocking\",\"location\":\"...\",\"summary\":\"...\",\"recommendation\":\"...\"}]}."
 	workdir := req.WorkItem.Worktree
 	if workdir == "" {
 		var err error
@@ -998,11 +1027,11 @@ func (r *NativeRunner) review(ctx context.Context, req StepRequest) (StepResult,
 			return StepResult{}, err
 		}
 	}
-	result, err := r.delegate(ctx, req, DelegateRequest{Role: "review", Persona: persona, Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir})
+	result, err := r.delegate(ctx, req, DelegateRequest{Role: "review", Persona: persona, Delegate: paramString(req.Node, "delegate", ""), Input: workflowRequest(persona, workflowHostTask(procedure), workflowOriginalTask("\n\nPROPOSAL:\n"+req.Proposal), workflowArtifact("\n\nARTIFACT:\n"+string(reviewed.Content))), Workdir: workdir})
 	if err != nil {
 		return StepResult{}, err
 	}
-	doc, err := extractJSONObject(result.Response)
+	doc, err := extractJSONObject(delegateText(result))
 	if err != nil {
 		return malformedReview(reviewed.Hash, persona, err, result.CostUSD), nil
 	}
@@ -1373,17 +1402,8 @@ func frozenWorktreeCreates(ctx context.Context, workdir, base string) ([]workflo
 	return creates, nil
 }
 
-type panelFinding struct {
-	ID             string `json:"id"`
-	Severity       string `json:"severity"`
-	Location       string `json:"location"`
-	Summary        string `json:"summary"`
-	Recommendation string `json:"recommendation"`
-}
-type panelAlignment struct {
-	Status  string `json:"status"`
-	Summary string `json:"summary"`
-}
+type panelFinding = panelwire.Finding
+type panelAlignment = panelwire.Alignment
 type panelResponse struct {
 	RunID                    string         `json:"run_id"`
 	ArtifactHash             string         `json:"artifact_hash"`
@@ -1479,9 +1499,13 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	// The saved panel is named, not resolved here: the module owns its preset
 	// store, and resolving a second time in the control plane is how the two
 	// sides previously ended up with different notions of the same panel.
+	reviewInput := workflowRequest("", workflowOriginalTask(req.Proposal))
+	if strings.TrimSpace(req.Proposal) == "" {
+		reviewInput = workflowRequest("", workflowHostTask("Review the supplied artifact for correctness, completeness, security, and test quality."))
+	}
 	result, err := r.reviews.Review(ctx, roundtablecfg.ReviewRequest{
 		Artifact:         string(reviewed.Content),
-		OriginalRequest:  req.Proposal,
+		Request:          reviewInput,
 		ArtifactStage:    reviewed.Type,
 		Roundtable:       paramString(req.Node, "roundtable", ""),
 		Workdir:          workdir,
@@ -1507,8 +1531,8 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		// resubmits the same rejection every few seconds until someone notices.
 		// The panel logs which part it refused; the status is all that crosses
 		// the wire.
-		var status *bus.ModuleCallStatusError
-		if errors.As(err, &status) && status.Status == bus.ModuleStatusInvalidRequest {
+		var status *ring.ModuleCallStatusError
+		if errors.As(err, &status) && status.Status == ring.ModuleStatusInvalidRequest {
 			return StepResult{Status: StepFailed, CostUSD: result.CostUSD,
 				CostUnknown: result.CostUnknown,
 				Detail:      "roundtable rejected the review request as invalid; see the module log for which part"}, nil
@@ -1546,16 +1570,6 @@ func roundtableStepResult(result roundtablecfg.RunResult, artifactHash string) S
 	return step
 }
 
-func normalizeRoundtableStage(raw string) (string, bool) {
-	stage := strings.ToLower(strings.TrimSpace(raw))
-	switch stage {
-	case "intent", "plan", "frozen_diff":
-		return stage, true
-	default:
-		return "", false
-	}
-}
-
 func panelFailureCategory(err error, transport bool) string {
 	// Typed deadlines intentionally unwrap to context.DeadlineExceeded, so their
 	// specific sentinels must stay ahead of the generic deadline branch.
@@ -1577,27 +1591,6 @@ func panelFailureCategory(err error, transport bool) string {
 	default:
 		return "malformed_after_repair"
 	}
-}
-
-func remainingCostLimit(limit, spent float64) float64 {
-	if limit <= 0 {
-		return 0
-	}
-	remaining := limit - spent
-	if remaining < 0 {
-		return 0
-	}
-	return remaining
-}
-
-// panelVerdictError reports why a parsed seat response is not a usable verdict.
-// Approve carries no findings and changes carries at least one; anything else is
-// a reviewer that contradicted itself, which says nothing about the artifact.
-// panelVerdict is the one normalization of a seat or chairman verdict. Both
-// paths must read the same value: validating one form and branching on another
-// silently turns a usable verdict into a non-vote.
-func panelVerdict(parsed panelResponse) string {
-	return strings.ToLower(strings.TrimSpace(parsed.Verdict))
 }
 
 func (r *NativeRunner) foreach(ctx context.Context, req StepRequest) (StepResult, error) {
@@ -2061,123 +2054,7 @@ func firstNonempty(value, fallback string) string {
 // JSON object. Candidate spans are disjoint and the scan index is monotonic, so
 // every byte is scanned once and passed to json.Unmarshal at most once.
 func extractJSONObject(text string) ([]byte, error) {
-	// Delegate providers sometimes append prose, shell snippets, or a second JSON
-	// value despite an "only JSON" prompt. Parsing first-'{' through last-'}' turns
-	// that harmless suffix into an infinite workflow refinement loop. Balance one
-	// candidate at a time while honoring quoted braces and escapes instead. A
-	// balanced but malformed outer object is skipped atomically: a valid-looking
-	// nested object must never be promoted to the provider's top-level response.
-	// Candidates never overlap, so every input byte is scanned once and belongs to
-	// at most one json.Unmarshal call. Total work is therefore linear in the input
-	// length without imposing a byte or candidate-count truncation limit. An
-	// unterminated string or escape consumes the remainder and fails closed; there
-	// cannot be a safely identifiable sibling object after malformed string data.
-	const (
-		objectOpen  = byte('{')
-		objectClose = byte('}')
-		arrayOpen   = byte('[')
-		arrayClose  = byte(']')
-	)
-	matches := func(open, close byte) bool {
-		return (open == objectOpen && close == objectClose) || (open == arrayOpen && close == arrayClose)
-	}
-	start := -1
-	// Retain both backing arrays across candidates/outer values. Candidates are
-	// scanned once; no candidate-count or byte limit truncates the response.
-	var delimiters []byte
-	var outerDelimiters []byte
-	inString := false
-	escaped := false
-	outerInString := false
-	outerEscaped := false
-	resetCandidate := func() {
-		start = -1
-		delimiters = delimiters[:0]
-		inString = false
-		escaped = false
-	}
-	for i := 0; i < len(text); i++ {
-		c := text[i]
-		if start < 0 {
-			// A complete top-level array is a different JSON value. Track its typed
-			// framing so objects nested inside it can never be promoted as the
-			// delegate's top-level object response.
-			if len(outerDelimiters) > 0 {
-				if outerInString {
-					if outerEscaped {
-						outerEscaped = false
-					} else if c == '\\' {
-						outerEscaped = true
-					} else if c == '"' {
-						outerInString = false
-					}
-					continue
-				}
-				switch c {
-				case '"':
-					outerInString = true
-				case objectOpen, arrayOpen:
-					outerDelimiters = append(outerDelimiters, c)
-				case objectClose, arrayClose:
-					if !matches(outerDelimiters[len(outerDelimiters)-1], c) {
-						return nil, errors.New("delegate returned structurally ambiguous outer JSON delimiters")
-					}
-					outerDelimiters = outerDelimiters[:len(outerDelimiters)-1]
-				}
-				continue
-			}
-			if c == arrayOpen {
-				outerDelimiters = append(outerDelimiters[:0], c)
-				outerInString = false
-				outerEscaped = false
-			} else if c == objectOpen {
-				start = i
-				delimiters = append(delimiters[:0], c)
-			}
-			continue
-		}
-		if inString {
-			if escaped {
-				escaped = false
-				continue
-			}
-			if c == '\\' {
-				escaped = true
-			} else if c == '"' {
-				inString = false
-			}
-			continue
-		}
-		switch c {
-		case '"':
-			inString = true
-		case objectOpen, arrayOpen:
-			delimiters = append(delimiters, c)
-		case objectClose, arrayClose:
-			if len(delimiters) == 0 || !matches(delimiters[len(delimiters)-1], c) {
-				// Once typed framing is mismatched, a later object cannot be proven to
-				// be a disjoint sibling rather than data nested in the malformed value.
-				// Fail closed instead of promoting an attacker/provider-controlled
-				// approval object from ambiguous framing.
-				return nil, errors.New("delegate returned structurally ambiguous JSON delimiters")
-			}
-			delimiters = delimiters[:len(delimiters)-1]
-			if len(delimiters) == 0 {
-				doc := []byte(text[start : i+1])
-				var value map[string]any
-				if json.Unmarshal(doc, &value) == nil {
-					return doc, nil
-				}
-				// i only advances: no byte from this failed candidate is
-				// revisited or promoted as the start of a nested candidate.
-				resetCandidate()
-			}
-		}
-	}
-	if len(outerDelimiters) > 0 || outerInString || outerEscaped {
-		return nil, errors.New("delegate returned unterminated outer JSON value")
-	}
-	return nil, errors.New("delegate returned no valid JSON object")
+	return panelwire.ExtractJSONObject(text)
 }
 func validateStructured(kind string, doc []byte) error {
 	var root map[string]any
@@ -2281,4 +2158,11 @@ func validateStructured(kind string, doc []byte) error {
 		}
 	}
 	return nil
+}
+
+// delegateText projects only admitted successful canonical content. The caller
+// has already propagated admission failure; there is no display-string fallback.
+func delegateText(result DelegateResult) string {
+	text, _ := result.SemanticText()
+	return text
 }

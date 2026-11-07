@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func memoryRequest(score int64) []byte {
@@ -29,8 +29,8 @@ func TestRerankConfidenceParity(t *testing.T) {
 		{660000, ConfidenceHigh},
 	}
 	for _, test := range tests {
-		response, status := Handle(bus.ModuleInvocation{StageID: StageRerank}, memoryRequest(test.score))
-		if status != bus.ModuleStatusOK || len(response) != responseLen ||
+		response, status := Handle(ring.ModuleInvocation{StageID: StageRerank}, memoryRequest(test.score))
+		if status != ring.ModuleStatusOK || len(response) != responseLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != responseMagic ||
 			binary.LittleEndian.Uint32(response[4:8]) != test.want {
 			t.Errorf("score %d response = %x, status = %d, want %d", test.score, response, status, test.want)
@@ -40,22 +40,22 @@ func TestRerankConfidenceParity(t *testing.T) {
 
 func TestMemoryRejectsUnimplementedAndMalformedStages(t *testing.T) {
 	for _, stage := range []uint32{StageExtractIndex, StageEmbed, StageRetrieve} {
-		if _, status := Handle(bus.ModuleInvocation{StageID: stage},
-			memoryRequest(660000)); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: stage},
+			memoryRequest(660000)); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("unimplemented stage %d status = %d", stage, status)
 		}
 	}
 	request := memoryRequest(660000)
 	binary.LittleEndian.PutUint32(request[0:4], requestMagic+1)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRerank}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRerank}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wire-magic status = %d", status)
 	}
 	request = memoryRequest(660000)
 	binary.LittleEndian.PutUint32(request[4:8], wireVersion+1)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRerank}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRerank}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wire-version status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRerank}, request[:len(request)-1]); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRerank}, request[:len(request)-1]); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("short-request status = %d", status)
 	}
 }
@@ -86,9 +86,9 @@ func TestWriteStageCarriesTheGateVerdict(t *testing.T) {
 		if len(test.relType) > relTypeMax {
 			continue // the C encoder refuses these; they never reach the stage
 		}
-		response, status := Handle(bus.ModuleInvocation{StageID: StageWrite},
+		response, status := Handle(ring.ModuleInvocation{StageID: StageWrite},
 			gateRequest(test.head, test.relType, test.tail))
-		if status != bus.ModuleStatusOK || len(response) != gateResponseLen ||
+		if status != ring.ModuleStatusOK || len(response) != gateResponseLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != gateResponseMagic {
 			t.Fatalf("(%d, %q, %d) response = %x, status = %d", test.head, test.relType, test.tail,
 				response, status)
@@ -108,7 +108,7 @@ func TestWriteStageCarriesTheGateVerdict(t *testing.T) {
 
 func TestWriteStageRejectsMalformedRequests(t *testing.T) {
 	valid := gateRequest(NodePerson, "works_for", NodeOrg)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageWrite}, valid); status != bus.ModuleStatusOK {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageWrite}, valid); status != ring.ModuleStatusOK {
 		t.Fatalf("valid gate request status = %d", status)
 	}
 	malformed := map[string]func([]byte){
@@ -120,34 +120,34 @@ func TestWriteStageRejectsMalformedRequests(t *testing.T) {
 	for name, corrupt := range malformed {
 		request := gateRequest(NodePerson, "works_for", NodeOrg)
 		corrupt(request)
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageWrite}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageWrite}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s status = %d", name, status)
 		}
 	}
 	// A rerank-shaped request routed to the write stage must not be misparsed.
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageWrite},
-		memoryRequest(660000)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageWrite},
+		memoryRequest(660000)); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("rerank request on write stage status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageWrite},
-		valid[:len(valid)-1]); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageWrite},
+		valid[:len(valid)-1]); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("short gate request status = %d", status)
 	}
 }
 
 func TestWriteStageHonorsCancellation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageWrite, DeadlineNS: 1}
-	if _, status := Handle(invocation, gateRequest(NodePerson, "works_for", NodeOrg)); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageWrite, DeadlineNS: 1}
+	if _, status := Handle(invocation, gateRequest(NodePerson, "works_for", NodeOrg)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }
 
 func TestMemoryHonorsCancellationAfterValidation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageRerank, DeadlineNS: 1}
-	if _, status := Handle(invocation, memoryRequest(660000)); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageRerank, DeadlineNS: 1}
+	if _, status := Handle(invocation, memoryRequest(660000)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
-	if _, status := Handle(invocation, nil); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(invocation, nil); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed expired-request status = %d", status)
 	}
 }
@@ -220,9 +220,9 @@ func TestExtractStageCarriesEveryTriple(t *testing.T) {
 		text := unescapeField(row[0])
 		want := ExtractPatterns(text, max)
 
-		response, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex},
+		response, status := Handle(ring.ModuleInvocation{StageID: StageExtractIndex},
 			extractRequest(text, max))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("extract(%q) status = %d", text, status)
 		}
 		got := decodeExtractResponse(t, response)
@@ -247,7 +247,7 @@ func TestExtractStageCarriesEveryTriple(t *testing.T) {
 
 func TestExtractStageRejectsMalformedRequests(t *testing.T) {
 	valid := extractRequest("my name is Theo", 16)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex}, valid); status != bus.ModuleStatusOK {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageExtractIndex}, valid); status != ring.ModuleStatusOK {
 		t.Fatalf("valid extract request status = %d", status)
 	}
 	malformed := map[string][]byte{
@@ -262,21 +262,21 @@ func TestExtractStageRejectsMalformedRequests(t *testing.T) {
 	binary.LittleEndian.PutUint32(malformed["wire version"][4:8], wireVersion+1)
 	binary.LittleEndian.PutUint32(malformed["text longer than the request"][12:16], 999)
 	for name, request := range malformed {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex},
-			request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageExtractIndex},
+			request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s status = %d", name, status)
 		}
 	}
 	// A gate-shaped request routed to the extract stage must not be misparsed.
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex},
-		gateRequest(NodePerson, "works_for", NodeOrg)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageExtractIndex},
+		gateRequest(NodePerson, "works_for", NodeOrg)); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("gate request on extract stage status = %d", status)
 	}
 }
 
 func TestExtractStageHonorsCancellation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageExtractIndex, DeadlineNS: 1}
-	if _, status := Handle(invocation, extractRequest("my name is Theo", 16)); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageExtractIndex, DeadlineNS: 1}
+	if _, status := Handle(invocation, extractRequest("my name is Theo", 16)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }
@@ -284,9 +284,9 @@ func TestExtractStageHonorsCancellation(t *testing.T) {
 // An empty text is a real turn shape (an empty memory row), not a malformed
 // request: the stage answers "no facts", which is different from failing.
 func TestExtractStageAcceptsEmptyText(t *testing.T) {
-	response, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageExtractIndex},
 		extractRequest("", 16))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("empty text status = %d", status)
 	}
 	if triples := decodeExtractResponse(t, response); len(triples) != 0 {
@@ -311,8 +311,8 @@ func TestRetrieveStageCarriesTheTurnVerdict(t *testing.T) {
 		text := unescapeField(row[0])
 		want := atoi(t, row[1], row)
 
-		response, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve}, piiRequest(text))
-		if status != bus.ModuleStatusOK || len(response) != piiResponseLen ||
+		response, status := Handle(ring.ModuleInvocation{StageID: StageRetrieve}, piiRequest(text))
+		if status != ring.ModuleStatusOK || len(response) != piiResponseLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != piiResponseMagic {
 			t.Fatalf("pii(%q) response = %x, status = %d", text, response, status)
 		}
@@ -332,7 +332,7 @@ func TestRetrieveStageCarriesTheTurnVerdict(t *testing.T) {
 
 func TestRetrieveStageRejectsMalformedRequests(t *testing.T) {
 	valid := piiRequest("what is my email")
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve}, valid); status != bus.ModuleStatusOK {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRetrieve}, valid); status != ring.ModuleStatusOK {
 		t.Fatalf("valid pii request status = %d", status)
 	}
 	malformed := map[string][]byte{
@@ -346,22 +346,22 @@ func TestRetrieveStageRejectsMalformedRequests(t *testing.T) {
 	binary.LittleEndian.PutUint32(malformed["wire version"][4:8], wireVersion+1)
 	binary.LittleEndian.PutUint32(malformed["declared length"][8:12], 999)
 	for name, request := range malformed {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve},
-			request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageRetrieve},
+			request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s status = %d", name, status)
 		}
 	}
 	// An extract-shaped request routed here must not be misparsed: both start
 	// with a magic and a version, and both carry length-prefixed text.
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve},
-		extractRequest("what is my email", 16)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRetrieve},
+		extractRequest("what is my email", 16)); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("extract request on retrieve stage status = %d", status)
 	}
 }
 
 func TestRetrieveStageHonorsCancellation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageRetrieve, DeadlineNS: 1}
-	if _, status := Handle(invocation, piiRequest("what is my email")); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageRetrieve, DeadlineNS: 1}
+	if _, status := Handle(invocation, piiRequest("what is my email")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }
@@ -394,8 +394,8 @@ func TestRetrieveStageClassifiesAWholeBatch(t *testing.T) {
 		want = append(want, RelSensitivity(atoi(t, row[1], row)))
 	}
 
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve}, sensRequest(labels))
-	if status != bus.ModuleStatusOK {
+	response, status := Handle(ring.ModuleInvocation{StageID: StageRetrieve}, sensRequest(labels))
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("batch status = %d", status)
 	}
 	if len(response) != sensResponseHeaderLen+len(labels) ||
@@ -411,15 +411,15 @@ func TestRetrieveStageClassifiesAWholeBatch(t *testing.T) {
 
 	// A batch of one, and a batch whose tiers differ from their neighbours', are
 	// where an off-by-one in the walk shows up.
-	single, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve},
+	single, status := Handle(ring.ModuleInvocation{StageID: StageRetrieve},
 		sensRequest([]string{"home_password"}))
-	if status != bus.ModuleStatusOK || len(single) != sensResponseHeaderLen+1 ||
+	if status != ring.ModuleStatusOK || len(single) != sensResponseHeaderLen+1 ||
 		RelSensitivity(single[sensResponseHeaderLen]) != SensSecret {
 		t.Fatalf("single-label batch = %x, status = %d", single, status)
 	}
-	mixed, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve},
+	mixed, status := Handle(ring.ModuleInvocation{StageID: StageRetrieve},
 		sensRequest([]string{"works_for", "ssn", "api_key"}))
-	if status != bus.ModuleStatusOK || len(mixed) != sensResponseHeaderLen+3 {
+	if status != ring.ModuleStatusOK || len(mixed) != sensResponseHeaderLen+3 {
 		t.Fatalf("mixed batch = %x, status = %d", mixed, status)
 	}
 	for i, tier := range []RelSensitivity{SensNormal, SensPII, SensSecret} {
@@ -431,7 +431,7 @@ func TestRetrieveStageClassifiesAWholeBatch(t *testing.T) {
 
 func TestRetrieveStageRejectsMalformedBatches(t *testing.T) {
 	valid := sensRequest([]string{"works_for", "ssn"})
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve}, valid); status != bus.ModuleStatusOK {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRetrieve}, valid); status != ring.ModuleStatusOK {
 		t.Fatalf("valid batch status = %d", status)
 	}
 	malformed := map[string][]byte{
@@ -447,16 +447,16 @@ func TestRetrieveStageRejectsMalformedBatches(t *testing.T) {
 	binary.LittleEndian.PutUint32(malformed["count larger than the body"][8:12], 9)
 	binary.LittleEndian.PutUint16(malformed["label length past the body"][12:14], 999)
 	for name, request := range malformed {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve},
-			request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageRetrieve},
+			request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s status = %d", name, status)
 		}
 	}
 }
 
 func TestRetrieveStageBatchHonorsCancellation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageRetrieve, DeadlineNS: 1}
-	if _, status := Handle(invocation, sensRequest([]string{"works_for"})); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageRetrieve, DeadlineNS: 1}
+	if _, status := Handle(invocation, sensRequest([]string{"works_for"})); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }
@@ -481,9 +481,9 @@ func TestExtractStageCarriesTheTurnScan(t *testing.T) {
 		wantHasAttr := atoi(t, row[2], row)
 		wantAttr := unescapeField(row[3])
 
-		response, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex},
+		response, status := Handle(ring.ModuleInvocation{StageID: StageExtractIndex},
 			scanRequest(text))
-		if status != bus.ModuleStatusOK || len(response) < scanResponseHeaderLen ||
+		if status != ring.ModuleStatusOK || len(response) < scanResponseHeaderLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != scanResponseMagic {
 			t.Fatalf("scan(%q) response = %x, status = %d", text, response, status)
 		}
@@ -522,7 +522,7 @@ func TestExtractStageCarriesTheTurnScan(t *testing.T) {
 
 func TestExtractStageRejectsMalformedScans(t *testing.T) {
 	valid := scanRequest("forget my email")
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex}, valid); status != bus.ModuleStatusOK {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageExtractIndex}, valid); status != ring.ModuleStatusOK {
 		t.Fatalf("valid scan status = %d", status)
 	}
 	malformed := map[string][]byte{
@@ -534,24 +534,24 @@ func TestExtractStageRejectsMalformedScans(t *testing.T) {
 	binary.LittleEndian.PutUint32(malformed["wire version"][4:8], wireVersion+1)
 	binary.LittleEndian.PutUint32(malformed["declared length"][8:12], 999)
 	for name, request := range malformed {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex},
-			request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageExtractIndex},
+			request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s status = %d", name, status)
 		}
 	}
 	// An extract request and a scan request are the same shape but for the magic;
 	// each stage half must refuse the other's.
-	response, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageExtractIndex},
 		extractRequest("forget my email", 16))
-	if status != bus.ModuleStatusOK ||
+	if status != ring.ModuleStatusOK ||
 		binary.LittleEndian.Uint32(response[0:4]) != extractResponseMagic {
 		t.Errorf("extract request answered with %x, status = %d", response[:4], status)
 	}
 }
 
 func TestExtractStageScanHonorsCancellation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageExtractIndex, DeadlineNS: 1}
-	if _, status := Handle(invocation, scanRequest("forget my email")); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageExtractIndex, DeadlineNS: 1}
+	if _, status := Handle(invocation, scanRequest("forget my email")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }

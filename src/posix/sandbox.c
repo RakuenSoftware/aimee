@@ -26,6 +26,7 @@
 #endif
 
 #include "sandbox.h"
+#include "child_environment.h"
 #include "aimee_home.h"
 #include "log.h"
 
@@ -774,11 +775,15 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
       pid_t pid = fork();
       if (pid == 0)
       {
+         if (cfg &&
+             child_environment_install(cfg->child_environment, cfg->child_environment_replace))
+            _exit(126);
          dup2(out_fd, STDOUT_FILENO);
          dup2(err_fd, STDERR_FILENO);
          if (workspace && workspace[0])
             chdir(workspace);
-         sandbox_prepare_child_path();
+         if (!cfg || !cfg->child_environment_replace)
+            sandbox_prepare_child_path();
          execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
          _exit(127);
       }
@@ -802,11 +807,15 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
       pid_t pid = fork();
       if (pid == 0)
       {
+         if (cfg &&
+             child_environment_install(cfg->child_environment, cfg->child_environment_replace))
+            _exit(126);
          dup2(out_fd, STDOUT_FILENO);
          dup2(err_fd, STDERR_FILENO);
          if (workspace && workspace[0])
             chdir(workspace);
-         sandbox_prepare_child_path();
+         if (!cfg || !cfg->child_environment_replace)
+            sandbox_prepare_child_path();
          execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
          _exit(127);
       }
@@ -866,6 +875,8 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
 
    if (pid == 0)
    {
+      if (child_environment_install(cfg->child_environment, cfg->child_environment_replace))
+         _exit(126);
       /* Child — wait for uid/gid map to be written before doing anything */
       close(g_sync_pipe[1]);
       g_sync_pipe[1] = -1;
@@ -932,7 +943,8 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
 
       dup2(out_fd, STDOUT_FILENO);
       dup2(err_fd, STDERR_FILENO);
-      sandbox_prepare_child_path();
+      if (!cfg || !cfg->child_environment_replace)
+         sandbox_prepare_child_path();
       execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
       _exit(127);
    }

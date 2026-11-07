@@ -59,7 +59,8 @@ static void test_internal_service_tools_are_not_external(void)
 /* Ordinary local tools must stay ungated, otherwise the gate is useless. */
 static void test_local_tools_are_none(void)
 {
-   static const char *local[] = {"read_file",
+   static const char *local[] = {"request_input",
+                                 "read_file",
                                  "write_file",
                                  "edit_file",
                                  "list_files",

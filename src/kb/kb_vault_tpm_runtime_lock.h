@@ -38,12 +38,6 @@ kb_vault_tpm_runtime_lock_acquire(const char *tcti, const char *nv_index,
 kb_vault_tpm_runtime_lock_result_t
 kb_vault_tpm_runtime_lock_revalidate(kb_vault_tpm_runtime_lock_t *owner);
 
-/* Acquisition centrally registers a pthread_atfork child hook that invokes this
- * close, so helper call sites do not know or audit the fd.  The explicit entry
- * is idempotent for test/raw child paths; it is async-signal-safe and does not
- * free inherited memory. The child must exec or _exit afterwards. */
-void kb_vault_tpm_runtime_lock_after_fork_child(kb_vault_tpm_runtime_lock_t *owner);
-
 /* Parent lifecycle release.  Idempotent and nulls the caller's opaque owner. */
 void kb_vault_tpm_runtime_lock_release(kb_vault_tpm_runtime_lock_t **owner);
 

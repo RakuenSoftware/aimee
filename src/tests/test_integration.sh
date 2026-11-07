@@ -14,9 +14,38 @@
 
 set -e
 
+# Explicit local diagnostic profile; the default CI qualification is unchanged.
+NATIVE_RECOVERY_ONLY="${AIMEE_TEST_NATIVE_RECOVERY_ONLY:-0}"
+case "$NATIVE_RECOVERY_ONLY" in 0|1) ;; *) echo "invalid native recovery mode"; exit 2 ;; esac
+NATIVE_MATRIX_ONLY="${AIMEE_TEST_NATIVE_MATRIX_ONLY:-0}"
+case "$NATIVE_MATRIX_ONLY" in 0|1) ;; *) echo "invalid native matrix mode"; exit 2 ;; esac
+if [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
+    if [ "$NATIVE_RECOVERY_ONLY" != 0 ] ||
+       [ ! -x "${AIMEE_TEST_NATIVE_CODEX:-}" ] || [ ! -x "${AIMEE_TEST_NATIVE_CLAUDE:-}" ] ||
+       [ -z "${AIMEE_STORE_URL:-}" ] || [ -z "${AIMEE_STORE_MIGRATION_URL:-}" ]; then
+        echo "focused native SDK matrix requires both explicit SDK executables and real store/runtime migration configuration; recovery-only is separate"
+        exit 2
+    fi
+    echo "FOCUSED native SDK matrix: all eight profiles, refusal and source fences; general integration and Docker grading are not run"
+fi
+if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+    if [ "${AIMEE_TEST_NATIVE_REQUIRE_CONTAINMENT:-0}" != 1 ] ||
+       [ -z "${AIMEE_NATIVE_CONTAINMENT_ROOT:-}" ] ||
+       [ -z "${AIMEE_TEST_NATIVE_CODEX:-}" ] || [ -z "${AIMEE_TEST_NATIVE_CLAUDE:-}" ] ||
+       [ -z "${AIMEE_STORE_URL:-}" ]; then
+        echo "focused native recovery requires the real store, both pinned SDKs and required containment"
+        exit 2
+    fi
+    echo "FOCUSED native recovery qualification: general integration and eight-profile SDK matrix are not run"
+fi
+
 # Resolve paths relative to repo root
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if [ -n "${AIMEE_TEST_NATIVE_ARTIFACT_DIR:-}" ]; then
+    python3 "$REPO_ROOT/scripts/preserve_native_recovery_logs.py" --check "$AIMEE_TEST_NATIVE_ARTIFACT_DIR"
+fi
 
 AIMEE="$REPO_ROOT/aimee"
 AIMEE_SERVER="$REPO_ROOT/aimee-server"
@@ -28,7 +57,8 @@ INTEG_REAL_HOME="$HOME"
 export GOCACHE="${GOCACHE:-$INTEG_REAL_HOME/.cache/go-build}"
 export GOMODCACHE="${GOMODCACHE:-$INTEG_REAL_HOME/go/pkg/mod}"
 export GOFLAGS="${GOFLAGS:--mod=mod}"
-export HOME=$(mktemp -d /tmp/aimee-integ-XXXXXX)
+INTEG_TEST_HOME=$(mktemp -d "${TMPDIR:-/tmp}/aimee-integ-XXXXXX")
+export HOME="$INTEG_TEST_HOME"
 export AIMEE_HOME="$HOME/.config/aimee"
 unset AIMEE_PROFILE
 # One session id for the whole run. Every `aimee mcp-serve` this harness spawns
@@ -155,6 +185,75 @@ stop_providers_module() {
     fi
 }
 
+# Use the actual Go final-request accounting owner for bounded native probes.
+ECONOMIZER_MODULE="$AIMEE_HOME/aimee-module-economizer"
+ECONOMIZER_MODULE_PID=""
+install_economizer_module() {
+    cp "$DB1_MODULE_BUILT" "$ECONOMIZER_MODULE"
+    chmod 0755 "$ECONOMIZER_MODULE"
+    install_generated_grant economizer "$ECONOMIZER_MODULE"
+    install_generated_grant economizer-db1 "$ECONOMIZER_MODULE"
+}
+start_economizer_module() {
+    stop_economizer_module
+    "$ECONOMIZER_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-economizer.log" 2>&1 &
+    ECONOMIZER_MODULE_PID=$!
+}
+stop_economizer_module() {
+    if [ -n "$ECONOMIZER_MODULE_PID" ]; then
+        kill "$ECONOMIZER_MODULE_PID" 2>/dev/null || true
+        wait "$ECONOMIZER_MODULE_PID" 2>/dev/null || true
+        ECONOMIZER_MODULE_PID=""
+    fi
+}
+
+# Paid/native delegation uses the actual Go cost-admission owner.
+ROUTING_MODULE="$AIMEE_HOME/aimee-module-routing"
+ROUTING_MODULE_PID=""
+install_routing_module() {
+    cp "$DB1_MODULE_BUILT" "$ROUTING_MODULE"
+    chmod 0755 "$ROUTING_MODULE"
+    install_generated_grant routing "$ROUTING_MODULE"
+}
+start_routing_module() {
+    stop_routing_module
+    "$ROUTING_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-routing.log" 2>&1 &
+    ROUTING_MODULE_PID=$!
+}
+stop_routing_module() {
+    if [ -n "$ROUTING_MODULE_PID" ]; then
+        kill "$ROUTING_MODULE_PID" 2>/dev/null || true
+        wait "$ROUTING_MODULE_PID" 2>/dev/null || true
+        ROUTING_MODULE_PID=""
+    fi
+}
+
+# Batch/private execution tests use the real role policy, including the
+# cache-eligible summarize role. An absent policy owner would make the cache
+# regression vacuous because the safe fallback disables all role caching.
+DELEGATES_MODULE="$AIMEE_HOME/aimee-module-delegates"
+DELEGATES_MODULE_PID=""
+install_delegates_module() {
+    cp "$DB1_MODULE_BUILT" "$DELEGATES_MODULE"
+    chmod 0755 "$DELEGATES_MODULE"
+    install_generated_grant delegates "$DELEGATES_MODULE"
+    # Native execution uses the same process's separate authenticated outbound
+    # identity; the serving grant does not imply permission to attach as76.
+    install_generated_grant delegates-host "$DELEGATES_MODULE"
+}
+start_delegates_module() {
+    stop_delegates_module
+    "$DELEGATES_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-delegates.log" 2>&1 &
+    DELEGATES_MODULE_PID=$!
+}
+stop_delegates_module() {
+    if [ -n "$DELEGATES_MODULE_PID" ]; then
+        kill "$DELEGATES_MODULE_PID" 2>/dev/null || true
+        wait "$DELEGATES_MODULE_PID" 2>/dev/null || true
+        DELEGATES_MODULE_PID=""
+    fi
+}
+
 # Native tool admission requires the real execution-policy owner, just as in
 # the shipped Server placement. Absence must remain a refusal in production.
 POLICY_MODULE="$AIMEE_HOME/aimee-module-execution-policy"
@@ -174,6 +273,72 @@ stop_policy_module() {
         kill "$POLICY_MODULE_PID" 2>/dev/null || true
         wait "$POLICY_MODULE_PID" 2>/dev/null || true
         POLICY_MODULE_PID=""
+    fi
+}
+
+# Governed local file tools need their exact resource owner as well as policy.
+TOOLS_MODULE="$AIMEE_HOME/aimee-module-tools"
+TOOLS_MODULE_PID=""
+install_tools_module() {
+    cp "$DB1_MODULE_BUILT" "$TOOLS_MODULE"
+    chmod 0755 "$TOOLS_MODULE"
+    install_generated_grant tools "$TOOLS_MODULE"
+}
+start_tools_module() {
+    stop_tools_module
+    "$TOOLS_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-tools.log" 2>&1 &
+    TOOLS_MODULE_PID=$!
+}
+stop_tools_module() {
+    if [ -n "$TOOLS_MODULE_PID" ]; then
+        kill "$TOOLS_MODULE_PID" 2>/dev/null || true
+        wait "$TOOLS_MODULE_PID" 2>/dev/null || true
+        TOOLS_MODULE_PID=""
+    fi
+}
+
+# Verification hashes and private snapshots belong to the migrated Git owner.
+# A daemon without this process treats clean source as unknown and can only
+# execute ordinary, ungraded verification. Install its real generated grants.
+GIT_MODULE="$AIMEE_HOME/aimee-module-git"
+GIT_MODULE_PID=""
+install_git_module() {
+    cp "$DB1_MODULE_BUILT" "$GIT_MODULE"
+    chmod 0755 "$GIT_MODULE"
+    install_generated_grant git "$GIT_MODULE"
+    install_generated_grant git-egress "$GIT_MODULE"
+}
+start_git_module() {
+    stop_git_module
+    "$GIT_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-git.log" 2>&1 &
+    GIT_MODULE_PID=$!
+}
+stop_git_module() {
+    if [ -n "$GIT_MODULE_PID" ]; then
+        kill "$GIT_MODULE_PID" 2>/dev/null || true
+        wait "$GIT_MODULE_PID" 2>/dev/null || true
+        GIT_MODULE_PID=""
+    fi
+}
+
+# Standalone observations must use the actual Learning owner, without a KB.
+LEARNING_MODULE="$AIMEE_HOME/aimee-module-learning"
+LEARNING_MODULE_PID=""
+install_learning_module() {
+    cp "$DB1_MODULE_BUILT" "$LEARNING_MODULE"
+    chmod 0755 "$LEARNING_MODULE"
+    install_generated_grant learning "$LEARNING_MODULE"
+}
+start_learning_module() {
+    stop_learning_module
+    "$LEARNING_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-learning.log" 2>&1 &
+    LEARNING_MODULE_PID=$!
+}
+stop_learning_module() {
+    if [ -n "$LEARNING_MODULE_PID" ]; then
+        kill "$LEARNING_MODULE_PID" 2>/dev/null || true
+        wait "$LEARNING_MODULE_PID" 2>/dev/null || true
+        LEARNING_MODULE_PID=""
     fi
 }
 
@@ -197,6 +362,20 @@ start_memory_module() {
 stop_memory_module() {
     if [ -n "$MEMORY_MODULE_PID" ]; then
         kill "$MEMORY_MODULE_PID" 2>/dev/null || true
+        for attempt in $(seq 1 100); do
+            if ! kill -0 "$MEMORY_MODULE_PID" 2>/dev/null; then break; fi
+            sleep 0.05
+        done
+        if kill -0 "$MEMORY_MODULE_PID" 2>/dev/null; then
+            echo "FAIL: memory owner did not stop within five seconds"
+            FAIL=$((FAIL + 1))
+            # Go prints the blocked owner stacks on QUIT. This is the test's
+            # disposable child; preserve a failing verdict before forcing exit.
+            kill -QUIT "$MEMORY_MODULE_PID" 2>/dev/null || true
+            sleep 0.25
+            tail -n 240 "$HOME/aimee-memory.log" 2>/dev/null || true
+            kill -KILL "$MEMORY_MODULE_PID" 2>/dev/null || true
+        fi
         wait "$MEMORY_MODULE_PID" 2>/dev/null || true
         MEMORY_MODULE_PID=""
     fi
@@ -268,9 +447,14 @@ install_db1_module() {
         python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
             --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
     fi
-    local serve="" ref=""
+    local serve="" ref="" publish="" subscribe=""
     if [ -r "$generated" ]; then
         serve=$(sed -n 's/^serve=//p' "$generated" || true)
+        # The change notifications too (ring D14). An empty publish= has the
+        # daemon refuse every announcement this module makes, so the work-item,
+        # delegation and learning-delivery wakes would go untested here.
+        publish=$(sed -n 's/^publish=//p' "$generated" || true)
+        subscribe=$(sed -n 's/^subscribe=//p' "$generated" || true)
         # From the file for the same reason the serve list is: a ref restated
         # here can drift from the one the module registers under, and the
         # failure that produces is a module nobody can reach.
@@ -290,8 +474,8 @@ principal_class=1
 principal_ref=${ref:-30}
 uid=self
 executable=$DB1_MODULE
-publish=
-subscribe=
+publish=$publish
+subscribe=$subscribe
 request=
 serve=$serve
 GRANT
@@ -428,7 +612,7 @@ install_workflow_module() {
 start_workflow_module() {
     [ -x "$WFE_MODULE" ] || return 1
     stop_workflow_module
-    "$WFE_MODULE" --home "$AIMEE_HOME" --socket "$AIMEE_HOME/aimee-wfe.sock" \
+    "$WFE_MODULE" --home "$AIMEE_HOME" \
         --module-bus-socket "$MODULE_BUS_SOCK" >"$HOME/aimee-wfe.log" 2>&1 &
     WFE_MODULE_PID=$!
     # Attachment is what matters, not the process: poll the seam itself until it
@@ -453,8 +637,14 @@ stop_workflow_module() {
 install_db1_module
 install_config_module
 install_providers_module
+install_delegates_module
 install_memory_module
 install_policy_module
+install_tools_module
+install_git_module
+install_learning_module
+install_economizer_module
+install_routing_module
 # Grants are read by the daemon at startup, so this has to happen BEFORE the
 # server is started even though the module itself is not launched until the
 # workflow section. Installing it later produced a module that ran, attached to
@@ -772,19 +962,60 @@ start_server() {
     # else, and every check that reads only the client's side has to guess.
     SERVER_LOG="$HOME/aimee-server.$$.log"
     local log="$SERVER_LOG"
-    "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
+    # The disposable local mirror has no network-backed forge owner. Use its
+    # known current commit explicitly; production keeps remote-default policy.
+    AIMEE_SESSION_WORKTREE_BASE=current "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
     SERVER_PID=$!
     local config_started=0
+    local deadline=$((SECONDS + 30))
     local i
     for i in $(seq 1 300); do
+        [ "$SECONDS" -lt "$deadline" ] || break
         if [ "$config_started" -eq 0 ] && [ -S "$MODULE_BUS_SOCK" ]; then
             start_config_module
             start_providers_module
-            if [ "$MEMORY_MODULE_ENABLED" -eq 1 ]; then start_memory_module; fi
+            start_delegates_module
             start_policy_module
+            start_tools_module
+            start_git_module
+            start_learning_module
+            start_economizer_module
+            start_routing_module
             config_started=1
         fi
-        [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
+        # HTTP may appear just after the bus check above. It cannot bypass the
+        # owned module launches in that publication window.
+        if [ "$config_started" -eq 1 ] && [ -S "$HTTP_SOCK" ]; then
+            if [ "$MEMORY_MODULE_ENABLED" -eq 0 ]; then
+                start_db1_module
+                return 0
+            fi
+            # Forking config is not SERVING. Memory performs a startup config
+            # read and exits on absence, so acknowledge the real read before
+            # launching it. Only this read retries, within the original budget.
+            local remaining=$((deadline - SECONDS))
+            [ "$remaining" -gt 0 ] || break
+            [ "$remaining" -le 10 ] || remaining=10
+            local configuration=""
+            configuration=$(AIMEE_TEST_HTTP_TIMEOUT="$remaining" http_rpc \
+                '{"method":"config.get","key":"server_api_http_port"}') || configuration=""
+            if printf '%s' "$configuration" | python3 -c '
+import json,sys
+try:
+    value=json.load(sys.stdin)
+    ready=(value.get("status")=="ok" and value.get("key")=="server_api_http_port" and
+           value.get("secret") is False and type(value.get("value")) is int)
+except (ValueError,TypeError,AttributeError):
+    ready=False
+sys.exit(0 if ready else 1)
+' >/dev/null 2>&1; then
+                # Memory's erasure replay also requires the existing real store
+                # and PostgreSQL owner; DB1's readiness establishes both.
+                start_db1_module || return 1
+                start_memory_module
+                return 0
+            fi
+        fi
         # A dead process will never bind; fail fast rather than waiting out the
         # full window for a server that has already exited.
         kill -0 "$SERVER_PID" 2>/dev/null || break
@@ -816,14 +1047,28 @@ stop_pg_module() {
 }
 
 cleanup() {
+    local rc=$?
+    if [ -n "${GRADE_FIXTURE_PID:-}" ]; then
+        kill "$GRADE_FIXTURE_PID" 2>/dev/null || true
+        wait "$GRADE_FIXTURE_PID" 2>/dev/null || true
+        GRADE_FIXTURE_PID=""
+    fi
+    if [ "${GRADE_SERVER_PAUSED:-0}" -eq 1 ] && [ -n "$SERVER_PID" ]; then
+        kill -CONT "$SERVER_PID" 2>/dev/null || true
+    fi
     stop_workflow_module
     stop_db1_module
     stop_pg_module
     stop_config_module
     stop_providers_module
+    stop_delegates_module
     stop_memory_module
     stop_policy_module
-    local rc=$?
+    stop_tools_module
+    stop_git_module
+    stop_learning_module
+    stop_economizer_module
+    stop_routing_module
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
         echo "integration: ABORTED after $((PASS + FAIL)) checks (exit $rc)."
@@ -837,9 +1082,19 @@ cleanup() {
         kill "$SERVER_PID" 2>/dev/null
         wait "$SERVER_PID" 2>/dev/null || true
     fi
+    # Preserve only bounded, redacted fixture logs before disposable HOME goes.
+    # The supplied destination must already be an owned private directory.
+    if [ -n "${AIMEE_TEST_NATIVE_ARTIFACT_DIR:-}" ] &&
+       { [ "$rc" -ne 0 ] || [ "$FAIL" -ne 0 ] || [ "$REACHED_SUMMARY" -ne 1 ]; }; then
+        python3 "$REPO_ROOT/scripts/preserve_native_recovery_logs.py" \
+            "$AIMEE_TEST_NATIVE_ARTIFACT_DIR" "$HOME" "$SERVER_LOG" ||
+            echo "integration: failed to preserve requested native diagnostics" >&2
+    fi
     # Same rule as the TCP teardown: removing a temp dir must never change the
     # verdict. This one already waits for its server, which is why it never bit.
     rm -rf "$HOME" || true
+    if [ "$FAIL" -ne 0 ]; then rc=1; fi
+    exit "$rc"
 }
 trap cleanup EXIT
 
@@ -850,6 +1105,23 @@ trap cleanup EXIT
 # ============================================================
 # 1. No server reachable
 # ============================================================
+
+if [ "$NATIVE_RECOVERY_ONLY" = 1 ] || [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
+    # The general profile enables this owner after its intentional outage
+    # checks. Focused native execution starts the same real owner immediately.
+    MEMORY_MODULE_ENABLED=1
+    start_server && SERVER_STARTED=1 || SERVER_STARTED=0
+    check "focused native owned server started" test "$SERVER_STARTED" = 1
+    if [ "$SERVER_STARTED" != 1 ]; then exit 1; fi
+    MEMORY_READY=0
+    for attempt in $(seq 1 100); do
+        RESP=$(srv_auth_req '{"method":"memory.get","store":"user"}') || true
+        case "$RESP" in *'"kind":"invalid_argument"'*) MEMORY_READY=1; break ;; esac
+        sleep 0.1
+    done
+    check "focused native real memory owner ready" test "$MEMORY_READY" = 1
+    if [ "$MEMORY_READY" != 1 ]; then exit 1; fi
+else
 # This used to be "auto-start", and asserted that a command failed *because
 # autostart was disabled*. There is no autostart now: the client starts no
 # server, ever, so an unreachable server is simply an outage.
@@ -994,7 +1266,7 @@ fi
 # bytes whether reached over the always-on Unix socket or the optional localhost
 # TCP listener (gated by aimee.api.{http_port,bearer_token}). Use an isolated
 # second server so the main harness server (UDS-only) is undisturbed.
-TCP_HOME=$(mktemp -d /tmp/aimee-tcp-XXXXXX) || true
+TCP_HOME=$(mktemp -d "${TMPDIR:-/tmp}/aimee-tcp-XXXXXX") || true
 mkdir -p "$TCP_HOME/.config/aimee/modules.d/server"
 TCP_PORT=18897
 TCP_BEARER="integ-tcp-bearer"
@@ -1665,7 +1937,7 @@ fi
 
 HOOK_PAYLOAD='{"tool_name":"Read","tool_input":"{\"file_path\":\"main.c\"}"}'
 set +e
-RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1) || true
+RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1)
 HOOK_RC=$?
 set -e
 if [ "$HOOK_RC" -ne 0 ] && echo "$RESP" | grep -q "server build mismatch"; then
@@ -1676,7 +1948,7 @@ if [ "$HOOK_RC" -ne 0 ] && echo "$RESP" | grep -q "server build mismatch"; then
     )
     start_server || true
     set +e
-    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1) || true
+    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1)
     HOOK_RC=$?
     set -e
 fi
@@ -1684,6 +1956,85 @@ if [ "$HOOK_RC" -eq 0 ]; then
     PASS=$((PASS + 1))
 else
     echo "FAIL: hooks pre safe file (expected exit 0, got $HOOK_RC)"
+    FAIL=$((FAIL + 1))
+fi
+
+# The actual server route admits both installed legacy clients and canonical
+# hook intents, while marked/mixed/foreign identities cannot fall back to a leaf.
+if python3 - "$HTTP_SOCK" "$AIMEE" <<'PYHOOK'
+import copy
+import http.client
+import json
+import os
+import socket
+import subprocess
+import sys
+
+class UnixHTTP(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(20)
+        self.sock.connect(sys.argv[1])
+
+def invoke(phase, payload, expected_status=200):
+    conn = UnixHTTP('localhost')
+    try:
+        encoded = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        conn.request('POST', '/v1/hooks/' + phase, encoded,
+                     {'Content-Type': 'application/json'})
+        response = conn.getresponse()
+        body = json.loads(response.read())
+        assert response.status == expected_status, (response.status, body)
+        return body.get('result', body)
+    finally:
+        conn.close()
+
+legacy = {'tool_name': 'Read', 'session_id': 'integ-hook-ir',
+          'tool_input': {'file_path': 'main.c'}}
+canonical = {'ir_version': 1, 'session_id': 'integ-hook-ir', 'hook': {
+    'call': {'type': 'tool_use', 'name': 'Read', 'tool_id': 'opaque-hook-id',
+             'input': {'file_path': 'main.c', 'number': 9007199254740993}},
+    'result': {'type': 'tool_result', 'tool_id': 'opaque-hook-id',
+               'content': {'content': [{'type': 'text', 'text': 'read result'}]},
+               'is_error': False}}}
+for phase in ('pre', 'post'):
+    for payload in (legacy, canonical):
+        reply = invoke(phase, payload)
+        assert reply.get('exit_code') == 0, (phase, reply)
+    for mutation in ('mixed', 'version', 'namespace', 'pair'):
+        payload = copy.deepcopy(canonical)
+        if mutation == 'mixed':
+            payload['tool_name'] = 'Read'
+        elif mutation == 'version':
+            payload['ir_version'] = 2
+        elif mutation == 'namespace':
+            payload['hook']['call']['namespace'] = 'foreign'
+        else:
+            payload['hook']['result']['tool_id'] = 'different-call'
+        reply = invoke(phase, payload)
+        assert reply.get('exit_code') == 2, (phase, mutation, reply)
+# Validate original HTTP bytes before native JSON can discard identity suffixes.
+for phase in ('pre', 'post'):
+    for frame in (b'{"tool_name":"Read","tool_name":"Write"}',
+                  br'{"tool_name":"Read\u0000Write"}',
+                  b'{"tool_name":"\xc0\xaf"}',
+                  b'{"tool_name":"Read"} trailing',
+                  b'{"tool_name":"Read"}\0hidden'):
+        invoke(phase, frame, 400)
+# Validate the installed thin-client entry as well as server admission. Oversize
+# or malformed stdin must refuse rather than send a truncated valid prefix.
+for frame in (b'{"tool_name":"Read"} trailing',
+              b'{"tool_name":"Read"}\0hidden',
+              b'{"tool_name":"Read"} ' + b' ' * (4 * 1024 * 1024)):
+    proc = subprocess.run([sys.argv[2], 'hooks', 'pre'], input=frame,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+    assert proc.returncode == 2, (proc.returncode, proc.stderr[:256])
+print('canonical/legacy hook RPC, identity refusal and complete thin-client frames pass')
+PYHOOK
+then
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: canonical hook transport and thin-client framing"
     FAIL=$((FAIL + 1))
 fi
 
@@ -1701,11 +2052,79 @@ check_output "unknown command fails before generic forwarding" "unknown command 
 # tool.execute runs on the compute pool, reached over its first-class local route
 # POST /v1/tools/execute (the `arguments` field is a JSON-encoded string, as the
 # dispatch expects).
-RESP=$(http_rpc '{"method":"tool.execute","tool":"bash","arguments":"{\"command\":\"echo integ-ok\"}","session_id":"t","cwd":"/tmp","timeout_ms":5000}') || true
+RESP=$(http_rpc '{"method":"session.create","client_type":"tool-integration"}') || true
+check_output "tool execution creates an owned session" '"session_id":' echo "$RESP"
+TOOL_SID=$(echo "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_id"])' 2>/dev/null || true)
+tool_rpc() {
+    local request
+    request=$(printf '%s' "$1" | TOOL_RPC_SID="$TOOL_SID" python3 -c 'import json,os,sys; req=json.load(sys.stdin); req["session_id"]=os.environ["TOOL_RPC_SID"]; print(json.dumps(req))')
+    http_rpc "$request"
+}
+
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"bash","arguments":"{\"command\":\"echo integ-ok\"}","session_id":"t","cwd":"/tmp","timeout_ms":5000}') || true
 check_output "tool.execute bash" "integ-ok" echo "$RESP"
 
-RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
-check_output "tool.execute read_file" '"status":"ok"' echo "$RESP"
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute read_file" 'anchored read' echo "$RESP"
+
+# The real tool API must retain the script's cwd and supervised nested admission.
+SCRIPT_REQUEST=$(python3 - <<'PYSCRIPT'
+import json
+body = "import aimee_tools\nr = aimee_tools.call('read_file', {'path':'hostname'})\nassert r['ok'], r\nprint('script-rpc-read-ok')\n"
+print(json.dumps({"method":"tool.execute", "tool":"execute_script", "arguments":json.dumps({"language":"python", "body":body, "timeout_secs":5}), "session_id":"t", "cwd":"/etc"}))
+PYSCRIPT
+)
+RESP=$(tool_rpc "$SCRIPT_REQUEST") || true
+check_output "tool.execute nested script cwd and admission" 'script-rpc-read-ok' echo "$RESP"
+
+# Policy categories come from the required tools owner even without KB rows.
+# A network restriction must match web_read while ordinary file reads keep their
+# existing success path. The loopback discard port bounds a failing regression without external traffic.
+python3 - <<'PYPOLICY'
+from pathlib import Path
+import os
+policy = Path(os.environ["AIMEE_HOME"]) / "policy.json"
+assert not policy.exists(), "unexpected pre-existing integration policy"
+policy.write_text('{"approval_levels":{"network":"block"}}')
+PYPOLICY
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"web_read","arguments":"{\"ref\":\"http://127.0.0.1:9/policy-fixture\"}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute owned network category" 'policy blocks network operations' echo "$RESP"
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute file read under network block" 'anchored read' echo "$RESP"
+python3 - <<'PYPOLICY'
+from pathlib import Path
+import os
+(Path(os.environ["AIMEE_HOME"]) / "policy.json").write_text(
+    '{"tool_rules":[{"path_prefix":"/etc","allowed_tools":["list_files"]}]}')
+PYPOLICY
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"filepath\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute alias obeys path policy" "not allowed for path /etc" echo "$RESP"
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute canonical path obeys same policy" "not allowed for path /etc" echo "$RESP"
+SCRIPT_REQUEST=$(python3 - <<'PYSCRIPT'
+import json
+body = "import aimee_tools\nr = aimee_tools.call('read_file', {'filepath':'/etc/hostname'})\nassert r['ok'] is False and 'not allowed for path' in r['error'], r\nprint('script-rpc-policy-denied')\n"
+print(json.dumps({"method":"tool.execute", "tool":"execute_script", "arguments":json.dumps({"language":"python", "body":body, "timeout_secs":5}), "session_id":"t", "cwd":"/tmp"}))
+PYSCRIPT
+)
+RESP=$(tool_rpc "$SCRIPT_REQUEST") || true
+check_output "tool.execute nested script alias obeys policy" 'script-rpc-policy-denied' echo "$RESP"
+
+python3 - <<'PYPOLICY'
+from pathlib import Path
+import os
+(Path(os.environ["AIMEE_HOME"]) / "policy.json").unlink()
+PYPOLICY
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"unregistered-policy-fixture","arguments":"{}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute unknown has no current canonical definition" 'current execution catalog' echo "$RESP"
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\"} trailing","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute rejects trailing argument bytes" 'admission failed' echo "$RESP"
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/tmp/x\",\"path\":\"/etc/hostname\"}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute rejects duplicate argument fields" 'admission failed' echo "$RESP"
+
+
+RESP=$(http_rpc "{\"method\":\"session.close\",\"session_id\":\"$TOOL_SID\"}") || true
+check_output "tool execution closes its owned session" '"status":"ok"' echo "$RESP"
 
 # ============================================================
 # 9. Mirror-sync -> reconstructed MCP Git, end to end
@@ -1879,6 +2298,32 @@ fi  # MIRROR_SHA256
 # suite covers that in isolation) but "the routes a client actually calls still
 # behave when their state lives in another process".
 
+# Source authority must describe a real server-owned workspace, not a dummy
+# relative label. Register through the same public owner used by deployment.
+WF_WORKSPACE="$HOME/workflow-control-workspace"
+git init -b main "$WF_WORKSPACE" >/dev/null
+git -C "$WF_WORKSPACE" config user.name "Aimee Integration"
+git -C "$WF_WORKSPACE" config user.email "aimee-integration@example.invalid"
+printf 'workflow control fixture\n' >"$WF_WORKSPACE/README.md"
+git -C "$WF_WORKSPACE" add README.md
+git -C "$WF_WORKSPACE" commit -m fixture >/dev/null
+WF_REGISTER=$(python3 - "$WF_WORKSPACE" <<'PYWORKSPACE'
+import json, sys
+print(json.dumps(dict(method="workspace.add", root=sys.argv[1], provider="shared", scan=False)))
+PYWORKSPACE
+)
+RESP=$(http_rpc "$WF_REGISTER") || true
+check_output "workflow control workspace registered" '"status":"ok"' echo "$RESP"
+workflow_submit() {
+    local body
+    body=$(python3 - "$WF_WORKSPACE" "$1" <<'PYSUBMIT'
+import json, sys
+print(json.dumps(dict(proposal_md=sys.argv[2], workflow="build", repo=sys.argv[1])))
+PYSUBMIT
+)
+    http_call POST /v1/dev/submit "$body"
+}
+
 WF_STEP=""
 if [ "$WORKFLOW_MODULE_INSTALLED" -ne 1 ]; then
     WF_STEP="install (go toolchain, build, or generated grants)"
@@ -1906,6 +2351,10 @@ else
 
 check_output "workflow defs list" '"defs"' echo "$(http_call GET /v1/workflow/defs)"
 check_output "the shipped definitions are served" 'build' echo "$(http_call GET /v1/workflow/defs)"
+# A live authenticated stage is required; absence of a process is not evidence
+# that the retired, unauthenticated workflow HTTP listeners stayed closed.
+check "workflow engine has no retired requested HTTP socket" test ! -S "$AIMEE_HOME/aimee-wfe.sock"
+check "workflow engine has no retired default HTTP socket" test ! -S "$AIMEE_HOME/aimee-server.sock"
 check_output "workflow items list answers" '200' echo "$(http_status GET /v1/workflow/items)"
 check_output "workflow triggers list answers" '200' echo "$(http_status GET /v1/workflow/triggers)"
 check_output "workflow blocks list answers" '200' echo "$(http_status GET /v1/workflow/blocks)"
@@ -1917,13 +2366,13 @@ check_output "submit without a proposal is refused" '400' \
 check_output "submit without a repo is refused too" '400' \
     echo "$(http_status POST /v1/dev/submit '{"proposal_md":"# no repo"}')"
 
-WF_SUB1=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ one\n\ndo the first thing","workflow":"build","repo":"integ/repo"}')
+WF_SUB1=$(workflow_submit $'# integ one\n\ndo the first thing')
 check_output "a submit is admitted" '200' echo "${WF_SUB1%% *}"
 check_output "and it names the run it started" '"work_item_id"' echo "$WF_SUB1"
 WI1=$(echo "$WF_SUB1" | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
 check "the submit returned an id" test -n "$WI1"
 
-WF_SUB2=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ two\n\ndo the second thing","workflow":"build","repo":"integ/repo"}')
+WF_SUB2=$(workflow_submit $'# integ two\n\ndo the second thing')
 check_output "a second submit is admitted" '200' echo "${WF_SUB2%% *}"
 WI2=$(echo "$WF_SUB2" | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
 check "the two runs are distinct" test -n "$WI2" -a "$WI1" != "$WI2"
@@ -1944,7 +2393,7 @@ check_output "while the second says its own thing" 'do the second thing' \
 # "the third one" fails for the wrong reason the day the default moves.
 WF_CAP_CODE="" ; WF_CAP_BODY=""
 for i in 1 2 3 4 5 6 7 8; do
-    WF_C=$(http_call POST /v1/dev/submit "{\"proposal_md\":\"# cap probe $i\",\"workflow\":\"build\",\"repo\":\"integ/repo\"}")
+    WF_C=$(workflow_submit "# cap probe $i")
     WF_CAP_CODE="${WF_C%% *}"
     WF_CAP_BODY="$WF_C"
     [ "$WF_CAP_CODE" != "200" ] && break
@@ -1988,7 +2437,7 @@ check_output "resuming a park the operator cannot clear is refused" '409' \
 # consequence that matters, since a cap that never released would wedge intake.
 check_output "the run can be stopped" '200' \
     echo "$(http_status POST /v1/workflow/items/$WI1/stop '{}')"
-WF_SUB4=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ four\n\nafter a slot freed","workflow":"build","repo":"integ/repo"}')
+WF_SUB4=$(workflow_submit $'# integ four\n\nafter a slot freed')
 check_output "stopping a run frees the admission slot it held" '200' echo "${WF_SUB4%% *}"
 
 check_output "a run can be deleted" '200' echo "$(http_status DELETE /v1/workflow/items/$WI2)"
@@ -1999,15 +2448,263 @@ stop_workflow_module
 
 fi  # WORKFLOW_MODULE_READY
 
+fi  # ordinary integration checks; focused mode shares setup and lifecycle below
+
+# Native provider output must cross the same durable IR contract used by
+# browser live delivery and replay, including after model switches.
+# This journey owns a server-local checkout. The earlier mirror journey's
+# client path is deliberately foreign to server execution; registering that path
+# as a mirror does not make it a shared server workspace for a delegate.
+PRIMARY_IR_WORKSPACE="$HOME/primary-ir-workspace"
+git init -b main "$PRIMARY_IR_WORKSPACE" >/dev/null
+git -C "$PRIMARY_IR_WORKSPACE" config user.name "Aimee Integration"
+git -C "$PRIMARY_IR_WORKSPACE" config user.email "aimee-integration@example.invalid"
+printf 'canonical delegate fixture\n' >"$PRIMARY_IR_WORKSPACE/README.md"
+git -C "$PRIMARY_IR_WORKSPACE" add README.md
+git -C "$PRIMARY_IR_WORKSPACE" commit -m fixture >/dev/null
+PRIMARY_WORKSPACE_REQ=$(python3 - "$PRIMARY_IR_WORKSPACE" <<'PYREQ'
+import json, sys
+print(json.dumps({"method": "workspace.add", "root": sys.argv[1],
+                  "provider": "shared", "scan": False}))
+PYREQ
+)
+RESP=$(http_rpc "$PRIMARY_WORKSPACE_REQ") || true
+check_output "canonical delegate server workspace registered" '"status":"ok"' echo "$RESP"
+if [ "$NATIVE_RECOVERY_ONLY" = 0 ] && [ "$NATIVE_MATRIX_ONLY" = 0 ]; then
+PRIMARY_IR_LOG="$HOME/primary-ir-live.log"
+if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/tests/test_primary_ir_live.py" >"$PRIMARY_IR_LOG" 2>&1; then
+    PASS=$((PASS + 1))
+    PRIMARY_SKIPS=$(grep -c '^SKIP:' "$PRIMARY_IR_LOG" || true)
+    SKIP=$((SKIP + PRIMARY_SKIPS))
+    grep '^SKIP:' "$PRIMARY_IR_LOG" || true
+    grep '^standalone learning:' "$PRIMARY_IR_LOG" || true
+    grep '^canonical evaluation' "$PRIMARY_IR_LOG" || true
+    grep '^delegate setup:' "$PRIMARY_IR_LOG" || true
+    grep '^delegate mirror:' "$PRIMARY_IR_LOG" || true
+    grep '^delegate source:' "$PRIMARY_IR_LOG" || true
+    grep '^Git mirror:' "$PRIMARY_IR_LOG" || true
+    grep '^delegate learning:' "$PRIMARY_IR_LOG" || true
+else
+    echo "FAIL: canonical primary switching and durable replay"
+    # This fixture contains synthetic provider data. Preserve bounded client-side
+    # assertion evidence as well as the server tail before cleanup removes HOME.
+    tail -c 12000 "$PRIMARY_IR_LOG"
+    dump_server_log
+    FAIL=$((FAIL + 1))
+fi
+
+# Independently graded reuse needs the real daemon/model dispatch as well as
+# the helper's Docker contract. CI requires Docker; local development reports
+# exactly this unavailable journey as a skip, without pretending it ran.
+GIT_OWNER_LOG="$HOME/git-verification-owner-live.log"
+if python3 "$REPO_ROOT/src/tests/test_git_verification_owner_live.py" >"$GIT_OWNER_LOG" 2>&1; then
+    PASS=$((PASS + 1))
+    cat "$GIT_OWNER_LOG"
+else
+    echo "FAIL: actual Git verification source owner"
+    tail -c 12000 "$GIT_OWNER_LOG"
+    dump_server_log
+    FAIL=$((FAIL + 1))
+fi
+fi  # primary/general grade-source journeys are outside the focused profile
+
+# This lifecycle hook belongs to the parent shell, which retains every owned
+# PID across restart. The fixture may request only these two fixed actions via
+# private files; no PID, socket path or executable is accepted from the request.
+GRADE_FIXTURE_PID=""
+GRADE_SERVER_PAUSED=0
+stop_execution_grade_fixture() {
+    if [ "$GRADE_SERVER_PAUSED" -eq 1 ] && [ -n "$SERVER_PID" ]; then
+        kill -CONT "$SERVER_PID" 2>/dev/null || true
+        GRADE_SERVER_PAUSED=0
+    fi
+    if [ -n "$GRADE_FIXTURE_PID" ]; then
+        kill "$GRADE_FIXTURE_PID" 2>/dev/null || true
+        wait "$GRADE_FIXTURE_PID" 2>/dev/null || true
+        GRADE_FIXTURE_PID=""
+    fi
+}
+run_execution_grade_fixture() {
+    local fixture="${1:-$REPO_ROOT/src/tests/test_execution_grade_live.py}"
+    local fixture_log="${2:-$EXECUTION_GRADE_LOG}"
+    local request="$AIMEE_HOME/execution-grade-recovery.request"
+    local acknowledgement="$AIMEE_HOME/execution-grade-recovery.ack"
+    local action="" previous="" stage="running" workflow_was_running=0
+    local deadline=$((SECONDS + 1200))
+    rm -f "$request" "$acknowledgement"
+    AIMEE_TEST_GRADE_LIFECYCLE=1 AIMEE_TEST_NATIVE_LIFECYCLE=1 AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$fixture" >"$fixture_log" 2>&1 &
+    GRADE_FIXTURE_PID=$!
+    while kill -0 "$GRADE_FIXTURE_PID" 2>/dev/null; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "integration: execution-grade fixture exceeded its owned lifecycle deadline" >>"$fixture_log"
+            kill "$GRADE_FIXTURE_PID" 2>/dev/null || true
+            wait "$GRADE_FIXTURE_PID" 2>/dev/null || true
+            GRADE_FIXTURE_PID=""
+            if [ "$GRADE_SERVER_PAUSED" -eq 1 ]; then
+                kill -CONT "$SERVER_PID" 2>/dev/null || true
+                GRADE_SERVER_PAUSED=0
+            fi
+            return 1
+        fi
+        if [ -f "$request" ]; then
+            action=$(cat "$request")
+            if [ "$action" != "$previous" ]; then
+                case "$action:$stage" in
+                    pause-owned-server:running|pause-owned-server:restarted)
+                        if ! kill -STOP "$SERVER_PID"; then stop_execution_grade_fixture; return 1; fi
+                        GRADE_SERVER_PAUSED=1
+                        local stopped=0
+                        for attempt in $(seq 1 100); do
+                            if ps -o stat= -p "$SERVER_PID" | grep -q '^[Tt]'; then stopped=1; break; fi
+                            sleep 0.02
+                        done
+                        if [ "$stopped" -ne 1 ]; then stop_execution_grade_fixture; return 1; fi
+                        stage="paused"
+                        ;;
+                    kill-owned-server:paused)
+                        # Test-only fixed action: reap precisely our daemon, but
+                        # leave the real SDK tree and modules untouched for the
+                        # fixture's post-death boundary observation.
+                        kill -KILL "$SERVER_PID" 2>/dev/null || true
+                        wait "$SERVER_PID" 2>/dev/null || true
+                        SERVER_PID=""
+                        GRADE_SERVER_PAUSED=0
+                        stage="killed"
+                        ;;
+                    restart-owned-server:paused|restart-owned-server:killed)
+                        [ -n "$WFE_MODULE_PID" ] && workflow_was_running=1
+                        if [ -n "$SERVER_PID" ]; then
+                            kill -KILL "$SERVER_PID" 2>/dev/null || true
+                            wait "$SERVER_PID" 2>/dev/null || true
+                            SERVER_PID=""
+                        fi
+                        GRADE_SERVER_PAUSED=0
+                        stop_workflow_module
+                        stop_db1_module
+                        stop_pg_module
+                        stop_config_module
+                        stop_providers_module
+                        stop_delegates_module
+                        stop_memory_module
+                        stop_policy_module
+                        stop_tools_module
+                        stop_git_module
+                        stop_learning_module
+                        stop_economizer_module
+                        stop_routing_module
+                        # Only known sockets of the now-reaped disposable daemon.
+                        # A stale file must not trick start_server's ready probes.
+                        rm -f "$HTTP_SOCK" "$MODULE_BUS_SOCK"
+                        cp "$SERVER_LOG" "$SERVER_LOG.before-grade-restart" 2>/dev/null || true
+                        if ! start_server; then
+                            printf '%s:error\n' "$action" >"$acknowledgement"
+                            stop_execution_grade_fixture
+                            return 1
+                        fi
+                        if [ "$workflow_was_running" -eq 1 ] && ! start_workflow_module; then
+                            printf '%s:error\n' "$action" >"$acknowledgement"
+                            stop_execution_grade_fixture
+                            return 1
+                        fi
+                        stage="restarted"
+                        ;;
+                    *)
+                        printf '%s:error\n' "$action" >"$acknowledgement"
+                        stop_execution_grade_fixture
+                        return 1
+                        ;;
+                esac
+                previous="$action"
+                printf '%s:ok\n' "$action" >"$acknowledgement.tmp"
+                mv "$acknowledgement.tmp" "$acknowledgement"
+            fi
+        fi
+        sleep 0.05
+    done
+    local status=0
+    wait "$GRADE_FIXTURE_PID" || status=$?
+    GRADE_FIXTURE_PID=""
+    if [ "$GRADE_SERVER_PAUSED" -eq 1 ]; then
+        kill -CONT "$SERVER_PID" 2>/dev/null || true
+        GRADE_SERVER_PAUSED=0
+        return 1
+    fi
+    return "$status"
+}
+if [ "$NATIVE_RECOVERY_ONLY" = 0 ] && [ "$NATIVE_MATRIX_ONLY" = 0 ]; then
+EXECUTION_GRADE_LOG="$HOME/execution-grade-live.log"
+if run_execution_grade_fixture; then
+    GRADE_SKIPS=$(grep -c '^SKIP:' "$EXECUTION_GRADE_LOG" || true)
+    if [ "$GRADE_SKIPS" -eq 0 ]; then
+        PASS=$((PASS + 1))
+    fi
+    SKIP=$((SKIP + GRADE_SKIPS))
+    grep -E '^(SKIP:|execution grade:)' "$EXECUTION_GRADE_LOG" || true
+else
+    echo "FAIL: actual independently graded execution and scoped reuse"
+    tail -c 16000 "$EXECUTION_GRADE_LOG"
+    dump_server_log
+    # The tail above is whatever the daemon logged last. This check turns on the
+    # grade and its delivery, so show those lines wherever they fell.
+    echo "  grade, verification and delivery lines from $AIMEE_HOME/server.log:"
+    grep -E "learning\.recovery|verif|grade|projection|outcome" "$AIMEE_HOME/server.log" 2>/dev/null |
+        tail -n 80 | sed 's/^/    /' || true
+    FAIL=$((FAIL + 1))
+fi
+
+fi  # independent Docker grading belongs to the ordinary integration profile
+
+# Extended native qualification uses explicitly supplied executable descriptors.
+# Baseline service runs do not discover or install an ambient provider SDK.
+if [ "$NATIVE_RECOVERY_ONLY" = 0 ] && [ -n "${AIMEE_TEST_NATIVE_CODEX:-}" ] && [ -n "${AIMEE_TEST_NATIVE_CLAUDE:-}" ]; then
+    NATIVE_IR_LOG="$HOME/native-ir-live.log"
+    if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/tests/test_native_ir_live.py" >"$NATIVE_IR_LOG" 2>&1; then
+        PASS=$((PASS + 1))
+        grep -E '^(native integration:|native containment qualification:|native execution fence:)' "$NATIVE_IR_LOG" || true
+    else
+        echo "FAIL: actual native SDK canonical execution"
+        tail -c 16000 "$NATIVE_IR_LOG"
+        dump_server_log
+        FAIL=$((FAIL + 1))
+    fi
+fi
+
+# This optional profile must qualify real SDK custody, not silently fall back.
+# Ordinary integration and its mandatory private-Docker checks are unchanged.
+if [ "${AIMEE_TEST_NATIVE_REQUIRE_CONTAINMENT:-0}" = 1 ]; then
+    NATIVE_CRASH_LOG="$HOME/native-ir-crash-live.log"
+    if [ -z "${AIMEE_TEST_NATIVE_CODEX:-}" ] || [ -z "${AIMEE_TEST_NATIVE_CLAUDE:-}" ]; then
+        echo "FAIL: required native crash qualification needs both pinned SDK descriptors"
+        FAIL=$((FAIL + 1))
+    elif run_execution_grade_fixture "$REPO_ROOT/src/tests/test_native_ir_crash_live.py" "$NATIVE_CRASH_LOG"; then
+        PASS=$((PASS + 1))
+        grep -E '^native (crash|interruption) recovery:' "$NATIVE_CRASH_LOG" || true
+    else
+        echo "FAIL: actual contained native SDK daemon crash/restart recovery"
+        tail -c 16000 "$NATIVE_CRASH_LOG"
+        dump_server_log
+        FAIL=$((FAIL + 1))
+    fi
+fi
+
 # ============================================================
 # 11. Server shutdown
 # ============================================================
 
-kill "$SERVER_PID" 2>/dev/null
-wait "$SERVER_PID" 2>/dev/null || true
-SERVER_PID=""
-
-check "socket removed after shutdown" test ! -S "$HTTP_SOCK"
+if [ -n "$SERVER_PID" ]; then
+    if ! kill "$SERVER_PID" 2>/dev/null; then
+        echo "FAIL: owned server exited before controlled shutdown"
+        FAIL=$((FAIL + 1))
+    fi
+    wait "$SERVER_PID" 2>/dev/null || true
+    SERVER_PID=""
+    check "socket removed after shutdown" test ! -S "$HTTP_SOCK"
+else
+    # A failed lifecycle fixture may have already reaped our daemon. Retain its
+    # recorded FAIL and reach the summary; never signal an empty/guessed PID or
+    # pretend a killed daemon performed graceful socket cleanup.
+    echo "integration: owned daemon already reaped by lifecycle fixture"
+fi
 
 # ============================================================
 # Results
@@ -2016,7 +2713,15 @@ check "socket removed after shutdown" test ! -S "$HTTP_SOCK"
 REACHED_SUMMARY=1
 TOTAL=$((PASS + FAIL)) || true
 echo ""
-echo "integration: $PASS/$TOTAL passed"
+if [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
+    echo "focused native SDK matrix qualification: $PASS/$TOTAL setup/eight-profile/shutdown checks passed"
+    echo "General integration and Docker grading were not run in this invocation."
+elif [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+    echo "focused native recovery qualification: $PASS/$TOTAL setup/recovery/shutdown checks passed"
+    echo "General integration and eight-profile SDK qualification were not run in this invocation."
+else
+    echo "integration: $PASS/$TOTAL passed"
+fi
 if [ "$SKIP" -gt 0 ]; then
     echo "SKIPPED ($SKIP checks whose service is not configured here; covered by full-stack E2E)"
 fi
@@ -2024,4 +2729,10 @@ if [ "$FAIL" -gt 0 ]; then
     echo "FAILED ($FAIL failures)"
     exit 1
 fi
-echo "All integration tests passed."
+if [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
+    echo "Focused eight-profile native SDK qualification passed."
+elif [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+    echo "Focused native crash/interruption recovery qualification passed."
+else
+    echo "All integration tests passed."
+fi

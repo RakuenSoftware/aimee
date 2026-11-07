@@ -31,11 +31,6 @@ int kb_features_upsert_with_sketch(int64_t doc_id, double lex_score, double dens
                                       features, NULL);
 }
 
-int kb_features_upsert(int64_t doc_id, double lex_score, double dense_score, double age_days)
-{
-   return kb_features_upsert_with_sketch(doc_id, lex_score, dense_score, age_days, NULL);
-}
-
 int kb_features_read(int64_t doc_id, char *buf, size_t len)
 {
    char subject_id[32];

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type benchmarkContext struct {
@@ -56,7 +56,7 @@ func buildBenchmarkContext(rows []Record, topK, tokenBudget, capacity int) bench
 	return result
 }
 
-func handleBenchmarkContext(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleBenchmarkContext(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	query, ok := args.stringValue("query")
 	topK, budget, capacity := args.integer("top_k", 10), args.integer("token_budget", 2000), args.integer("capacity", 16384)
 	if topK <= 0 {
@@ -68,10 +68,10 @@ func handleBenchmarkContext(options handlerOptions, invocation bus.ModuleInvocat
 	topK = min(topK, 32)
 	budget = min(budget, 131072)
 	if !ok || capacity < 1 || capacity > 512*1024 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	response, status := benchmarkRead(options, invocation, args, DataRequest{Operation: "search", Query: query, Limit: min(32, topK*4)})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	return commandResult(buildBenchmarkContext(response.Records, topK, budget, capacity))

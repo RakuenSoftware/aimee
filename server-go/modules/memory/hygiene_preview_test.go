@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -37,7 +37,7 @@ func TestHygieneRejectsMutationAndUnboundedInputs(t *testing.T) {
 
 }
 
-func exerciseHygienePreviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseHygienePreviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -157,13 +157,13 @@ func exerciseHygienePreviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		t.Fatal("resume did not cover retained rows", inspected)
 	}
 
-	caller := bus.CommandContext{Authenticated: true, Principal: "model:hygiene", TransportIdentity: "cert:hygiene", ScopeKind: ScopeProject, ScopeID: "hygiene-visible"}
+	caller := ring.CommandContext{Authenticated: true, Principal: "model:hygiene", TransportIdentity: "cert:hygiene", ScopeKind: ScopeProject, ScopeID: "hygiene-visible"}
 	queue := func() hygienePreview {
 		t.Helper()
 		result, status := invokeContextCommand(t, handler, 0, caller, "hygiene", `{"dry_run":false,"scope":{"type":"project","value":"hygiene-visible"},"max_rows":128,"max_content_bytes":32768}`)
 		body, _ := json.Marshal(result)
 		var out hygienePreview
-		if status != bus.ModuleStatusOK || json.Unmarshal(body, &out) != nil || out.Status != "ok" || len(out.Findings) != 2 {
+		if status != ring.ModuleStatusOK || json.Unmarshal(body, &out) != nil || out.Status != "ok" || len(out.Findings) != 2 {
 			t.Fatalf("hygiene admission %s %v", body, status)
 		}
 		return duplicates(out)

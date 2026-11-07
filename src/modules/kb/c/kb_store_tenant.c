@@ -6,7 +6,7 @@
 #include "kb_store.h" /* kb_store_lease_begin/_end */
 #include "kb_store_bounded_text.h"
 #include "management_intent_fields.h"
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <string.h>
 

@@ -7,11 +7,13 @@
 #include <stdio.h>
 #include <string.h>
 
-static const char *principal = "alice";
+static request_context_t context;
+static int active;
+static const char *expected_actor = "alice";
 static int calls, serves, admissions, finishes;
-const char *request_context_principal(void)
+const request_context_t *request_context_get(void)
 {
-   return principal;
+   return active ? &context : NULL;
 }
 cJSON *server_error_kind_json(const char *kind, const char *message, const char *id)
 {
@@ -42,7 +44,7 @@ cJSON *memory_task_promotion_command(const cJSON *proof)
 int db1_session_task_projection_apply(const char *owner, const char *sid, const char *wire,
                                       char *reply, size_t cap)
 {
-   assert(!strcmp(owner, "alice") && !strcmp(sid, "session"));
+   assert(!strcmp(owner, expected_actor) && !strcmp(sid, "session"));
    cJSON *r = cJSON_Parse(wire);
    assert(r && !cJSON_HasObjectItem(r, "authoritative"));
    const char *op = jo_cstr(r, "operation");
@@ -75,11 +77,12 @@ int main(void)
        cJSON_Parse("{\"operation\":\"rebuild\",\"session_id\":\"session\",\"task_id\":\"1\","
                    "\"binding\":{\"project\":\"owned\"},\"prepared\":{\"forged\":true},\"promotion_"
                    "result\":{\"admission\":\"forged\"},\"authoritative\":true}");
-   principal = NULL;
+   active = 0;
    cJSON *result = task_projection_command(r);
    assert(!strcmp(jo_cstr(result, "kind"), "invalid_argument") && calls == 0);
    cJSON_Delete(result);
-   principal = "alice";
+   active = 1;
+   snprintf(context.principal, sizeof(context.principal), "alice");
    result = task_projection_command(r);
    cJSON_Delete(result);
    assert(calls == 1 && serves == 1);
@@ -95,6 +98,17 @@ int main(void)
    cJSON_ReplaceItemInObject(r, "operation", cJSON_CreateString("promotion_finish"));
    result = task_projection_command(r);
    assert(!strcmp(jo_cstr(result, "kind"), "invalid_argument") && calls == 6);
+   cJSON_Delete(result);
+   context.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   snprintf(context.vault_principal, sizeof(context.vault_principal), "webuser:alice");
+   expected_actor = context.vault_principal;
+   cJSON_ReplaceItemInObject(r, "operation", cJSON_CreateString("get"));
+   result = task_projection_command(r);
+   assert(!strcmp(jo_cstr(result, "status"), "ok") && calls == 8);
+   cJSON_Delete(result);
+   context.vault_principal[0] = 0;
+   result = task_projection_command(r);
+   assert(!strcmp(jo_cstr(result, "kind"), "invalid_argument") && calls == 8);
    cJSON_Delete(result);
    cJSON_Delete(r);
    puts("task projection transport boundaries passed");

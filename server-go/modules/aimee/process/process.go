@@ -10,12 +10,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	database "github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // storePrincipalRef is the store module's OUTBOUND identity, used to call the
@@ -64,7 +64,7 @@ func aimeeDirectory(ctx context.Context, moduleBusSocket string) (aimee.Director
 	if ctx == nil || moduleBusSocket == "" {
 		return aimee.NoDirectory{}, "none: db1 was asked for but there is no module bus socket"
 	}
-	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, aimeeDirectoryPrincipalRef)
+	busClient, err := ring.ConnectClient(ctx, moduleBusSocket, 1, aimeeDirectoryPrincipalRef)
 	if err != nil {
 		// Reported, not silently downgraded: a module that was told to use db1
 		// and quietly did not would answer no_directory for a reason nobody
@@ -72,7 +72,7 @@ func aimeeDirectory(ctx context.Context, moduleBusSocket string) (aimee.Director
 		return aimee.NoDirectory{}, fmt.Sprintf("none: could not attach as principal %d: %v",
 			aimeeDirectoryPrincipalRef, err)
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, busClient)
 	if err != nil {
 		busClient.Detach()
 		return aimee.NoDirectory{}, fmt.Sprintf("none: no module caller: %v", err)
@@ -118,10 +118,11 @@ func aimeeDirectory(ctx context.Context, moduleBusSocket string) (aimee.Director
 // so rather than hang forever looking healthy. The ceiling is what separates
 // "not up yet" from "not coming".
 //
-// Retrying ONLY ErrStoreUnavailable, which is the transport reporting it could
-// not reach the module at all. A store that answers and refuses is a different
-// thing, and retrying that would turn one clear error into the same error
-// thirty times.
+// Retrying ONLY ErrStoreUnavailable: the transport could not reach the module,
+// or the module answered that it cannot reach its database yet (it registers
+// its stages before the database is reachable, by design). A store that
+// answers and refuses on the merits is a different thing, and retrying that
+// would turn one clear error into the same error thirty times.
 func applySchemaWaiting(ctx context.Context, db aimee.Store) error {
 	const (
 		attempts = 30
@@ -158,11 +159,11 @@ func storeBackend(ctx context.Context, moduleBusSocket string) (database.Store, 
 	if ctx == nil || moduleBusSocket == "" {
 		return nil, errors.New("store: no module bus to reach the postgres module on")
 	}
-	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, storePrincipalRef)
+	busClient, err := ring.ConnectClient(ctx, moduleBusSocket, 1, storePrincipalRef)
 	if err != nil {
 		return nil, err
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, busClient)
 	if err != nil {
 		busClient.Detach()
 		return nil, err
@@ -178,7 +179,7 @@ func storeBackend(ctx context.Context, moduleBusSocket string) (database.Store, 
 
 // New initializes storage and applies the complete schema before advertising
 // any capability. Both executable forms use this startup path.
-func New(ctx context.Context, moduleBusSocket string) (*aimee.Module, error) {
+func New(ctx context.Context, moduleBusSocket string, announcer *Announcer) (*aimee.Module, error) {
 	// Peer messaging. The registry is process-local: inboxes and grants
 	// live in memory and do not survive a bounce.
 	//
@@ -224,7 +225,7 @@ func New(ctx context.Context, moduleBusSocket string) (*aimee.Module, error) {
 		return nil, err
 	}
 	log.Printf("store: schema applied (%d files)", families.SchemaFileCount())
-	mux, err := aimee.NewMux(db, families.All()...)
+	mux, err := aimee.NewMux(db, announcing(families.All(), announcer)...)
 	if err != nil {
 		log.Printf("store: %v", err)
 		return nil, err
@@ -244,4 +245,28 @@ func New(ctx context.Context, moduleBusSocket string) (*aimee.Module, error) {
 		return nil, err
 	}
 	return module, nil
+}
+
+// announcing has the families whose changes other components act on announce
+// each committed write: lifecycle for the workflow engine, delegation and agent
+// work for the core's delegate monitor. Any family's operation that queues a
+// learning projection announces that to the core's delivery worker.
+func announcing(all []aimee.Family, announcer *Announcer) []aimee.Family {
+	if announcer == nil {
+		return all
+	}
+	for i := range all {
+		all[i].Noted = func(topic string) {
+			if topic == families.NoteLearningProjectionQueued {
+				announcer.Announce(KindLearningProjectionPending, topic)
+			}
+		}
+		switch all[i].Name {
+		case families.Lifecycle.Name:
+			all[i].Changed = func(op string) { announcer.Announce(KindWorkItemChanged, op) }
+		case families.Delegation.Name, families.AgentWork.Name:
+			all[i].Changed = func(op string) { announcer.Announce(KindDelegationChanged, op) }
+		}
+	}
+	return all
 }

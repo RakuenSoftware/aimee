@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestIngressTaskHistoryBothPlacements(t *testing.T) {
@@ -31,8 +31,8 @@ func TestIngressTaskHistoryBothPlacements(t *testing.T) {
 		runHostRuntime(t, handler, `{"operation":"ingress-task-reset"}`)
 		claim("document billing retry policy", true)
 		for _, operation := range []string{"claim", "rearm", "reset"} {
-			frame, _ := bus.EncodeCommand("runtime", []byte(fmt.Sprintf(`{"operation":"ingress-task-%s","session":"s","project":"p","query":"q"}`, operation)))
-			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+			frame, _ := ring.EncodeCommand("runtime", []byte(fmt.Sprintf(`{"operation":"ingress-task-%s","session":"s","project":"p","query":"q"}`, operation)))
+			if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 				t.Fatal(operation, status)
 			}
 		}
@@ -97,8 +97,8 @@ func TestIngressTaskInvalidArgumentsDoNotClaim(t *testing.T) {
 		`{"operation":"ingress-task-claim","session":"s","project":7,"query":"q"}`,
 		`{"operation":"ingress-task-rearm","session":"s"}`,
 	} {
-		frame, _ := bus.EncodeCommand("runtime", []byte(args))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", []byte(args))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(args, status)
 		}
 	}

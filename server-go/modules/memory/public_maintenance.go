@@ -6,10 +6,10 @@ import (
 	"math"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func handleMaintenanceCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleMaintenanceCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{IncludeAll: true}
 	var modelDroppedPrune bool
 	switch verb {
@@ -36,24 +36,24 @@ func handleMaintenanceCommand(options handlerOptions, invocation bus.ModuleInvoc
 			}
 		}
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	result := map[string]any{"status": "ok"}
 	if verb == "maintenance_run" {
 		if response.Maintenance == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		result["summary"] = response.Maintenance
 		switch args.stringOr("view", "") {
@@ -62,7 +62,7 @@ func handleMaintenanceCommand(options handlerOptions, invocation bus.ModuleInvoc
 		case "model":
 			summary, err := json.Marshal(response.Maintenance)
 			if err != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			text := string(summary)
 			var droppedPrune bool
@@ -149,7 +149,7 @@ func modelMaintenanceModes(modes uint32) (uint32, bool) {
 	return modes &^ MaintenancePrune, modes&MaintenancePrune != 0
 }
 
-func planModelMaintenance(args commandArgs) ([]byte, bus.ModuleStatus) {
+func planModelMaintenance(args commandArgs) ([]byte, ring.ModuleStatus) {
 	// The existing MCP vocabulary excludes drift; numeric and unknown modes
 	// behave like an omitted mode. CLI mode parsing remains broader.
 	modes := parseMaintenanceModes(args.stringOr("modes", "")) &^ MaintenanceDrift

@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #include "server.h" /* CAP_* bits, server_capability_for_method */
 #include "server_mcp_memory_gate.h"
+#include "request_context.h"
 
 /* Every mutate verb maps to the RPC method that does the same thing, so the MCP
  * door inherits the grade the NDJSON/HTTP door already had. `forget` is the one
@@ -112,6 +113,17 @@ static void test_authenticated_identity_is_not_capability(void)
    assert(server_account_memory_authority("cert:thin-client") == MEMORY_AUTHORITY_USER);
    assert(server_account_memory_authority("") == MEMORY_AUTHORITY_MODEL);
    assert(server_account_memory_authority(NULL) == MEMORY_AUTHORITY_MODEL);
+
+   request_context_t model = {.model_execution = 1};
+   strcpy(model.caller_subject, "oidc:sub-123");
+   request_context_set(&model);
+   assert(server_account_is_person("oidc:sub-123") == 1);
+   assert(server_account_memory_authority("oidc:sub-123") == MEMORY_AUTHORITY_MODEL);
+   assert(server_account_memory_authority("cert:thin-client") == MEMORY_AUTHORITY_MODEL);
+   model.model_execution = 0;
+   request_context_set(&model);
+   assert(server_account_memory_authority("oidc:sub-123") == MEMORY_AUTHORITY_USER);
+   request_context_clear();
 
    /* The point of the split: a caller can hold the destructive capability and
     * still not be a person, which is exactly the case the mapping must catch. */

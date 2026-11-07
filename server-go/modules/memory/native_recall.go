@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The native host supplies its remaining byte allocation. Go owns mandatory
@@ -235,7 +235,7 @@ func nativeRecallEnvelope(raw []byte, args commandArgs) ([]byte, error) {
 	return json.Marshal(envelope)
 }
 
-func nativeRecallText(raw []byte, args commandArgs) ([]byte, bus.ModuleStatus) {
+func nativeRecallText(raw []byte, args commandArgs) ([]byte, ring.ModuleStatus) {
 	projected, err := nativeRecallEnvelope(raw, args)
 	if err != nil {
 		kind := "invalid_projection"
@@ -250,7 +250,7 @@ func nativeRecallText(raw []byte, args commandArgs) ([]byte, bus.ModuleStatus) {
 
 // The host calls this only after accepting the Go projection's exact bytes.
 // Binding source metadata to an opaque request handle remains Go-owned.
-func handleNativeSourceRelease(state *sourceReleaseState, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleNativeSourceRelease(state *sourceReleaseState, args commandArgs) ([]byte, ring.ModuleStatus) {
 	var p nativeRecallProjection
 	if json.Unmarshal(args["native_projection"], &p) != nil || p.Version != 1 || p.Sources == nil || p.Bytes != len(p.Text) || p.Bytes > p.Limit || p.Limit < 0 || p.Limit > maxDataBody || p.Digest != fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(p.Text))) || p.SelectionDigest != releaseDigest(p.Sources) {
 		return commandResult(commandError("invalid_projection", "native source commitment unavailable"))

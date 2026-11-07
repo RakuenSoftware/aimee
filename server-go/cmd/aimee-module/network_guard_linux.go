@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -20,6 +21,11 @@ func hardenEgressCredentialOwner() error {
 // thread in the process while retaining AF_UNIX for the module bus. It runs
 // after any network-owner setup and before the serving bus connection opens.
 func installModuleNetworkGuard() error {
+	// no_new_privs belongs to an OS thread. Keep the prerequisite and seccomp
+	// installation on that thread even when the Go scheduler moves goroutines.
+	// TSYNC then propagates the filter and no_new_privs to the other threads.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	filter := []unix.SockFilter{
 		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 0},
 		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 4, K: uint32(unix.SYS_SOCKET)},
@@ -33,10 +39,15 @@ func installModuleNetworkGuard() error {
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("set no-new-privileges: %w", err)
 	}
-	_, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER,
+	unsynchronized, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER,
 		unix.SECCOMP_FILTER_FLAG_TSYNC, uintptr(unsafe.Pointer(&program)))
 	if errno != 0 {
 		return fmt.Errorf("install synchronized socket filter: %w", errno)
+	}
+	// TSYNC can report a thread that could not be synchronized as a positive
+	// syscall result rather than errno. Never treat a partial install as success.
+	if unsynchronized != 0 {
+		return fmt.Errorf("install synchronized socket filter: thread %d could not be synchronized", unsynchronized)
 	}
 	return nil
 }

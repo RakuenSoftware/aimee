@@ -1,3 +1,4 @@
+#include <aimee/core/codec/base64.h>
 #include "kb_workload_jwt.h"
 
 #include "aws_sts.h"
@@ -28,44 +29,14 @@ static int printable_ascii(const char *s, size_t min, size_t max)
    return 1;
 }
 
-static int b64_value(unsigned char c)
-{
-   if (c >= 'A' && c <= 'Z')
-      return c - 'A';
-   if (c >= 'a' && c <= 'z')
-      return c - 'a' + 26;
-   if (c >= '0' && c <= '9')
-      return c - '0' + 52;
-   return c == '-' ? 62 : (c == '_' ? 63 : -1);
-}
-
 static int b64_decode_canonical(const char *in, size_t n, unsigned char *out, size_t cap,
                                 size_t *out_len)
 {
-   if (!in || !out || !out_len || !n || n % 4 == 1)
+   size_t written = 0;
+   if (!n || !out_len ||
+       !aimee_codec_base64_decode(in, n, out, cap, AIMEE_BASE64_URL_CANONICAL, &written))
       return -1;
-   size_t o = 0;
-   uint32_t acc = 0;
-   unsigned bits = 0;
-   for (size_t i = 0; i < n; ++i)
-   {
-      int v = b64_value((unsigned char)in[i]);
-      if (v < 0)
-         return -1;
-      acc = (acc << 6) | (uint32_t)v;
-      bits += 6;
-      if (bits >= 8)
-      {
-         bits -= 8;
-         if (o >= cap)
-            return -1;
-         out[o++] = (unsigned char)(acc >> bits);
-         acc &= bits ? ((1u << bits) - 1u) : 0u;
-      }
-   }
-   if (acc != 0)
-      return -1;
-   *out_len = o;
+   *out_len = written;
    return 0;
 }
 

@@ -652,11 +652,9 @@
  "\"default\":40,\"empty\":\"emit\"}]}"},
 
 {"aux.test",
- "{\"fields\":[{\"json\":\"task\",\"count_min\":1,\"from\":"
- "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"prompt\","
- "\"count_min\":2,\"from\":\"positional\",\"index\":1,\"empty\":\"emit\""
- "},{\"json\":\"max_tokens\",\"count_min\":3,\"from\":\"positional\","
- "\"index\":2,\"type\":\"number_lenient\"}]}"},
+ "{\"fields\":[{\"json\":\"task\",\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"js"
+ "on\":\"request\",\"type\":\"canonical_request\",\"count_min\":2,\"from\":\"positional\",\"index\":1,\"empt"
+ "y\":\"emit\",\"max_tokens_index\":2,\"temperature\":0}]}"},
 
 {"dogfood.review",
  "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"month\",\"from\":"
@@ -675,9 +673,8 @@
  ",\"index\":0,\"empty\":\"emit\"},{\"json\":\"value\",\"count_min\":2,"
  "\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"}]}"},
 {"delegate.aggregate",
- "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"prompt\","
- "\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
- "}]}"},
+ "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"request\",\"type\":\"canonical_request\",\"count_min\":"
+ "1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 {"evidence.fidelity_retrieval_event",
  "{\"fields\":[{\"json\":\"turn_id\",\"count_min\":1,\"from\":"
  "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
@@ -968,7 +965,7 @@
  "{\"bool_flags\":[\"no-compress\"],\"usage\":\"usage: aimee trajectory export <session_id> [--no-compress] [--max-result-bytes N]\",\"fields\":[{\"json\":\"session_id\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"session\",\"required\":true},{\"json\":\"compress\",\"from\":\"flag\",\"flag\":\"no-compress\",\"type\":\"bool_inverted\"},{\"json\":\"max_result_bytes\",\"from\":\"flag\",\"flag\":\"max-result-bytes\",\"type\":\"number_lenient\",\"default\":512,\"omit_if_nonpositive\":true}]}"},
 
 {"trajectory.batch",
- "{\"bool_flags\":[\"no-compress\"],\"usage\":\"usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]\",\"fields\":[{\"json\":\"tasks_path\",\"from\":\"flag\",\"flag\":\"tasks\",\"required\":true},{\"json\":\"toolset_dist\",\"from\":\"flag\",\"flag\":\"toolset-dist\"},{\"json\":\"out_dir\",\"from\":\"flag\",\"flag\":\"out\"},{\"json\":\"compress\",\"from\":\"flag\",\"flag\":\"no-compress\",\"type\":\"bool_inverted\"},{\"json\":\"max_result_bytes\",\"from\":\"flag\",\"flag\":\"max-result-bytes\",\"type\":\"number_lenient\",\"default\":512,\"omit_if_nonpositive\":true}]}"},
+ "{\"bool_flags\":[\"no-compress\"],\"usage\":\"usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--session ID] [--toolset-dist research] [--out dir]\",\"fields\":[{\"json\":\"tasks_path\",\"from\":\"flag\",\"flag\":\"tasks\",\"required\":true},{\"json\":\"session_id\",\"from\":\"session\",\"empty\":\"emit\"},{\"json\":\"toolset_dist\",\"from\":\"flag\",\"flag\":\"toolset-dist\"},{\"json\":\"out_dir\",\"from\":\"flag\",\"flag\":\"out\"},{\"json\":\"compress\",\"from\":\"flag\",\"flag\":\"no-compress\",\"type\":\"bool_inverted\"},{\"json\":\"max_result_bytes\",\"from\":\"flag\",\"flag\":\"max-result-bytes\",\"type\":\"number_lenient\",\"default\":512,\"omit_if_nonpositive\":true}]}"},
 
 {"session.close",
  "{\"fields\":[{\"json\":\"session_id\",\"from\":\"positional_or_flag\","

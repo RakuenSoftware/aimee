@@ -106,7 +106,7 @@ func exerciseSharedIndexReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 		t.Fatal("future index membership granted current read", err)
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories m JOIN memory_embeddings e ON e.point_id=m.id
- WHERE m.id=$1 AND `+memoryValidityAtSQL("m.", "'2099-01-01'::timestamptz"), future).Scan(&count); err != nil || count != 1 {
+ WHERE m.id=$1 AND `+memoryValidityAtSQL("m.", "'2099-01-01T00:00:00Z'::timestamptz"), future).Scan(&count); err != nil || count != 1 {
 		t.Fatal("prepared vector missing at applicability boundary", count, err)
 	}
 	var futureUnit int64

@@ -3,7 +3,7 @@ package memory
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 	"time"
@@ -125,7 +125,7 @@ func TestHealthReleaseRealTransportOrdering(t *testing.T) {
 		rows = append(rows, map[string]any{"sequence": fmt.Sprint(len(rows) + 1), "action": "memory.provider." + e.Stage, "attempt_id": e.AttemptID, "detail": detail, "row_hash": strings.Repeat("f", 64)})
 	}
 	inspected, status := inspectProviderReceipts(sourceReleaseArgs(map[string]any{"dispatch_owner": strings.Repeat("a", 32), "receipt_request_id": "request", "chain_intact": true, "ledger_events": rows}))
-	body, decodeErr := bus.DecodeCommandResult(inspected)
+	body, decodeErr := ring.DecodeCommandResult(inspected)
 	var ledger struct {
 		Receipts []inspectedHealthReceipt `json:"receipts"`
 	}

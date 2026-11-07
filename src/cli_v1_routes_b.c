@@ -440,7 +440,7 @@ static cJSON *marshal_cron_add(int argc, char **argv)
    return req;
 }
 
-static cJSON *marshal_agent_args(const char *method, int argc, char **argv)
+cJSON *marshal_agent_args(const char *method, int argc, char **argv)
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
@@ -449,53 +449,6 @@ static cJSON *marshal_agent_args(const char *method, int argc, char **argv)
    for (int i = 0; i < argc; i++)
       cJSON_AddItemToArray(args, cJSON_CreateString(argv[i]));
    cJSON_AddItemToObject(req, "args", args);
-   return req;
-}
-
-/* workspace.add: keep the {method,args} body the socket dispatch parses, but also
- * surface root + provider as top-level fields so the first-class REST route
- * POST /v1/workspaces (which reads {root, provider}) accepts the same body when
- * the thin client routes over a remote /v1 endpoint. The route's response is the
- * raw dispatch result (ws_dispatch_args -> loopback_rpc), so it parses identically
- * to the socket path. */
-cJSON *marshal_workspace_add(int argc, char **argv)
-{
-   cJSON *req = marshal_agent_args("workspace.add", argc, argv);
-   if (!req)
-      return NULL;
-   cli_args_t opts;
-   /* --no-scan takes no value, so it must be declared boolean: cli_args_parse would
-    * otherwise treat the following argument as its value, and swallow the flag
-    * entirely when it is last. */
-   static const char *ws_bool_flags[] = {"no-scan", NULL};
-   cli_args_parse(argc, argv, ws_bool_flags, &opts);
-   if (opts.pos_count > 0)
-      cJSON_AddStringToObject(req, "root", opts.positional[0]);
-   const char *prov = cli_args_get(&opts, "provider");
-   if (prov)
-      cJSON_AddStringToObject(req, "provider", prov);
-   /* The mirror coordinates need surfacing for the same reason root and provider
-    * do. This body reaches the server through POST /v1/workspaces -- including
-    * locally, over the HTTP UDS -- and that route reads top-level fields, not
-    * `args`. Left in args only, they were silently dropped, so
-    * `aimee workspace add <path> --provider mirror --remote <url>` came back with
-    * "--provider mirror requires --remote <url>" while staring at the flag the
-    * user had just typed. The socket dispatch still parses argv, so both paths
-    * now carry them. */
-   const char *rem = cli_args_get(&opts, "remote");
-   if (rem)
-      cJSON_AddStringToObject(req, "remote", rem);
-   const char *hd = cli_args_get(&opts, "head");
-   if (hd)
-      cJSON_AddStringToObject(req, "head", hd);
-   /* --no-scan registers the workspace and returns instead of walking every
-    * discovered project first. On a large tree the eager scan makes this RPC
-    * take minutes, so a caller with a timeout abandons a registration that
-    * already succeeded; the background ingest timer indexes them regardless.
-    * Omitted (not sent as true) by default, so an older server sees exactly the
-    * body it saw before. */
-   if (cli_args_has_flag(&opts, "no-scan"))
-      cJSON_AddBoolToObject(req, "scan", 0);
    return req;
 }
 
@@ -597,33 +550,36 @@ static const struct
    const char *first;  /* what a bare first word means, NULL if none */
    const char *second; /* what a bare second word means, NULL if none */
    int rest_files;     /* remaining bare words accumulate into `files` */
+   const char *usage;  /* printed for a bare call when the first word is required */
 } GIT_CLI[] = {
-    {"status", "git_status", NULL, NULL, 0},
-    {"commit", "git_commit", "message", NULL, 1},
-    {"push", "git_push", NULL, NULL, 0},
-    {"pull", "git_pull", NULL, NULL, 0},
-    {"fetch", "git_fetch", "remote", NULL, 0},
-    {"branch", "git_branch", "action", "name", 0},
-    {"log", "git_log", NULL, NULL, 0},
-    {"diff", "git_diff_summary", "ref", NULL, 1},
-    {"diff_summary", "git_diff_summary", "ref", NULL, 1},
-    {"pr", "git_pr", "action", NULL, 0},
-    {"issue", "git_issue", "action", NULL, 0},
-    {"clone", "git_clone", "url", "path", 0},
-    {"stash", "git_stash", "action", NULL, 0},
-    {"tag", "git_tag", "action", "name", 0},
-    {"reset", "git_reset", "ref", "mode", 0},
-    {"restore", "git_restore", NULL, NULL, 1},
-    {"add", "git_add", NULL, NULL, 1},
-    {"merge", "git_merge", "ref", NULL, 0},
-    {"rebase", "git_rebase", "base", NULL, 0},
-    {"sync", "git_sync", "base", NULL, 0},
-    {"cherry-pick", "git_cherry_pick", "ref", NULL, 0},
-    {"cherry_pick", "git_cherry_pick", "ref", NULL, 0},
-    {"revert", "git_revert", "ref", NULL, 0},
-    {"switch", "git_switch", "ref", NULL, 0},
-    {"checkout", "git_checkout", NULL, NULL, 1},
-    {NULL, NULL, NULL, NULL, 0},
+    {"status", "git_status", NULL, NULL, 0, NULL},
+    {"commit", "git_commit", "message", NULL, 1, "usage: aimee git commit <message> [files...]\n"},
+    {"push", "git_push", NULL, NULL, 0, NULL},
+    {"pull", "git_pull", NULL, NULL, 0, NULL},
+    {"fetch", "git_fetch", "remote", NULL, 0, NULL},
+    {"branch", "git_branch", "action", "name", 0,
+     "usage: aimee git branch <list|create|switch|claim|delete|orphan> [name] [key=value ...]\n"},
+    {"log", "git_log", NULL, NULL, 0, NULL},
+    {"diff", "git_diff_summary", "ref", NULL, 1, NULL},
+    {"diff_summary", "git_diff_summary", "ref", NULL, 1, NULL},
+    {"pr", "git_pr", "action", NULL, 0,
+     "usage: aimee git pr <action> [key=value ...]; actions and keys: aimee get-help git\n"},
+    {"issue", "git_issue", "action", NULL, 0, NULL},
+    {"clone", "git_clone", "url", "path", 0, "usage: aimee git clone <url> [path]\n"},
+    {"stash", "git_stash", "action", NULL, 0, NULL},
+    {"tag", "git_tag", "action", "name", 0, NULL},
+    {"reset", "git_reset", "ref", "mode", 0, NULL},
+    {"restore", "git_restore", NULL, NULL, 1, NULL},
+    {"add", "git_add", NULL, NULL, 1, NULL},
+    {"merge", "git_merge", "ref", NULL, 0, NULL},
+    {"rebase", "git_rebase", "base", NULL, 0, NULL},
+    {"sync", "git_sync", "base", NULL, 0, NULL},
+    {"cherry-pick", "git_cherry_pick", "ref", NULL, 0, NULL},
+    {"cherry_pick", "git_cherry_pick", "ref", NULL, 0, NULL},
+    {"revert", "git_revert", "ref", NULL, 0, NULL},
+    {"switch", "git_switch", "ref", NULL, 0, "usage: aimee git switch <ref> [path=DIR]\n"},
+    {"checkout", "git_checkout", NULL, NULL, 1, NULL},
+    {NULL, NULL, NULL, NULL, 0, NULL},
 };
 
 /* Bare words that mean an action rather than a ref, for the operations that can
@@ -696,6 +652,11 @@ static cJSON *marshal_git_cli(int argc, char **argv)
               "branch log diff pr issue clone stash tag reset restore verify add merge "
               "rebase sync cherry-pick revert switch checkout\n",
               sub);
+      return NULL;
+   }
+   if (argc == 1 && GIT_CLI[row].usage)
+   {
+      fputs(GIT_CLI[row].usage, stderr);
       return NULL;
    }
 
@@ -1391,6 +1352,7 @@ static const struct
    marshal_argv_fn fn;
 } MARSHAL_ARGV[] = {
     {"model.episodes", marshal_agent_episodes},
+    {"model.generate", marshal_model_generate},
     {"api.enable", marshal_api_enable},
     {"aux.test", marshal_aux_test},
     {"cert.issue", marshal_cert_issue},
@@ -1793,8 +1755,19 @@ void print_server_health(cJSON *resp)
    cJSON *uptime = cJSON_GetObjectItemCaseSensitive(resp, "uptime");
    cJSON *connections = cJSON_GetObjectItemCaseSensitive(resp, "connections");
 
-   printf("aimee-server: %s\n", cJSON_IsString(status) ? status->valuestring : "unknown");
+   cJSON *ready = cJSON_GetObjectItemCaseSensitive(resp, "ready");
+   cJSON *not_ready = cJSON_GetObjectItemCaseSensitive(resp, "not_ready");
+   /* A server that answers but is not ready is not "ok": that is the state in
+    * which every governed action is refused, and the one this command is run in. */
+   int unready = cJSON_IsFalse(ready);
+   printf("aimee-server: %s\n", unready                  ? "not ready"
+                                : cJSON_IsString(status) ? status->valuestring
+                                                         : "unknown");
    printf("  state:       %s\n", cJSON_IsString(state) ? state->valuestring : "unknown");
+   if (unready)
+      printf("  not ready:   %s\n", cJSON_IsString(not_ready) && not_ready->valuestring[0]
+                                        ? not_ready->valuestring
+                                        : "unknown");
    if (cJSON_IsNumber(uptime))
       printf("  uptime:      %.0fs\n", uptime->valuedouble);
    if (cJSON_IsNumber(connections))

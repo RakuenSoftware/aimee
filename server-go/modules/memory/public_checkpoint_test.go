@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -23,7 +23,7 @@ func TestCheckpointValidation(t *testing.T) {
 	}
 }
 
-func exerciseCheckpointReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseCheckpointReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -44,8 +44,8 @@ func exerciseCheckpointReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 		t.Helper()
 		args["scope_context"], args["project"] = true, "checkpoint-private"
 		body, _ := json.Marshal(args)
-		result, status := invokeContextCommand(t, handler, 0, bus.CommandContext{Authenticated: true, Principal: "user:checkpoint", UserAuthority: true}, "checkpoint", string(body))
-		if status != bus.ModuleStatusOK {
+		result, status := invokeContextCommand(t, handler, 0, ring.CommandContext{Authenticated: true, Principal: "user:checkpoint", UserAuthority: true}, "checkpoint", string(body))
+		if status != ring.ModuleStatusOK {
 			t.Fatal(result, status)
 		}
 		return result

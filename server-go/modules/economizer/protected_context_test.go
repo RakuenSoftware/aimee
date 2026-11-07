@@ -2,7 +2,7 @@ package economizer
 
 import (
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 )
@@ -79,7 +79,7 @@ func TestMixedUserToolContentRemainsWhole(t *testing.T) {
 	text := NewObject()
 	text.Set("type", NewString("text"))
 	text.Set("text", NewString("Do not remove CASE_7."))
-	mixed.Get("content").Append(text)
+	mixed.Get("blocks").Append(text)
 	messages.Append(mixed)
 	for i := 0; i < 8; i++ {
 		appendAutonomousToolTurn(messages, i)
@@ -101,21 +101,14 @@ func TestDelegateReductionAdmission(t *testing.T) {
 	for _, orphan := range []bool{false, true} {
 		messages := NewArray()
 		if orphan {
-			for i := 0; i < 12; i++ {
-				appendTurn(messages, i)
-			}
-			result := NewObject()
-			result.Set("role", NewString("tool"))
-			result.Set("tool_call_id", NewString("missing"))
-			result.Set("content", NewString("unpaired result"))
-			messages.Append(result)
+			messages = canonicalModuleTurns(12, true)
 		} else {
 			for i := 0; i < 20; i++ {
-				messages.Append(mkUser("Do not remove requirement CASE_7."))
+				messages.Append(ParseJSON(`{"role":"user","blocks":[{"type":"text","text":"Do not remove requirement CASE_7."}]}`))
 			}
 		}
 		response, status := invoke(t, ReduceRequest{Messages: json.RawMessage(PrintJSONUnformatted(messages)), Seam: "delegate", HistoryFold: true})
-		if status != bus.ModuleStatusOK || response.Mutated || len(response.Messages) != 0 || response.Reason != "reduction_not_admitted" {
+		if status != ring.ModuleStatusOK || response.Mutated || len(response.Messages) != 0 || response.Reason != "reduction_not_admitted" {
 			t.Fatalf("unadmitted native candidate exposed: orphan=%v status=%v reason=%s", orphan, status, response.Reason)
 		}
 	}

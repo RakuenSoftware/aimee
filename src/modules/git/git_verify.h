@@ -43,10 +43,27 @@ typedef struct
    int enforce; /* 1 = gate push/PR create; 0 = informational only (default) */
    int incremental;
    char always_run_globs[256];
+   int incomplete; /* Parsing/discovery exceeded bounds; never qualify a test grade. */
 } verify_config_t;
 
-/* Load verify steps from .aimee/project.yaml. Returns 0 on success, -1 if no
- * verify section found. project_root may be NULL (uses cwd). */
+/* Optional host execution owner. Install before dispatch starts. A successful
+ * begin transfers a retained resource; run joins its effects (1 handled, 0
+ * declined only before configured tests start with acknowledged cleanup), finish consumes
+ * it exactly once. CLI callers without an owner keep the ordinary runner. */
+typedef struct
+{
+   void *resource;
+   int (*run)(void *resource, const verify_config_t *cfg, int *results, char **outputs,
+              volatile int *cancel_requested);
+   void (*finish)(void *resource);
+} verify_execution_t;
+typedef int (*verify_execution_begin_fn)(const char *root, const char *session,
+                                         const verify_config_t *cfg, verify_execution_t *out);
+void verify_register_execution_owner(verify_execution_begin_fn begin);
+
+/* Load Aimee's projects/<main-repo-name>/project.yaml, generating missing config
+ * from the repository Makefile. Returns 0 on success, -1 if no verify section
+ * was found. project_root may be NULL (uses cwd). */
 int verify_load_config(const char *project_root, verify_config_t *cfg);
 
 /* The git toplevel for `dir` (ambient cwd when NULL), or -1 when `dir` is not in

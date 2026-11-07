@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -38,8 +38,8 @@ func TestMemoryBackendEgressUsesConfiguredOriginAndVault(t *testing.T) {
 	target := upstream.URL + "/api/v1/datasets"
 	request := HTTPRequest{Request: Request{TargetURL: target, Purpose: "memory-backend", Method: "GET", CredentialPresent: true, RequestSHA256: RequestDigest("GET", target, nil, true)}, CredentialHandle: "memory-backend", MaxResponseBytes: 1024, TimeoutMS: 1000}
 	raw, _ := json.Marshal(request)
-	reply, status := p.handleHTTP(bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: MemoryClientRef}, raw)
-	if status != bus.ModuleStatusOK {
+	reply, status := p.handleHTTP(ring.ModuleInvocation{PrincipalClass: 1, PrincipalRef: MemoryClientRef}, raw)
+	if status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
 	out, err := decodeHTTPResponse(reply)
@@ -109,14 +109,14 @@ func TestMemoryBackendAPIKeyIsInjectedOnlyByEgress(t *testing.T) {
 	target := upstream.URL + "/api/v1/datasets"
 	request := HTTPRequest{Request: Request{TargetURL: target, Purpose: "memory-backend", Method: "GET", CredentialPresent: true, RequestSHA256: RequestDigest("GET", target, nil, true)}, CredentialHandle: "memory-backend", MaxResponseBytes: 1024, TimeoutMS: 1000}
 	raw, _ := json.Marshal(request)
-	reply, status := p.handleHTTP(bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: MemoryClientRef}, raw)
+	reply, status := p.handleHTTP(ring.ModuleInvocation{PrincipalClass: 1, PrincipalRef: MemoryClientRef}, raw)
 	out, err := decodeHTTPResponse(reply)
-	if status != bus.ModuleStatusOK || err != nil || out.Status != 200 {
+	if status != ring.ModuleStatusOK || err != nil || out.Status != 200 {
 		t.Fatal(status, out, err)
 	}
 	request.Headers = map[string]string{"X-Api-Key": "untrusted"}
 	raw, _ = json.Marshal(request)
-	if _, status = p.handleHTTP(bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: MemoryClientRef}, raw); status != bus.ModuleStatusInvalidRequest {
+	if _, status = p.handleHTTP(ring.ModuleInvocation{PrincipalClass: 1, PrincipalRef: MemoryClientRef}, raw); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("caller credential header admitted", status)
 	}
 }
@@ -140,7 +140,7 @@ func TestHillockLiveGovernedTransport(t *testing.T) {
 		return []byte(token), nil
 	}}
 	p := policy{resolver: fixedResolver{{IP: net.ParseIP("127.0.0.1")}}, backendCredentials: credentials}
-	invoke := func(method, path string, body []byte, principal uint32) (HTTPResponse, bus.ModuleStatus) {
+	invoke := func(method, path string, body []byte, principal uint32) (HTTPResponse, ring.ModuleStatus) {
 		t.Helper()
 		target := endpoint + path
 		request := HTTPRequest{Request: Request{TargetURL: target, Purpose: "memory-backend", Method: method,
@@ -153,8 +153,8 @@ func TestHillockLiveGovernedTransport(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		reply, status := p.handleHTTP(bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: principal}, raw)
-		if status != bus.ModuleStatusOK {
+		reply, status := p.handleHTTP(ring.ModuleInvocation{PrincipalClass: 1, PrincipalRef: principal}, raw)
+		if status != ring.ModuleStatusOK {
 			return HTTPResponse{}, status
 		}
 		response, err := decodeHTTPResponse(reply)
@@ -164,32 +164,32 @@ func TestHillockLiveGovernedTransport(t *testing.T) {
 		return response, status
 	}
 	health, status := invoke("GET", "/v1/health", nil, MemoryClientRef)
-	if status != bus.ModuleStatusOK || health.Status != 200 || !strings.Contains(string(health.Body), `"stateless":true`) {
+	if status != ring.ModuleStatusOK || health.Status != 200 || !strings.Contains(string(health.Body), `"stateless":true`) {
 		t.Fatal(health, status)
 	}
 	body := []byte(`{"query":"lighthouse height","candidates":[{"id":1,"revision":"` + strings.Repeat("a", 64) + `","text":"lighthouse height is 69cm"}],"limit":1}`)
 	ranked, status := invoke("POST", "/v1/rank", body, MemoryClientRef)
-	if status != bus.ModuleStatusOK || ranked.Status != 200 || !strings.Contains(string(ranked.Body), `"id":1`) {
+	if status != ring.ModuleStatusOK || ranked.Status != 200 || !strings.Contains(string(ranked.Body), `"id":1`) {
 		t.Fatal(ranked, status)
 	}
-	if reply, status := invoke("POST", "/v1/rank", body, ProvidersClientRef); status == bus.ModuleStatusOK && (reply.Status != 0 || reply.Error == "") {
+	if reply, status := invoke("POST", "/v1/rank", body, ProvidersClientRef); status == ring.ModuleStatusOK && (reply.Status != 0 || reply.Error == "") {
 		t.Fatal("foreign caller admitted")
 	}
-	if reply, status := invoke("POST", "/v1/chat/completions", body, MemoryClientRef); status == bus.ModuleStatusOK && (reply.Status != 0 || reply.Error == "") {
+	if reply, status := invoke("POST", "/v1/chat/completions", body, MemoryClientRef); status == ring.ModuleStatusOK && (reply.Status != 0 || reply.Error == "") {
 		t.Fatal("chat route admitted")
 	}
 	token = "rotated-invalid-fixture"
 	refused, status := invoke("GET", "/v1/health", nil, MemoryClientRef)
-	if status != bus.ModuleStatusOK || refused.Status != 401 {
+	if status != ring.ModuleStatusOK || refused.Status != 401 {
 		t.Fatal("rotated credential was not read", refused, status)
 	}
 	token = "contract-fixture"
 	restored, status := invoke("GET", "/v1/health", nil, MemoryClientRef)
-	if status != bus.ModuleStatusOK || restored.Status != 200 {
+	if status != ring.ModuleStatusOK || restored.Status != 200 {
 		t.Fatal("credential recovery", restored, status)
 	}
 	revoked = true
-	if reply, status := invoke("GET", "/v1/health", nil, MemoryClientRef); status == bus.ModuleStatusOK && (reply.Status != 0 || reply.Error == "") {
+	if reply, status := invoke("GET", "/v1/health", nil, MemoryClientRef); status == ring.ModuleStatusOK && (reply.Status != 0 || reply.Error == "") {
 		t.Fatal("revoked credential admitted")
 	}
 }

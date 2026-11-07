@@ -3,16 +3,17 @@ package roundtable
 import (
 	"context"
 	"encoding/json"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/delegate"
 	delegatemodule "github.com/JBailes/aimee/server-go/modules/delegates"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // moduleStageBridge crosses the same JSON stage contract as the process bus.
@@ -20,7 +21,7 @@ import (
 // the subsequent limiter contention a real admission race rather than ten
 // panels that happen to execute serially.
 type moduleStageBridge struct {
-	handler   bus.ModuleHandler
+	handler   ring.ModuleHandler
 	planCount int
 	planned   int
 	plansDone chan struct{}
@@ -34,12 +35,12 @@ func (b *moduleStageBridge) releasePlans() {
 
 func (b *moduleStageBridge) Call(ctx context.Context, _ uint32, stage uint32, _ uint64,
 	_ time.Duration, request []byte) ([]byte, error) {
-	reply, status := b.handler(bus.ModuleInvocation{StageID: stage}, request)
-	if status != bus.ModuleStatusOK {
+	reply, status := b.handler(ring.ModuleInvocation{StageID: stage}, request)
+	if status != ring.ModuleStatusOK {
 		if stage == delegate.StageGroupPlan {
 			b.releasePlans()
 		}
-		return nil, &bus.ModuleCallStatusError{Status: status}
+		return nil, &ring.ModuleCallStatusError{Status: status}
 	}
 	if stage == delegate.StageGroupPlan {
 		b.mu.Lock()
@@ -58,6 +59,15 @@ func (b *moduleStageBridge) Call(ctx context.Context, _ uint32, stage uint32, _ 
 	return reply, nil
 }
 
+// The actual SDK runs only inside the C host owner. This slow owner transport
+// exercises real Go admission/cancellation without a parallel SDK process.
+type slowHostOwner struct{}
+
+func (slowHostOwner) Call(ctx context.Context, _ uint32, _ uint32, _ uint64, _ time.Duration, _ []byte) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable(t *testing.T) {
 	const campaigns = 10
 	home := t.TempDir()
@@ -73,7 +83,7 @@ func TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable(t *testi
 	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	executor, err := delegatemodule.NewRegistryExecutor(home)
+	executor, err := delegatemodule.NewRegistryExecutorWithHost(home, slowHostOwner{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +106,8 @@ func TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable(t *testi
 		go func(i int) {
 			defer wg.Done()
 			run := panel.Run{ID: "live-capacity-" + string(rune('a'+i)),
-				OriginalRequest: "review the implementation under overlapping delegate load",
-				Reviewed:        panel.Artifact{Stage: "frozen_diff", Content: content, Hash: panel.Hash([]byte(content))}}
+				Request:  canonical.TaskRequest("", "review the implementation under overlapping delegate load"),
+				Reviewed: panel.Artifact{Stage: "frozen_diff", Content: content, Hash: panel.Hash([]byte(content))}}
 			result, err := panel.Convene(t.Context(), delegates, run, reviewPanel, "")
 			results <- result
 			errs <- err

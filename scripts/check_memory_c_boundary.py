@@ -217,8 +217,6 @@ FORBIDDEN_STORE_CALLS = (
     "aimee_pg_",
 )
 
-EXTERNAL_CONNECTION_C = {"src/modules/benchmarks/agent_eval_memory_transport.c"}
-
 KB_CONNECTION_C = {
     "src/kb/kb_memory_facts.c",
 }
@@ -279,7 +277,7 @@ def validate(root: Path) -> None:
                 f"symbol={match.group(0)}"
             )
 
-    missing_connections = [relative for relative in KB_CONNECTION_C | EXTERNAL_CONNECTION_C if not (root / relative).exists()]
+    missing_connections = [relative for relative in KB_CONNECTION_C if not (root / relative).exists()]
     if missing_connections:
         raise BoundaryError(f"rule=memory-c-connection-inventory missing={missing_connections}")
 
@@ -292,7 +290,7 @@ def validate(root: Path) -> None:
             )
 
     violations: list[str] = []
-    for relative in sorted(ALLOWED_C | EXTERNAL_CONNECTION_C):
+    for relative in sorted(ALLOWED_C):
         text = (root / relative).read_text(encoding="utf-8")
         for include in FORBIDDEN_INCLUDES:
             if include in text:

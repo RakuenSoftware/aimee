@@ -39,31 +39,6 @@ int kb_store_tool_registry_lookup(const char *name, tool_registry_entry_t *out)
    return rc;
 }
 
-const char *kb_store_tool_registry_side_effect(const char *name)
-{
-   static __thread char buf[32];
-   buf[0] = '\0';
-
-   void *conn = kb_store_conn();
-   if (!conn || !name)
-      return "read";
-
-   char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT side_effect FROM tool_registry WHERE name = ?1", err, sizeof(err));
-   if (!st)
-      return "read";
-   aimee_pg_bind_text(st, "?1", name);
-
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *val = aimee_pg_column_text(st, 0);
-      snprintf(buf, sizeof(buf), "%s", val ? val : "read");
-   }
-   aimee_pg_finalize(st);
-   return buf[0] ? buf : "read";
-}
-
 int kb_store_tool_registry_iter_prompts(tool_registry_prompt_cb cb, void *user)
 {
    if (!cb)

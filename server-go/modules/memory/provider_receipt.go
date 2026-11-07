@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // These plans are NOT durable receipts. The host must synchronously append both
@@ -37,6 +37,7 @@ type providerReceiptBinding struct {
 	Retention            string          `json:"retention_mode"`
 	SourceCoverage       string          `json:"source_coverage"`
 	Sources              json.RawMessage `json:"sources"`
+	ConfiguredTests      json.RawMessage `json:"configured_test_receipts,omitempty"`
 	SourcesDigest        string          `json:"sources_digest"`
 	SourceCheckID        string          `json:"source_check_id"`
 	Route                string          `json:"route"`
@@ -100,7 +101,7 @@ func receiptEventJSON(event providerReceiptEvent) (string, bool) {
 // Caller holds the source-release mutex. The single-use successful source check
 // binds one concrete body/attempt. Retrying either transport or preparation needs
 // a fresh owner check and receives a distinct attempt identity.
-func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseEntry) ([]byte, bus.ModuleStatus) {
+func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseEntry) ([]byte, ring.ModuleStatus) {
 	coverage := "retained_versioned_inputs"
 	check := ""
 	if entry != nil {
@@ -116,6 +117,9 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 		coverage = "no_versioned_source_handle"
 		entry = &sourceReleaseEntry{sources: json.RawMessage(`[]`),
 			binding: releaseBinding(args), digest: releaseDigest([]typedProjectionRef{})}
+	}
+	if len(entry.executionGrades) > 0 {
+		coverage = "retained_inputs_with_configured_tests"
 	}
 	digest, count := args.stringOr("payload_sha256", ""), args.stringOr("payload_bytes", "")
 	route := args.stringOr("route", "")
@@ -141,7 +145,7 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 	binding := providerReceiptBinding{SchemaVersion: 1, AttemptID: attempt, ProducerID: s.receiptProducer,
 		TurnID: turn, ProducerBuild: build, CallerLimitsDigest: callerLimits, OperatorLimitsDigest: operatorLimits,
 		RequestID: requestID, RequestBinding: entry.binding, Workspace: entry.workspace, Project: entry.project,
-		Retention: "commitment_only", SourceCoverage: coverage, Sources: entry.sources,
+		Retention: "commitment_only", SourceCoverage: coverage, Sources: entry.sources, ConfiguredTests: entry.executionGrades,
 		SourcesDigest: entry.digest, SourceCheckID: check, Route: route, Provider: provider, Model: model,
 		PayloadDigest: digest, PayloadBytes: count, CountProvenance: "host_final_provider_bytes"}
 	if owner := args.stringOr("dispatch_owner", ""); owner != "" {
@@ -223,7 +227,7 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 
 // Host observations remain distinct from intent. A transport error, including a
 // timeout after a possible send, cannot prove that the provider did no work.
-func (s *sourceReleaseState) receiptObservation(args commandArgs) ([]byte, bus.ModuleStatus) {
+func (s *sourceReleaseState) receiptObservation(args commandArgs) ([]byte, ring.ModuleStatus) {
 	entry := s.receipts[args.stringOr("attempt_id", "")]
 	if entry == nil || entry.binding != releaseBinding(args) {
 		return commandResult(commandError("unavailable", "provider receipt observation unavailable"))
@@ -292,7 +296,7 @@ func (s *sourceReleaseState) receiptRoom(entries, bytes int) bool {
 	return true
 }
 
-func (s *sourceReleaseState) receiptStored(args commandArgs) ([]byte, bus.ModuleStatus) {
+func (s *sourceReleaseState) receiptStored(args commandArgs) ([]byte, ring.ModuleStatus) {
 	entry := s.receipts[args.stringOr("attempt_id", "")]
 	digest := args.stringOr("observation_sha256", "")
 	if entry == nil || entry.binding != releaseBinding(args) || entry.observation == "" || !receiptDigestValid(digest) || digest != releaseDigest(json.RawMessage(entry.observation)) {
@@ -310,7 +314,7 @@ func (s *sourceReleaseState) receiptStored(args commandArgs) ([]byte, bus.Module
 
 // Called only after the host's concrete request-write invocation returned.
 // This is an observation of transport work, never proof of provider execution.
-func (s *sourceReleaseState) receiptStarted(args commandArgs) ([]byte, bus.ModuleStatus) {
+func (s *sourceReleaseState) receiptStarted(args commandArgs) ([]byte, ring.ModuleStatus) {
 	e := s.receipts[args.stringOr("attempt_id", "")]
 	if e == nil || e.binding != releaseBinding(args) {
 		return commandResult(commandError("unavailable", "provider attempt unavailable"))
@@ -334,7 +338,7 @@ func (s *sourceReleaseState) receiptStarted(args commandArgs) ([]byte, bus.Modul
 
 // This operation is private to the authenticated host adapter. Caller-supplied
 // receipts use verify_receipt and cannot assert ledger inclusion or ownership.
-func inspectProviderReceipts(args commandArgs) ([]byte, bus.ModuleStatus) {
+func inspectProviderReceipts(args commandArgs) ([]byte, ring.ModuleStatus) {
 	type row struct {
 		Sequence string `json:"sequence"`
 		Action   string `json:"action"`

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestIngressPlanModesScopeAndOptOut(t *testing.T) {
@@ -152,8 +152,8 @@ func TestIngressPlanRuntimeAuthorityBothPlacements(t *testing.T) {
 			t.Fatal(plan)
 		}
 		for _, op := range []string{"ingress-begin", "ingress-task-result", "ingress-recall-result", "ingress-metrics"} {
-			frame, _ := bus.EncodeCommand("runtime", []byte(fmt.Sprintf(`{"operation":%q}`, op)))
-			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+			frame, _ := ring.EncodeCommand("runtime", []byte(fmt.Sprintf(`{"operation":%q}`, op)))
+			if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 				t.Fatal(op, status)
 			}
 		}
@@ -189,8 +189,8 @@ func TestIngressRecallUnavailableCounterIsAtomic(t *testing.T) {
 		`{"operation":"ingress-recall-result","unavailable":true,"count":0.5}`,
 		`{"operation":"ingress-recall-result","unavailable":null,"count":0}`,
 	} {
-		frame, _ := bus.EncodeCommand("runtime", []byte(request))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", []byte(request))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(request, status)
 		}
 	}

@@ -29,7 +29,7 @@ RUN sh /tmp/build-audit-sqlite.sh /out
 # The module runtime is a static multicall binary. The canonical process
 # contracts decide which executable names are populated from it in the C build
 # stage below, so Docker never carries a second language-selection list.
-FROM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS module-go-build
+FROM golang:1.26.10-bookworm@sha256:fe3da92a5cb2881e4aa75e625cb0b7c50571632fb4cf340cbe53e6ccdcffdd51 AS module-go-build
 WORKDIR /src/server-go
 COPY server-go/go.mod server-go/go.sum ./
 RUN go mod download
@@ -51,7 +51,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
+        cmake \
         ca-certificates \
+        cmake \
         libpq-dev \
         libp11-kit-dev \
         git \
@@ -63,6 +65,7 @@ RUN apt-get update \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
+ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /src
 COPY . .
 COPY --from=module-go-build /out/aimee-module /tmp/aimee-module-go
@@ -78,15 +81,16 @@ RUN build_version="$AIMEE_VERSION" \
     && if [ -z "$build_version" ]; then build_version=$(cat src/core/VERSION); fi \
     && sh scripts/fetch-treesitter.sh \
     && make -C src ../aimee-server ../aimee-kb ../aimee-kb-worm ../aimee ../aimee-forwarder -j"$(nproc)" \
-         AIMEE_TREESITTER=1 GIT_VERSION="v$build_version"
+         AIMEE_TREESITTER=1 GIT_VERSION="v$build_version" \
+    && cmake -S . -B /thinclient-build \
+         -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && cmake --build /thinclient-build --target aimee-client -j"$(nproc)"
 
 # Build the independently supervised same-container module adapters from the
-# canonical contract. C processes link only the extracted event-bus client;
-# Go processes are copies of the static multicall runtime under attested names.
+# canonical contract. Every module process is Go: a copy of the static
+# multicall runtime under its attested name.
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
-    && python3 scripts/build_c_module_runtime_bundle.py \
-         --bundle /module-runtime --output /module-runtime/bin \
     && while IFS= read -r module_id; do \
          [ -n "$module_id" ] || continue; \
          if [ "$module_id" = config ]; then module_bin=/tmp/aimee-module-config-go; \
@@ -109,7 +113,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- webchat service: standalone Go browser server (cgo: legacy crypt migration + sqlite) ---
-FROM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS runtime-web-build
+FROM golang:1.26.10-bookworm@sha256:fe3da92a5cb2881e4aa75e625cb0b7c50571632fb4cf340cbe53e6ccdcffdd51 AS runtime-web-build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
@@ -117,9 +121,14 @@ RUN apt-get update \
         libpam0g-dev \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=build /thinclient-build/libaimee-client.so /usr/local/lib/libaimee-client.so
+COPY --from=build /thinclient-build/aimee-client-install.pc /usr/local/lib/pkgconfig/aimee-client.pc
+COPY --from=build /src/src/headers/cli_client.h /usr/local/include/aimee-client/cli_client.h
 WORKDIR /src/runtime-web
+COPY server-go/thinclient/ /src/server-go/thinclient/
 COPY server-go/go.mod server-go/go.sum /src/server-go/
 COPY server-go/modules/runtime-web/policy/ /src/server-go/modules/runtime-web/policy/
+COPY server-go/ir/ /src/server-go/ir/
 COPY runtime-web/go.mod runtime-web/go.sum ./
 RUN go mod download
 COPY runtime-web/ ./
@@ -130,7 +139,7 @@ RUN CGO_ENABLED=1 go build -o /out/aimee-runtime-web .
 # without putting C back in charge of workflow transitions. This is crash
 # containment, not an OS security boundary: both processes currently share the
 # appliance service identity for repository credentials and Unix-socket access.
-FROM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS wfe-build
+FROM golang:1.26.10-bookworm@sha256:fe3da92a5cb2881e4aa75e625cb0b7c50571632fb4cf340cbe53e6ccdcffdd51 AS wfe-build
 WORKDIR /src/server-go
 COPY server-go/go.mod server-go/go.sum ./
 RUN go mod download
@@ -438,6 +447,7 @@ COPY --from=build /src/aimee-forwarder /usr/local/bin/aimee-forwarder
 # See the build stage: delegates reach aimee THROUGH this binary (`aimee mcp serve`
 # as their MCP server, `aimee hooks pre` as their PreToolUse guard).
 COPY --from=build /src/aimee /usr/local/bin/aimee
+COPY --from=build /thinclient-build/libaimee-client.so /usr/local/lib/libaimee-client.so
 
 # Co-located webchat browser UI: the Go service, the single-file React SPA, and
 # Vault-only bootstrap/launch helpers. webchat shares
@@ -471,7 +481,8 @@ COPY deploy/container/server-entrypoint.sh /usr/local/bin/aimee-server-entrypoin
 COPY --chmod=0755 deploy/container/kb-role-runtime.sh /usr/local/bin/aimee-kb-role-runtime
 RUN chmod +x /usr/local/bin/aimee-server-entrypoint \
     /usr/local/bin/core-storage.sh /usr/local/bin/plane-supervisor.sh \
-    /usr/local/bin/module-supervisor.sh
+    /usr/local/bin/module-supervisor.sh \
+    && ldconfig
 
 # Baked default config (enables the inbound /v1 HTTP listener: port + bearer).
 # Kept OUTSIDE $AIMEE_HOME so a bind-mounted (empty) volume can't shadow it; the

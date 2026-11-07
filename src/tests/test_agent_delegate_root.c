@@ -1,3 +1,4 @@
+#include "support/ir_tool_fixture.h"
 /* test_agent_delegate_root.c: focused delegate root-cause regressions. */
 #include <assert.h>
 #include <stdio.h>
@@ -10,12 +11,18 @@
 #include "support/store_module_fixture.h"
 #include "db1_client/agent_jobs.h"
 #include "agent_tasks.h"
+#include "agent_config.h"
+#include "config_client.h"
 #include <aimee/tools/agent_tools.h>
+#include <aimee/delegates/delegate_backend.h>
 #include "modules/workspace/workspace_provider.h"
+#include "modules/workspace/workspace_provider_container.h"
+#include <aimee/core/turn_integrity.h>
 #include "cJSON.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "util.h"
+#include "support/config_test_setters.h"
 
 void test_cancelled_durable_job_blocks_tool_dispatch(void)
 {
@@ -40,7 +47,7 @@ void test_cancelled_durable_job_blocks_tool_dispatch(void)
 
    char args[1024];
    snprintf(args, sizeof(args), "{\"path\":\"%s\",\"content\":\"should not write\"}", path);
-   char *result = dispatch_tool_call("write_file", args, 1000);
+   char *result = fixture_dispatch_tool("write_file", args, 1000);
    assert(result != NULL);
    assert(strstr(result, "delegate cancelled") != NULL);
    assert(access(path, F_OK) != 0);
@@ -244,6 +251,71 @@ void test_delegate_bash_cancel_kills_running_tool(void)
    printf("  PASS: test_delegate_bash_cancel_kills_running_tool\n");
 }
 
+typedef struct
+{
+   const char *ready;
+   atomic_int *cancel;
+} bash_host_cancel_t;
+
+static void *bash_cancel_when_ready(void *context)
+{
+   bash_host_cancel_t *host = context;
+   int ready = 0;
+   for (int tick = 0; tick < 2000 && !ready; tick++)
+   {
+      ready = access(host->ready, F_OK) == 0;
+      if (!ready)
+         usleep(1000);
+   }
+   atomic_store(host->cancel, 1);
+   return ready ? (void *)1 : NULL;
+}
+
+void test_bash_host_cancellation_and_closed_output_deadline(void)
+{
+   char root[MAX_PATH_LEN], ready[MAX_PATH_LEN], command[MAX_PATH_LEN * 2];
+   snprintf(root, sizeof root, "%s/bhc.XXXXXX", platform_tmpdir());
+   char *made = platform_mkdtemp(root);
+   assert(made);
+   snprintf(ready, sizeof ready, "%s/ready", root);
+   atomic_int cancel = 0;
+   atomic_int *previous = agent_get_request_cancel();
+   agent_set_request_cancel(&cancel);
+   bash_host_cancel_t host = {.ready = ready, .cancel = &cancel};
+   pthread_t thread;
+   int created = pthread_create(&thread, NULL, bash_cancel_when_ready, &host);
+   assert(!created);
+   snprintf(command, sizeof command, "exec 1>&- 2>&-; trap '' TERM; : > '%s'; sleep 2", ready);
+   char *result = tool_bash(command, 5000);
+   void *saw_ready = NULL;
+   pthread_join(thread, &saw_ready);
+   cJSON *reply = result ? cJSON_Parse(result) : NULL;
+   assert(saw_ready && reply);
+   assert(cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == -1);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "cancelled")));
+   assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "timed_out")));
+   cJSON_Delete(reply);
+   free(result);
+   unlink(ready);
+   snprintf(command, sizeof command, ": > '%s'", ready);
+   result = tool_bash(command, 5000);
+   reply = result ? cJSON_Parse(result) : NULL;
+   assert(reply && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "cancelled")));
+   assert(access(ready, F_OK) != 0); /* A pre-cancelled command must not start. */
+   agent_set_request_cancel(previous);
+   cJSON_Delete(reply);
+   free(result);
+   rmdir(root);
+   result = tool_bash("exec 1>&- 2>&-; sleep 2", 200);
+   reply = result ? cJSON_Parse(result) : NULL;
+   assert(reply && cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == -1);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "timed_out")));
+   assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "cancelled")));
+   cJSON_Delete(reply);
+   free(result);
+   puts("  PASS: bash retains host cancellation and deadlines after output EOF");
+}
+
 void test_parent_write_guard_allows_mkdir_in_delegate_worktree(void)
 {
    char root[512];
@@ -278,16 +350,47 @@ void test_parent_write_guard_allows_mkdir_in_delegate_worktree(void)
 
 void test_parent_write_guard_allows_workspace_file_ops(void)
 {
+   int prior_require_worktree = config_require_session_worktree();
+   assert(config_set_require_session_worktree(1) == 0);
    char root[512];
    snprintf(root, sizeof(root), "%s/aimee_parent_guard_file_ops_XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(root) != NULL);
 
    char worktree[512];
-   snprintf(worktree, sizeof(worktree), "%s/.aimee/worktrees/delegate/main", root);
+   snprintf(worktree, sizeof(worktree), "%s/.aimee/worktrees/delegate/1234abcd", root);
    assert(platform_mkdir_p(worktree, 0700) == 0 || access(worktree, F_OK) == 0);
 
+   /* A real repository marker keeps the non-Git document exception out of this test. */
+   char git_marker[512];
+   snprintf(git_marker, sizeof git_marker, "%s/.git", root);
+   assert(!platform_mkdir_p(git_marker, 0700));
+   agent_tools_parent_write_guard_clear();
+   assert(agent_tools_session_isolation_blocks("native.txt", worktree));
    agent_tools_parent_write_guard_set(root, worktree);
+   assert(!agent_tools_session_isolation_blocks("native.txt", worktree));
+   assert(agent_tools_session_isolation_blocks("../escape.txt", worktree));
+   assert(agent_tools_session_isolation_blocks("native.txt", root));
+   char sibling[768];
+   snprintf(sibling, sizeof sibling, "%s-other/file.txt", worktree);
+   assert(agent_tools_session_isolation_blocks(sibling, worktree));
    run_cmd_set_cwd(worktree);
+   char *native = fixture_dispatch_tool("write_file",
+                                        "{\"path\":\"native.txt\",\"content\":\"scope\\n\"}", 1000);
+   assert(native && !strstr(native, "write blocked"));
+   free(native);
+   char native_path[768], actual[32] = "";
+   snprintf(native_path, sizeof native_path, "%s/native.txt", worktree);
+   FILE *written = fopen(native_path, "rb");
+   assert(written && fread(actual, 1, sizeof actual - 1, written) == 6 &&
+          !strcmp(actual, "scope\n") && !fclose(written));
+   agent_tools_write_capable_set(0);
+   native = fixture_dispatch_tool("write_file",
+                                  "{\"path\":\"forbidden.txt\",\"content\":\"forbidden\"}", 1000);
+   assert(native && strstr(native, "read-only delegate"));
+   free(native);
+   snprintf(native_path, sizeof native_path, "%s/forbidden.txt", worktree);
+   assert(access(native_path, F_OK) != 0);
+   agent_tools_write_capable_set(1);
    char *result = tool_bash("touch marker.txt", 5000);
    run_cmd_set_cwd(NULL);
 
@@ -353,6 +456,10 @@ void test_parent_write_guard_allows_workspace_file_ops(void)
    result = tool_bash(command, 5000);
    run_cmd_set_cwd(NULL);
    agent_tools_parent_write_guard_clear();
+   assert(agent_tools_session_isolation_blocks("native.txt", worktree));
+   agent_tools_parent_write_guard_set(root, root);
+   assert(agent_tools_session_isolation_blocks("native.txt", worktree));
+   agent_tools_parent_write_guard_clear();
 
    assert(result != NULL);
    json = cJSON_Parse(result);
@@ -367,6 +474,7 @@ void test_parent_write_guard_allows_workspace_file_ops(void)
    assert(access(outside, F_OK) != 0);
 
    platform_test_rmrf(root);
+   assert(config_set_require_session_worktree(prior_require_worktree) == 0);
    printf("  PASS: test_parent_write_guard_allows_workspace_file_ops\n");
 }
 
@@ -558,7 +666,7 @@ void test_container_execute_script_runs_in_sandbox(void)
                    sandbox_root) < (int)sizeof(sandbox_cwd));
    assert(platform_mkdir_p(sandbox_cwd, 0700) == 0 || access(sandbox_cwd, F_OK) == 0);
    run_cmd_set_cwd(sandbox_cwd);
-   char *result = dispatch_tool_call(
+   char *result = fixture_dispatch_tool(
        "execute_script", "{\"language\":\"bash\",\"body\":\"echo hi\",\"timeout_secs\":7}", 5000);
    run_cmd_set_cwd(NULL);
    workspace_provider_clear_active();

@@ -38,14 +38,42 @@ void agent_source_authority_tls_set(int authority, const char *worktree_root, co
    tl_sa_paths = (paths && paths[0]) ? strdup(paths) : NULL;
 }
 
-void agent_source_authority_tls_capture(agent_source_authority_snapshot_t *snap)
+int agent_source_authority_snapshot_clone(const agent_source_authority_snapshot_t *source,
+                                          agent_source_authority_snapshot_t *out)
+{
+   if (!source || !out || source == out)
+      return -1;
+   memset(out, 0, sizeof *out);
+   char *paths = source->paths ? strdup(source->paths) : NULL;
+   if (source->paths && !paths)
+      return -1;
+   *out = *source;
+   out->paths = paths;
+   return 0;
+}
+void agent_source_authority_snapshot_destroy(agent_source_authority_snapshot_t *snap)
 {
    if (!snap)
       return;
-   snap->active = tl_sa_active;
-   snap->authority = tl_sa_authority;
-   snprintf(snap->root, sizeof(snap->root), "%s", tl_sa_root);
-   snap->paths = tl_sa_paths ? strdup(tl_sa_paths) : NULL;
+   free(snap->paths);
+   memset(snap, 0, sizeof *snap);
+}
+int agent_source_authority_tls_capture_checked(agent_source_authority_snapshot_t *snap)
+{
+   agent_source_authority_snapshot_t current = {
+       .active = tl_sa_active, .authority = tl_sa_authority, .paths = tl_sa_paths};
+   memcpy(current.root, tl_sa_root, sizeof current.root);
+   return agent_source_authority_snapshot_clone(&current, snap);
+}
+void agent_source_authority_tls_capture(agent_source_authority_snapshot_t *snap)
+{
+   if (snap && agent_source_authority_tls_capture_checked(snap))
+   {
+      /* Legacy bookmarks cannot report OOM. Preserve a conservative explicit
+       * scope instead of re-enabling the process-global fallback on restore. */
+      memset(snap, 0, sizeof *snap);
+      snap->active = 1;
+   }
 }
 
 void agent_source_authority_tls_restore(agent_source_authority_snapshot_t *snap)
@@ -58,20 +86,6 @@ void agent_source_authority_tls_restore(agent_source_authority_snapshot_t *snap)
    free(tl_sa_paths);
    tl_sa_paths = snap->paths; /* transfer ownership */
    snap->paths = NULL;
-}
-
-/* Mirror this thread's source-authority context into the process env so a
- * fork()ed child that re-execs (cmd_index, the aimee-client shell-out) inherits
- * it. Call ONLY in the post-fork/pre-exec child, where the single-threaded child
- * is immune to the cross-thread env clobber that affects the parent. No-op when
- * not inside a delegate run (the inherited env is left untouched). */
-void agent_source_authority_export_env(void)
-{
-   if (!tl_sa_active)
-      return;
-   platform_setenv("AIMEE_DELEGATE_SOURCE_AUTHORITY", tl_sa_authority ? "1" : "");
-   platform_setenv("AIMEE_DELEGATE_WORKTREE_ROOT", tl_sa_root);
-   platform_setenv("AIMEE_DELEGATE_SOURCE_PATHS", tl_sa_paths ? tl_sa_paths : "");
 }
 
 static int source_authority_enabled(void)

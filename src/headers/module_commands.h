@@ -78,6 +78,10 @@ int aimee_module_commands_dispatch_raw_context(const char *method, const cJSON *
                                                const cJSON *context, cJSON **result);
 cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id, const char *verb,
                                          const cJSON *args, const cJSON *context);
+/* Same host/context authority, with a bounded caller-owned deadline. */
+cJSON *aimee_module_command_call_context_timeout(uint32_t event_kind, uint32_t stage_id,
+                                                 const char *verb, const cJSON *args,
+                                                 const cJSON *context, int timeout_ms);
 
 /* Collect again only if the last collect is older than ttl_ms.
  *

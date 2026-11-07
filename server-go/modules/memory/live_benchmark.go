@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/internal/retrievalmetrics"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type liveBenchmarkCase struct {
@@ -65,8 +65,8 @@ func parseLiveBenchmarkCorpus(raw string) ([]liveBenchmarkCase, error) {
 	return cases, nil
 }
 
-func handleLiveBenchmark(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+func handleLiveBenchmark(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	for _, name := range []string{"fusion_state", "arm", "weight_profile"} {
@@ -116,7 +116,7 @@ func handleLiveBenchmark(options handlerOptions, invocation bus.ModuleInvocation
 			}
 		}
 		response, status := benchmarkRead(options, invocation, args, DataRequest{Operation: "query-records", Mode: "eval", Limit: limit})
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return commandResult(commandError("unavailable", "live corpus read failed"))
 		}
 		for _, record := range response.Records {
@@ -147,7 +147,7 @@ func handleLiveBenchmark(options handlerOptions, invocation bus.ModuleInvocation
 	for _, c := range cases {
 		start := time.Now()
 		response, status := benchmarkRead(options, invocation, args, DataRequest{Operation: "search", Query: c.Query, Limit: 20})
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return commandResult(commandError("unavailable", "benchmark retrieval failed; no partial result published"))
 		}
 		elapsed := float64(time.Since(start)) / float64(time.Millisecond)
@@ -155,11 +155,11 @@ func handleLiveBenchmark(options handlerOptions, invocation bus.ModuleInvocation
 		seen := map[int64]bool{}
 		r := liveBenchmarkReceipt{Query: c.Query, Expected: []string{}, Retrieved: []string{}, LatencyMS: elapsed}
 		if len(ids) > 20 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		for i, record := range response.Records {
 			if record.ID <= 0 || seen[record.ID] {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			seen[record.ID] = true
 			ids[i] = record.ID
@@ -206,7 +206,7 @@ func handleLiveBenchmark(options handlerOptions, invocation bus.ModuleInvocation
 			output = []byte(fmt.Sprintf("Memory benchmark — %s\nQueries: %d; labelled: %d; basis: %s\nMRR: %.6f; nDCG@10: %.6f; Recall@10: %.6f\nOwner latency p50=%.3fms p95=%.3fms p99=%.3fms\nLive diagnostic; not a frozen release gate.\n", suite, len(cases), scores.Cases, quality, scores.MRR, scores.NDCG10, scores.Recall10, percentile(.5), percentile(.95), percentile(.99)))
 		}
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		view = map[string]any{"status": "ok", "output": string(output)}
 	}

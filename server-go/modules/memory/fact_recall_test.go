@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type factRecallRows struct {
@@ -358,8 +358,8 @@ func exerciseCurrentFactRecallReplay(t *testing.T, ctx context.Context, tx pgx.T
 		t.Fatal("fact source projection lost selected assertion or parent", projection, err)
 	}
 	exerciseSourceRevalidationReplay(t, ctx, tx, backend, projection.Retained)
-	public, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementKB, backend)), 0, bus.CommandContext{}, "facts", `{"query":"CurrentFactEntity","project":"current-fact-project","scope_context":true}`)
-	if status != bus.ModuleStatusOK || public["status"] != "ok" {
+	public, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementKB, backend)), 0, ring.CommandContext{}, "facts", `{"query":"CurrentFactEntity","project":"current-fact-project","scope_context":true}`)
+	if status != ring.ModuleStatusOK || public["status"] != "ok" {
 		t.Fatal("public fact projection unavailable", public, status)
 	}
 	encoded, _ := json.Marshal(public["fact_projection"])

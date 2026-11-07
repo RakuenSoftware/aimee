@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -111,8 +111,8 @@ CREATE TEMP TABLE memory_embeddings(point_id bigint PRIMARY KEY,embedding vector
 							t.Fatal(hits, tc.want)
 						}
 					}
-					frame, _ := bus.EncodeCommand("runtime", raw)
-					if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+					frame, _ := ring.EncodeCommand("runtime", raw)
+					if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 						t.Fatal(status)
 					}
 				})
@@ -162,7 +162,7 @@ CREATE TEMP TABLE memory_embeddings(point_id bigint PRIMARY KEY,embedding vector
 			if _, err := tx.Exec(ctx, `DROP TABLE memory_embeddings`); err != nil {
 				t.Fatal(err)
 			}
-			if _, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "runtime", string(raw)); status != bus.ModuleStatusInternal {
+			if _, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "runtime", string(raw)); status != ring.ModuleStatusInternal {
 				t.Fatalf("unavailable storage became status %d", status)
 			}
 		})

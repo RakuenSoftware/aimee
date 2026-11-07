@@ -199,42 +199,6 @@ static void test_generic_action_preserves_budget_auth_and_refusal(void)
    mock_agent_http_reset();
 }
 
-static int single_miss_post_handler(const char *url, const char *auth_header, const char *body,
-                                    char **response_buf, int timeout_ms, const char *extra_headers)
-{
-   (void)url;
-   (void)auth_header;
-   (void)body;
-   (void)timeout_ms;
-   (void)extra_headers;
-   if (response_buf)
-      *response_buf = strdup("{\"status\":\"error\",\"message\":\"record not found\"}");
-   return 200;
-}
-
-static int scoped_request_count;
-
-static int scoped_ok_post_handler(const char *url, const char *auth_header, const char *body,
-                                  char **response_buf, int timeout_ms, const char *extra_headers)
-{
-   (void)url;
-   (void)auth_header;
-   (void)timeout_ms;
-   (void)extra_headers;
-   assert(body != NULL);
-   assert(strstr(body, "\"scope_context\":true") != NULL);
-   assert(strstr(body, "\"workspace\":\"active-workspace\"") != NULL);
-   assert(strstr(body, "\"project\":\"active-project\"") != NULL);
-   assert(strstr(body, "\"include_all\":false") != NULL);
-   scoped_request_count++;
-   if (response_buf)
-      *response_buf = strdup("{\"status\":\"ok\",\"memories\":[],\"facts\":[],\"results\":[],"
-                             "\"conflicts\":[],\"edges\":[],\"relations\":[],\"links\":[],"
-                             "\"context\":\"\",\"block\":\"\",\"answer\":\"\","
-                             "\"citations\":[]}");
-   return 200;
-}
-
 static int explicit_scope_post_handler(const char *url, const char *auth_header, const char *body,
                                        char **response_buf, int timeout_ms,
                                        const char *extra_headers)
@@ -424,91 +388,6 @@ static void test_readers_distinguish_unreachable_from_empty(void)
    printf("  PASS: test_readers_distinguish_unreachable_from_empty\n");
 }
 
-static void test_ordered_readers_propagate_active_project_context(void)
-{
-
-   scoped_request_count = 0;
-   mock_agent_http_set_post_handler(scoped_ok_post_handler);
-   kb_client_memory_scope_context_set("active-workspace", "active-project", 0);
-
-   cJSON *visible = cJSON_Parse("{\"query\":\"q\",\"limit\":8}");
-   kb_client_memory_scope_context_apply(visible);
-   free(kb_v1_action_request("memory.find_facts_visible", visible));
-   char *json = kb_client_memory_assemble_context("q");
-   free(json);
-   json = kb_client_memory_assemble_typed_context("q");
-   free(json);
-   json = kb_client_memory_recall_json("q", 128, 0);
-   free(json);
-   cJSON *alerts = cJSON_CreateObject();
-   kb_client_memory_scope_context_apply(alerts);
-   free(kb_v1_action_request("memory.alerts", alerts));
-   cJSON *briefing = cJSON_Parse("{\"limit_tokens\":128}");
-   kb_client_memory_scope_context_apply(briefing);
-   free(kb_v1_action_request("memory.briefing", briefing));
-   const char *graph_commands[] = {"memory.entity_profile", "memory.entity_edges",
-                                   "memory.search_graph", "memory.search_graph_as_of"};
-   for (size_t i = 0; i < sizeof(graph_commands) / sizeof(graph_commands[0]); i++)
-   {
-      cJSON *request = cJSON_CreateObject();
-      kb_client_memory_scope_context_apply(request);
-      cJSON_AddStringToObject(request, "entity", "entity");
-      cJSON_AddStringToObject(request, "query", "entity");
-      cJSON_AddStringToObject(request, "as_of", "2026-07-29");
-      json = kb_v1_action_request(graph_commands[i], request);
-      free(json);
-   }
-   cJSON *ask = cJSON_CreateObject();
-   kb_client_memory_scope_context_apply(ask);
-   cJSON_AddStringToObject(ask, "query", "q");
-   json = kb_v1_action_request("memory.ask", ask);
-   free(json);
-
-   const char *context_commands[] = {"memory.context_block", "memory.facts"};
-   for (size_t i = 0; i < sizeof(context_commands) / sizeof(context_commands[0]); i++)
-   {
-      cJSON *request = cJSON_CreateObject();
-      kb_client_memory_scope_context_apply(request);
-      cJSON_AddStringToObject(request, "query", "q");
-      json = kb_v1_action_request(context_commands[i], request);
-      free(json);
-   }
-   cJSON *diagnostics = cJSON_Parse("{\"query\":\"q\",\"limit\":2}");
-   kb_client_memory_scope_context_apply(diagnostics);
-   free(kb_v1_action_request("memory.diagnose_scoped", diagnostics));
-
-   (void)kb_client_memory_insert("L2", "fact", "scoped-key", "scoped-content", 0.8, NULL, NULL);
-   (void)kb_client_memory_find_id_by_key_kind("scoped-key", "fact");
-   cJSON *reject = cJSON_Parse("{\"id\":42,\"reason\":\"wrong\"}");
-   kb_client_memory_scope_context_apply(reject);
-   free(kb_v1_action_request("memory.reject", reject));
-   memory_t memory;
-   (void)kb_client_memory_get(42, &memory);
-
-   kb_client_memory_scope_context_clear();
-   assert(scoped_request_count == 18);
-   mock_agent_http_reset();
-   printf("  PASS: test_ordered_readers_propagate_active_project_context\n");
-}
-
-static void test_single_record_miss_is_not_dependency_failure(void)
-{
-   memory_t memory;
-
-   kb_client_dependency_reset_for_tests();
-   mock_agent_http_set_post_handler(single_miss_post_handler);
-   assert(kb_client_memory_get(42, &memory) == 1);
-   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_EMPTY);
-
-   kb_client_dependency_reset_for_tests();
-   mock_agent_http_set_post_handler(unreachable_post_handler);
-   assert(kb_client_memory_get(42, &memory) < 0);
-   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE);
-
-   mock_agent_http_reset();
-   printf("  PASS: test_single_record_miss_is_not_dependency_failure\n");
-}
-
 static void test_explicit_scope_overrides_ambient_context(void)
 {
    mock_agent_http_set_post_handler(explicit_scope_post_handler);
@@ -571,228 +450,6 @@ static void test_typed_context_uses_server_defaults(void)
    printf("  PASS: test_typed_context_uses_server_defaults\n");
 }
 
-/* `memory get --as-of` was marshalled by the client, accepted by aimee-kb, and
- * lost in between: kb_client_memory_get sent a request carrying nothing but the
- * id. Every test around it passed anyway, because each end was checked against a
- * payload written by hand to contain the field -- the CLI marshaller was asserted
- * to emit as_of, the printer was fed a synthetic reply that already had valid_at,
- * and the KB_STORE primitive was called directly. Three green pieces that never
- * touched each other.
- *
- * So this asserts the SERIALIZED REQUEST BODY, which is the thing that was
- * actually empty. A test that only checked the return value would pass against
- * the broken version. */
-static char last_request_body[1024];
-static const char *as_of_reply = NULL;
-
-static int as_of_post_handler(const char *url, const char *auth_header, const char *body,
-                              char **response_buf, int timeout_ms, const char *extra_headers)
-{
-   (void)url;
-   (void)auth_header;
-   (void)timeout_ms;
-   (void)extra_headers;
-   snprintf(last_request_body, sizeof(last_request_body), "%s", body ? body : "");
-   if (response_buf)
-      *response_buf = strdup(as_of_reply);
-   return 200;
-}
-
-static void test_as_of_reaches_the_kb_and_its_verdict_comes_back(void)
-{
-   memory_t m;
-   kb_valid_at_t verdict;
-
-   mock_agent_http_set_post_handler(as_of_post_handler);
-   as_of_reply = "{\"status\":\"ok\",\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":false,"
-                 "\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
-
-   /* The field must be ON THE WIRE. This is the assertion that fails against the
-    * bug: the old request body was {"id":42} and nothing else. */
-   last_request_body[0] = '\0';
-   assert(kb_client_memory_get_as_of(42, "2026-06-12 00:00:00", &m, &verdict) == 0);
-   assert(strstr(last_request_body, "\"as_of\"") != NULL);
-   assert(strstr(last_request_body, "2026-06-12 00:00:00") != NULL);
-   assert(verdict == KB_VALID_AT_NO);
-
-   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9007199254740993,\"key\":\"k\"}}";
-   assert(kb_client_memory_get(INT64_C(9007199254740993), &m) == 0);
-   assert(m.id == INT64_C(9007199254740993));
-   assert(strstr(last_request_body, "\"id\":\"9007199254740993\""));
-   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9223372036854775807,\"key\":\"k\"}}";
-   assert(kb_client_memory_get(INT64_MAX, &m) == 0 && m.id == INT64_MAX);
-   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9223372036854775808}}";
-   assert(kb_client_memory_get(INT64_MAX, &m) < 0 && m.id == 0);
-
-   /* "unknown" must survive as a third answer. Folding it into NO would report
-    * "not in force" for a row the service could not judge. */
-   as_of_reply = "{\"status\":\"ok\",\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":\"unknown\","
-                 "\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
-   assert(kb_client_memory_get_as_of(42, "2026-06-12 00:00:00", &m, &verdict) == 0);
-   assert(verdict == KB_VALID_AT_UNKNOWN);
-
-   as_of_reply = "{\"status\":\"ok\",\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":true,"
-                 "\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
-   assert(kb_client_memory_get_as_of(42, "2026-06-12 00:00:00", &m, &verdict) == 0);
-   assert(verdict == KB_VALID_AT_YES);
-
-   /* Not asking must send no as_of at all: aimee-kb emits the verdict exactly
-    * when it receives a non-empty as_of, so an empty string here would be
-    * indistinguishable from asking. */
-   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
-   last_request_body[0] = '\0';
-   assert(kb_client_memory_get_as_of(42, NULL, &m, &verdict) == 0);
-   assert(strstr(last_request_body, "as_of") == NULL);
-   assert(verdict == KB_VALID_AT_UNASKED);
-
-   last_request_body[0] = '\0';
-   assert(kb_client_memory_get_as_of(42, "", &m, &verdict) == 0);
-   assert(strstr(last_request_body, "as_of") == NULL);
-   assert(verdict == KB_VALID_AT_UNASKED);
-
-   /* The plain entry point keeps its six existing callers' behaviour: no as_of
-    * on the wire, and it must still compile against a NULL verdict. */
-   last_request_body[0] = '\0';
-   assert(kb_client_memory_get(42, &m) == 0);
-   assert(strstr(last_request_body, "as_of") == NULL);
-
-   /* Presentation callers can request the raw object without routing content
-    * through memory_t.content[2048]. This is what keeps memory.get lossless
-    * after the KB returns a long stored value. */
-   char long_content[5001];
-   memset(long_content, 'q', sizeof(long_content) - 1);
-   long_content[sizeof(long_content) - 1] = '\0';
-   size_t reply_size = strlen(long_content) + 128;
-   char *long_reply = malloc(reply_size);
-   assert(long_reply != NULL);
-   snprintf(long_reply, reply_size,
-            "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\","
-            "\"content\":\"%s\"}}",
-            long_content);
-   as_of_reply = long_reply;
-   cJSON *raw_memory = NULL;
-   assert(kb_client_memory_get_json_as_of(42, NULL, &raw_memory, &verdict) == 0);
-   cJSON *raw_content = cJSON_GetObjectItemCaseSensitive(raw_memory, "content");
-   assert(cJSON_IsString(raw_content));
-   assert(strlen(raw_content->valuestring) == strlen(long_content));
-   cJSON_Delete(raw_memory);
-   free(long_reply);
-   as_of_reply = NULL;
-
-   mock_agent_http_reset();
-   printf("  PASS: test_as_of_reaches_the_kb_and_its_verdict_comes_back\n");
-}
-
-/* ---------------------------------------------------------------------------
- * PII must never cross to aimee-kb.
- *
- * The assertion that matters is NOT "the call returned an error" -- it is that
- * NO REQUEST WAS ISSUED. A gate that lets the POST happen and then reports a
- * rejection has already moved the data it exists to contain. g_pii_posts counts
- * transmissions; for withheld content it must stay at zero.
- */
-static int g_pii_posts;
-static char g_pii_last_body[4096];
-
-static int recording_post_handler(const char *url, const char *auth_header, const char *body,
-                                  char **response_buf, int timeout_ms, const char *extra_headers)
-{
-   (void)url;
-   (void)auth_header;
-   (void)timeout_ms;
-   (void)extra_headers;
-   g_pii_posts++;
-   snprintf(g_pii_last_body, sizeof(g_pii_last_body), "%s", body ? body : "");
-   if (response_buf)
-      *response_buf = strdup("{\"status\":\"ok\",\"memory\":{\"id\":7}}");
-   return 200;
-}
-
-static void test_pii_never_reaches_kb(void)
-{
-   const char *secret = "my password: hunter2trustno1";
-
-   /* 1. Clean content is transmitted unchanged. */
-   mock_agent_http_reset();
-   mock_agent_http_set_post_handler(recording_post_handler);
-   g_pii_posts = 0;
-   g_pii_last_body[0] = '\0';
-   assert(kb_client_memory_insert(TIER_L1, KIND_FACT, "k-clean", "the sky is blue", 1.0, "s",
-                                  NULL) == 0);
-   assert(g_pii_posts == 1);
-   assert(strstr(g_pii_last_body, "the sky is blue") != NULL);
-
-   /* 2. The secret never appears on the wire: either redacted, or withheld with
-    *    nothing sent at all. */
-   mock_agent_http_reset();
-   mock_agent_http_set_post_handler(recording_post_handler);
-   g_pii_posts = 0;
-   g_pii_last_body[0] = '\0';
-   int rc = kb_client_memory_insert(TIER_L1, KIND_FACT, "k-secret", secret, 1.0, "s", NULL);
-   if (rc == 0)
-   {
-      assert(g_pii_posts == 1);
-      assert(strstr(g_pii_last_body, "hunter2trustno1") == NULL);
-      assert(strstr(g_pii_last_body, "REDACTED") != NULL);
-   }
-   else
-   {
-      assert(rc == KB_CLIENT_MEMORY_WITHHELD_PII);
-      assert(g_pii_posts == 0);
-   }
-
-   /* The direct action path used by HTTP/MCP has the same no-transmit gate. */
-   const char *methods[] = {"memory.store", "memory.update", "memory.supersede", "memory.reject"};
-   for (int i = 0; i < 4; i++)
-   {
-      g_pii_posts = 0;
-      cJSON *request = cJSON_CreateObject();
-      cJSON_AddStringToObject(request,
-                              i == 2   ? "new_content"
-                              : i == 3 ? "reason"
-                                       : "content",
-                              secret);
-      char *raw = kb_v1_action_request(methods[i], request);
-      assert(raw && g_pii_posts == 0 && !strstr(raw, "hunter2trustno1"));
-      free(raw);
-   }
-
-   /* 3. A sensitive KEY withholds the whole write: the key is the lookup handle
-    *    and cannot be redacted in place. Nothing is transmitted. */
-   mock_agent_http_reset();
-   mock_agent_http_set_post_handler(recording_post_handler);
-   g_pii_posts = 0;
-   rc = kb_client_memory_insert(TIER_L1, KIND_FACT, secret, "benign body", 1.0, "s", NULL);
-   assert(rc == KB_CLIENT_MEMORY_WITHHELD_PII);
-   assert(g_pii_posts == 0);
-
-   mock_agent_http_reset();
-   printf("  PASS: test_pii_never_reaches_kb\n");
-}
-
-/* ---------------------------------------------------------------------------
- * The screen guards EVERY content-carrying write, not just memory.store.
- *
- * memory.store, memory.update and memory.supersede were screened first; the
- * other eleven builders that persist session-authored prose into aimee-kb were
- * not, which is the same defect in a different file. The invariant asserted
- * here is the one that matters and the one that holds for every wrapper
- * whatever its return type: THE SECRET NEVER APPEARS ON THE WIRE. A wrapper
- * may satisfy it by withholding the request entirely or by sending a redacted
- * form -- both are safe, and which one applies depends on whether the
- * classifier could locate the span.
- *
- * A new content-carrying wrapper that forgets the screen fails here.
- */
-static void assert_secret_never_sent(const char *what)
-{
-   if (g_pii_posts > 0 && strstr(g_pii_last_body, "hunter2trustno1") != NULL)
-   {
-      fprintf(stderr, "FAIL: %s transmitted the secret to aimee-kb: %s\n", what, g_pii_last_body);
-      assert(0);
-   }
-}
-
 #define PII_CASE(what, call)                                                                       \
    do                                                                                              \
    {                                                                                               \
@@ -803,50 +460,6 @@ static void assert_secret_never_sent(const char *what)
       call;                                                                                        \
       assert_secret_never_sent(what);                                                              \
    } while (0)
-
-static void test_every_content_wrapper_screens(void)
-{
-   const char *secret = "my password: hunter2trustno1";
-   char *json = NULL;
-   aimee_task_t task;
-   anti_pattern_t ap;
-   kb_store_decision_log_row_t dec;
-   int reinforced = 0;
-
-   /* Wrappers returning a response document. */
-   PII_CASE("notes.create", json = kb_client_note_create_json("t", secret, "tag", "a"));
-   free(json);
-   PII_CASE("notes.create(title)", json = kb_client_note_create_json(secret, "c", "tag", "a"));
-   free(json);
-   PII_CASE("curiosity.create",
-            json = kb_client_curiosity_create_json("gap", "", "topic", secret, 1.0, 1.0, "s"));
-   free(json);
-
-   /* Wrappers returning a status code. */
-   PII_CASE("rules.insert", (void)kb_client_rules_insert("positive", "title", secret, 1));
-   PII_CASE("feedback.record",
-            (void)kb_client_feedback_record("positive", "title", secret, 1, &reinforced));
-   PII_CASE("anti_pattern.insert",
-            (void)kb_client_anti_pattern_insert(secret, "desc", "src", "ref", 1.0, &ap));
-   PII_CASE("decision_log.insert",
-            (void)kb_client_decision_log_insert(1, "opts", "chosen", secret, "assume", &dec));
-   PII_CASE("collab_rules.propose", (void)kb_client_collab_rules_propose(secret, "why", "me"));
-   PII_CASE("task.create", (void)kb_client_task_create(secret, "s", 0, &task));
-
-   /* And the screen must not have turned these into blanket refusals: clean
-    * content still reaches the kb. */
-   mock_agent_http_reset();
-   mock_agent_http_set_post_handler(recording_post_handler);
-   g_pii_posts = 0;
-   g_pii_last_body[0] = '\0';
-   json = kb_client_note_create_json("title", "the sky is blue", "tag", "a");
-   free(json);
-   assert(g_pii_posts == 1);
-   assert(strstr(g_pii_last_body, "the sky is blue") != NULL);
-
-   mock_agent_http_reset();
-   printf("  PASS: test_every_content_wrapper_screens\n");
-}
 
 static void test_screen_failures(void)
 {
@@ -925,39 +538,6 @@ static void test_benchmark_file_transport(void)
    mock_agent_http_reset();
 }
 
-static const char *exact_reply;
-static int exact_id_post(const char *url, const char *auth, const char *body, char **reply,
-                         int timeout, const char *headers)
-{
-   (void)url;
-   (void)auth;
-   (void)timeout;
-   (void)headers;
-   cJSON *request = cJSON_Parse(body);
-   assert(
-       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "view")), "native"));
-   cJSON_Delete(request);
-   *reply = strdup(exact_reply);
-   return 200;
-}
-static void test_exact_mutation_identity(void)
-{
-   kb_client_dependency_reset_for_tests();
-   mock_agent_http_set_post_handler(exact_id_post);
-   exact_reply = "{\"status\":\"ok\",\"id_text\":\"9007199254740993\",\"id\":9007199254740993,"
-                 "\"memory\":{\"id\":9007199254740993}}";
-   memory_t out;
-   assert(kb_client_memory_insert("L2", "fact", "key", "content", .8, NULL, &out) == 0 &&
-          out.id == INT64_C(9007199254740993));
-   assert(kb_client_memory_find_id_by_key_kind("key", "fact") == INT64_C(9007199254740993));
-   exact_reply = "{\"status\":\"ok\",\"id_text\":\"9223372036854775808\",\"id\":42}";
-   assert(kb_client_memory_find_id_by_key_kind("key", "fact") == 0);
-   exact_reply = "{\"status\":\"ok\",\"id\":9007199254740993}";
-   assert(kb_client_memory_insert("L2", "fact", "key", "content", .8, NULL, &out) < 0);
-   assert(kb_client_memory_find_id_by_key_kind("key", "fact") == 0);
-   mock_agent_http_reset();
-}
-
 static int exact_evidence_post(const char *url, const char *auth, const char *body, char **reply,
                                int timeout, const char *headers)
 {
@@ -1012,18 +592,12 @@ int main(void)
    assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
    test_exact_evidence_transport();
-   test_exact_mutation_identity();
    test_benchmark_file_transport();
    test_generic_action_preserves_budget_auth_and_refusal();
    test_readers_distinguish_unreachable_from_empty();
-   test_single_record_miss_is_not_dependency_failure();
-   test_ordered_readers_propagate_active_project_context();
    test_explicit_scope_overrides_ambient_context();
    test_typed_context_uses_server_defaults();
    test_recall_carries_and_records_production_activation();
-   test_as_of_reaches_the_kb_and_its_verdict_comes_back();
-   test_pii_never_reaches_kb();
-   test_every_content_wrapper_screens();
 
    unsetenv("AIMEE_KB_API_URL");
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");

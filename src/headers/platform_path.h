@@ -31,6 +31,11 @@ int platform_unlink(const char *path);
  * Returns 0 on success, -1 on error. */
 int platform_set_permissions(const char *path, int mode);
 
+/* Existing-path containment after filesystem symlink/junction resolution.
+ * Returns 1 within the existing root directory, 0 on refusal/error. This is a
+ * filesystem fact, not an access grant or a retained file handle. */
+int platform_path_is_beneath(const char *root, const char *path);
+
 /* Get parent process ID. POSIX: getppid(). Windows: NtQueryInformationProcess or toolhelp. */
 int platform_getppid(void);
 

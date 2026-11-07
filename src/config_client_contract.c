@@ -71,6 +71,11 @@ int config_reload_if_changed(void)
 
 int config_present(void)
 {
+   /* A held snapshot nothing has changed answers without fetching it again:
+    * with announcements that costs no module call at all, and without them one
+    * version check instead of the whole snapshot. */
+   if (config_client_changed() == 0)
+      return 1;
    return config_client_refresh() == 0;
 }
 
@@ -137,12 +142,6 @@ const char *config_guardrail_mode(void)
    if (config_client_read_string("guardrail_mode", value, sizeof(value)) != 0 || !value[0])
       snprintf(value, sizeof(value), "approve");
    return value;
-}
-
-int config_sandbox_package_access_valid(const char *s)
-{
-   return s && (!strcmp(s, "proxy") || !strcmp(s, "off") || !strcmp(s, "gated") ||
-                !strcmp(s, "governance"));
 }
 
 void config_sandbox(sandbox_config_t *out)
@@ -231,14 +230,6 @@ int config_module_enabled(int config_tristate, int env_default)
    return config_tristate == 0 || config_tristate == 1 ? config_tristate : !!env_default;
 }
 
-int config_module_roundtable_enabled(void)
-{
-   const char *env = getenv("AIMEE_MODULE_ROUNDTABLE");
-   int fallback =
-       env && (!strcasecmp(env, "1") || !strcasecmp(env, "true") || !strcasecmp(env, "on"));
-   return config_module_enabled(config_module_roundtable(), fallback);
-}
-
 const char *econ_mode_name(int mode)
 {
    if (mode == ECON_MODE_OFF)
@@ -246,17 +237,6 @@ const char *econ_mode_name(int mode)
    if (mode == ECON_MODE_AGGRESSIVE)
       return "aggressive";
    return "safe";
-}
-
-int econ_mode_parse(const char *s)
-{
-   if (s && !strcasecmp(s, "off"))
-      return ECON_MODE_OFF;
-   if (s && !strcasecmp(s, "safe"))
-      return ECON_MODE_SAFE;
-   if (s && !strcasecmp(s, "aggressive"))
-      return ECON_MODE_AGGRESSIVE;
-   return -1;
 }
 
 int econ_mode_current(void)
@@ -337,11 +317,6 @@ int config_set(const char *key, const char *value)
    if (parse_number(value, &number))
       return config_client_set_number(key, number);
    return config_client_set_string(key, value);
-}
-
-int config_persist_defaults(void)
-{
-   return config_client_operation("persist-defaults", NULL);
 }
 
 int config_workspace_add(const char *path, const char *provider, const char *remote,
@@ -688,28 +663,6 @@ int config_server_api_bearer_extra_snapshot(char out[][256], int max)
    return count;
 }
 
-int config_disposition_source(int index)
-{
-   double value = 0;
-   (void)config_client_read_indexed_number("dispositions", index, "source", &value);
-   return (int)value;
-}
-
-const char *config_disposition_source_name(config_disposition_source_t source)
-{
-   switch (source)
-   {
-   case CONFIG_DISPOSITION_SOURCE_GLOBAL:
-      return "global";
-   case CONFIG_DISPOSITION_SOURCE_WORKSPACE:
-      return "workspace";
-   case CONFIG_DISPOSITION_SOURCE_PROJECT:
-      return "project";
-   default:
-      return "none";
-   }
-}
-
 int config_conversation_dirs(char dirs[][MAX_PATH_LEN], int max_dirs)
 {
    if (!dirs || max_dirs <= 0)
@@ -724,33 +677,6 @@ int config_conversation_dirs(char dirs[][MAX_PATH_LEN], int max_dirs)
       snprintf(dirs[0], MAX_PATH_LEN, "%s/.codex/sessions", home);
    else
       return 0;
-   return 1;
-}
-
-int config_autonomy_lookup(const char *env_name, long *out)
-{
-   if (!env_name || !out || strncmp(env_name, "AIMEE_AUTONOMY_", 15) != 0)
-      return 0;
-   const char *override = getenv(env_name);
-   if (override && override[0])
-   {
-      char *end = NULL;
-      long parsed = strtol(override, &end, 10);
-      if (end && !*end)
-      {
-         *out = parsed;
-         return 1;
-      }
-   }
-   char key[128] = "autonomy_";
-   size_t at = strlen(key);
-   for (const char *p = env_name + 15; *p && at + 1 < sizeof(key); p++)
-      key[at++] = (char)tolower((unsigned char)*p);
-   key[at] = 0;
-   double value = 0;
-   if (config_client_read_number(key, &value) != 0)
-      return 0;
-   *out = (long)value;
    return 1;
 }
 
@@ -818,26 +744,6 @@ aimee_mode_t config_current_mode(void)
    char persona[64];
    config_current_persona(persona, sizeof(persona));
    return mode_parse(persona);
-}
-
-int config_persist_mode(const char *mode)
-{
-   if (platform_mkdir_p(config_default_dir(), 0700) != 0)
-      return -1;
-   char path[MAX_PATH_LEN];
-   mode_path(path, sizeof(path));
-   FILE *file = fopen(path, "w");
-   if (!file)
-      return -1;
-   fprintf(file, "%s\n", mode && mode[0] ? mode : "engineer");
-   return fclose(file) == 0 ? 0 : -1;
-}
-
-const char *config_default_db1_path(void)
-{
-   static _Thread_local char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/aimee.db", config_default_dir());
-   return path;
 }
 
 int config_embedder_dims_default(void)
@@ -986,8 +892,3 @@ CONFIG_FLAG(config_transport_kb_pool_enabled, "transport_kb_pool_enabled")
 CONFIG_FLAG(config_wfe_live_forge_enabled, "wfe_live_forge_enabled")
 CONFIG_FLAG(config_ingress_audit_async, "ingress_audit_async")
 #undef CONFIG_FLAG
-
-double config_memory_semantic_floor_scale(void)
-{
-   return config_number_or_zero("memory_semantic_floor_scale");
-}

@@ -1,6 +1,6 @@
 /* test_delegate_liveness.c: unit tests for delegate liveness detection utilities.
  *
- * Tests liveness_is_empty_response(), liveness_format_empty_diagnostic(),
+ * Tests semantic response checks, repeat-loop tracking,
  * and liveness_circuit_breaker_tripped(). */
 
 #include <assert.h>
@@ -151,156 +151,6 @@ static void test_unexecuted_tool_plan_preserves_findings(void)
                          "The failing path drops scope filters before bucketing audit rows.\n";
    assert(liveness_is_unexecuted_tool_plan_response(content) == 0);
    printf("  PASS: findings with command examples are not unexecuted plans\n");
-}
-
-static void test_reject_degenerate_owned_response(void)
-{
-   char *response = malloc(64);
-   assert(response != NULL);
-   strcpy(response, "[TOOL_CALL]\n{}\n[/TOOL_CALL]\n");
-   char error[128] = {0};
-   assert(liveness_reject_degenerate_response(&response, error, sizeof(error),
-                                              "durable job produced tool markup") == 1);
-   assert(response == NULL);
-   assert(strcmp(error, "durable job produced tool markup") == 0);
-   printf("  PASS: owned degenerate response is rejected and cleared\n");
-}
-
-static void test_reject_degenerate_preserves_good_response(void)
-{
-   char *response = malloc(64);
-   assert(response != NULL);
-   strcpy(response, "No blocking findings.");
-   char error[128] = {0};
-   assert(liveness_reject_degenerate_response(&response, error, sizeof(error), "bad") == 0);
-   assert(response != NULL);
-   assert(strcmp(response, "No blocking findings.") == 0);
-   assert(error[0] == '\0');
-   free(response);
-   printf("  PASS: owned semantic response is preserved\n");
-}
-
-static void test_reject_degenerate_null_inputs(void)
-{
-   char error[128] = {0};
-   assert(liveness_reject_degenerate_response(NULL, error, sizeof(error), "bad") == 0);
-   assert(error[0] == '\0');
-
-   char *response = NULL;
-   assert(liveness_reject_degenerate_response(&response, error, sizeof(error), "bad") == 0);
-   assert(response == NULL);
-   assert(error[0] == '\0');
-   printf("  PASS: reject helper ignores NULL response inputs\n");
-}
-
-static void test_reject_degenerate_zero_error_buffer(void)
-{
-   char *response = malloc(64);
-   assert(response != NULL);
-   strcpy(response, "[TOOL_CALL]\n{}\n[/TOOL_CALL]\n");
-   assert(liveness_reject_degenerate_response(&response, NULL, 0, "bad") == 1);
-   assert(response == NULL);
-   printf("  PASS: reject helper tolerates missing error buffer\n");
-}
-
-static void test_reject_degenerate_default_message(void)
-{
-   char *response = malloc(64);
-   assert(response != NULL);
-   strcpy(response, "[TOOL_CALL]\n{}\n[/TOOL_CALL]\n");
-   char error[128] = {0};
-   assert(liveness_reject_degenerate_response(&response, error, sizeof(error), NULL) == 1);
-   assert(response == NULL);
-   assert(strstr(error, "raw tool-call markup") != NULL);
-   printf("  PASS: reject helper writes default diagnostic\n");
-}
-
-static void test_empty_single_newline(void)
-{
-   assert(liveness_is_empty_response("\n") == 1);
-   printf("  PASS: single newline is empty\n");
-}
-
-/* --- liveness_format_empty_diagnostic --- */
-
-static void test_diagnostic_with_agent_name(void)
-{
-   char buf[512];
-   liveness_format_empty_diagnostic("code-agent", buf, sizeof(buf));
-   assert(strstr(buf, "code-agent") != NULL);
-   assert(strstr(buf, "LIVENESS ERROR") != NULL);
-   assert(strstr(buf, "empty response") != NULL);
-   printf("  PASS: diagnostic includes agent name\n");
-}
-
-static void test_diagnostic_without_agent_name(void)
-{
-   char buf[512];
-   liveness_format_empty_diagnostic(NULL, buf, sizeof(buf));
-   assert(strstr(buf, "LIVENESS ERROR") != NULL);
-   assert(strstr(buf, "empty response") != NULL);
-   printf("  PASS: diagnostic works without agent name\n");
-}
-
-static void test_diagnostic_empty_agent_name(void)
-{
-   char buf[512];
-   liveness_format_empty_diagnostic("", buf, sizeof(buf));
-   assert(strstr(buf, "LIVENESS ERROR") != NULL);
-   printf("  PASS: diagnostic works with empty agent name\n");
-}
-
-static void test_diagnostic_null_buf(void)
-{
-   /* Should not crash */
-   liveness_format_empty_diagnostic("agent", NULL, 0);
-   liveness_format_empty_diagnostic("agent", NULL, 100);
-   printf("  PASS: diagnostic handles NULL buf safely\n");
-}
-
-static void test_final_tool_call_diagnostic_without_partial_text(void)
-{
-   char buf[1600];
-   liveness_format_final_tool_call_diagnostic("review-agent", "read_file", NULL, "rg",
-                                              "line 12 matched", 8, buf, sizeof(buf));
-   assert(strstr(buf, "review-agent") != NULL);
-   assert(strstr(buf, "final response turn") != NULL);
-   assert(strstr(buf, "read_file") != NULL);
-   assert(strstr(buf, "No additional tools were run") != NULL);
-   assert(strstr(buf, "rg") != NULL);
-   assert(strstr(buf, "line 12 matched") != NULL);
-   printf("  PASS: final tool-call diagnostic includes attempted and last tool context\n");
-}
-
-static void test_final_tool_call_diagnostic_preserves_partial_text(void)
-{
-   char buf[1600];
-   liveness_format_final_tool_call_diagnostic("delegate", "bash", "I found one likely bug.", "sed",
-                                              "snippet", 3, buf, sizeof(buf));
-   assert(strstr(buf, "I found one likely bug.") != NULL);
-   assert(strstr(buf, "bash") != NULL);
-   assert(strstr(buf, "No additional tools were run") != NULL);
-   printf("  PASS: final tool-call diagnostic preserves partial model text\n");
-}
-
-static void test_final_tool_call_diagnostic_filters_raw_tool_fragment(void)
-{
-   char buf[1600];
-   const char *fragment = "38/c746e546/src\n</parameter>\n</function>\n</tool_call>\n";
-   liveness_format_final_tool_call_diagnostic("delegate", "bash", fragment, "sed", "snippet", 3,
-                                              buf, sizeof(buf));
-   assert(strstr(buf, "</tool_call>") == NULL);
-   assert(strstr(buf, "38/c746e546/src") == NULL);
-   assert(strstr(buf, "bash") != NULL);
-   assert(strstr(buf, "No additional tools were run") != NULL);
-   printf("  PASS: final tool-call diagnostic filters raw tool fragments\n");
-}
-
-static void test_final_tool_call_diagnostic_null_buf(void)
-{
-   liveness_format_final_tool_call_diagnostic("agent", "read_file", "partial", "tool", "result", 1,
-                                              NULL, 0);
-   printf("  PASS: final tool-call diagnostic handles NULL buf safely\n");
 }
 
 /* --- liveness_circuit_breaker_tripped --- */
@@ -531,7 +381,6 @@ int main(void)
    test_empty_empty_string();
    test_empty_whitespace_only();
    test_empty_normal_content();
-   test_empty_single_newline();
    test_degenerate_punctuation_only();
    test_degenerate_repetitive_numeric_pattern();
    test_degenerate_bare_tool_markup();
@@ -543,20 +392,6 @@ int main(void)
    test_degenerate_preserves_signal();
    test_unexecuted_tool_plan_detected();
    test_unexecuted_tool_plan_preserves_findings();
-   test_reject_degenerate_owned_response();
-   test_reject_degenerate_preserves_good_response();
-   test_reject_degenerate_null_inputs();
-   test_reject_degenerate_zero_error_buffer();
-   test_reject_degenerate_default_message();
-
-   test_diagnostic_with_agent_name();
-   test_diagnostic_without_agent_name();
-   test_diagnostic_empty_agent_name();
-   test_diagnostic_null_buf();
-   test_final_tool_call_diagnostic_without_partial_text();
-   test_final_tool_call_diagnostic_preserves_partial_text();
-   test_final_tool_call_diagnostic_filters_raw_tool_fragment();
-   test_final_tool_call_diagnostic_null_buf();
 
    test_circuit_breaker_below_threshold();
    test_circuit_breaker_at_threshold();

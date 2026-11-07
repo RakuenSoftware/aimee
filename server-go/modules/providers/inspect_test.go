@@ -115,7 +115,7 @@ func TestAnthropicProbeUsesVersionedMessagesRoute(t *testing.T) {
 			p["provider"], p["endpoint"], p["auth_type"] = "anthropic", endpoint, "x-api-key"
 			call(t, m, "provider.save_connection", p)
 			call(t, m, "model.add", object{"args": []string{"mini", "unused", "MiniMax-M3", "--registration", "minimax"}})
-			network := &fixtureNetwork{replies: []egress.HTTPResponse{response(404, `{}`), response(200, `{"content":[{"type":"text","text":"ok"}]}`)}}
+			network := &fixtureNetwork{replies: []egress.HTTPResponse{response(404, `{}`), response(200, `{"role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`)}}
 			m.SetEgress(network)
 			out := call(t, m, "model.probe", object{"args": []string{"mini"}})
 			if !boolean(out, "execution_ok", false) {
@@ -152,10 +152,8 @@ func TestCodexProbeUsesResponsesAndSelectedOAuthAccount(t *testing.T) {
 		vault.values["codex:api_key"] = "wrong-api-key"
 		if document {
 			vault.values["codex:oauth"] = `{"tokens":{"access_token":"fixture-oauth","account_id":"account-a"}}`
-		} else {
-			vault.values["codex:codex_oauth_token"] = "fixture-oauth"
-			vault.values["codex:codex_account_id"] = "account-a"
 		}
+		vault.values["codex:codex_oauth_credentials"] = codexPair("fixture-oauth", "account-a")
 		network := &fixtureNetwork{replies: []egress.HTTPResponse{response(200, codexCompleted)}}
 		m.SetEgress(network)
 		out := call(t, m, "model.probe", object{"args": []string{"codex:model"}})
@@ -200,22 +198,23 @@ func TestCodexProbeDoesNotBorrowAnotherConnectionsCredentials(t *testing.T) {
 
 func TestProbeResponseRequiresFinalSuccessfulOutput(t *testing.T) {
 	for _, tc := range []struct {
-		name, body    string
-		responses, ok bool
+		name, body, wire string
+		ok               bool
 	}{
-		{"codex", codexCompleted, true, true},
-		{"delta-only", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n", true, false},
-		{"failed-after-text", codexCompleted + "data: {\"type\":\"response.failed\"}\n\n", true, false},
-		{"incomplete", strings.ReplaceAll(codexCompleted, "completed", "incomplete"), true, false},
-		{"reasoning-only", strings.ReplaceAll(codexCompleted, "output_text", "reasoning_text"), true, false},
-		{"bad-event", "data: not json\n\n", true, false},
-		{"openai", `{"choices":[{"message":{"content":"ok"}}]}`, false, true},
-		{"anthropic", `{"content":[{"type":"text","text":"ok"}]}`, false, true},
-		{"invalid-json", "not json", false, false},
-		{"empty", `{}`, false, false},
+		{"codex", codexCompleted, "responses", true},
+		{"delta-only", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n", "responses", false},
+		{"failed-after-text", codexCompleted + "data: {\"type\":\"response.failed\"}\n\n", "responses", false},
+		{"incomplete", strings.ReplaceAll(codexCompleted, "completed", "incomplete"), "responses", false},
+		{"reasoning-only", strings.ReplaceAll(codexCompleted, "output_text", "reasoning_text"), "responses", false},
+		{"bad-event", "data: not json\n\n", "responses", false},
+		{"openai", `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}`, "openai_chat", true},
+		{"anthropic", `{"role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`, "anthropic", true},
+		{"invalid-json", "not json", "openai_chat", false},
+		{"empty", `{}`, "openai_chat", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := probeResponse([]byte(tc.body), tc.responses); (err == nil) != tc.ok {
+			response, err := probeHTTPResponse([]byte(tc.body), tc.wire)
+			if (err == nil && response.CompleteText()) != tc.ok {
 				t.Fatal(err)
 			}
 		})
@@ -230,13 +229,13 @@ func TestCodexProbeAcceptsStreamedOutputWithEmptyCompletion(t *testing.T) {
 		`{"type":"response.content_part.done","part":{"type":"output_text","text":"ok"}}`,
 	} {
 		stream := "data: " + output + "\n\n"
-		if err := probeResponse([]byte(stream+completed), true); err != nil {
+		if response, err := probeHTTPResponse([]byte(stream+completed), "responses"); err != nil || !response.CompleteText() {
 			t.Fatal(err)
 		}
-		if err := probeResponse([]byte(stream), true); err == nil {
+		if response, err := probeHTTPResponse([]byte(stream), "responses"); err == nil && response.CompleteText() {
 			t.Fatal("incomplete stream accepted")
 		}
-		if err := probeResponse([]byte(stream+"data: {\"type\":\"response.failed\"}\n\n"), true); err == nil {
+		if response, err := probeHTTPResponse([]byte(stream+"data: {\"type\":\"response.failed\"}\n\n"), "responses"); err == nil && response.CompleteText() {
 			t.Fatal("failed stream accepted")
 		}
 	}
@@ -250,5 +249,59 @@ func TestProbeFailureRetainsNativeClientFields(t *testing.T) {
 	out := call(t, m, "model.probe", object{"args": []string{"model"}})
 	if str(out, "execution_message") != "provider returned HTTP 403" || out["detected_slots"] != out["slots"] || out["detected_context_window"] != out["context_window"] {
 		t.Fatal(out)
+	}
+}
+
+func codexPair(token, account string) string {
+	value, _ := json.Marshal(object{"token": token, "account_id": account, "source_digest": strings.Repeat("a", 64)})
+	return string(value)
+}
+
+func TestCodexProbeUsesSelectedServingSnapshot(t *testing.T) {
+	m, _, vault := manager(t)
+	vault.values["codex:codex_oauth_credentials"] = codexPair("refreshed-access", "account-current")
+	vault.values["codex:oauth"] = `{"tokens":{"access_token":"expired-access","account_id":"account-a"}}`
+	vault.values["codex:codex_oauth_token"] = "unpaired-token"
+	vault.values["codex:codex_account_id"] = "unpaired-account"
+	token, account, err := m.resolveCodex(context.Background(), object{"name": "codex"})
+	if err != nil || token != "refreshed-access" || account != "account-current" {
+		t.Fatal("serving snapshot was not selected")
+	}
+	if _, _, err := m.resolveCodex(context.Background(), object{"name": "personal"}); err == nil {
+		t.Fatal("named connection borrowed server credentials")
+	}
+	vault.values["personal:codex_oauth_credentials"] = codexPair("personal-access", "personal-account")
+	token, account, err = m.resolveCodex(context.Background(), object{"name": "personal"})
+	if err != nil || token != "personal-access" || account != "personal-account" {
+		t.Fatal("selected connection snapshot was not selected")
+	}
+	vault.values["codex:codex_oauth_credentials"] = codexPair("refreshed-access", "")
+	token, account, err = m.resolveCodex(context.Background(), object{"name": "codex"})
+	if err != nil || token != "refreshed-access" || account != "" {
+		t.Fatal("snapshot borrowed account metadata from a stale import")
+	}
+	for _, invalid := range []string{`{}`, `{"token":"x"}`, "not json", codexPair("bad\r\nheader", "account")} {
+		vault.values["codex:codex_oauth_credentials"] = invalid
+		if _, _, err := m.resolveCodex(context.Background(), object{"name": "codex"}); err == nil {
+			t.Fatal("invalid private credential accepted")
+		}
+	}
+}
+
+type failedCanonicalVault struct{ Resources }
+
+func (v failedCanonicalVault) Credential(ctx context.Context, op, agent, cred, secret string) (string, error) {
+	if agent == "codex" && cred == "codex_oauth_credentials" {
+		return "", errors.New("refresh unavailable")
+	}
+	return v.Resources.Credential(ctx, op, agent, cred, secret)
+}
+
+func TestCodexRefreshFailureDoesNotReuseStaleDocument(t *testing.T) {
+	m, _, vault := manager(t)
+	vault.values["codex:oauth"] = `{"access_token":"expired-access"}`
+	m.resources = failedCanonicalVault{vault}
+	if _, _, err := m.resolveCodex(context.Background(), object{"name": "codex"}); err == nil {
+		t.Fatal("refresh failure fell back to stale credentials")
 	}
 }

@@ -9,19 +9,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Exercise the actual memory -> egress wire contract and policy. The ordinary
 // embed transport stub intentionally does not enforce caller permissions.
-type governedEmbedCaller struct{ handler bus.ModuleHandler }
+type governedEmbedCaller struct{ handler ring.ModuleHandler }
 
 func (c governedEmbedCaller) Call(_ context.Context, _ uint32, stage uint32,
 	trace uint64, _ time.Duration, body []byte) ([]byte, error) {
-	reply, status := c.handler(bus.ModuleInvocation{StageID: stage,
+	reply, status := c.handler(ring.ModuleInvocation{StageID: stage,
 		PrincipalClass: 1, PrincipalRef: egress.MemoryClientRef, TraceID: trace}, body)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, fmt.Errorf("egress status %d", status)
 	}
 	return reply, nil
@@ -72,10 +72,10 @@ func TestEmbedDimensionAndTruncation(t *testing.T) {
 		t.Fatal(got)
 	}
 	handler := NewHandler(&batchExecutor{reply: `[1,2,3]`})
-	frame, _ := bus.EncodeCommand("embed_text", []byte(`{"base_url":"http://embedder","text":"probe","max_dim":2}`))
-	encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-	body, err := bus.DecodeCommandResult(encoded)
-	if status != bus.ModuleStatusOK || err != nil || strings.Contains(string(body), `"vector"`) || !strings.Contains(string(body), `"truncated":true`) {
+	frame, _ := ring.EncodeCommand("embed_text", []byte(`{"base_url":"http://embedder","text":"probe","max_dim":2}`))
+	encoded, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+	body, err := ring.DecodeCommandResult(encoded)
+	if status != ring.ModuleStatusOK || err != nil || strings.Contains(string(body), `"vector"`) || !strings.Contains(string(body), `"truncated":true`) {
 		t.Fatalf("%s %v", body, err)
 	}
 }

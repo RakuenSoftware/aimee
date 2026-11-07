@@ -25,6 +25,7 @@ func TestCliOauthHandlerProxies(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/oauth/start", strings.NewReader(`{"vendor":"claude"}`))
 	s.cliOauthHandler("model.cli_oauth_start", 5*time.Second)(rr, req)
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%q", rr.Code, rr.Body.String())
@@ -62,6 +63,7 @@ func TestCliOauthHandlerForwardsSessionAndCode(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/oauth/code",
 		strings.NewReader(`{"vendor":"claude","session":"s1","code":"ABC-123"}`))
 	s.cliOauthHandler("model.cli_oauth_code", 5*time.Second)(rr, req)
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%q", rr.Code, rr.Body.String())

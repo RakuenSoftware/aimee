@@ -16,11 +16,11 @@ extern "C"
 {
 #endif
 
-#define DB1_AJ_ROLE_LEN   32
-#define DB1_AJ_AGENT_LEN  64
+#define DB1_AJ_ROLE_LEN        32
+#define DB1_AJ_AGENT_LEN       64
 #define DB1_AJ_PARTICIPANT_LEN 65
-#define DB1_AJ_STATUS_LEN 32
-#define DB1_AJ_TS_LEN     32
+#define DB1_AJ_STATUS_LEN      32
+#define DB1_AJ_TS_LEN          32
 
 #define DB1_AJ_TOOL_LEN 64
 
@@ -51,9 +51,10 @@ extern "C"
        * distinguish in-tool stalls (legitimate long bash) from idle stalls
        * (model wedged with no API call). */
       char current_tool[DB1_AJ_TOOL_LEN];
-      /* api_call_count: monotonic count of provider API calls made. A heartbeat
-       * with the same (current_tool, api_call_count) across polls means
-       * forward progress has stalled. */
+      /* api_call_count: monotonic model-transport HTTP invocations with uncertain delivery,
+       * excluding explicit no-send refusals; not SDK generations or billed calls.
+       * A heartbeat with the same (current_tool, api_call_count) across polls
+       * means forward progress has stalled. */
       int api_call_count;
       double cost_usd;
       /* 0 means no measurement is available, never "the job was free". */
@@ -87,8 +88,9 @@ extern "C"
 
    /* UPDATE heartbeat_at/updated_at=now AND current_tool, api_call_count.
     * current_tool may be "" or NULL when the delegate is between tool
-    * calls (waiting on the model). api_call_count is a monotonic counter
-    * of provider API calls made by this delegate; pass the current value.
+    * calls (waiting on the model). api_call_count counts model-transport HTTP invocations
+    * with uncertain delivery, excluding explicit no-send refusals; pass the
+    * current cumulative value, not SDK generations or assumed billed calls.
     * Used by the runtime to write per-tool-call heartbeats so stale-state
     * detection can distinguish idle stalls from in-tool stalls. */
    void db1_agent_job_heartbeat_ext(int job_id, const char *current_tool, int api_call_count);
@@ -125,6 +127,12 @@ extern "C"
     * db1_agent_job_free. On miss, out is zero-initialized (free is still safe). */
    int db1_agent_job_get(int job_id, db1_agent_job_t *out);
 
+   /* Private actor-owned canonical child observation; never reads job.result.
+    * 0: found (caller owns *json_out), 1: no binding/child,
+    * -2: owner/canonical-source refused, -1: transport/framing failure. */
+   int db1_agent_job_canonical_observation(int job_id, const char *authenticated_actor,
+                                           char **json_out);
+
    /* Resolve an unguessable participant capability to its durable delegate job.
     * Exact-token lookup keeps agent identity behind the delegation boundary. */
    int db1_agent_job_get_by_participant(const char *participant_token, db1_agent_job_t *out);
@@ -133,10 +141,6 @@ extern "C"
     * db1_agent_job_get / db1_agent_job_list_recent. Idempotent and NULL-safe:
     * tolerates a zero-initialized struct (a failed get) and double calls. */
    void db1_agent_job_free(db1_agent_job_t *job);
-
-   /* Check if a heartbeat_at timestamp is older than `stale_minutes`
-    * ago. Returns 1 if stale, 0 if fresh or unparseable. */
-   int db1_agent_job_heartbeat_is_stale(const char *heartbeat_at, int stale_minutes);
 
    /* UPDATE status='running', lease_owner=<owner>, heartbeat_at=now.
     * Returns 0 on success, -1 on error. */
@@ -169,13 +173,10 @@ extern "C"
    int db1_agent_job_cancel_unassigned(int job_id, const char *reason, int min_age_secs);
 
    /* Cancel every pending/running delegate row left by an earlier server
-    * process. Call once during server startup, before any worker can exist.
+    * process. Require an acknowledged success before admitting any new durable
+    * job, then never repeat cleanup after that admission barrier opens.
     * Empty results receive the cancellation reason; existing results remain. */
    int db1_agent_job_cancel_nonterminal_on_restart(const char *reason);
-
-   /* Cancel all 'running' jobs older than `threshold_seconds`, with a
-    * fixed reason. Returns rows changed. */
-   int db1_agent_job_cancel_stale(int threshold_seconds, const char *reason);
 
    /* One row from the agent_log table. */
    typedef struct

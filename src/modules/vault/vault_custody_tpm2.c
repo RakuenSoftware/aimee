@@ -2304,31 +2304,6 @@ out:
    return rc;
 }
 
-void vault_custody_tpm2_reset(void)
-{
-   if (tpm2_process_ready() != 0)
-      return;
-   pthread_mutex_lock(&g_ctx.mu);
-   OPENSSL_cleanse(g_ctx.kek, sizeof(g_ctx.kek));
-   g_ctx.kek_ready = 0;
-   g_ctx.sealed = 1;
-   if (g_ctx.nv_handle != ESYS_TR_NONE && g_ctx.esys)
-      Esys_TR_Close(g_ctx.esys, &g_ctx.nv_handle);
-   g_ctx.nv_handle = ESYS_TR_NONE;
-   g_ctx.nv_auth_ready = 0;
-   if (g_ctx.primary != ESYS_TR_NONE && g_ctx.esys)
-      Esys_TR_Close(g_ctx.esys, &g_ctx.primary);
-   g_ctx.primary = ESYS_TR_NONE;
-   if (g_ctx.esys)
-      Esys_Finalize(&g_ctx.esys); /* finalize ESYS before the TCTI (lifecycle order) */
-   g_ctx.esys = NULL;
-   if (g_ctx.tcti)
-      Tss2_TctiLdr_Finalize(&g_ctx.tcti);
-   g_ctx.tcti = NULL;
-   g_ctx.init_done = 0;
-   pthread_mutex_unlock(&g_ctx.mu);
-}
-
 /* ══════════════════════════════════════════════════════════════════════════════
  * #else : the fail-closed STUB (default build; no libtss2)
  * ════════════════════════════════════════════════════════════════════════════ */
@@ -2529,11 +2504,6 @@ int vault_custody_tpm2_nv_generation(const char *secret, uint64_t *out_gen)
    (void)secret;
    (void)out_gen;
    return -1; /* built without TPM2 -> no NV counter (fail closed) */
-}
-
-void vault_custody_tpm2_reset(void)
-{
-   /* nothing to reset in the stub */
 }
 
 #endif /* WITH_TPM2 */

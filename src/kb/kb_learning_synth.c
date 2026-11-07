@@ -1,6 +1,6 @@
 /* kb_learning_synth.c: cross-source learning candidate-generation pass.
  *
- * bundle (learning_bundle) -> sidecar (model) -> proposed candidate artifacts,
+ * bundle (learning_bundle) -> canonical model IR -> proposed candidate artifacts,
  * each citing the neighbourhood evidence so judge/promote can act unchanged.
  * KB_STORE only; no DB1 access from this file. */
 
@@ -12,7 +12,8 @@
 #include "modules/kb/c/learning_synth_ops.h"
 #include "modules/learning/learning_bundle.h"
 #include "log.h"
-#include "platform_process.h" /* platform_exec_pipe */
+#include "kb_curator_llm.h"
+#include <math.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,7 +21,7 @@
 
 /* Pull embeddable/summarisable text from an evidence artifact payload, falling
  * back through alternate keys then the whole payload (mirrors the embed worker
- * so the sidecar sees the same text the vector was built from). */
+ * so the model sees the same text the vector was built from). */
 static void synth_extract_content(const char *payload_json, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
@@ -86,12 +87,44 @@ static char *synth_build_request(const char *query, const learning_bundle_t *bun
    return str;
 }
 
+static const char synth_prompt[] =
+    "You are a learning-synthesis assistant. The input JSON contains a seed query and a "
+    "neighbourhood of related evidence drawn from MULTIPLE sources (feedback, guardrail events, "
+    "session turns, run outcomes), retrieved because they are semantically close to that seed. "
+    "Synthesise the durable lesson(s) this evidence JOINTLY supports — a consolidated learning "
+    "the system should remember. Prefer a single strong candidate over many weak ones. "
+    "Only propose a candidate when at least two of the evidence items corroborate it. "
+    "Return ONLY a valid JSON object, no markdown fences, of this exact shape: "
+    "{\"candidates\":[{\"kind\":\"<one of: preference, workflow, anti_pattern, mistake_pattern, "
+    "synthesis>\","
+    "\"payload\":{\"title\":\"short imperative summary\",\"content\":\"one-paragraph statement of "
+    "the lesson\","
+    "\"rationale\":\"why the evidence supports it\"},\"confidence\":0.80}]}. "
+    "If the evidence does not jointly support any durable lesson, return {\"candidates\":[]}.";
+
+static int candidate_kind(const char *kind)
+{
+   static const char *const kinds[] = {"preference", "workflow", "anti_pattern", "mistake_pattern",
+                                       "synthesis"};
+   for (size_t i = 0; kind && i < sizeof kinds / sizeof *kinds; i++)
+      if (!strcmp(kind, kinds[i]))
+         return 1;
+   return 0;
+}
+
 int kb_learning_synth_generate(const char *query, const char *synth_cmd, const char *embed_cmd,
                                int k, int max_tokens, const char *scope_kind, const char *scope_id,
                                const char *operator_id, char proposed_ids[][37], int max_ids)
 {
-   if (!query || !query[0] || !synth_cmd || !synth_cmd[0])
+   if (!query || !query[0])
       return -1;
+   if (synth_cmd && synth_cmd[0])
+   {
+      aimee_log(
+          LOG_WARN, "kb.learning.synth",
+          "command model execution is unsupported; configure the canonical synthesis provider");
+      return -1;
+   }
 
    learning_bundle_t bundle;
    if (learning_bundle_build(query, embed_cmd, k, &bundle) != 0)
@@ -103,22 +136,34 @@ int kb_learning_synth_generate(const char *query, const char *synth_cmd, const c
    if (!req)
       return -1;
 
-   char *resp = NULL;
-   size_t resp_len = 0;
-   int rc = platform_exec_pipe(synth_cmd, req, strlen(req), &resp, &resp_len);
+   aimee_request_t request = {0};
+   aimee_response_t response = {0};
+   char error[256] = "";
+   int rc = kb_curator_llm_request_init(&request, synth_prompt, req, NULL);
    free(req);
-   if (rc != 0 || !resp)
+   if (!rc)
    {
-      aimee_log(LOG_WARN, "kb.learning.synth", "sidecar failed (exit %d)", rc);
-      free(resp);
+      request.has_max_tokens = 1;
+      request.max_tokens = max_tokens > 0 ? max_tokens : 2048;
+      rc =
+          kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, &request, &response, error, sizeof error);
+   }
+   char *resp = rc ? NULL : kb_curator_llm_text(&response, error, sizeof error);
+   aimee_request_free(&request);
+   aimee_response_free(&response);
+   if (!resp)
+   {
+      aimee_log(LOG_WARN, "kb.learning.synth",
+                "canonical synthesis did not return a complete authored answer");
       return -1;
    }
-
-   cJSON *root = cJSON_Parse(resp);
+   cJSON *root = aimee_ir_json_parse_frame(resp, strlen(resp));
    free(resp);
-   if (!root)
+   if (!cJSON_IsObject(root))
    {
-      aimee_log(LOG_WARN, "kb.learning.synth", "sidecar returned invalid JSON");
+      cJSON_Delete(root);
+      aimee_log(LOG_WARN, "kb.learning.synth",
+                "canonical synthesis returned invalid candidate JSON");
       return -1;
    }
 
@@ -126,9 +171,8 @@ int kb_learning_synth_generate(const char *query, const char *synth_cmd, const c
    if (status && cJSON_IsString(status) && status->valuestring &&
        strcmp(status->valuestring, "ok") != 0)
    {
-      cJSON *errj = cJSON_GetObjectItemCaseSensitive(root, "error");
-      aimee_log(LOG_WARN, "kb.learning.synth", "sidecar error: %s",
-                (errj && cJSON_IsString(errj)) ? errj->valuestring : "(unspecified)");
+      aimee_log(LOG_WARN, "kb.learning.synth",
+                "canonical synthesis returned a failed business result");
       cJSON_Delete(root);
       return -1;
    }
@@ -137,7 +181,7 @@ int kb_learning_synth_generate(const char *query, const char *synth_cmd, const c
    if (!candidates || !cJSON_IsArray(candidates))
    {
       cJSON_Delete(root);
-      return 0;
+      return -1;
    }
 
    int written = 0;
@@ -148,7 +192,8 @@ int kb_learning_synth_generate(const char *query, const char *synth_cmd, const c
          continue;
       cJSON *kind_j = cJSON_GetObjectItemCaseSensitive(c, "kind");
       cJSON *payload_j = cJSON_GetObjectItemCaseSensitive(c, "payload");
-      if (!kind_j || !cJSON_IsString(kind_j) || !kind_j->valuestring || !kind_j->valuestring[0])
+      if (!cJSON_IsString(kind_j) || !candidate_kind(kind_j->valuestring) ||
+          !cJSON_IsObject(payload_j))
          continue;
       const char *kind = kind_j->valuestring;
 
@@ -163,8 +208,8 @@ int kb_learning_synth_generate(const char *query, const char *synth_cmd, const c
 
       double confidence = 0.0;
       cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(c, "confidence");
-      if (conf_j && cJSON_IsNumber(conf_j))
-         confidence = conf_j->valuedouble;
+      if (cJSON_IsNumber(conf_j) && isfinite(conf_j->valuedouble))
+         confidence = fmax(0.0, fmin(1.0, conf_j->valuedouble));
 
       char *payload_str = NULL;
       if (payload_j)
@@ -198,8 +243,13 @@ int kb_learning_synth_generate(const char *query, const char *synth_cmd, const c
 int kb_learning_synth_drain(int max, const char *synth_cmd, const char *embed_cmd, int k,
                             int max_tokens)
 {
-   if (!synth_cmd || !synth_cmd[0])
-      return 0;
+   if (synth_cmd && synth_cmd[0])
+   {
+      aimee_log(
+          LOG_WARN, "kb.learning.synth",
+          "command model execution is unsupported; configure the canonical synthesis provider");
+      return -1;
+   }
    if (max <= 0)
       max = 16;
 

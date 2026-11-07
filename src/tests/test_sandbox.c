@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -268,6 +269,41 @@ static void test_audit_hook_degraded(void)
  * main
  * ---------------------------------------------------------------------- */
 
+static void test_child_environment_is_private(void)
+{
+   setenv("AIMEE_ENV_SCOPE_TEST", "parent-value", 1);
+   char *environment[] = {"PATH=/usr/bin:/bin", "AIMEE_ENV_SCOPE_TEST=child-only", NULL};
+   sandbox_config_t cfg = {.mode = SANDBOX_MODE_OFF, .child_environment = environment};
+   int pipes[2];
+   assert(!pipe(pipes));
+   pid_t pid =
+       sandbox_exec(&cfg, "printf '%s' \"$AIMEE_ENV_SCOPE_TEST\"", pipes[1], pipes[1], NULL);
+   assert(pid > 0);
+   close(pipes[1]);
+   char output[32] = "";
+   assert(read(pipes[0], output, sizeof output - 1) == 10);
+   close(pipes[0]);
+   int status;
+   assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) && !WEXITSTATUS(status));
+   assert(!strcmp(output, "child-only"));
+   assert(!strcmp(getenv("AIMEE_ENV_SCOPE_TEST"), "parent-value"));
+   assert(!setenv("AIMEE_ENV_AMBIENT_SECRET", "parent-secret", 1));
+   cfg.child_environment_replace = 1;
+   assert(!pipe(pipes));
+   pid = sandbox_exec(&cfg, "printf '%s|%s' \"${AIMEE_ENV_AMBIENT_SECRET-unset}\" \"$PATH\"",
+                      pipes[1], pipes[1], NULL);
+   assert(pid > 0);
+   close(pipes[1]);
+   memset(output, 0, sizeof output);
+   assert(read(pipes[0], output, sizeof output - 1) > 0);
+   close(pipes[0]);
+   assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) && !WEXITSTATUS(status));
+   assert(!strcmp(output, "unset|/usr/bin:/bin"));
+   assert(!strcmp(getenv("AIMEE_ENV_AMBIENT_SECRET"), "parent-secret"));
+   unsetenv("AIMEE_ENV_AMBIENT_SECRET");
+   unsetenv("AIMEE_ENV_SCOPE_TEST");
+}
+
 int main(void)
 {
    test_mode_from_string();
@@ -279,6 +315,7 @@ int main(void)
    test_config_defaults();
    test_command_program();
    test_audit_hook_degraded();
+   test_child_environment_is_private();
 
    printf("sandbox: all tests passed\n");
    return 0;

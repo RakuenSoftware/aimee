@@ -32,8 +32,10 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
+	serverconfig "github.com/JBailes/aimee/server-go/config"
 	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	aimeeprocess "github.com/JBailes/aimee/server-go/modules/aimee/process"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -221,18 +223,20 @@ func start(t testing.TB, path string) (*fixture, error) {
 	// test process attaches as the WFE principal, which is what the engine does
 	// in production.
 	if err := writeGrant(filepath.Join(policy, "aimee.grant"), 1, 30, storeModuleBin,
-		serveKinds()); err != nil {
+		serveKinds(), kindList(aimeeprocess.KindWorkItemChanged, aimeeprocess.KindDelegationChanged,
+			aimeeprocess.KindLearningProjectionPending)); err != nil {
 		return nil, err
 	}
 	if err := writeGrant(filepath.Join(policy, "postgres.grant"), 1, 28,
-		postgresModuleBin, "11265,11266"); err != nil {
+		postgresModuleBin, "11265,11266", ""); err != nil {
 		return nil, err
 	}
 	if err := writeGrantRequesting(filepath.Join(policy, "aimee-postgres.grant"), 1, 69,
-		storeModuleBin, 11266); err != nil {
+		storeModuleBin, 11266, ""); err != nil {
 		return nil, err
 	}
-	if err := writeGrant(filepath.Join(policy, "config.grant"), 1, 2, configBin, "4609"); err != nil {
+	if err := writeGrant(filepath.Join(policy, "config.grant"), 1, 2, configBin, "4609",
+		kindList(serverconfig.EventConfigChanged)); err != nil {
 		return nil, err
 	}
 	// Mirrors the wfe client in src/modules/process-contracts.json: the engine
@@ -250,7 +254,8 @@ func start(t testing.TB, path string) (*fixture, error) {
 		self = resolved
 	}
 	if err := writeGrantRequesting(filepath.Join(policy, "wfe.grant"), busPrincipalClass,
-		wfeBusPrincipalRef, self, lifecycleKind); err != nil {
+		wfeBusPrincipalRef, self, lifecycleKind,
+		kindList(serverconfig.EventConfigChanged, workflowstore.WorkItemChangedKind)); err != nil {
 		return nil, err
 	}
 
@@ -335,7 +340,15 @@ func start(t testing.TB, path string) (*fixture, error) {
 	// mysterious first-call failure.
 	// Attach once, then wait for the module to answer through it. Attaching on
 	// every poll would burn a slot per attempt and deny the one that mattered.
-	deadline := time.Now().Add(20 * time.Second)
+	//
+	// The budget covers the store's schema apply, which takes the database-wide
+	// migration lock (aimee:db:schema). Every fixture in every package of a
+	// workflow-db-e2e run migrates its own schema under that one lock, so a
+	// fixture can queue behind many others; at 20s, a CT with 6 cores under
+	// -race timed out 2 runs in 3 on testing with the postgres module still
+	// waiting for the lock.
+	const serveBudget = 90 * time.Second
+	deadline := time.Now().Add(serveBudget)
 	var lastErr error
 	for time.Now().Before(deadline) && f.client == nil {
 		client, err := attach(f)
@@ -348,9 +361,16 @@ func start(t testing.TB, path string) (*fixture, error) {
 	}
 	for f.client != nil && time.Now().Before(deadline) {
 		if _, callErr := f.client.WfeActiveRootCount(context.Background()); callErr == nil {
-			keepStore = true
-			keepHome = true
-			return f, nil
+			// Tests seed agent_jobs directly, bypassing normal delegate admission.
+			// A serving store alone does not prove the daemon acknowledged its
+			// one-time restart cleanup. Wait for its real success marker first,
+			// within the same deadline, or that cleanup can cancel fresh fixtures.
+			if startupReconciled(filepath.Join(aimeeHome, "server.log")) {
+				keepStore = true
+				keepHome = true
+				return f, nil
+			}
+			lastErr = fmt.Errorf("daemon delegate startup reconciliation not acknowledged")
 		} else {
 			lastErr = fmt.Errorf("call: %w", callErr)
 		}
@@ -362,8 +382,9 @@ func start(t testing.TB, path string) (*fixture, error) {
 	for _, e := range entries {
 		names += " " + e.Name()
 	}
-	return nil, fmt.Errorf("module did not start serving within 20s: %v\nhome:%s\nserver: %s\nmodule: %s",
-		lastErr, names, tail(filepath.Join(home, "server.log")), tail(filepath.Join(home, "store.log")))
+	return nil, fmt.Errorf("module did not start serving within %v: %v\nhome:%s\nserver: %s\ndaemon log: %s\nmodule: %s\npostgres: %s",
+		serveBudget, lastErr, names, tail(filepath.Join(home, "server.log")), tail(filepath.Join(aimeeHome, "server.log")),
+		tail(filepath.Join(home, "store.log")), tail(filepath.Join(home, "postgres.log")))
 }
 
 func copyExecutable(source, destination string) error {
@@ -384,6 +405,13 @@ func copyExecutable(source, destination string) error {
 		return fmt.Errorf("close module alias %s: %w", destination, err)
 	}
 	return nil
+}
+
+// The file is the native logger output of this fixture's own trusted daemon.
+// Neither a store row nor an earlier transport-ready event opens this barrier.
+func startupReconciled(logPath string) bool {
+	body, err := os.ReadFile(logPath)
+	return err == nil && strings.Contains(string(body), "INFO  server: delegate startup reconciliation complete\n")
 }
 
 func prepareStore(t testing.TB, baseURL, key string) (*pgxpool.Pool, *pgxpool.Pool, string, string, error) {
@@ -486,12 +514,12 @@ func withDSNParams(dsn string, params map[string]string) string {
 func attach(f *fixture) (*wire.Client, error) {
 	ctx := context.Background()
 	busSock := filepath.Join(f.home, ".config", "aimee", "server-module-bus.sock")
-	attached, err := bus.ConnectClient(ctx, busSock, busPrincipalClass,
+	attached, err := ring.ConnectClient(ctx, busSock, busPrincipalClass,
 		wfeBusPrincipalRef)
 	if err != nil {
 		return nil, err
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, attached)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, attached)
 	if err != nil {
 		return nil, err
 	}
@@ -501,18 +529,31 @@ func attach(f *fixture) (*wire.Client, error) {
 // lifecycleKind is DB1's lifecycle stage, the one the engine's store calls.
 const lifecycleKind = 11792
 
-func writeGrantRequesting(path string, class, ref uint32, executable string, request int) error {
+// The publish= and subscribe= lines carry the change notifications the
+// exporter grants in production (ring D14). Left empty, the daemon refuses
+// every announcement, and push-driven paths -- the engine's work-item wake, the
+// learning delivery worker -- are never exercised here.
+func writeGrantRequesting(path string, class, ref uint32, executable string, request int,
+	subscribe string) error {
 	body := fmt.Sprintf("version=1\nprincipal_class=%d\nprincipal_ref=%d\nuid=self\n"+
-		"executable=%s\npublish=\nsubscribe=\nrequest=%d\nserve=\n",
-		class, ref, executable, request)
+		"executable=%s\npublish=\nsubscribe=%s\nrequest=%d\nserve=\n",
+		class, ref, executable, subscribe, request)
 	return os.WriteFile(path, []byte(body), 0o600)
 }
 
-func writeGrant(path string, class, ref uint32, executable, serve string) error {
+func writeGrant(path string, class, ref uint32, executable, serve, publish string) error {
 	body := fmt.Sprintf("version=1\nprincipal_class=%d\nprincipal_ref=%d\nuid=self\n"+
-		"executable=%s\npublish=\nsubscribe=\nrequest=\nserve=%s\n",
-		class, ref, executable, serve)
+		"executable=%s\npublish=%s\nsubscribe=\nrequest=\nserve=%s\n",
+		class, ref, executable, publish, serve)
 	return os.WriteFile(path, []byte(body), 0o600)
+}
+
+func kindList(kinds ...uint32) string {
+	out := make([]string, len(kinds))
+	for i, kind := range kinds {
+		out[i] = strconv.FormatUint(uint64(kind), 10)
+	}
+	return strings.Join(out, ",")
 }
 
 // serveKinds lists DB1's event kinds. Derived from the family base rather than

@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -65,11 +65,11 @@ SELECT set_config('aimee.memory_scope_all','1',true);`)
 	db := runtimeRoleDB{evalQueryer{tx}, t}
 	backend := &postgresDataStore{db: db, placement: PlacementKB}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
-	call := func(req DataRequest) (DataResponse, bus.ModuleStatus) {
+	call := func(req DataRequest) (DataResponse, ring.ModuleStatus) {
 		t.Helper()
-		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
+		raw, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
 		var out DataResponse
-		if status == bus.ModuleStatusOK && json.Unmarshal(raw, &out) != nil {
+		if status == ring.ModuleStatusOK && json.Unmarshal(raw, &out) != nil {
 			t.Fatal(string(raw))
 		}
 		return out, status
@@ -77,7 +77,7 @@ SELECT set_config('aimee.memory_scope_all','1',true);`)
 	okCall := func(req DataRequest) DataResponse {
 		t.Helper()
 		out, status := call(req)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(req, status)
 		}
 		return out
@@ -122,14 +122,14 @@ SELECT set_config('aimee.memory_scope_all','1',true);`)
 	if len(hidden.Scopes) != 0 {
 		t.Fatal(hidden)
 	}
-	if _, status := call(DataRequest{Operation: "scope-tag", ID: 6, TagScope: &Scope{Type: "workspace", Value: "reject-projection"}, IncludeAll: true}); status != bus.ModuleStatusInternal {
+	if _, status := call(DataRequest{Operation: "scope-tag", ID: 6, TagScope: &Scope{Type: "workspace", Value: "reject-projection"}, IncludeAll: true}); status != ring.ModuleStatusInternal {
 		t.Fatal("projection failure accepted", status)
 	}
 	if primary(6) != (ScopeTag{Type: "global", Value: "_global"}) || len(collect(6)) != 4 {
 		t.Fatal("partial scope mutation committed")
 	}
 	for _, private := range []Scope{{Type: "user", Value: "alice"}, {Type: "agent", Value: "reviewer"}} {
-		if _, status := call(DataRequest{Operation: "scope-tag", ID: 6, TagScope: &private, IncludeAll: true}); status != bus.ModuleStatusInvalidRequest {
+		if _, status := call(DataRequest{Operation: "scope-tag", ID: 6, TagScope: &private, IncludeAll: true}); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("KB accepted private scope", private, status)
 		}
 	}
@@ -173,7 +173,7 @@ SELECT set_config('aimee.memory_scope_all','1',true);`)
 	}
 }
 
-func exerciseScopeReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseScopeReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	if _, err := tx.Exec(ctx, `SELECT set_config('aimee.memory_scope_all','1',true)`); err != nil {
 		t.Fatal(err)
@@ -184,9 +184,9 @@ func exerciseScopeReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler b
 	}
 	call := func(req DataRequest) DataResponse {
 		t.Helper()
-		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
+		raw, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
 		var out DataResponse
-		if status != bus.ModuleStatusOK || json.Unmarshal(raw, &out) != nil {
+		if status != ring.ModuleStatusOK || json.Unmarshal(raw, &out) != nil {
 			t.Fatalf("scope replay %s: %v %s", req.Operation, status, raw)
 		}
 		return out

@@ -12,9 +12,7 @@
     "supported": true
   },
   "ownership_complete": true,
-  "sources": [
-    "src/modules/control-web/module_adapter.c"
-  ],
+  "sources": [],
   "go_sources": [
     "server-go/modules/control-web/policy/acl.go",
     "server-go/modules/control-web/control_web.go"

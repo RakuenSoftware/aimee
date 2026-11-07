@@ -2271,7 +2271,7 @@ static void ensure_hermes_plugin_enabled(const char *config_path)
    dstr_free(&data);
    if (!text)
       return;
-   const char *plugins = strstr(text, "plugins:");
+   char *plugins = strstr(text, "plugins:");
    while (plugins && plugins != text && plugins[-1] != '\n')
       plugins = strstr(plugins + 1, "plugins:");
    if (!plugins)

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func groundingWire(kind claimKind, claims, callees []string) []byte {
@@ -60,9 +60,9 @@ func TestGroundingDecisionParity(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response, status := Handle(bus.ModuleInvocation{StageID: StageGrounding},
+			response, status := Handle(ring.ModuleInvocation{StageID: StageGrounding},
 				groundingWire(test.kind, test.claims, test.callees))
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("status = %d", status)
 			}
 			reject, reason := groundingDecision(t, response)
@@ -79,9 +79,9 @@ func TestGroundingSideEffectingCalleeSet(t *testing.T) {
 		t.Fatalf("side-effecting callee count = %d, want 74", len(sideEffectingCallees))
 	}
 	for callee := range sideEffectingCallees {
-		response, status := Handle(bus.ModuleInvocation{StageID: StageGrounding},
+		response, status := Handle(ring.ModuleInvocation{StageID: StageGrounding},
 			groundingWire(claimNone, nil, []string{callee}))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("%s status = %d", callee, status)
 		}
 		reject, reason := groundingDecision(t, response)
@@ -128,11 +128,11 @@ func TestGroundingRejectsMalformedWire(t *testing.T) {
 	embeddedZero[requestClaimsOff+1] = 0
 	tests = append(tests, embeddedZero)
 	for index, request := range tests {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageGrounding}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageGrounding}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("malformed request %d status = %d", index, status)
 		}
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageGrounding + 1}, valid()); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageGrounding + 1}, valid()); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong-stage status = %d", status)
 	}
 }
@@ -147,19 +147,19 @@ func TestGroundingWireBounds(t *testing.T) {
 	for index := range callees {
 		callees[index] = maxText
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageGrounding},
-		groundingWire(claimStringArray, claims, callees)); status != bus.ModuleStatusOK {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageGrounding},
+		groundingWire(claimStringArray, claims, callees)); status != ring.ModuleStatusOK {
 		t.Fatalf("maximum canonical wire status = %d", status)
 	}
 }
 
 func TestGroundingHonorsCancellationAfterValidation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageGrounding, DeadlineNS: 1}
+	invocation := ring.ModuleInvocation{StageID: StageGrounding, DeadlineNS: 1}
 	valid := groundingWire(claimNone, nil, []string{"write"})
-	if _, status := Handle(invocation, valid); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(invocation, valid); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
-	if _, status := Handle(invocation, nil); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(invocation, nil); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed expired-request status = %d", status)
 	}
 }

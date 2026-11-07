@@ -3,13 +3,13 @@ package memory
 import (
 	"encoding/json"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func handleScopeCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleScopeCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{IncludeAll: true}
 	scoped := false
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	switch verb {
@@ -51,19 +51,19 @@ func handleScopeCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		request.Operation, request.TagScope = "scope-tag", &Scope{Type: kind, Value: value}
 		scoped = commandScope(args, &request)
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	result := map[string]any{"status": "ok"}
 	if verb == "scope_visibility_rank" {

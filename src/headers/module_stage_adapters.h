@@ -11,21 +11,11 @@ typedef struct cJSON cJSON;
  * process module. Calls fail closed; readiness keeps the listener out of
  * rotation until all required modules have attached to the local bus. */
 void server_module_stage_adapters_configure(void);
+void server_module_tools_adapters_configure(void);
 
 /* The skills nudge has no reusable monolith service object, so its call site
  * invokes this adapter directly. Returns 0 on a valid module reply. */
 int server_module_skill_should_fire(int hook_count, int interval, int *fire);
-
-/* Score one bounded benchmark result set through the separately supervised
- * benchmarks process. There is no in-process scoring fallback. */
-int server_module_benchmark_score(const int64_t *retrieved, uint32_t retrieved_count,
-                                  const int64_t *relevant, uint32_t relevant_count, uint32_t k,
-                                  aimee_benchmarks_ir_scores_t *scores);
-
-/* Summarize measured query latency through the benchmarks process. The server
- * only captures timings and does not retain a local percentile fallback. */
-int server_module_benchmark_latency(const double *latencies, uint32_t count,
-                                    aimee_benchmarks_latency_summary_t *summary);
 
 /* Invoke the Go memory module's scoped data stage. `request` must contain the
  * DATA JSON contract; this connection adapter forcibly supplies user scope so
@@ -36,6 +26,7 @@ cJSON *server_module_memory_data(const cJSON *request);
 /* Complete configured derived-memory cleanup before acknowledging erasure. */
 int server_module_memory_reset_derived(void);
 
-int server_module_memory_erase_subject(const char *request_id, const char *subject, const cJSON *sessions);
+int server_module_memory_erase_subject(const char *request_id, const char *subject,
+                                       const cJSON *sessions);
 
 #endif

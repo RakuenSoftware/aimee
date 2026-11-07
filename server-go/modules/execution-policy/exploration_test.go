@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -304,7 +304,7 @@ func TestToolJSONCannotIssueOrBypassContract(t *testing.T) {
 	}
 	req["contract"] = map[string]any{"tier": "enforce"}
 	body, _ := json.Marshal(req)
-	if _, status := h(bus.ModuleInvocation{StageID: StageTool}, body); status != bus.ModuleStatusInvalidRequest {
+	if _, status := h(ring.ModuleInvocation{StageID: StageTool}, body); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("tool JSON issued a contract", status)
 	}
 }

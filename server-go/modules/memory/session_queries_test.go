@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
 // Exercise the public commands through the restricted-role transaction owner.
 // These assertions replace the native top-L2/session-priority wrapper tests.
-func exerciseSessionQueryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseSessionQueryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -43,12 +43,12 @@ func exerciseSessionQueryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ha
 	run := func(verb string, max int, all bool, project, workspace, pattern string) []publicMemoryRecord {
 		t.Helper()
 		args, _ := json.Marshal(map[string]any{"max": max, "include_all": all, "project": project, "workspace": workspace, "scope_context": true, "pattern": pattern})
-		frame, _ := bus.EncodeCommand(verb, args)
-		encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status != bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand(verb, args)
+		encoded, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != ring.ModuleStatusOK {
 			t.Fatal(verb, status)
 		}
-		body, err := bus.DecodeCommandResult(encoded)
+		body, err := ring.DecodeCommandResult(encoded)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,9 +116,9 @@ func exerciseSessionQueryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ha
 	// count once, RLS excludes foreign rows, and absent/nonpositive IDs do not
 	// invent updates. Read the stored effect, not just a successful envelope.
 	request := DataRequest{Operation: "touch", Project: "session-query-project", IDs: []int64{local, local, workspace, private, -1, 9223372036854775807}}
-	raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request))
+	raw, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, request))
 	var response DataResponse
-	if status != bus.ModuleStatusOK || json.Unmarshal(raw, &response) != nil || response.Count == nil || *response.Count != 1 {
+	if status != ring.ModuleStatusOK || json.Unmarshal(raw, &response) != nil || response.Count == nil || *response.Count != 1 {
 		t.Fatal("batch touch", status, string(raw))
 	}
 	exec(`SELECT set_config('aimee.memory_scope_all','1',true)`)
@@ -131,7 +131,7 @@ func exerciseSessionQueryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ha
 	}
 	for _, ids := range [][]int64{nil, make([]int64, 257)} {
 		request.IDs = ids
-		if _, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != bus.ModuleStatusInvalidRequest {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("touch bounds", len(ids), status)
 		}
 	}

@@ -16,7 +16,7 @@ COPY frontend/ ./
 RUN npm run build:console
 
 # --- console service: the standalone Go server (cgo: sqlite sessions) ---
-FROM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS gobuild
+FROM golang:1.26.10-bookworm@sha256:fe3da92a5cb2881e4aa75e625cb0b7c50571632fb4cf340cbe53e6ccdcffdd51 AS gobuild
 WORKDIR /src/control-web
 COPY server-go/go.mod server-go/go.sum /src/server-go/
 COPY server-go/modules/control-web/policy/ /src/server-go/modules/control-web/policy/

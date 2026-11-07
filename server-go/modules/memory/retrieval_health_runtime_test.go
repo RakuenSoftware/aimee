@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestHealthReceiptImportPreservesStagesAndMissingMetadata(t *testing.T) {
@@ -80,14 +80,14 @@ func TestHealthPrivateHostBoundaryAndWindowPlan(t *testing.T) {
 	t.Setenv("AIMEE_MEMORY_HEALTH_ENABLED", "1")
 	options := handlerOptions{placement: PlacementServer}
 	args := sourceReleaseArgs(map[string]any{"operation": "health-plan", "health_principal": "alice", "window": "2h"})
-	if _, code := handleRetrievalHealth(options, bus.ModuleInvocation{PrincipalRef: 1}, args); code != bus.ModuleStatusInvalidRequest {
+	if _, code := handleRetrievalHealth(options, ring.ModuleInvocation{PrincipalRef: 1}, args); code != ring.ModuleStatusInvalidRequest {
 		t.Fatal(code)
 	}
-	raw, code := handleRetrievalHealth(options, bus.ModuleInvocation{}, args)
-	if code != bus.ModuleStatusOK {
+	raw, code := handleRetrievalHealth(options, ring.ModuleInvocation{}, args)
+	if code != ring.ModuleStatusOK {
 		t.Fatal(code)
 	}
-	body, err := bus.DecodeCommandResult(raw)
+	body, err := ring.DecodeCommandResult(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,15 +102,15 @@ func TestHealthPrivateHostBoundaryAndWindowPlan(t *testing.T) {
 	}
 	for _, window := range []string{"0h", "25h", "invalid", "-1h"} {
 		args["window"], _ = json.Marshal(window)
-		raw, _ = handleRetrievalHealth(options, bus.ModuleInvocation{}, args)
-		body, _ = bus.DecodeCommandResult(raw)
+		raw, _ = handleRetrievalHealth(options, ring.ModuleInvocation{}, args)
+		body, _ = ring.DecodeCommandResult(raw)
 		if !strings.Contains(string(body), "invalid_argument") {
 			t.Fatal(string(body))
 		}
 	}
 	t.Setenv("AIMEE_MEMORY_HEALTH_ENABLED", "")
-	raw, _ = handleRetrievalHealth(options, bus.ModuleInvocation{}, args)
-	body, _ = bus.DecodeCommandResult(raw)
+	raw, _ = handleRetrievalHealth(options, ring.ModuleInvocation{}, args)
+	body, _ = ring.DecodeCommandResult(raw)
 	if !strings.Contains(string(body), "disabled") {
 		t.Fatal(string(body))
 	}

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -40,7 +40,7 @@ func TestAlertViews(t *testing.T) {
 	}
 }
 
-func exerciseAlertsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseAlertsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -97,12 +97,12 @@ func exerciseAlertsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 			args[k] = v
 		}
 		raw, _ := json.Marshal(args)
-		frame, _ := bus.EncodeCommand("alerts", raw)
-		encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status != bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand("alerts", raw)
+		encoded, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status)
 		}
-		body, err := bus.DecodeCommandResult(encoded)
+		body, err := ring.DecodeCommandResult(encoded)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -213,9 +213,9 @@ func exerciseAlertsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
  SELECT 'L2','fact','plateau-'||i,'commitment','project','alerts-project','pending',pg_now_text((-(90-i%90))||' days'),pg_now_text((-(90-i%90)+10)||' days') FROM generate_series(1,500) i`)
 	sweep := func() int {
 		t.Helper()
-		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{Operation: "lifecycle-sweep", Project: "alerts-project"}))
+		raw, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{Operation: "lifecycle-sweep", Project: "alerts-project"}))
 		var response DataResponse
-		if status != bus.ModuleStatusOK || json.Unmarshal(raw, &response) != nil || response.Count == nil {
+		if status != ring.ModuleStatusOK || json.Unmarshal(raw, &response) != nil || response.Count == nil {
 			t.Fatal(status, string(raw))
 		}
 		return *response.Count

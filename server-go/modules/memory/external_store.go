@@ -13,13 +13,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	contract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/audit"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 	"github.com/JBailes/aimee/server-go/modules/memory/backendstore"
 	"github.com/JBailes/aimee/server-go/modules/memory/cognee"
 	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // externalDataStore is a complete baseline store backed by an engine-owned
@@ -68,13 +68,13 @@ func configuredExternalStore(executor egress.Executor, placement Placement) (*ex
 	}
 	return &externalDataStore{ContractDataStore: ContractDataStore{backend}, catalog: catalog, backend: backend, placement: placement}, nil
 }
-func (s *externalDataStore) execute(ctx context.Context, request DataRequest, scope Scope, options handlerOptions, explicit bool) (response DataResponse, status bus.ModuleStatus) {
+func (s *externalDataStore) execute(ctx context.Context, request DataRequest, scope Scope, options handlerOptions, explicit bool) (response DataResponse, status ring.ModuleStatus) {
 	response = DataResponse{Records: []Record{}}
-	status = bus.ModuleStatusOK
+	status = ring.ModuleStatusOK
 	actor := personalCaller(options.commandContext, request.Authority)
 	epoch, epochErr := s.catalog.AdmissionEpoch(ctx, actor.principal)
 	if epochErr != nil {
-		return response, bus.ModuleStatusInternal
+		return response, ring.ModuleStatusInternal
 	}
 	scopes := []Scope{scope}
 	if s.placement == PlacementKB && !explicit {
@@ -122,14 +122,14 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 		}
 		return result, nil
 	}
-	fail := func(err error) (DataResponse, bus.ModuleStatus) {
-		refusal := func(kind, message string, retry bool) (DataResponse, bus.ModuleStatus) {
+	fail := func(err error) (DataResponse, ring.ModuleStatus) {
+		refusal := func(kind, message string, retry bool) (DataResponse, ring.ModuleStatus) {
 			failure := &contract.Failure{Kind: kind, Message: message, Retryable: retry}
 			raw, _ := json.Marshal(commandError(kind, message))
-			return DataResponse{Records: []Record{}, Failure: failure, Payload: raw}, bus.ModuleStatusOK
+			return DataResponse{Records: []Record{}, Failure: failure, Payload: raw}, ring.ModuleStatusOK
 		}
 		if ctx.Err() != nil {
-			return response, bus.ModuleStatusCancelled
+			return response, ring.ModuleStatusCancelled
 		}
 		if errors.Is(err, backendstore.ErrErasedAdmission) {
 			return refusal("erased_admission", "memory write predates retained erasure controls", false)
@@ -145,32 +145,32 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 		}
 		if errors.Is(err, backendstore.ErrConflict) {
 			code := MutationVersionConflict
-			return DataResponse{Code: &code}, bus.ModuleStatusOK
+			return DataResponse{Code: &code}, ring.ModuleStatusOK
 		}
 		if errors.Is(err, backendstore.ErrReplayUnavailable) {
 			code := MutationReplayUnavailable
-			return DataResponse{Code: &code}, bus.ModuleStatusOK
+			return DataResponse{Code: &code}, ring.ModuleStatusOK
 		}
 		if errors.Is(err, backendstore.ErrIdempotency) {
 			code := MutationIdempotencyConflict
-			return DataResponse{Code: &code}, bus.ModuleStatusOK
+			return DataResponse{Code: &code}, ring.ModuleStatusOK
 		}
 		if code := mutationRefusal(err); code != 0 {
-			return DataResponse{Code: &code}, bus.ModuleStatusOK
+			return DataResponse{Code: &code}, ring.ModuleStatusOK
 		}
 		if errors.Is(err, contract.ErrNotFound) {
-			return response, bus.ModuleStatusOK
+			return response, ring.ModuleStatusOK
 		}
 		if errors.Is(err, contract.ErrClientRequest) {
-			return response, bus.ModuleStatusInvalidRequest
+			return response, ring.ModuleStatusInvalidRequest
 		}
 		if errors.Is(err, contract.ErrUnsupported) {
-			return response, bus.ModuleStatusCapabilityAbsent
+			return response, ring.ModuleStatusCapabilityAbsent
 		}
 		if ctx.Err() != nil {
-			return response, bus.ModuleStatusCancelled
+			return response, ring.ModuleStatusCancelled
 		}
-		return response, bus.ModuleStatusInternal
+		return response, ring.ModuleStatusInternal
 	}
 	convert := func(records []contract.Record) error {
 		for _, r := range records {
@@ -192,10 +192,10 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 	case "personal-source-revalidate", "source-revalidate":
 		private := request.Operation == "personal-source-revalidate"
 		if private != (s.placement == PlacementServer) || !request.Revalidation.valid() {
-			return response, bus.ModuleStatusInvalidRequest
+			return response, ring.ModuleStatusInvalidRequest
 		}
 		if s.placement == PlacementKB && request.Revalidation.SendGuard != "" && !sourceSendGuardAllowed(options.commandContext) {
-			return response, bus.ModuleStatusCapabilityAbsent
+			return response, ring.ModuleStatusCapabilityAbsent
 		}
 		eligible, err := s.externalRevalidate(ctx, request.Revalidation, scopes)
 		if err != nil {
@@ -204,7 +204,7 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 		response.Payload, _ = json.Marshal(sourceGuardResponse(request.Revalidation, eligible))
 	case "get":
 		if request.ID <= 0 {
-			return response, bus.ModuleStatusInvalidRequest
+			return response, ring.ModuleStatusInvalidRequest
 		}
 		if request.ReadPolicy != nil && request.ReadPolicy.Mode != "current" {
 			return fail(contract.ErrUnsupported)
@@ -253,7 +253,7 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 		deleting := request.Operation == "delete" || request.Operation == "delete-as"
 		replacing := request.Operation == "supersede" || request.Operation == "update-as"
 		if (deleting || replacing) && request.ID <= 0 {
-			return response, bus.ModuleStatusInvalidRequest
+			return response, ring.ModuleStatusInvalidRequest
 		}
 		confidence := 1.0
 		if request.Confidence != nil {
@@ -277,7 +277,7 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 			r.Metadata, _ = json.Marshal(map[string]string{"use_cases": request.UseCases, "source_session": request.SessionID})
 		}
 		if !deleting && !replacing && (r.ID != 0 || r.Key == "" || r.Kind == "") {
-			return response, bus.ModuleStatusInvalidRequest
+			return response, ring.ModuleStatusInvalidRequest
 		}
 		if !deleting {
 			if err = screenModelMemory(actor.authority, r.Key, r.Content, request.UseCases); err != nil {
@@ -396,7 +396,7 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 		response.Payload, _ = json.Marshal(capability)
 	case "backend-export":
 		if !verifiedRetryCaller(options.commandContext) || !options.commandContext.UserAuthority {
-			return response, bus.ModuleStatusCapabilityAbsent
+			return response, ring.ModuleStatusCapabilityAbsent
 		}
 		raw, err := s.catalog.ExportScope(ctx, scope)
 		if err != nil {
@@ -408,7 +408,7 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 		response.Payload = raw
 	case "backend-import":
 		if !verifiedRetryCaller(options.commandContext) || !options.commandContext.UserAuthority {
-			return response, bus.ModuleStatusCapabilityAbsent
+			return response, ring.ModuleStatusCapabilityAbsent
 		}
 		// Reset prior derived state before publishing the imported source catalog.
 		if reset, ok := s.backend.(contract.DerivedResetter); ok {

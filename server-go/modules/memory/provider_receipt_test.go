@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 	"time"
@@ -350,7 +350,7 @@ func TestProviderReceiptRecoveryStages(t *testing.T) {
 			inspect := sourceReleaseArgs(map[string]any{"dispatch_owner": strings.Repeat("b", 32), "receipt_request_id": "request", "chain_intact": true, "ledger_events": rows})
 			raw, code := inspectProviderReceipts(inspect)
 			var result map[string]any
-			body, decodeErr := bus.DecodeCommandResult(raw)
+			body, decodeErr := ring.DecodeCommandResult(raw)
 			if decodeErr != nil {
 				t.Fatal(decodeErr)
 			}
@@ -420,7 +420,7 @@ func TestProviderReceiptReplayRetention(t *testing.T) {
 	inspect := sourceReleaseArgs(map[string]any{"dispatch_owner": strings.Repeat("b", 32), "receipt_request_id": "request", "chain_intact": true, "ledger_events": rows, "include_payload": true, "replay_inputs": map[string]string{prepared.AttemptID: base64.StdEncoding.EncodeToString(payload)}})
 	run := func() map[string]any {
 		raw, _ := inspectProviderReceipts(inspect)
-		body, err := bus.DecodeCommandResult(raw)
+		body, err := ring.DecodeCommandResult(raw)
 		var result map[string]any
 		if err != nil || json.Unmarshal(body, &result) != nil {
 			t.Fatal(err, string(body))
