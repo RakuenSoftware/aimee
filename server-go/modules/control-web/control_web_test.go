@@ -40,6 +40,12 @@ func TestProxyRouteAuthorizationParity(t *testing.T) {
 		want         bool
 	}{
 		{"console exact", TargetConsoleAdmin, "GET", "/v1/console/overview", true},
+		{"memory administration", TargetConsoleAdmin, "POST", "/v1/console/memory", true},
+		{"memory administration trailing slash", TargetConsoleAdmin, "POST", "/v1/console/memory/", true},
+		{"memory administration wrong method", TargetConsoleAdmin, "GET", "/v1/console/memory", false},
+		{"memory administration nested", TargetConsoleAdmin, "POST", "/v1/console/memory/extra", false},
+		{"memory administration encoded", TargetConsoleAdmin, "POST", "/v1/console/%6demory", false},
+		{"memory administration fleet denied", TargetFleet, "POST", "/v1/console/memory", false},
 		{"console wildcard", TargetConsoleAdmin, "POST", "/v1/enrollments/abc/revoke", true},
 		{"console trailing slash", TargetConsoleAdmin, "GET", "/v1/enrollments/", true},
 		{"console wrong method", TargetConsoleAdmin, "DELETE", "/v1/enrollments/abc/revoke", false},

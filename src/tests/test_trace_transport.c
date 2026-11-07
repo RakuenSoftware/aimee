@@ -7,7 +7,8 @@
 #include "trace_analysis.h"
 #include <assert.h>
 
-static int load_count = 2, unavailable, applies, reads;
+static int load_count = 2, unavailable, applies, reads, captures, context_failure, context_absent;
+static cJSON *snapshot;
 static const int64_t last_id = INT64_C(9007199254741507);
 static const char *state_receipt = "{\"status\":\"ok\",\"last_id\":\"9007199254741507\"}";
 static const char *apply_receipt =
@@ -21,6 +22,9 @@ int db1_execution_trace_list_after_id(int64_t after, db1_execution_trace_mining_
 {
    assert(after == last_id && max >= 2);
    reads++;
+   /* Simulate a verifier identity change during canonical I/O. The already
+    * captured command context must remain the same owned snapshot. */
+   context_failure = 1;
    for (int i = 0; i < load_count; i++)
    {
       out[i].id = last_id + i + 1;
@@ -31,9 +35,30 @@ int db1_execution_trace_list_after_id(int64_t after, db1_execution_trace_mining_
    }
    return load_count;
 }
-int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **response)
+int aimee_module_commands_capture_caller_context(cJSON **context)
 {
-   assert(!strcmp(method, "memory.runtime"));
+   captures++;
+   *context = NULL;
+   if (context_failure)
+      return -1;
+   if (context_absent)
+      return 0;
+   *context = snapshot = cJSON_Parse("{\"authenticated\":true,\"user_authority\":false,\"principal\":\"service-one\",\"transport_identity\":\"service-one\",\"scope_kind\":\"project\",\"scope_id\":\"one\"}");
+   return *context ? 1 : -1;
+}
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **response)
+{
+   assert(!strcmp(method, "memory.runtime") && timeout_ms == 125000);
+   assert(context_absent ? context == NULL : context == snapshot);
+   if (context)
+   {
+      assert(!strcmp(jo_cstr(context, "principal"), "service-one"));
+      assert(!strcmp(jo_cstr(context, "scope_kind"), "project"));
+      assert(!strcmp(jo_cstr(context, "scope_id"), "one"));
+      assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));
+   }
    if (unavailable)
    {
       *response = NULL;
@@ -64,7 +89,10 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
 }
 int main(void)
 {
-   assert(trace_mine() == 1 && applies == 1 && reads == 1);
+   assert(trace_mine() == 1 && applies == 1 && reads == 1 && captures == 1);
+   assert(context_failure);
+   assert(trace_mine() == -1 && applies == 1 && reads == 1 && captures == 2);
+   context_failure = 0;
    unavailable = 1;
    assert(trace_mine() == -1 && applies == 1 && reads == 1);
    unavailable = 0;
@@ -77,6 +105,7 @@ int main(void)
    for (size_t i = 0; i < sizeof(bad_state) / sizeof(bad_state[0]); i++)
    {
       state_receipt = bad_state[i];
+      context_failure = 0;
       assert(trace_mine() == -1 && applies == 1 && reads == 1);
    }
    state_receipt = "{\"status\":\"ok\",\"last_id\":\"9007199254741507\"}";
@@ -88,12 +117,18 @@ int main(void)
    for (size_t i = 0; i < sizeof(bad_apply) / sizeof(bad_apply[0]); i++)
    {
       apply_receipt = bad_apply[i];
+      context_failure = 0;
       assert(trace_mine() == -1);
    }
    int before = applies;
+   context_failure = 0;
    load_count = -1;
    assert(trace_mine() == -1 && applies == before);
+   context_failure = 0;
    load_count = 0;
+   assert(trace_mine() == 0 && applies == before);
+   context_failure = 0;
+   context_absent = 1;
    assert(trace_mine() == 0 && applies == before);
    puts("trace connection: exact IDs, context and malformed/error responses passed");
    return 0;

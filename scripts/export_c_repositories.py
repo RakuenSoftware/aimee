@@ -617,6 +617,8 @@ def c_process_has_handler(sources: list[str]) -> bool:
 def go_module_main(module_id: str, principal_ref: int,
                    stages: list[dict[str, object]]) -> str:
     """Generate one independently buildable Go process entry point."""
+    if module_id == "memory":
+        return 'package main\nimport ("fmt"; "os")\nfunc main() { fmt.Fprintln(os.Stderr, "memory capability unavailable: install an external implementation and select its absolute executable in the role module manifest"); os.Exit(2) }\n'
     entries = "\n".join(
         f"\t\t{{EventKind: {stage['event_kind']}, StageID: {stage['id']}}},"
         for stage in stages
@@ -647,14 +649,6 @@ def go_module_main(module_id: str, principal_ref: int,
         extra_imports = '\t"github.com/JBailes/aimee/server-go/modules/aimee/process"\n'
         handler = "moduleHandler.Handle"
         process_setup = """\tmoduleHandler, err := process.New(ctx, os.Args[1])
-\tif err != nil {
-\t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
-\t\tos.Exit(1)
-\t}
-"""
-    if module_id == "memory":
-        handler = "moduleHandler"
-        process_setup = """\tmoduleHandler, err := handler.NewProcessHandler(ctx, os.Args[1], os.Getenv("AIMEE_MODULE_PLACEMENT"))
 \tif err != nil {
 \t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
 \t\tos.Exit(1)
@@ -778,6 +772,8 @@ GO_SHARED_CONTRACTS = {
 def go_process_shared_sources(module_id: str) -> list[str]:
     """Return shared contracts and helpers needed by independently built Go modules."""
     sources: list[str] = []
+    if module_id == "memory":
+        return sorted([path.relative_to(ROOT).as_posix() for path in (ROOT / "server-go/memory").glob("*.go") if not path.name.endswith("_test.go")] + ["server-go/cmd/aimee-memory-bus-probe/main.go"])  # Generic SDK/probe, not concrete-owner sources.
     for directory, importers in GO_SHARED_CONTRACTS.items():
         if module_id not in importers:
             continue
@@ -787,24 +783,6 @@ def go_process_shared_sources(module_id: str) -> list[str]:
             if not path.name.endswith("_test.go") or
             (module_id == "config" and directory == "server-go/config")
         )
-    if module_id == "memory":
-        # Integration tests drive the real PostgreSQL provider's encoded
-        # contract. Include that test dependency under its own owner directory;
-        # the memory runtime still imports only the bus-facing db contract.
-        sources.extend(
-            path.relative_to(ROOT).as_posix()
-            for path in (ROOT / "server-go/modules/postgres").glob("*.go")
-            if not path.name.endswith("_test.go")
-        )
-        # Frozen corpora are data dependencies of exported Go tests, not native
-        # executable test registrations in the module descriptor.
-        sources.extend([
-            "tests/eval/memory_mr05_coverage_cases.json",
-            "tests/eval/memory_mr09/baseline-policy.json",
-            "tests/eval/memory_mr09/diversity-policy.json",
-            "tests/eval/memory_mr09/diversity-v2-policy.json",
-            "tests/eval/memory_mr09/code-navigation-pilot.json",
-        ])
     return sorted(sources)
 
 
@@ -870,11 +848,9 @@ def go_module_requirements(module_id: str) -> tuple[list[str], list[str]]:
     indirect: list[str] = []
     if module_id == "config":
         direct.append("go.yaml.in/yaml/v3")
-    if module_id == "memory":
-        direct.append("golang.org/x/text")
     # The memory export includes PostgreSQL integration tests, while its
     # production storage remains the pure-Go bus client.
-    if module_id in {"postgres", "memory"}:
+    if module_id == "postgres":
         direct.append("github.com/jackc/pgx/v5")
         indirect.extend([
             "github.com/jackc/pgpassfile",

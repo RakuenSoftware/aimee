@@ -125,6 +125,14 @@ func handleRecordBuild(invocation bus.ModuleInvocation, request []byte) ([]byte,
 	if err != nil || req.Start < 0 || req.End < req.Start || req.End > len(messages) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	// A lossy record has no owner-attested representation of attached sources.
+	// Refuse the range rather than converting it into untracked summary text.
+	rawMessages := ParseJSON(string(req.Messages))
+	for i := req.Start; i < req.End; i++ {
+		if messageHasToolSource(rawMessages.At(i)) {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+	}
 	resp := buildRecord(messages, req.Start, req.End)
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled

@@ -124,8 +124,10 @@ or imply runtime evaluation authority.
 request/response adapter. It uses the existing C bus; the shared memory process
 and its producer/consumer remain pure Go. This ownership move does not fix the
 legacy dataset runners' scratch-store isolation: their C connection cannot
-redirect the Go owner. Use the explicit disposable store in `aimee-memory-eval`
-for the supported Go corpus path.
+redirect the Go owner. Concrete Go corpus evaluation moved to the separate
+private aims-db `experiments/legacy-aimee-go` baseline. Its `qualify.py` builds the
+frozen evaluator with an explicit owned PostgreSQL; the public build does not
+ship that executable.
 
 The separate native `bench-perf` harness keeps retired memory case names as
 `unavailable` with null timings and exits 2 without saving or certifying a

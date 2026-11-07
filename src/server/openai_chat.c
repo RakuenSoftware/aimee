@@ -1,3 +1,4 @@
+#include "responses_history_owner.h"
 #include "module_commands.h"
 #include "json_fluent.h"
 /* openai_chat.c: inference-backed handlers for the OpenAI-compatible
@@ -601,16 +602,26 @@ static int responses_restore_history(aimee_request_t *request, char *error, size
       snprintf(error, capacity, "invalid or unauthorized previous_response_id");
       return -1;
    }
-   int status = db1_session_ir_history_load(id, scope, actor, "", &json);
-   if (status)
+   cJSON *history = NULL;
+   int owned = aimee_responses_history_owner_load_v1(id, scope, actor, &history);
+   if (owned < 0)
    {
-      snprintf(error, capacity, "%s",
-               status > 0 ? "previous_response_id was not found in this session scope"
-                          : "durable Responses history is unavailable");
+      snprintf(error, capacity, "durable Responses history is unavailable");
       return -1;
    }
-   cJSON *history = cJSON_Parse(json);
-   free(json);
+   if (owned == 1)
+   {
+      int status = db1_session_ir_history_load(id, scope, actor, "", &json);
+      if (status)
+      {
+         snprintf(error, capacity, "%s",
+                  status > 0 ? "previous_response_id was not found in this session scope"
+                             : "durable Responses history is unavailable");
+         return -1;
+      }
+      history = cJSON_Parse(json);
+      free(json);
+   }
    cJSON *current = openai_ir_history_json(request);
    if (!cJSON_IsArray(history) || !current)
    {
@@ -641,6 +652,9 @@ static int responses_store_history(const char *id, const aimee_request_t *reques
    char scope[80];
    if (!actor || !actor[0] || responses_history_scope(scope))
       return -1;
+   int owned = aimee_responses_history_owner_save_v1(id, scope, actor);
+   if (owned != 1)
+      return owned;
    cJSON *history = openai_ir_history_json(request);
    aimee_message_t assistant = {
        .role = "assistant", .blocks = response->content, .n_blocks = response->n_content};
@@ -1025,7 +1039,8 @@ static int openai_post_ir(const agent_t *agent, aimee_request_t *request, aimee_
     * existing owner requires buffering before any response is projected. */
    int incremental = stream && wire == AIMEE_WIRE_RESPONSES && !openai_governance_enabled() &&
                      !gateway_prevent_subagents_enabled() &&
-                     !gw_ir_response_completion_armed(request);
+                     !gw_ir_response_completion_armed(request) &&
+                     !agent_tools_module_native_requires_buffered_v1(request->tools,(size_t)request->n_tools);
    if (incremental)
       request->stream = 1;
    char *body = openai_build_ir_body(request, wire);
@@ -1270,13 +1285,18 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
       rc = -1;
       snprintf(error, capacity, "cannot retain native replay binding");
    }
-   if (rc || out->error_message ||
-       (!(stream && stream->used) && aimee_ir_session_emit_buffered_response(out, NULL)))
+   aimee_ir_capture_cause_t capture_cause = AIMEE_IR_CAPTURE_CAUSE_NONE;
+   int capture_rc = 0;
+   if (!rc && !out->error_message && !(stream && stream->used))
+      capture_rc = aimee_ir_session_emit_buffered_response_checked(out, NULL, &capture_cause);
+   if (rc || out->error_message || capture_rc)
    {
       if (!rc)
          snprintf(error, capacity, "%s",
                   out->error_message ? out->error_message
-                                     : "canonical response persistence failed");
+                  : capture_cause == AIMEE_IR_CAPTURE_CAUSE_INPUT_ADMISSION
+                      ? "module tool input admission refused"
+                      : "canonical response persistence failed");
       return -1;
    }
    rc = agent_response_govern(out, openai_governance_enabled(), gateway_prevent_subagents_enabled(),
@@ -1793,4 +1813,49 @@ void openai_chat_register(void)
    server_http_set_responses_handler(responses_handler);
    server_http_set_models_provider(models_provider);
    server_http_set_models_raw_provider(codex_models_raw);
+}
+
+/* Generic forwarding only. Concrete binding, currentness and durability are
+ * selected owner's policy; this adapter never interprets an opaque receipt. */
+
+
+#include <stdatomic.h>
+#include <stddef.h>
+static atomic_int owner_state;
+static aimee_responses_history_owner_v1 owner_copy;
+int aimee_responses_history_owner_install_v1(const aimee_responses_history_owner_v1 *owner)
+{
+    if(!owner||owner->contract_version!=1||!owner->save||!owner->load)return -1;
+    int empty=0;
+    if(!atomic_compare_exchange_strong(&owner_state,&empty,1))return -1;
+    owner_copy=*owner;
+    atomic_store(&owner_state,2);
+    return 0;
+}
+int aimee_responses_history_owner_save_v1(const char *id,const char *scope,const char *actor)
+{
+    int state=atomic_load(&owner_state);
+    if(!state)return 1;
+    if(state!=2)return -1;
+    const aimee_responses_history_owner_v1 *owner=&owner_copy;
+    if(!id||!scope||!actor||!id[0]||!scope[0]||!actor[0])return -1;
+    int rc=owner->save(owner->context,id,scope,actor);
+    return rc==0||rc==1?rc:-1;
+}
+int aimee_responses_history_owner_load_v1(const char *id,const char *scope,const char *actor,cJSON **out)
+{
+    if(!out)return -1;
+    *out=NULL;
+    int state=atomic_load(&owner_state);
+    if(!state)return 1;
+    if(state!=2)return -1;
+    const aimee_responses_history_owner_v1 *owner=&owner_copy;
+    if(!id||!scope||!actor||!id[0]||!scope[0]||!actor[0])return -1;
+    cJSON *history=NULL;
+    int rc=owner->load(owner->context,id,scope,actor,&history);
+    if(rc==0&&cJSON_IsArray(history)) { *out=history;return 0; }
+    /* Even an unselected answer may not smuggle a partial history into fallback. */
+    int unselected=rc==1&&!history;
+    cJSON_Delete(history);
+    return unselected?1:-1;
 }

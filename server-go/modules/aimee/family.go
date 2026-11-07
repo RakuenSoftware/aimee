@@ -148,9 +148,9 @@ func (f Family) Handler(db DB) bus.ModuleHandler {
 			// operations all individually wrong at the same instant, which is
 			// the one explanation that cannot be true.
 			//
-			// Reported at the TRANSPORT level rather than as a sixth status.
-			// The five are the catalog's result codes, shared with 461 C call
-			// sites, and a family does not get to invent another. ModuleStatus
+			// Store unavailability remains a TRANSPORT outcome. The additive
+			// application conflict status describes a known logical conflict,
+			// not a missing module/store. ModuleStatus
 			// is where "I cannot serve this right now" already lives -- the
 			// runtime uses Internal for its in-flight cap for the same reason
 			// -- and it costs C callers nothing, since call_stage returns -1

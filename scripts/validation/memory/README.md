@@ -29,3 +29,15 @@ controls. This is not an automatic import into aims-db.
 The backend-neutral `qualify-conversation.py`, `answer-quality.py` and
 `model-request.py` remain available for disposable current native fixtures.
 Current aims-db paired and extraction experiments live with its private product.
+
+## Extracted evaluation and seed tools
+
+The public build no longer builds or installs `aimee-memory-eval`, the concrete
+ontology seed command, or the private transfer executable. In a separate private
+aims-db checkout, `experiments/legacy-aimee-go/qualify.py --help` describes the
+immutable legacy evaluator/seed qualification. The moved three generator
+regressions and pinned native-table fixture live in `generator-fixtures/` there.
+The current public serving-contract gate is `scripts/check_current_memory_contracts.py`;
+it explicitly excludes the ten extracted evaluator cases and does not claim full
+historical MR18 certification. `native-transfer.py` retains its explicit
+`--validator` override (and may use a separately installed private validator).

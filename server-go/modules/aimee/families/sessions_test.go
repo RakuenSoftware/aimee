@@ -66,6 +66,14 @@ func (r *sessRows) Scan(dest ...any) error {
 			*p = row[i].(string)
 		case *int64:
 			*p = row[i].(int64)
+		case **bool:
+			if row[i] == nil {
+				*p = nil
+			} else if value, ok := row[i].(bool); ok {
+				*p = &value
+			} else {
+				return fmt.Errorf("test row has non-boolean terminal marker")
+			}
 		}
 	}
 	return nil
@@ -99,16 +107,7 @@ func (d *sessDB) Query(_ context.Context, sql string, args ...any) (store.Rows, 
 	d.args = append(d.args, args)
 	if sql == sessionIRHistorySQL {
 		after, _ := strconv.ParseUint(args[2].(string), 10, 64)
-		page := make([][]any, 0, sessionIRHistoryPageSize)
-		for _, row := range d.rows {
-			n, _ := strconv.ParseUint(row[0].(string), 10, 64)
-			if n > after {
-				page = append(page, row)
-				if len(page) == sessionIRHistoryPageSize {
-					break
-				}
-			}
-		}
+		page := historyCompletionFixturePage(d.rows, after)
 		return &sessRows{rows: page}, nil
 	}
 	return &sessRows{rows: d.rows}, nil
@@ -117,6 +116,8 @@ func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row 
 	d.executed = append(d.executed, sql)
 	d.args = append(d.args, args)
 	switch {
+	case sql == originalInputPresenceSQL || sql == originalInputMessageSQL:
+		return inputBoolRow(false)
 	case strings.Contains(sql, "local_procedure_prepare_subject_erasure"):
 		return sessRow{db: d, sql: sql, values: []any{int64(0)}}
 	case strings.Contains(sql, "user_memory_prepare_subject_erasure"):
@@ -755,6 +756,8 @@ func (d *irAppendFixture) QueryRow(ctx context.Context, sql string, args ...any)
 		return sessRow{db: &sessDB{scanErr: d.lockErr}, values: []any{"actor"}}
 	case sessionIRExistingSQL:
 		return sessRow{db: &sessDB{}, values: d.existing}
+	case originalInputMessageSQL:
+		return inputBoolRow(false)
 	case nativeRecoveryFenceSQL:
 		return sessRow{db: &sessDB{scanErr: store.ErrNoRows}}
 	case sessionIRInsertSQL:
@@ -771,7 +774,7 @@ func TestSessionIRAppendRetryAndFailure(t *testing.T) {
 	if err != nil || status != store.StatusOK || len(cells) != 1 || cells[0] != "42" {
 		t.Fatalf("append %d %v %v", status, cells, err)
 	}
-	if len(db.reads) != 4 || db.reads[0] != sessionIRLockSQL || db.reads[2] != nativeRecoveryFenceSQL || db.reads[3] != sessionIRInsertSQL {
+	if len(db.reads) != 5 || db.reads[0] != sessionIRLockSQL || db.reads[2] != originalInputMessageSQL || db.reads[3] != nativeRecoveryFenceSQL || db.reads[4] != sessionIRInsertSQL {
 		t.Fatal("append was not serialized under session lock")
 	}
 	db = &irAppendFixture{sessDB: &sessDB{}, existing: []any{int64(42), "turn-1", "actor", payload}}

@@ -1236,6 +1236,11 @@ static char *mcp_content_flatten(cJSON *content)
    cJSON_Delete(content);
    char *result = safe_strdup(out.len && out.data ? out.data : "(no output)");
    dstr_free(&out);
+   if (agent_tool_source_check(result) != 0)
+   {
+      free(result);
+      return safe_strdup("error: tool source output changed during flattening");
+   }
    return result;
 }
 
@@ -1349,9 +1354,12 @@ static char *td_find_symbol(cJSON *args, const char *name, const char *dispatch_
    return result;
 }
 
+extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
 static char *td_search_memory(cJSON *args, const char *name, const char *dispatch_cwd,
                               const char *dispatch_sid, int timeout_ms)
 {
+   if (aimee_module_tool_source_mode && aimee_module_tool_source_mode(name) < 0)
+      return safe_strdup("error: selected tool source custody is unavailable");
    char *result = NULL;
    cJSON *q = cJSON_GetObjectItem(args, "query");
    if (!q || !cJSON_IsString(q))
@@ -2049,6 +2057,28 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
    return result;
 }
 
+extern int agent_tools_module_native_has(const char *) __attribute__((weak));
+extern char *agent_tools_module_native_call(const char *, const char *, int, int *) __attribute__((weak));
+struct td_module_scope { char *bytes; cJSON *arguments; };
+static void td_module_cleanup(void *opaque)
+{
+   struct td_module_scope *scope = opaque;
+   free(scope->bytes);
+   cJSON_Delete(scope->arguments);
+}
+static char *td_module_call(const char *volatile name, cJSON *args, volatile int timeout,
+                            int *error)
+{
+   struct td_module_scope scope = {.arguments = args};
+   char *volatile reply = NULL;
+   pthread_cleanup_push(td_module_cleanup, &scope);
+   scope.bytes = cJSON_PrintUnformatted(args);
+   if (scope.bytes && agent_tools_module_native_call)
+      reply = agent_tools_module_native_call(name, scope.bytes, timeout, error);
+   scope.arguments = NULL; /* the ordinary dispatch return path still owns args */
+   pthread_cleanup_pop(1);
+   return reply;
+}
 static char *dispatch_tool_call_ctx_inner(const char *name, const char *arguments_json,
                                           int timeout_ms, cJSON *admitted_arguments);
 
@@ -2069,6 +2099,13 @@ char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json
 char *agent_tools_dispatch_owned(const char *name, const char *arguments_json, int timeout_ms,
                                  int *is_error, cJSON *admitted_arguments)
 {
+   if (aimee_module_tool_source_mode && aimee_module_tool_source_mode(name) < 0)
+   {
+      cJSON_Delete(admitted_arguments);
+      if (is_error)
+         *is_error = 1;
+      return safe_strdup("error: selected tool source custody is unavailable");
+   }
    agent_tools_emit_tool_event("started", name);
    td_outcome_reset();
    char *result =
@@ -2304,7 +2341,13 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
    }
    char *result = NULL;
 
-   if (strcmp(name, "bash") == 0)
+   if (agent_tools_module_native_has && agent_tools_module_native_has(name))
+   {
+      int module_error = 1;
+      result = td_module_call(name, args, timeout_ms, &module_error);
+      if (module_error) td_outcome_set("error", "module_tool");
+   }
+   else if (strcmp(name, "bash") == 0)
       result = td_bash(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "execute_script") == 0)
       result = td_execute_script(args, name, dispatch_cwd, dispatch_sid, timeout_ms);

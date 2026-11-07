@@ -567,14 +567,15 @@ void mcp_collapse_families(cJSON *tools)
       int found = 0;
       for (const struct fam_member *m = f->members; m->command; m++)
       {
-         cJSON_AddItemToArray(en, cJSON_CreateString(m->command));
-         if (cl < sizeof(clist))
-            cl += (size_t)snprintf(clist + cl, sizeof(clist) - cl, "%s%s", cl ? ", " : "",
-                                   m->command);
          cJSON *mt = family_member_retains_direct(m->tool) ? family_copy_member(tools, m->tool)
                                                            : family_detach_member(tools, m->tool);
          if (!mt)
             continue;
+         /* Partial/host-filtered catalogs must not advertise absent members. */
+         cJSON_AddItemToArray(en, cJSON_CreateString(m->command));
+         if (cl < sizeof(clist))
+            cl += (size_t)snprintf(clist + cl, sizeof(clist) - cl, "%s%s", cl ? ", " : "",
+                                   m->command);
          found++;
          cJSON *ms = cJSON_GetObjectItemCaseSensitive(mt, "inputSchema");
          cJSON *mp = ms ? cJSON_GetObjectItemCaseSensitive(ms, "properties") : NULL;

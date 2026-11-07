@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiSend } from "../api";
 
 /* Typed Facts page: the kb's typed-fact layer — its knobs, and the promotion
@@ -123,7 +123,19 @@ export default function TypedFacts() {
   const [threshold, setThreshold] = useState(0);
   const [commitId, setCommitId] = useState("");
   const [ingestRunId, setIngestRunId] = useState("");
-  const [commitPreview, setCommitPreview] = useState<CommitPreview | null>(null);
+  const [commitPreview, setCommitPreview] = useState<(CommitPreview & {
+    selector: string;
+    requestId: number;
+  }) | null>(null);
+  const commitPreviewRequest = useRef(0);
+  const commitSelector = JSON.stringify([commitId.trim(), ingestRunId.trim()]);
+  const matchingCommitPreview = commitPreview?.selector === commitSelector
+    && commitPreview.requestId === commitPreviewRequest.current;
+  const invalidateCommitPreview = () => {
+    ++commitPreviewRequest.current;
+    setCommitPreview(null);
+    setBusy((current) => current === "commit-preview" ? "" : current);
+  };
   const [eraseSubject, setEraseSubject] = useState("");
   const [eraseRelation, setEraseRelation] = useState("");
   const [eraseObject, setEraseObject] = useState("");
@@ -160,6 +172,7 @@ export default function TypedFacts() {
 
   useEffect(() => {
     refresh();
+    return () => { ++commitPreviewRequest.current; };
   }, [refresh]);
 
   const patchConfig = async (patch: Record<string, boolean | number>, msg: string) => {
@@ -249,21 +262,27 @@ export default function TypedFacts() {
   };
 
   const previewCommit = async () => {
+    const requestId = ++commitPreviewRequest.current;
+    const selector = commitSelector;
+    setCommitPreview(null);
     setBusy("commit-preview");
     try {
       const payload = ingestRunId.trim()
         ? { action: "preview", ingest_run_id: ingestRunId.trim() }
         : { action: "preview", commit_id: commitId.trim() };
-      setCommitPreview(await apiSend<CommitPreview>("POST", "/v1/console/typed_facts/commit", payload));
+      const preview = await apiSend<CommitPreview>("POST", "/v1/console/typed_facts/commit", payload);
+      if (requestId === commitPreviewRequest.current) {
+        setCommitPreview({ ...preview, selector, requestId });
+      }
     } catch (e) {
-      setErr(`Changeset preview failed: ${e}`);
+      if (requestId === commitPreviewRequest.current) setErr(`Changeset preview failed: ${e}`);
     } finally {
-      setBusy("");
+      if (requestId === commitPreviewRequest.current) setBusy("");
     }
   };
 
   const rollbackCommit = async () => {
-    if (!commitPreview || !window.confirm("Apply this compensating revert?")) return;
+    if (!commitPreview || !matchingCommitPreview || !window.confirm("Apply this compensating revert?")) return;
     setBusy("commit-rollback");
     try {
       const payload = ingestRunId.trim()
@@ -342,12 +361,13 @@ export default function TypedFacts() {
 
   return (
     <div style={{ padding: "18px 24px", maxWidth: 860, margin: "0 auto", fontFamily: "system-ui" }}>
-      <h2 style={{ margin: "0 0 4px" }}>Typed facts</h2>
+      <h2 style={{ margin: "0 0 4px" }}>Legacy SQL typed facts</h2>
       <p style={{ color: "var(--sg-text-faint)", fontSize: 13, margin: "0 0 18px" }}>
         The typed-fact layer turns observed relations into structured knowledge. New relations start
         provisional; recurrence raises review priority, while activation always remains an explicit
         operator governance decision.
       </p>
+      <p role="note">This page administers legacy SQL identities. Its rollback and erasure controls do not change native memory. <a href="/memory">Open memory administration</a> for native owner, ontology and correction requests.</p>
       {err && <p style={{ color: "var(--sg-danger-dark)", fontSize: 13 }}>{err}</p>}
       {notice && <p style={{ color: "var(--sg-success-dark)", fontSize: 13 }}>{notice}</p>}
 
@@ -615,14 +635,14 @@ export default function TypedFacts() {
         <div style={{ padding: 12, display: "grid", gap: 8 }}>
           <div style={helpStyle}>Preview one graph commit, or an entire ingest run, before atomically rolling it back.</div>
           <input aria-label="Commit ID" placeholder="commit ID" value={commitId}
-            disabled={!!ingestRunId} onChange={(e) => { setCommitId(e.target.value); setCommitPreview(null); }} style={textStyle} />
+            disabled={!!ingestRunId} onChange={(e) => { setCommitId(e.target.value); invalidateCommitPreview(); }} style={textStyle} />
           <input aria-label="Ingest run ID" placeholder="ingest run ID (for example memory-facts:42)" value={ingestRunId}
-            disabled={!!commitId} onChange={(e) => { setIngestRunId(e.target.value); setCommitPreview(null); }} style={textStyle} />
+            disabled={!!commitId} onChange={(e) => { setIngestRunId(e.target.value); invalidateCommitPreview(); }} style={textStyle} />
           <div style={{ display: "flex", gap: 6 }}>
             <button disabled={!!busy || (!commitId.trim() && !ingestRunId.trim())} onClick={previewCommit} style={plainBtn}>preview diff</button>
-            <button disabled={!!busy || !commitPreview} onClick={rollbackCommit} style={{ ...plainBtn, color: "#b00", borderColor: "#e0b4b4" }}>rollback previewed changes</button>
+            <button disabled={!!busy || !matchingCommitPreview} onClick={rollbackCommit} style={{ ...plainBtn, color: "#b00", borderColor: "#e0b4b4" }}>rollback previewed changes</button>
           </div>
-          {commitPreview && (
+          {commitPreview && matchingCommitPreview && (
             <div style={{ fontSize: 12 }}>
               {commitPreview.changes.length} change{commitPreview.changes.length === 1 ? "" : "s"}
               {commitPreview.changes.map((change, i) => (

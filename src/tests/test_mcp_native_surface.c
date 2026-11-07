@@ -21,6 +21,13 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <aimee/ir/aimee_ir.h>
+#ifndef _WIN32
+#include <pthread.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include "module_native_surface_cases.inc"
+#endif
 
 #define FAKE_TOOL "index_find_callers"
 
@@ -169,6 +176,9 @@ static void test_registration_is_idempotent_and_bad_advert_is_skipped(void)
 int main(void)
 {
    printf("test_mcp_native_surface:\n");
+#ifndef _WIN32
+   module_surface_cases();
+#endif
    /* Order matters: the unregistered case must run before anything registers,
     * since the registry is process-global (the server registers once at startup). */
    test_unregistered_advertises_nothing();

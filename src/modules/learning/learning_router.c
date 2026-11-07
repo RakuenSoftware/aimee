@@ -140,7 +140,7 @@ static int learning_apply_sink(const learning_proposal_t *proposal)
       cJSON_AddItemToObject(request, "action", cJSON_Duplicate(action, 1));
       cJSON *response = NULL;
       int dispatched =
-          aimee_module_commands_dispatch_internal("memory.runtime", request, &response);
+          aimee_module_commands_dispatch_internal_caller("memory.runtime", request, &response);
       const cJSON *status = cJSON_GetObjectItemCaseSensitive(response, "status");
       rc = dispatched == 1 && cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 ? 0
                                                                                                : -1;
@@ -387,7 +387,7 @@ static void learning_fill_target_key(learning_signal_input_t *input)
    cJSON *args = cJSON_CreateObject(), *reply = NULL;
    cJSON_AddStringToObject(args, "operation", "record");
    cJSON_AddItemToObject(args, "id", jo_i64_value_exact(input->target_memory_id));
-   if (aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) == 1)
+   if (aimee_module_commands_dispatch_internal_caller("memory.runtime", args, &reply) == 1)
    {
       const cJSON *record = cJSON_GetObjectItemCaseSensitive(reply, "memory");
       const char *key = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "key"));

@@ -126,9 +126,9 @@ var Conversation = store.Family{
 		opWindowsDeleteAfterTurn:  {Name: "windows_delete_after_turn", Args: 2, Tx: true, Run: windowsDeleteAfterTurn},
 
 		// --- user memories ---
-		opUserMemoryListRecall: {Name: "user_memory_list_recall", Cells: 5, Args: 2, Run: userMemoryListRecall},
-		opUserMemoryAny:        {Name: "user_memory_any", Args: 0, Run: userMemoryAny},
-		opUserMemoryUpsert:     {Name: "user_memory_upsert", Args: 6, Tx: true, Run: userMemoryUpsert},
+		opUserMemoryListRecall: {Name: "user_memory_list_recall", Cells: 5, Args: 2, RunDB: retiredPersonalMemory},
+		opUserMemoryAny:        {Name: "user_memory_any", Args: 0, RunDB: retiredPersonalMemory},
+		opUserMemoryUpsert:     {Name: "user_memory_upsert", Args: 6, Tx: true, RunDB: retiredPersonalMemory},
 
 		// --- clarification sessions ---
 		//

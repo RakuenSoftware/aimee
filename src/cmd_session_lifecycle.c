@@ -5,6 +5,8 @@
  * Extracted from cmd_hooks.c to keep file sizes tractable. Hooks-scope
  * helpers shared with cmd_hooks.c live in cmd_hooks_scope.c. */
 #include "aimee.h"
+#include "headers/owned_feature.h"
+AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_context_legacy_guard_contract_v1);
 #include "db1_client/db1.h"
 #include "modules/kb/c/memory_query.h"
 #include "modules/kb/c/rules.h"
@@ -300,6 +302,7 @@ static char *build_session_context(const char *client_cwd)
     * and local — sourced from DB1, never the shared KB. Renders nothing when the
     * switch is off or nothing has been learned yet. The observer that fills it is
     * memory_recall_handler (per user turn). */
+   if (aimee_owned_feature_status("working_profile") == 0)
    {
       char *wp = prompt_apply_working_profile("");
       if (wp && wp[0])

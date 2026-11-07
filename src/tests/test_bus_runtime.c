@@ -168,7 +168,7 @@ int main(int argc, char **argv)
                                     .serve = server_kinds,
                                     .serve_count = 2}};
 
-   bus_host_config_t host_config = {.max_slots = 8,
+   bus_host_config_t host_config = {.max_slots = 3,
                                     .slot_size = 512,
                                     .inline_budget = 400,
                                     .queue_capacity = 8,
@@ -232,12 +232,36 @@ int main(int argc, char **argv)
    assert(bus_host_kind_has_server(&host, TEST_SERVER_KIND));
    assert(bus_host_kind_has_server(&host, TEST_SERVER_KIND_2));
    pthread_mutex_unlock(&host_lock);
+   pthread_mutex_lock(&host_lock);
+   assert(bus_host_admitted(&host) == host_config.max_slots);
+   pthread_mutex_unlock(&host_lock);
    bus_client_t duplicate;
    assert(attach(socket_path, 9, &duplicate) == BUS_CLIENT_DENIED);
    assert(kill(crashed, SIGKILL) == 0);
    int status = 0;
    assert(waitpid(crashed, &status, 0) == crashed);
    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+   /* Authentication must precede reclaim even when an exited slot fills capacity. */
+   pthread_mutex_lock(&host_lock);
+   const char *saved_executable = grants[2].executable;
+   grants[2].executable = "/never-authorized-bus-runtime-executable";
+   pthread_mutex_unlock(&host_lock);
+   assert(attach(socket_path, 9, &denied) == BUS_CLIENT_DENIED);
+   pthread_mutex_lock(&host_lock);
+   assert(bus_host_admitted(&host) == host_config.max_slots);
+   assert(bus_host_kind_has_server(&host, TEST_SERVER_KIND));
+   assert(bus_host_kind_has_server(&host, TEST_SERVER_KIND_2));
+   grants[2].executable = saved_executable;
+   uint32_t saved_uid = grants[2].uid;
+   grants[2].uid = geteuid() == 0 ? 1U : 0U;
+   pthread_mutex_unlock(&host_lock);
+   assert(attach(socket_path, 9, &denied) == BUS_CLIENT_DENIED);
+   pthread_mutex_lock(&host_lock);
+   assert(bus_host_admitted(&host) == host_config.max_slots);
+   assert(bus_host_kind_has_server(&host, TEST_SERVER_KIND));
+   assert(bus_host_kind_has_server(&host, TEST_SERVER_KIND_2));
+   grants[2].uid = saved_uid;
+   pthread_mutex_unlock(&host_lock);
    bus_client_t replacement;
    assert(attach(socket_path, 9, &replacement) == BUS_CLIENT_OK);
    pthread_mutex_lock(&host_lock);

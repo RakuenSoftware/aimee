@@ -9,6 +9,7 @@
 
 #include "aimee.h"
 #include "session_briefing.h"
+#include "session_briefing_source.h"
 #include "module_commands.h"
 #include "json_fluent.h"
 #include "cJSON.h"
@@ -76,11 +77,14 @@ char *session_briefing_render_commitments(int limit)
    cJSON *args = cJSON_CreateObject();
    if (!args)
       return NULL;
+   int provider_context = session_briefing_provider_context();
    cJSON_AddNumberToObject(args, "limit", limit);
+   if (!provider_context)
+      cJSON_AddBoolToObject(args, "native_source_mode", 0);
    cJSON *response = NULL;
    cJSON_AddStringToObject(args, "operation", "prospective-briefing");
    int rc =
-       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
+       aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", args, 60000, &response);
    if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
    {
       cJSON_Delete(response);
@@ -89,7 +93,10 @@ char *session_briefing_render_commitments(int limit)
    cJSON_Delete(args);
    const char *block =
        response ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block")) : NULL;
-   char *result = block && block[0] ? strdup(block) : NULL;
+   char *result = block && block[0] &&
+                          session_briefing_accept_source(response, block, provider_context) == 0
+                      ? strdup(block)
+                      : NULL;
    cJSON_Delete(response);
    return result;
 }
@@ -99,11 +106,14 @@ char *session_briefing_render_directives(int limit)
    cJSON *args = cJSON_CreateObject();
    if (!args)
       return NULL;
+   int provider_context = session_briefing_provider_context();
    cJSON_AddNumberToObject(args, "limit", limit);
+   if (!provider_context)
+      cJSON_AddBoolToObject(args, "native_source_mode", 0);
    cJSON *response = NULL;
    cJSON_AddStringToObject(args, "operation", "directive-briefing");
    int rc =
-       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
+       aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", args, 60000, &response);
    if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
    {
       cJSON_Delete(response);
@@ -112,7 +122,10 @@ char *session_briefing_render_directives(int limit)
    cJSON_Delete(args);
    const char *block =
        response ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block")) : NULL;
-   char *result = block && block[0] ? strdup(block) : NULL;
+   char *result = block && block[0] &&
+                          session_briefing_accept_source(response, block, provider_context) == 0
+                      ? strdup(block)
+                      : NULL;
    cJSON_Delete(response);
    return result;
 }

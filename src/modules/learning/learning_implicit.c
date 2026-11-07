@@ -7,15 +7,17 @@
  * See docs/proposals/pending/learning-signals-router-phase-2-fixtures.md. */
 #include "aimee.h"
 #include "config.h"
+#include "cJSON.h"
 #include "dogfood.h"
 #include <aimee/learning/learning.h>
 #include "learning_implicit.h"
 #include <string.h>
 #include <time.h>
 
-static void emit_implicit(const char *signal_type, const char *polarity, const char *title,
+static void emit_implicit_refs(const char *signal_type, const char *polarity, const char *title,
                           const char *description, const char *target_key, int64_t target_memory_id,
-                          const char *workflow_project, const char *workflow_signal_type)
+                          const char *workflow_project, const char *workflow_signal_type,
+                          const char *evidence_refs_json)
 {
    learning_signal_input_t input;
    memset(&input, 0, sizeof(input));
@@ -34,8 +36,16 @@ static void emit_implicit(const char *signal_type, const char *polarity, const c
    if (workflow_signal_type)
       snprintf(input.workflow_signal_type, sizeof(input.workflow_signal_type), "%s",
                workflow_signal_type);
-   input.evidence_refs_json = "[]";
+   input.evidence_refs_json = evidence_refs_json ? evidence_refs_json : "[]";
    learning_router_record_signal(&input, NULL);
+}
+
+static void emit_implicit(const char *signal_type, const char *polarity, const char *title,
+                          const char *description, const char *target_key, int64_t target_memory_id,
+                          const char *workflow_project, const char *workflow_signal_type)
+{
+   emit_implicit_refs(signal_type, polarity, title, description, target_key, target_memory_id,
+                       workflow_project, workflow_signal_type, NULL);
 }
 
 void learning_implicit_detect_turn(const char *user_text)
@@ -110,16 +120,40 @@ void learning_implicit_record_correction(const char *target_key, int64_t target_
 void learning_implicit_record_workflow(const char *workspace, const char *signal_type,
                                        const char *description)
 {
-   if (!workspace || !workspace[0] || !signal_type || !signal_type[0])
+   learning_implicit_record_workflow_evidence(workspace, signal_type, description, NULL);
+}
+
+void learning_implicit_record_workflow_evidence(const char *workspace, const char *signal_type,
+                                                const char *description,
+                                                const char *evidence_refs_json)
+{
+   if (!workspace || !workspace[0] || !signal_type || !signal_type[0] ||
+       strlen(workspace) >= sizeof(((learning_signal_input_t *)0)->workflow_project) ||
+       strlen(signal_type) >= sizeof(((learning_signal_input_t *)0)->workflow_signal_type))
       return;
    if (!config_present() || !config_learning_implicit_workflow_repetition())
       return;
 
+   /* Evidence is opaque transport metadata, not a SQL ID or authorization.
+    * Preserve its exact bytes and refuse a reference that the existing proposal
+    * representation could only retain by truncating. */
+   if (evidence_refs_json)
+   {
+      if (strlen(evidence_refs_json) >= sizeof(((learning_proposal_t *)0)->evidence_refs))
+         return;
+      cJSON *refs = cJSON_ParseWithLengthOpts(evidence_refs_json,
+                                             strlen(evidence_refs_json) + 1, NULL, 1);
+      int valid = cJSON_IsArray(refs);
+      cJSON_Delete(refs);
+      if (!valid)
+         return;
+   }
    struct timespec t0, t1;
    clock_gettime(CLOCK_MONOTONIC, &t0);
 
-   emit_implicit("workflow_repetition", "positive", "Implicit workflow_repetition signal",
-                 description ? description : "", workspace, 0, workspace, signal_type);
+   emit_implicit_refs("workflow_repetition", "positive", "Implicit workflow_repetition signal",
+                 description ? description : "", workspace, 0, workspace, signal_type,
+                 evidence_refs_json);
 
    clock_gettime(CLOCK_MONOTONIC, &t1);
    double ms = (t1.tv_sec - t0.tv_sec) * 1000.0 + (t1.tv_nsec - t0.tv_nsec) / 1.0e6;

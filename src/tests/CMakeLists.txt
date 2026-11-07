@@ -21,6 +21,12 @@ function(aimee_add_test test_name)
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
   target_link_libraries(${test_name} PRIVATE aimee-core-codec)
   aimee_enable_test_asserts(${test_name})
+  # Standalone server-response tests need the same real embedded API header as
+  # the Make build, including in a fresh checkout without ignored build output.
+  if(";${ARGN};" MATCHES ";\.\./server/server_http_response\.c;")
+    add_dependencies(${test_name} aimee_server_openapi_test_header)
+    target_include_directories(${test_name} PRIVATE "${AIMEE_SERVER_OPENAPI_TEST_DIR}")
+  endif()
   if(WIN32)
     target_compile_definitions(${test_name} PRIVATE AIMEE_WINDOWS _WIN32_WINNT=0x0A00)
   endif()
@@ -31,6 +37,17 @@ function(aimee_add_test test_name)
   set_tests_properties(${test_name} PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endfunction()
+
+set(AIMEE_SERVER_OPENAPI_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated-server-api")
+set(AIMEE_SERVER_OPENAPI_TEST_HEADER "${AIMEE_SERVER_OPENAPI_TEST_DIR}/openapi_server_data.h")
+add_custom_command(OUTPUT "${AIMEE_SERVER_OPENAPI_TEST_HEADER}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${AIMEE_SERVER_OPENAPI_TEST_DIR}"
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../gen_openapi_server.py"
+          "${AIMEE_SERVER_OPENAPI_TEST_HEADER}"
+  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../gen_openapi_server.py"
+          "${CMAKE_SOURCE_DIR}/api/openapi-server-v1.yaml"
+  VERBATIM)
+add_custom_target(aimee_server_openapi_test_header DEPENDS "${AIMEE_SERVER_OPENAPI_TEST_HEADER}")
 
 # Portable unit tests that build cleanly under both POSIX and the current
 # Windows CMake target set.
@@ -208,6 +225,23 @@ aimee_add_test(test_bus_config_autonomy test_bus_config_autonomy.c)
 # rows through the real producer/consumer and requires the real ledger to hold
 # exactly N, each once, zero drops. obs_bus + bus compiled in; the ledger reader
 # and file writer come from aimee-core. Test binary only.
+# Real credential-checked Unix module calls, cancellation and late reply isolation.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+aimee_add_test(test_obs_bus_module_concurrency test_obs_bus_module_concurrency.c
+  module_command_cancellation_cases.inc ../module_commands.c ../module_json_call.c
+  ../command_registry.c ../modules/ir/aimee_ir.c ../modules/audit/obs_bus.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES}
+  ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c
+  ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c
+  ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c
+  ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c
+  ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c)
+target_include_directories(test_obs_bus_module_concurrency PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_obs_bus_module_concurrency PRIVATE Threads::Threads)
+set_tests_properties(test_obs_bus_module_concurrency PROPERTIES TIMEOUT 40)
+endif()
+
 aimee_add_test(test_bus_audit_durability test_bus_audit_durability.c ../modules/audit/obs_bus.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES} ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c)
 target_include_directories(test_bus_audit_durability PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_audit_durability PRIVATE Threads::Threads)
@@ -285,7 +319,7 @@ aimee_add_test(test_aimee_frontend test_aimee_frontend.c
   ../modules/translation/aimee_backend_openai.c
   ../modules/translation/aimee_backend_responses.c
   ../modules/ir/aimee_ir.c ../aimee_sha256.c)
-aimee_add_test(test_aimee_backend test_aimee_backend.c
+aimee_add_test(test_aimee_backend test_aimee_backend.c ../posix/agent_runtime_messages.c ../modules/ir/session_event.c
   ../modules/translation/aimee_backend_anthropic.c
   ../modules/translation/aimee_backend_openai.c
   ../modules/translation/aimee_backend_responses.c
@@ -612,6 +646,7 @@ if(NOT WIN32)
   aimee_enable_test_asserts(test_server_native_cli)
   add_test(NAME test_server_native_cli COMMAND test_server_native_cli)
   add_executable(test_server_native_runtime test_server_native_runtime.c support/log_stub.c
+    ../modules/tools/agent_tools_tool_source.c
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
     ../server/server_native_runtime.c ../server/server_native_cli.c ../modules/protocols/mcp/mcp_tools_extended.c ../server/server_native_history.c ../server/server_native_tool_admission.c ../server/server_session_question.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c
     ../modules/ir/session_event.c ../cli_proxy.c ../server/request_context.c
@@ -652,14 +687,14 @@ endif()
 if(NOT WIN32)
   aimee_add_test(test_server_chat_ir test_server_chat_ir.c ../server/server_chat_ir.c ../server/server_session_capture.c ../server/server_session_control.c
     ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
-    ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
+    ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
   target_link_libraries(test_server_chat_ir PRIVATE OpenSSL::Crypto)
 endif()
 
 # Owner-checked canonical primary-history fixtures.
 if(NOT WIN32)
   add_executable(test_primary_session_adapter
-    test_primary_session_adapter.c ../server/primary_session_adapter.c
+    test_primary_session_adapter.c ../server/primary_session_adapter.c ../posix/agent_runtime_messages.c
     ../server/agent_adapter.c support/provider_cli_adapter_stub.c support/log_stub.c
     ../modules/translation/history_ir.c
     ../modules/translation/aimee_frontend_anthropic.c
@@ -693,10 +728,10 @@ endif()
 if(NOT WIN32)
   add_executable(test_server_session_capture test_server_session_capture.c
     ../server/server_session_capture.c ../server/server_session_control.c
-    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../vendor/cJSON.c)
+    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../vendor/cJSON.c ../aimee_sha256.c)
   target_include_directories(test_server_session_capture PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
     ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
-  target_link_libraries(test_server_session_capture PRIVATE Threads::Threads m)
+  target_link_libraries(test_server_session_capture PRIVATE Threads::Threads OpenSSL::Crypto m)
   aimee_enable_test_asserts(test_server_session_capture)
   add_test(NAME test_server_session_capture COMMAND test_server_session_capture)
   add_executable(test_server_mcp_delegate test_server_mcp_delegate.c
@@ -734,6 +769,58 @@ if(NOT WIN32)
     ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
     ../aimee_sha256.c)
   target_link_libraries(test_server_session_log PRIVATE Threads::Threads OpenSSL::Crypto)
+  # Fork-isolated startup/cancellation cases use GNU/ELF RAND_bytes wrapping.
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    aimee_add_test(test_server_original_input_created test_server_original_input_created.c
+      ../server/server_session_log.c ../server/server_session_capture.c ../server/server_session_control.c
+      ../server/server_session_question.c ../platform_random.c ../posix/platform_random.c
+      ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
+      ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+      ../aimee_sha256.c)
+    target_link_libraries(test_server_original_input_created PRIVATE Threads::Threads OpenSSL::Crypto)
+    target_link_options(test_server_original_input_created PRIVATE -Wl,--wrap=RAND_bytes)
+    set_tests_properties(test_server_original_input_created PROPERTIES TIMEOUT 60)
+    aimee_add_test(test_server_original_input_delivery test_server_original_input_delivery.c
+      ../server/server_session_log.c ../server/server_session_capture.c ../server/server_session_control.c
+      ../server/server_session_question.c ../platform_random.c ../posix/platform_random.c
+      ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
+      ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+      ../aimee_sha256.c)
+    target_link_libraries(test_server_original_input_delivery PRIVATE Threads::Threads OpenSSL::Crypto)
+    target_link_options(test_server_original_input_delivery PRIVATE -Wl,--wrap=RAND_bytes)
+    set_tests_properties(test_server_original_input_delivery PROPERTIES TIMEOUT 60)
+    aimee_add_test(test_server_original_input_plan test_server_original_input_plan.c
+      ../server/server_session_log.c ../server/server_session_capture.c ../server/server_session_control.c
+      ../server/server_session_question.c ../platform_random.c ../posix/platform_random.c
+      ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
+      ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+      ../aimee_sha256.c)
+    target_link_libraries(test_server_original_input_plan PRIVATE Threads::Threads OpenSSL::Crypto)
+    target_link_options(test_server_original_input_plan PRIVATE -Wl,--wrap=RAND_bytes)
+    set_tests_properties(test_server_original_input_plan PROPERTIES TIMEOUT 60)
+    aimee_add_test(test_db1_original_input_plan_client test_db1_original_input_plan_client.c
+      ../db1_client/original_input_plan.c ../db1_client/transport.c
+      ../modules/ir/aimee_ir.c ../aimee_sha256.c ../text.c)
+    target_compile_options(test_db1_original_input_plan_client PRIVATE -ffunction-sections -fdata-sections)
+    target_link_libraries(test_db1_original_input_plan_client PRIVATE OpenSSL::Crypto)
+    target_link_options(test_db1_original_input_plan_client PRIVATE -Wl,--gc-sections)
+    set_tests_properties(test_db1_original_input_plan_client PROPERTIES TIMEOUT 30)
+    aimee_add_test(test_server_session_delivery_conflict test_server_session_delivery_conflict.c
+      ../server/server_session.c ../server/server_http_response.c ../json_fluent.c)
+    target_compile_options(test_server_session_delivery_conflict PRIVATE -ffunction-sections -fdata-sections)
+    target_link_options(test_server_session_delivery_conflict PRIVATE -Wl,--gc-sections)
+    set_tests_properties(test_server_session_delivery_conflict PROPERTIES TIMEOUT 30)
+    aimee_add_test(test_db1_original_input_delivery_client test_db1_original_input_delivery_client.c
+      ../db1_client/sessions.c ../db1_client/transport.c)
+    target_compile_options(test_db1_original_input_delivery_client PRIVATE -ffunction-sections -fdata-sections)
+    target_link_options(test_db1_original_input_delivery_client PRIVATE -Wl,--gc-sections)
+    set_tests_properties(test_db1_original_input_delivery_client PROPERTIES TIMEOUT 30)
+    aimee_add_test(test_server_erasure_protocol test_server_erasure_protocol.c
+      ../server/server_state_vectors.c ../json_fluent.c)
+    target_compile_options(test_server_erasure_protocol PRIVATE -ffunction-sections -fdata-sections)
+    target_link_options(test_server_erasure_protocol PRIVATE -Wl,--gc-sections)
+    set_tests_properties(test_server_erasure_protocol PROPERTIES TIMEOUT 30)
+  endif()
 endif()
 # Tenant entry is stubbed to exercise every HTTP failure mapping without a DB.
 add_executable(test_kb_http_common test_kb_http_common.c
@@ -822,3 +909,119 @@ if(NOT WIN32)
   target_link_libraries(test_coord_dispatcher_startup PRIVATE Threads::Threads m)
   target_link_libraries(test_delegate_startup PRIVATE Threads::Threads)
 endif()
+
+add_executable(test_tool_source_scope test_tool_source_scope.c
+  ../modules/tools/agent_tools_tool_source.c ../modules/ir/aimee_ir.c
+  ../aimee_sha256.c ../vendor/cJSON.c)
+target_include_directories(test_tool_source_scope PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+target_link_libraries(test_tool_source_scope PRIVATE Threads::Threads OpenSSL::Crypto)
+target_compile_options(test_tool_source_scope PRIVATE -ffunction-sections -fdata-sections)
+if(APPLE)
+  target_link_options(test_tool_source_scope PRIVATE -Wl,-dead_strip)
+else()
+  target_link_options(test_tool_source_scope PRIVATE -Wl,--gc-sections)
+endif()
+aimee_enable_test_asserts(test_tool_source_scope)
+add_test(NAME test_tool_source_scope COMMAND test_tool_source_scope)
+
+add_executable(test_mcp_source_discovery test_mcp_source_discovery.c
+  ../modules/protocols/mcp/mcp_tools.c ../modules/protocols/mcp/mcp_tools_extended.c
+  ../vendor/cJSON.c)
+target_include_directories(test_mcp_source_discovery PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+target_compile_options(test_mcp_source_discovery PRIVATE -ffunction-sections -fdata-sections)
+if(APPLE)
+  target_link_options(test_mcp_source_discovery PRIVATE -Wl,-dead_strip)
+else()
+  target_link_options(test_mcp_source_discovery PRIVATE -Wl,--gc-sections)
+endif()
+aimee_enable_test_asserts(test_mcp_source_discovery)
+add_test(NAME test_mcp_source_discovery COMMAND test_mcp_source_discovery)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  aimee_add_test(test_server_module_console test_server_module_console.c ../modules/ir/aimee_ir.c)
+  target_link_libraries(test_server_module_console PRIVATE Threads::Threads m)
+  aimee_add_test(test_server_module_console_absent test_server_module_console_absent.c ../modules/ir/aimee_ir.c)
+  target_link_libraries(test_server_module_console_absent PRIVATE Threads::Threads m)
+  set_tests_properties(test_server_module_console test_server_module_console_absent PROPERTIES TIMEOUT 30)
+  aimee_add_test(test_original_input_web_negotiation test_original_input_web_negotiation.c
+    ../server/server_http_response.c ../server/host_original_submission.c
+    ../modules/ir/aimee_ir.c ../aimee_sha256.c ../http_content_encoding.c)
+  target_link_libraries(test_original_input_web_negotiation PRIVATE Threads::Threads OpenSSL::Crypto ZLIB::ZLIB zstd)
+  set_tests_properties(test_original_input_web_negotiation PROPERTIES TIMEOUT 90)
+  aimee_add_test(test_host_original_submission test_host_original_submission.c
+    ../server/host_original_submission.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
+  target_link_libraries(test_host_original_submission PRIVATE Threads::Threads OpenSSL::Crypto)
+  aimee_add_test(test_server_chat_original_input test_server_chat_original_input.c
+    ../server/server_chat_ir.c ../server/server_session_capture.c ../server/server_session_control.c
+    ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
+    ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+    ../aimee_sha256.c)
+  target_link_libraries(test_server_chat_original_input PRIVATE Threads::Threads OpenSSL::Crypto)
+  aimee_add_test(test_server_chat_original_handoff test_server_chat_original_handoff.c
+    ../server/server_compute.c ../server/host_original_submission.c
+    ../server/server_chat_ir.c ../server/server_session_capture.c ../server/server_session_control.c
+    ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
+    ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+    ../aimee_sha256.c)
+  target_link_libraries(test_server_chat_original_handoff PRIVATE Threads::Threads OpenSSL::Crypto m)
+  aimee_add_test(test_host_original_documentary test_host_original_documentary.c
+    ../server/host_original_submission.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
+  target_link_libraries(test_host_original_documentary PRIVATE Threads::Threads OpenSSL::Crypto)
+  aimee_add_test(test_server_capture_documentary test_server_capture_documentary.c
+    ../server/server_compute.c ../server/host_original_submission.c
+    ../server/server_chat_ir.c ../server/server_session_capture.c ../server/server_session_control.c
+    ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
+    ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+    ../aimee_sha256.c)
+  target_link_libraries(test_server_capture_documentary PRIVATE Threads::Threads OpenSSL::Crypto m)
+  set_tests_properties(test_host_original_documentary test_server_capture_documentary
+    PROPERTIES TIMEOUT 90)
+  set_tests_properties(test_host_original_submission test_server_chat_original_input
+    test_server_chat_original_handoff PROPERTIES TIMEOUT 90)
+endif()
+
+
+# Linux-only provider lock/cancellation and actual process-reopen regressions.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  aimee_add_test(test_vault_generation_retirement test_vault_generation_retirement.c
+    ../modules/vault/vault_service.c ../modules/vault/vault_store.c
+    ../modules/vault/vault_kek_check.c ../modules/vault/vault_crypto.c
+    ../modules/vault/vault_kek_cache.c ../modules/vault/vault_server_key.c)
+  target_include_directories(test_vault_generation_retirement PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS})
+  target_compile_options(test_vault_generation_retirement PRIVATE -ffunction-sections -fdata-sections)
+  target_link_options(test_vault_generation_retirement PRIVATE -Wl,--gc-sections
+    -Wl,--wrap=fsync -Wl,--wrap=pthread_mutex_lock -Wl,--wrap=flock)
+  target_link_libraries(test_vault_generation_retirement PRIVATE
+    OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS} m)
+endif()
+
+if(UNIX)
+  aimee_add_test(test_module_native_tools test_module_native_tools.c
+    ../modules/ir/aimee_ir.c ../modules/ir/session_event.c
+    ../modules/translation/aimee_frontend_openai.c ../server/tool_args_coerce.c
+    ../modules/translation/aimee_backend_openai.c ../modules/translation/aimee_backend_responses.c
+    ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c
+    ../modules/translation/harness_ir.c ../modules/translation/aimee_ir_stream.c
+    ../text.c ../util.c ../aimee_sha256.c ../vendor/cJSON.c)
+  target_include_directories(test_module_native_tools PRIVATE
+    ../modules/tools/include ../modules/ir/include ../modules/translation/include)
+  target_link_libraries(test_module_native_tools PRIVATE pthread m OpenSSL::Crypto)
+endif()
+
+aimee_add_test(test_agent_runtime_messages test_agent_runtime_messages.c ../posix/agent_runtime_messages.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
+
+# Pure summary attribution uses the actual builder; no economizer service is started.
+aimee_add_test(test_runtime_hint_summary test_runtime_hint_summary.c
+  ../posix/agent_runtime_messages.c ../modules/ir/aimee_ir.c
+  ../modules/ir/session_event.c ../vendor/cJSON.c ../text.c)
+target_include_directories(test_runtime_hint_summary PRIVATE
+  .. ../headers ../vendor/headers ../modules/economizer ../modules/ir/include
+  ../modules/translation/include)
+aimee_enable_test_asserts(test_runtime_hint_summary)
+target_compile_options(test_runtime_hint_summary PRIVATE -ffunction-sections -fdata-sections)
+target_link_options(test_runtime_hint_summary PRIVATE -Wl,--gc-sections)
+target_link_libraries(test_runtime_hint_summary PRIVATE m)

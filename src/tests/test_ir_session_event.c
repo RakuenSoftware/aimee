@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 static int captured;
 static int capture(const aimee_session_event_t *event, void *context)
@@ -37,6 +40,108 @@ static int buffered_capture(const aimee_session_event_t *event, void *context)
    }
    assert(!strcmp(event->message_id, "buffered"));
    return buffered_steps == fail_at ? -7 : 0;
+}
+static int buffered_error_capture(const aimee_session_event_t *event, void *context)
+{
+   int fail_at = *(int *)context;
+   buffered_steps++;
+   assert(event->kind == AIMEE_SESSION_DELTA);
+   assert(event->delta->type == (buffered_steps == 1 ? AIMEE_DELTA_TURN_START :
+                                 buffered_steps == 2 ? AIMEE_DELTA_ERROR : AIMEE_DELTA_TURN_STOP));
+   if (buffered_steps == 2)
+      assert(!strcmp(event->delta->error_message, "private-error-not-a-diagnostic"));
+   return buffered_steps == fail_at ? -7 : 0;
+}
+
+static FILE *diagnostic_capture_begin(int enabled, int *saved)
+{
+   assert(!setenv("AIMEE_IR_CAPTURE_PHASE_DIAGNOSTIC", enabled ? "1" : "0", 1));
+   FILE *file = tmpfile();
+   assert(file && fflush(stderr) == 0);
+   *saved = dup(STDERR_FILENO);
+   assert(*saved >= 0 && dup2(fileno(file), STDERR_FILENO) >= 0);
+   return file;
+}
+static void diagnostic_capture_end(FILE *file, int saved, char *out, size_t size)
+{
+   assert(fflush(stderr) == 0 && dup2(saved, STDERR_FILENO) >= 0);
+   close(saved);
+   rewind(file);
+   size_t n = fread(out, 1, size - 1, file);
+   assert(!ferror(file) && n < size - 1);
+   out[n] = 0;
+   fclose(file);
+   assert(!unsetenv("AIMEE_IR_CAPTURE_PHASE_DIAGNOSTIC"));
+}
+static void test_buffered_capture_diagnostic_stages(void)
+{
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "private-payload-not-a-diagnostic"};
+   aimee_response_t response = {.role = "assistant", .content = &block, .n_content = 1,
+                                .stop_reason = AIMEE_STOP_MAX_TOKENS,
+                                .usage_cache_read = 9, .usage_cache_write = 3};
+   /* A fresh child proves the process-wide cap, without exhausting the parent
+    * diagnostic budget or altering the actual emitter's sink/capture behavior. */
+   pid_t child = fork();
+   assert(child >= 0);
+   if (!child)
+   {
+      int saved, fail_at = 1;
+      char output[16384];
+      FILE *file = diagnostic_capture_begin(1, &saved);
+      for (int i = 0; i < 100; i++)
+      {
+         buffered_steps = 0;
+         aimee_ir_session_set_sink(buffered_capture, &fail_at);
+         assert(aimee_ir_session_emit_buffered_response(&response, "buffered") == -7);
+         assert(buffered_steps == 1 && aimee_ir_session_capture_failed());
+         aimee_ir_session_set_sink(NULL, NULL);
+      }
+      diagnostic_capture_end(file, saved, output, sizeof output);
+      unsigned lines = 0;
+      for (char *p = output; *p; p++) lines += *p == '\n';
+      assert(lines == 64 && !strstr(output, block.text));
+      _exit(0);
+   }
+   int status;
+   assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && !WEXITSTATUS(status));
+   for (int error_response = 0; error_response <= 1; error_response++)
+   for (int enabled = 0; enabled <= 1; enabled++)
+      for (int fail_at = 0; fail_at <= 3; fail_at++)
+      {
+         int saved;
+         char output[4096];
+         FILE *file = diagnostic_capture_begin(enabled, &saved);
+         buffered_steps = 0;
+         response.error_message = error_response ? "private-error-not-a-diagnostic" : NULL;
+         aimee_ir_session_set_sink(error_response ? buffered_error_capture : buffered_capture,
+                                   &fail_at);
+         errno = EDOM;
+         aimee_ir_capture_cause_t cause = AIMEE_IR_CAPTURE_CAUSE_INPUT_ADMISSION;
+         assert(aimee_ir_session_emit_buffered_response_checked(&response, "buffered", &cause) ==
+                (fail_at ? -7 : 0));
+         assert(cause == (fail_at ? AIMEE_IR_CAPTURE_CAUSE_SINK : AIMEE_IR_CAPTURE_CAUSE_NONE));
+         assert(errno == EDOM && buffered_steps == (fail_at ? fail_at : 3));
+         assert(aimee_ir_session_capture_failed() == (fail_at != 0));
+         aimee_ir_session_set_sink(NULL, NULL);
+         diagnostic_capture_end(file, saved, output, sizeof output);
+         if (!enabled || !fail_at) assert(!output[0]);
+         else
+         {
+            const char *phase = fail_at == 1 ? "buffered_start" :
+                                fail_at == 2 ? "buffered_message" : "buffered_stop";
+            assert(strstr(output, phase) && strstr(output, "session_sink") &&
+                   strstr(output, "\"result\":-7") && !strstr(output, block.text) &&
+                   !strstr(output, "private-error-not-a-diagnostic") &&
+                   !strstr(output, "buffered_tool_admission"));
+            if (fail_at == 2)
+            {
+               char expected[96];
+               snprintf(expected, sizeof expected, "\"phase\":\"buffered_message\",\"event_kind\":%d",
+                        error_response ? AIMEE_SESSION_DELTA : AIMEE_SESSION_MESSAGE);
+               assert(strstr(output, expected));
+            }
+         }
+      }
 }
 
 static void test_owned_delta_assembly(void)
@@ -309,6 +414,7 @@ static void test_verification_proofs(void)
 
 int main(void)
 {
+   test_buffered_capture_diagnostic_stages();
    test_verification_proofs();
    test_response_snapshot();
    test_owned_delta_assembly();

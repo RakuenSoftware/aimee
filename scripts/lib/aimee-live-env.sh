@@ -638,7 +638,7 @@ live_env_start_kb_modules() {
       src/build/obj/module-bundle/grants/kb/config.grant >"$grants/config.grant"
    sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-postgres|" \
       src/build/obj/module-bundle/grants/kb/postgres.grant >"$grants/postgres.grant"
-   live_env_memory_grants kb "$grants"
+   live_env_memory_grants kb "$grants" || return 2
    live_env_arm_module "$PWD/src/build/obj/aimee-module-config" "$bus" \
       "$AIMEE_HOME/kb-config-module.log" LIVE_KB_CONFIG_PID \
       "AIMEE_MODULE_POLICY_DIR=$grants"
@@ -652,12 +652,8 @@ live_env_start_kb_modules() {
 }
 
 live_env_memory_grants() {
-   local placement=$1 grants=$2 name
-   for name in memory memory-postgres memory-egress; do
-      sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-memory|" \
-         "src/build/obj/module-bundle/grants/$placement/$name.grant" \
-         >"$grants/$name.grant" || exit 2
-   done
+   echo "$LIVE_NAME: bundled memory owner retired; this legacy rig requires a separately provisioned external memory fixture with exact executable grants" >&2
+   return 2
 }
 
 live_env_stop_kb_modules() {
@@ -724,7 +720,7 @@ live_env_start_module() {
       src/build/obj/module-bundle/grants/server/config.grant \
       >"$AIMEE_HOME/modules.d/server/config.grant"
    local bus="$AIMEE_HOME/server-module-bus.sock"
-   live_env_memory_grants server "$AIMEE_HOME/modules.d/server"
+   live_env_memory_grants server "$AIMEE_HOME/modules.d/server" || return 2
    # Postgres first: the store checks for its backend as it comes up.
    live_env_arm_module "$PWD/$pgmodule" "$bus" "$AIMEE_HOME/pg-module.log" \
       LIVE_PG_MODULE_PID "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" \

@@ -11,6 +11,8 @@
  */
 #include "prompts.h"
 #include "aimee.h"
+#include "owned_feature.h"
+AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_prompt_legacy_guard_contract_v1);
 #include "db1_client/db1.h"
 #include "dstr.h"
 #include "working_profile.h"
@@ -1006,6 +1008,8 @@ static int working_profile_field_allowed(const char *field)
 
 char *prompt_apply_working_profile(const char *base_prompt)
 {
+   if (aimee_owned_feature_status("working_profile"))
+      return NULL; /* Current owned Model projection is a separate custody path. */
    dstr_t out;
    dstr_init(&out);
    dstr_append_str(&out, base_prompt ? base_prompt : "");

@@ -1,5 +1,6 @@
 /* primary_session_adapter.c: direct primary-agent conversation sessions. */
 #include "primary_session_adapter.h"
+#include "headers/server_session_capture.h"
 #include "ingress_preinject.h" /* S2 binding: publish primary session id per turn */
 
 #include "agent_adapter.h"
@@ -234,16 +235,164 @@ static int primary_session_adopt_latest_for_id(primary_session_state_t *state, c
    return 1;
 }
 
-static int primary_session_store_history(primary_session_state_t *state, const char *json)
+/* Match only documentary annotations on unchanged, ordered User TEXT. The
+ * canonical owner is the authority; a compatibility/model view cannot supply a
+ * new attachment or select a different occurrence of an identical prompt. */
+typedef struct
+{
+   cJSON *block;
+   size_t user_message, block_index;
+} primary_user_text_t;
+
+static int primary_user_texts(cJSON *messages, primary_user_text_t *texts, size_t *count)
+{
+   *count = 0;
+   size_t user_message = 0;
+   cJSON *message;
+   cJSON_ArrayForEach(message, messages)
+   {
+      const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(message, "role"));
+      if (!role || strcmp(role, "user"))
+         continue;
+      cJSON *blocks = cJSON_GetObjectItemCaseSensitive(message, "blocks"), *block;
+      size_t block_index = 0;
+      cJSON_ArrayForEach(block, blocks)
+      {
+         const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block, "type"));
+         if (type && !strcmp(type, "text"))
+         {
+            if (*count == AIMEE_IR_MAX_BLOCKS)
+               return -1;
+            texts[(*count)++] = (primary_user_text_t){block, user_message, block_index};
+         }
+         ++block_index;
+      }
+      ++user_message;
+   }
+   return 0;
+}
+
+static void primary_scan_metadata(cJSON *messages, int *inputs, int *tools)
+{
+   *inputs = *tools = 0;
+   cJSON *message, *block;
+   cJSON_ArrayForEach(message, messages)
+       cJSON_ArrayForEach(block, cJSON_GetObjectItemCaseSensitive(message, "blocks"))
+   {
+      *inputs |= cJSON_GetObjectItemCaseSensitive(block, "input_attachment") != NULL;
+      *tools |= cJSON_GetObjectItemCaseSensitive(block, "tool_source") != NULL;
+   }
+}
+
+static int primary_history_metadata(cJSON *messages, int *inputs, int *tools)
+{
+   if (aimee_ir_history_admit_host(messages) != 0)
+      return -1;
+   primary_scan_metadata(messages, inputs, tools);
+   return 0;
+}
+
+static int primary_restore_inputs(cJSON *canonical, cJSON *messages)
+{
+   primary_user_text_t *before = calloc(AIMEE_IR_MAX_BLOCKS, sizeof(*before));
+   primary_user_text_t *after = calloc(AIMEE_IR_MAX_BLOCKS, sizeof(*after));
+   size_t n = 0, m = 0;
+   int result = -1;
+   if (!before || !after || primary_user_texts(canonical, before, &n) ||
+       primary_user_texts(messages, after, &m) || n != m)
+      goto done;
+   for (size_t i = 0; i < n; ++i)
+   {
+      if (before[i].user_message != after[i].user_message ||
+          before[i].block_index != after[i].block_index)
+         goto done;
+      const char *left =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(before[i].block, "text"));
+      const char *right =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(after[i].block, "text"));
+      if (!left || !right || strcmp(left, right))
+         goto done;
+      cJSON *original = cJSON_GetObjectItemCaseSensitive(before[i].block, "input_attachment");
+      cJSON *supplied = cJSON_GetObjectItemCaseSensitive(after[i].block, "input_attachment");
+      if (supplied && (!original || !cJSON_Compare(original, supplied, 1)))
+         goto done;
+      if (!original || supplied)
+         continue;
+      /* No text-only inference when more than one User occurrence could match. */
+      for (size_t j = 0; j < n; ++j)
+         if (i != j && !strcmp(left, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                                         before[j].block, "text"))))
+            goto done;
+      cJSON *copy = cJSON_Duplicate(original, 1);
+      if (!copy || !cJSON_AddItemToObject(after[i].block, "input_attachment", copy))
+      {
+         cJSON_Delete(copy);
+         goto done;
+      }
+   }
+   result = 0;
+done:
+   free(before);
+   free(after);
+   return result;
+}
+
+/* Called with cancellation disabled until the primary busy lease is released.
+ * The capture history RPC owns its own mutex; no primary global lock is held. */
+static int primary_session_store_history(primary_session_state_t *state, cJSON *messages,
+                                         const char *active_turn)
 {
    unsigned char random[16];
    char checkpoint[33];
    const char *principal = agent_get_request_vault_principal();
-   if (!principal || !principal[0] || !json || RAND_bytes(random, sizeof random) != 1)
-      return -1;
+   server_session_capture_t *capture = NULL;
+   cJSON *canonical = NULL;
+   char *json = NULL;
+   int inputs = 0, tools = 0, canonical_inputs = 0, canonical_tools = 0;
+   int prior_inputs = 0, prior_tools = 0;
+   primary_scan_metadata(state->messages, &prior_inputs, &prior_tools);
+   int result = -1;
+   if (!principal || !principal[0] || primary_history_metadata(messages, &inputs, &tools))
+      goto done;
+   /* A compatibility compactor cannot erase the evidence that it needs a
+    * preserving checkpoint. Source-bearing compaction requires a live owner. */
+   if ((prior_inputs || prior_tools) && (!active_turn || !active_turn[0]))
+      goto done;
+   if (active_turn && active_turn[0])
+   {
+      if (server_session_capture_retain_current(state->scope_id, principal, &capture) || !capture ||
+          strcmp(server_session_capture_session(capture), state->scope_id) ||
+          strcmp(server_session_capture_turn(capture), active_turn) ||
+          server_session_capture_history(capture, &canonical) ||
+          primary_history_metadata(canonical, &canonical_inputs, &canonical_tools))
+         goto done;
+      if (prior_inputs && !canonical_inputs)
+         goto done;
+      if ((canonical_inputs || inputs) && primary_restore_inputs(canonical, messages))
+         goto done;
+      if (primary_history_metadata(messages, &inputs, &tools))
+         goto done;
+   }
+   if ((inputs || tools) && !capture)
+      goto done;
+   json = cJSON_PrintUnformatted(messages);
+   if (!json || RAND_bytes(random, sizeof random) != 1)
+      goto done;
    for (int i = 0; i < 16; i++)
       snprintf(checkpoint + 2 * i, 3, "%02x", random[i]);
-   return db1_session_ir_history_save(state->scope_id, checkpoint, "primary", principal, json);
+   if (inputs)
+      result = db1_session_input_attachment_history_save(state->scope_id, checkpoint, "primary",
+                                                         principal, active_turn, json);
+   else if (tools || prior_tools || canonical_tools)
+      result = db1_session_tool_source_history_save(state->scope_id, checkpoint, "primary",
+                                                    principal, active_turn, json);
+   else
+      result = db1_session_ir_history_save(state->scope_id, checkpoint, "primary", principal, json);
+done:
+   free(json);
+   cJSON_Delete(canonical);
+   server_session_capture_release(capture);
+   return result;
 }
 
 static int primary_session_load_messages_locked(primary_session_state_t *state,
@@ -393,7 +542,6 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
    cJSON *initial_messages = NULL;
    char session_id[128] = {0};
    char effective_aimee_session_id[128] = {0};
-   char *persist_json = NULL;
    const char *requested_id = "";
    if (req->provider_session_id && req->provider_session_id[0])
       requested_id = req->provider_session_id;
@@ -539,11 +687,10 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
    run_cmd_set_cwd(NULL);
    cJSON_Delete(initial_messages);
 
-   if (rc == 0 && updated_messages)
-      persist_json = cJSON_PrintUnformatted(updated_messages);
-
+   int checkpoint_cancel_state;
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &checkpoint_cancel_state);
    if (rc == 0 && updated_messages &&
-       (!persist_json || primary_session_store_history(state, persist_json) != 0))
+       primary_session_store_history(state, updated_messages, req->active_turn_id) != 0)
    {
       state->history_failed = 1;
       rc = AGENT_RC_CAPTURE_FAILED;
@@ -568,7 +715,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
    pthread_mutex_unlock(&g_primary_sessions_lock);
    cJSON_Delete(updated_messages);
 
-   free(persist_json);
+   pthread_setcancelstate(checkpoint_cancel_state, NULL);
 
    return rc;
 }
@@ -665,15 +812,14 @@ int primary_session_adapter_compact(const primary_session_request_t *req,
    if (result)
       *result = local_result;
 
-   char *persist_json = NULL;
-   if (rc == 0)
-      persist_json = cJSON_PrintUnformatted(messages);
+   int checkpoint_cancel_state;
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &checkpoint_cancel_state);
 
    snprintf(effective_aimee_session_id, sizeof(effective_aimee_session_id), "%s",
             (req->aimee_session_id && req->aimee_session_id[0]) ? req->aimee_session_id
                                                                 : session_id);
 
-   if (rc == 0 && (!persist_json || primary_session_store_history(state, persist_json) != 0))
+   if (rc == 0 && primary_session_store_history(state, messages, req->active_turn_id) != 0)
       rc = -1;
 
    pthread_mutex_lock(&g_primary_sessions_lock);
@@ -692,15 +838,13 @@ int primary_session_adapter_compact(const primary_session_request_t *req,
    pthread_mutex_unlock(&g_primary_sessions_lock);
    cJSON_Delete(messages);
 
-   if (rc != 0 || !persist_json)
+   pthread_setcancelstate(checkpoint_cancel_state, NULL);
+   if (rc != 0)
    {
-      free(persist_json);
       if (error_out && error_len > 0)
          snprintf(error_out, error_len, "failed to compact primary session '%s'", session_id);
       return -1;
    }
-
-   free(persist_json);
 
    if (session_id_out && session_id_len > 0)
       snprintf(session_id_out, session_id_len, "%s", session_id);

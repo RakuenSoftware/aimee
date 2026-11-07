@@ -7,6 +7,14 @@
 #ifndef KB_HTTP_CONSOLE_H
 #define KB_HTTP_CONSOLE_H
 
+/* Optional linked module extension. Called only by the verified console route;
+ * request bytes and verifier-owned command context remain separate. The context
+ * is complete JSON, not request-provided authority. Return an HTTP status and a
+ * complete JSON response. Absence is an explicit unavailable capability. */
+int aimee_module_console_admin_extension(const char *method, const char *path,
+                                         const char *body, const char *verified_context,
+                                         char *out, int out_cap) __attribute__((weak));
+
 /* Handle a console route under /v1/console. Returns the HTTP status if (method,
  * path) is a console route, or -1 if it is not (so the caller continues). */
 int kb_http_console_route(const char *method, const char *path, const char *body, char *out_buf,

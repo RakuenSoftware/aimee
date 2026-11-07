@@ -115,7 +115,7 @@ class CProcessBuildTests(unittest.TestCase):
                     [{**client, "publish": publish}], {11266}, {7})
 
     @unittest.skipUnless(shutil.which("go"), "go is not installed")
-    def test_memory_export_builds_with_all_owner_sources(self) -> None:
+    def test_memory_export_is_unavailable_and_retains_generic_probe(self) -> None:
         contract = exporter.process_contracts.validate()["memory"]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -123,15 +123,15 @@ class CProcessBuildTests(unittest.TestCase):
                                    exporter.source_timestamp(),
                                    exporter.CORE_VERSION_FILE.read_text().strip())
             module = root / "aimee-module-memory"
-            for source in (REPO_ROOT / "server-go/modules/memory").rglob("*.go"):
-                relative = source.relative_to(REPO_ROOT)
-                self.assertEqual((module / relative).read_bytes(), source.read_bytes())
-            build = subprocess.run(["go", "build", "-o", str(module / "memory"), "./runtime"],
-                                   cwd=module, capture_output=True, text=True, timeout=180)
+            self.assertEqual(sorted(str(p.relative_to(module / "server-go/modules/memory")) for p in (module / "server-go/modules/memory").rglob("*.go")), ["adapter/unavailable.go"])
+            self.assertEqual((module / "server-go/cmd/aimee-memory-bus-probe/main.go").read_bytes(),
+                             (REPO_ROOT / "server-go/cmd/aimee-memory-bus-probe/main.go").read_bytes())
+            build = subprocess.run(["go", "build", "-o", str(module / "memory"), "./runtime"], cwd=module, capture_output=True, text=True, timeout=180)
             self.assertEqual(build.returncode, 0, build.stderr)
-            tests = subprocess.run(["go", "test", "./server-go/modules/memory",
-                                    "-run", "TestLifecycleVersionValidation|TestObservedRankingTrace|TestEvidenceCoverage|TestEvidenceRequirements|TestEvidenceRecovery|TestEvidenceTemporal|TestEvidenceComparison|TestEvidenceProcedure|TestMR05FrozenCoverage|TestUtilityHorizon|TestRequestCopySharesCodeInitialization", "-count=1"],
-                                   cwd=module, capture_output=True, text=True, timeout=180)
+            run = subprocess.run([str(module / "memory"), "/nonexistent/no-memory-bus.sock"], capture_output=True, text=True, timeout=5)
+            self.assertEqual(run.returncode, 2)
+            self.assertIn("memory capability unavailable", run.stderr)
+            tests = subprocess.run(["go", "test", "./server-go/memory", "./server-go/cmd/aimee-memory-bus-probe", "-count=1"], cwd=module, capture_output=True, text=True, timeout=180)
             self.assertEqual(tests.returncode, 0, tests.stdout + tests.stderr)
 
     @unittest.skipUnless(shutil.which("go"), "go is not installed")

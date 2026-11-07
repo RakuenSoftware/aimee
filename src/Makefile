@@ -14,8 +14,6 @@ RM      = rm -rf
 endif
 BINARY  = ../aimee$(EXEEXT)
 SERVER  = ../aimee-server$(EXEEXT)
-MEMORY_EVAL = ../aimee-memory-eval$(EXEEXT)
-MEMORY_TRANSFER = ../aimee-memory-transfer$(EXEEXT)
 CONFIG_MODULE = $(OBJDIR)/aimee-module-config$(EXEEXT)
 # Statically-linked TCP<->UDS bridge that runs INSIDE a delegate sandbox container.
 FORWARDER = ../aimee-forwarder$(EXEEXT)
@@ -301,7 +299,7 @@ else ifeq ($(UNAME_S),Darwin)
         posix/cmd_hooks.c posix/server_compute.c \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \
-        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
+        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_tool_source.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
 else
     PLATFORM_BASIC_SRCS = \
         posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
@@ -316,7 +314,7 @@ else
         posix/cmd_hooks.c posix/server_compute.c \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \
-        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
+        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_tool_source.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
 endif
 
 PLATFORM_SRCS       = $(PLATFORM_BASIC_SRCS) $(PLATFORM_EXTRA_SRCS) $(PLATFORM_AGENT_SRCS)
@@ -377,6 +375,10 @@ DB1_OBJS = $(DB1_SRCS:%.c=$(OBJDIR)/%.o)
 DB1_CLIENT_SRCS = db1_client/transport.c db1_client/checkpoints.c db1_client/jti_replay.c db1_client/lifecycle.c db1_client/mgmt_jwks.c db1_client/mgmt_nonce.c db1_client/pki.c db1_client/git_ownership.c db1_client/conversation.c db1_client/agent_work.c db1_client/delegation.c db1_client/sessions.c db1_client/runtime.c db1_client/telemetry.c db1_client/guardrail_state.c db1_client/ensemble.c db1_client/workflow.c db1_client/roundtable.c db1_client/identity.c
 
 DB1_CLIENT_OBJS = $(DB1_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
+# The opt-in plan client validates canonical IR JSON; keep that dependency out
+# of unrelated clients/tests linking the legacy DB1_CLIENT_OBJS collection.
+DB1_INPUT_PLAN_CLIENT_SRCS = db1_client/original_input_plan.c
+DB1_INPUT_PLAN_CLIENT_OBJS = $(DB1_INPUT_PLAN_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0c: KB_STORE (shared knowledge tier) ---
 POSTGRES_CLIENT_SRCS = modules/postgres/client/session.c modules/postgres/client/local_session.c
@@ -527,7 +529,7 @@ $(OBJDIR)/modules/audit/audit_replay.o: C_FLAGS += -Icore/event_bus/include
 $(OBJDIR)/server/execution_policy_bus.o: C_FLAGS += -Imodules/execution-policy/include
 
 # --- Layer 2: Agent execution (agent loop, tools, HTTP, policy) ---
-AGENT_SRCS = core/turn_integrity/turn_integrity.c agent_job_release.c delegate_exit_classify.c primary_session_release.c model_catalog_release.c server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/execution_policy_bus.c modules/benchmarks/agent_eval.c modules/benchmarks/agent_eval_memory_support.c modules/benchmarks/agent_eval_baseline.c server/agent_coord.c \
+AGENT_SRCS = server/host_original_text.c server/host_original_submission.c core/turn_integrity/turn_integrity.c agent_job_release.c delegate_exit_classify.c primary_session_release.c model_catalog_release.c server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/execution_policy_bus.c modules/benchmarks/agent_eval.c modules/benchmarks/agent_eval_memory_support.c modules/benchmarks/agent_eval_baseline.c server/agent_coord.c \
              server/agent_tasks.c server/agent_tools.c server/computer_use.c server/script_runner.c server/script_rpc.c server/script_tool_execution.c toolset.c server/tool_args_coerce.c server/tool_schema_sanitizer.c server/osv_check.c server/http_retry.c server/failover.c \
              server/web_search.c server/web_search_fuse.c server/web_search_breaker.c server/token_tracker.c server/token_tracker_registry.c server/token_tracker_db1.c server/middleware.c server/agent_pipeline.c \
              server/process_mgr.c server/agent_loop.c server/liveness.c server/cli_session.c server/cli_session_pty.c server/cli_codex.c server/cli_codex_profile.c server/provider_cli_adapter.c server/cli_claude.c server/cli_claude_native.c server/claude_headless.c server/server_session_control.c server/server_session_capture.c server/server_session_question.c server/server_session_log.c server/agent_response_projection.c  server/cli_mistral.c server/cli_acp.c server/session_compact.c server/rounds_to_resume.c server/compact_prune.c server/context_engine.c \
@@ -954,12 +956,12 @@ GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o \
                $(OBJDIR)/modules/vault/runtime_secret.o $(GATEWAY_PLATFORM_OBJS)
 
 # All source files for linting (excluding vendored cJSON)
-ALL_SRCS = $(sort $(CORE_CODEC_SRCS) $(POSTGRES_CLIENT_SRCS) $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(KB_STORE_PG_SRCS) $(KB_STORE_SRCS) $(KB_STORE_HOST_ADAPTER_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/kb/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/kb/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/kb/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) \
+ALL_SRCS = $(sort $(CORE_CODEC_SRCS) $(POSTGRES_CLIENT_SRCS) $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(DB1_INPUT_PLAN_CLIENT_SRCS) $(KB_STORE_PG_SRCS) $(KB_STORE_SRCS) $(KB_STORE_HOST_ADAPTER_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/kb/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/kb/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/kb/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) \
            $(CORE_CONNECTION_SRCS) $(CORE_EVENT_BUS_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
 # All object files for dependency tracking
-ALL_OBJS = $(CORE_CODEC_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(KB_STORE_PG_OBJS) $(KB_STORE_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) \
+ALL_OBJS = $(CORE_CODEC_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(DB1_INPUT_PLAN_CLIENT_OBJS) $(KB_STORE_PG_OBJS) $(KB_STORE_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) \
            $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(GATEWAY_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 # Header dependency tracking must cover EVERY object we compile, not just the ones
 # a hand-maintained *_OBJS variable happens to name. Objects reachable only as a
@@ -977,7 +979,7 @@ DEPS = $(ALL_OBJS:.o=.d) $(shell find $(OBJDIR) -name '*.d' 2>/dev/null)
 
 .PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check memory-c-boundary-check module-egress-check cleanup-ledger-check repository-lock-check postgres-provider-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check memory-store-degradation-check config-schema-drift-check config-uninitialized-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests configure-hooks-matrix-test go-unit-tests go-vulncheck verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke init-migrate-service-test postgres-store-bootstrap-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check learning-loop-evidence self-learning-efficacy virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check module-placement-check
 
-all: retire-obsolete-binaries $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
+all: retire-obsolete-binaries $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
 
 # The forwarder is a standalone static binary (libc only, no aimee objects); it is
 # shipped in the aimee-server image and docker-cp'd into a delegate sandbox.
@@ -1447,35 +1449,12 @@ check-transport-artifact:
 test-transport-artifact:
 	@python3 ../tests/test_transport_artifact.py
 
-.PHONY: memory-owner-replay-check
-# Reuse the isolated PostgreSQL replay database. Missing runtime-role or
-# evaluator DSNs must fail rather than skip CI.
-memory-owner-replay-check:
-	@test -n "$$AIMEE_KB_STORE_REPLAY_URL" || (echo "memory-owner-replay-check requires AIMEE_KB_STORE_REPLAY_URL for a disposable PostgreSQL database" >&2; exit 2)
-	@test -n "$$AIMEE_MEMORY_EVAL_URL" || (echo "memory-owner-replay-check requires AIMEE_MEMORY_EVAL_URL for a separate disposable scratch database" >&2; exit 2)
-	@test -n "$$AIMEE_DB_TEST_URL" || (echo "memory-owner-replay-check requires AIMEE_DB_TEST_URL for isolated evaluator provisioning" >&2; exit 2)
-ifeq ($(strip $(MEMORY_OWNER_REPLAY_JSON)),)
-	cd ../server-go && \
-	  AIMEE_MEMORY_REPLAY_REQUIRED=1 AIMEE_MEMORY_EVAL_REQUIRED=1 \
-	  AIMEE_DB_TEST_REQUIRED=1 go test -race -count=1 -timeout=30m -v \
-	  ./modules/memory ./modules/memory/cmd/aimee-memory-eval ./cmd/aimee-module
-else
-	@# Same run, also recorded as `go test -json` so the frozen reliability
-	@# check (scripts/check_memory_reliability_release.py --go-events) can verify
-	@# its required cases from THIS execution instead of running them again. The
-	@# log shows the same text -v prints.
-	@mkdir -p "$(dir $(abspath $(MEMORY_OWNER_REPLAY_JSON)))"
-	cd ../server-go || exit 1; status=0; \
-	  AIMEE_MEMORY_REPLAY_REQUIRED=1 AIMEE_MEMORY_EVAL_REQUIRED=1 \
-	  AIMEE_DB_TEST_REQUIRED=1 go test -race -count=1 -timeout=30m -json \
-	  ./modules/memory ./modules/memory/cmd/aimee-memory-eval ./cmd/aimee-module \
-	  > "$(abspath $(MEMORY_OWNER_REPLAY_JSON))" || status=$$?; \
-	  python3 -I -S ../scripts/go-test-json-output.py "$(abspath $(MEMORY_OWNER_REPLAY_JSON))"; \
-	  exit $$status
-endif
-
-memory-retrieval-eval-check:
-	cd ../server-go && AIMEE_MEMORY_EVAL_REQUIRED=1 go test -race -count=1 -v ./modules/memory -run '^(TestRetrievalCorpus|TestPersonalMemoryPrivacyRegression|TestContentGateEmitsCleanVerdict|TestPrivateCode.*|TestKBGraphFusionUsesInstancePolicyAndVisibility|TestCodeVectorsRejectStaleContentAndModel)$$'
+.PHONY: memory-owner-replay-check memory-retrieval-eval-check
+# The concrete Go memory owner is an explicitly private frozen experiment.
+# These historical target names cannot certify the external implementation.
+memory-owner-replay-check memory-retrieval-eval-check:
+	@echo "Legacy Go memory certification unavailable here; run private aims-db/experiments/legacy-aimee-go/qualify.py against fresh owned PostgreSQL" >&2
+	@exit 2
 
 # Virtual-context long-session benchmark gate: deterministic compression,
 # stub answerability, and baseline-vs-compacted late-turn accuracy (AC#4).
@@ -1507,13 +1486,8 @@ $(BINARY): $(CLI_OBJS) $(CLIENT_SUPPORT_OBJS) $(CORE_CONNECTION_LIB)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_CLIENT)
 
-# The corpus evaluator owns its disposable PostgreSQL session and Go memory owner.
-MEMORY_EVAL_GO_SRCS := $(shell find ../server-go -name '*.go' -type f 2>$(NULLDEV)) ../server-go/go.mod ../server-go/go.sum
-$(MEMORY_TRANSFER): $(MEMORY_EVAL_GO_SRCS)
-	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../aimee-memory-transfer ./modules/memory/cmd/aimee-memory-transfer
-
-$(MEMORY_EVAL): $(MEMORY_EVAL_GO_SRCS)
-	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../aimee-memory-eval ./modules/memory/cmd/aimee-memory-eval
+# Concrete memory evaluator/transfer binaries are private aims-db tools;
+# they are built explicitly there, never by the public application install.
 
 # Go webchat server: serves the browser UI, handles PAM auth, proxies chat to aimee-server.
 RUNTIME_WEB_GO_SRCS := $(wildcard ../runtime-web/*.go) ../runtime-web/go.mod ../runtime-web/go.sum \
@@ -1536,7 +1510,7 @@ $(DELEGATE_EGRESS): $(DELEGATE_EGRESS_GO_SRCS)
 # synthesize a tcp: endpoint from a --server / AIMEE_SERVER_URL / remote.conf
 # target. --gc-sections drops the rest of aimee_client (the actual TCP/TLS
 # transport), so no extra net/tls/uds objects are needed here.
-$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_KB_STORE_OBJS) $(SERVER_KB_STORE_PG_OBJS) $(SERVER_MEMORY_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
+$(SERVER): $(DB1_INPUT_PLAN_CLIENT_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_KB_STORE_OBJS) $(SERVER_KB_STORE_PG_OBJS) $(SERVER_MEMORY_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_SERVER)
 
@@ -1854,10 +1828,8 @@ CFLAGS_DATADIR = -DAIMEE_DATADIR='"$(DATADIR)"'
 install:
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	@mkdir -p build && date +%s > $(BUILD_ID_FILE)
-	$(MAKE) $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY)
+	$(MAKE) $(BINARY) $(RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY)
 	rm -f $(PREFIX)/bin/aimee-client $(PREFIX)/bin/aimee-worker
-	install -m 755 $(MEMORY_EVAL) $(PREFIX)/bin/aimee-memory-eval
-	install -m 755 $(MEMORY_TRANSFER) $(PREFIX)/bin/aimee-memory-transfer
 	install -m 755 $(BINARY) $(PREFIX)/bin/aimee
 	install -m 755 $(RUNTIME_WEB) $(PREFIX)/bin/aimee-runtime-web
 	install -m 755 $(DELEGATE_EGRESS) $(PREFIX)/bin/aimee-delegate-egress
@@ -2240,6 +2212,7 @@ module-bus-boundary-check:
 memory-c-boundary-check:
 	@python3 -I -S ../scripts/check_memory_c_boundary.py
 	@python3 -I -S ../scripts/check_memory_ownership.py
+	@python3 -I -S ../scripts/check_memory_retirement_boundary.py
 
 module-egress-check:
 	@python3 -I -S ../scripts/check-module-egress.py

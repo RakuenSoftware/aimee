@@ -91,6 +91,33 @@ static void cancel_request(bus_client_t *bus, uint32_t event_kind, uint64_t corr
    }
 }
 
+typedef struct
+{
+   aimee_module_client_t *client;
+   uint8_t *payload;
+   uint32_t event_kind;
+   uint64_t correlation;
+   uint32_t *response_len;
+   int request_started;
+   int normal_return;
+} module_call_scope_t;
+static void module_call_scope_cleanup(void *opaque)
+{
+   volatile module_call_scope_t *scope = opaque;
+   int prior;
+   (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &prior);
+   if (!scope->normal_return)
+   {
+      if (scope->request_started)
+         cancel_request(scope->client->bus, scope->event_kind, scope->correlation);
+      *scope->response_len = 0;
+   }
+   free(scope->payload);
+   pthread_mutex_unlock(&scope->client->lock);
+   if (scope->normal_return)
+      (void)pthread_setcancelstate(prior, NULL);
+}
+
 aimee_module_call_result_t
 aimee_module_client_call(aimee_module_client_t *client, uint32_t event_kind, uint32_t stage_id,
                          uint64_t trace_id, uint64_t deadline_ns, const void *request_body,
@@ -111,7 +138,10 @@ aimee_module_client_call(aimee_module_client_t *client, uint32_t event_kind, uin
       return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
 
    pthread_mutex_lock(&client->lock);
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_TRANSPORT;
+   volatile module_call_scope_t owned = {.client = client, .event_kind = event_kind,
+                               .response_len = response_len};
+   volatile aimee_module_call_result_t result = AIMEE_MODULE_CALL_TRANSPORT;
+   pthread_cleanup_push(module_call_scope_cleanup, (void *)&owned);
    if (client->bus->reply.inline_budget <= AIMEE_MODULE_MESSAGE_HEADER_LEN)
    {
       result = AIMEE_MODULE_CALL_TRANSPORT;
@@ -119,12 +149,14 @@ aimee_module_client_call(aimee_module_client_t *client, uint32_t event_kind, uin
    }
    uint32_t chunk_capacity = client->bus->reply.inline_budget - AIMEE_MODULE_MESSAGE_HEADER_LEN;
    uint8_t *payload = malloc(client->bus->reply.inline_budget);
+   owned.payload = payload;
    if (!payload)
    {
       result = AIMEE_MODULE_CALL_INTERNAL;
       goto done;
    }
    const uint64_t correlation = next_correlation(client);
+   owned.correlation = correlation;
    const struct timespec idle = {.tv_sec = 0, .tv_nsec = 1000000};
    uint32_t request_offset = 0;
    int first_fragment = 1;
@@ -134,7 +166,7 @@ aimee_module_client_call(aimee_module_client_t *client, uint32_t event_kind, uin
       first_fragment = 0;
       if (cancelled_now(cancelled, cancel_context))
       {
-         free(payload);
+         free(owned.payload); owned.payload = NULL;
          if (request_started)
             cancel_request(client->bus, event_kind, correlation);
          result = AIMEE_MODULE_CALL_CANCELLED;
@@ -142,7 +174,7 @@ aimee_module_client_call(aimee_module_client_t *client, uint32_t event_kind, uin
       }
       if (deadline_now(deadline_ns))
       {
-         free(payload);
+         free(owned.payload); owned.payload = NULL;
          if (request_started)
             cancel_request(client->bus, event_kind, correlation);
          result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
@@ -159,7 +191,7 @@ aimee_module_client_call(aimee_module_client_t *client, uint32_t event_kind, uin
                                         .trace_id = trace_id};
       if (aimee_module_message_encode(&request, payload, payload_len) == 0)
       {
-         free(payload);
+         free(owned.payload); owned.payload = NULL;
          result = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
          goto done;
       }
@@ -173,11 +205,12 @@ aimee_module_client_call(aimee_module_client_t *client, uint32_t event_kind, uin
          if (sent == BUS_CLIENT_OK)
          {
             request_started = 1;
+            owned.request_started = 1;
             break;
          }
          if (sent != BUS_CLIENT_WOULD_BLOCK)
          {
-            free(payload);
+            free(owned.payload); owned.payload = NULL;
             if (request_started)
                cancel_request(client->bus, event_kind, correlation);
             result = AIMEE_MODULE_CALL_TRANSPORT;
@@ -191,7 +224,7 @@ aimee_module_client_call(aimee_module_client_t *client, uint32_t event_kind, uin
          continue; /* the top of the loop sends cancellation and returns */
       request_offset += part;
    }
-   free(payload);
+   free(owned.payload); owned.payload = NULL;
 
    uint32_t response_total = 0;
    int response_too_large = 0;
@@ -284,7 +317,8 @@ aimee_module_client_call(aimee_module_client_t *client, uint32_t event_kind, uin
    }
 
 done:
-   pthread_mutex_unlock(&client->lock);
+   owned.normal_return = 1;
+   pthread_cleanup_pop(1);
    return result;
 }
 

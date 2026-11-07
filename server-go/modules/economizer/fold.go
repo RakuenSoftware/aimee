@@ -406,7 +406,7 @@ func FoldView(messages *JSONValue, cfg *FoldConfig, freeze *FoldFreeze) FoldResu
 	// unchanged instead of splitting its protected message.
 	for i := 0; i < split; i++ {
 		m := messages.At(i)
-		if protectedMessage(m) && m.GetString("role") == "user" && !isCleanUserTurn(m) {
+		if messageHasToolSource(m) || (protectedMessage(m) && m.GetString("role") == "user" && !isCleanUserTurn(m)) {
 			return out
 		}
 	}

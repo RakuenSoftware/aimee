@@ -173,6 +173,10 @@ static void retry_after_header(char *dst, size_t n)
       dst[0] = '\0';
 }
 
+extern int host_original_submission_required(void) __attribute__((weak));
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_original_input_web_negotiation_contract_v1 = 1;
+
 void send_response(int fd, int status, const char *body, const char *request_id)
 {
    const char *reason = status == 200   ? "OK"
@@ -211,10 +215,14 @@ void send_response(int fd, int status, const char *body, const char *request_id)
    const char *encoding = compressed ? "Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n" : "";
    const char *request_encoding =
        server_http_gzip_peek() ? "Accept-Request-Encoding: gzip\r\n" : "";
+   const char *original_input =
+       host_original_submission_required && host_original_submission_required()
+           ? "X-Aimee-Original-Input: required\r\n"
+           : "X-Aimee-Original-Input: optional\r\n";
    int hlen = snprintf(head, sizeof(head),
                        "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n"
-                       "Content-Length: %zu\r\n%s%s%s%s%sConnection: %s\r\n\r\n",
-                       status, reason, wire_len, rid, reh, rah, encoding, request_encoding,
+                       "Content-Length: %zu\r\n%s%s%s%s%s%sConnection: %s\r\n\r\n",
+                       status, reason, wire_len, rid, reh, rah, encoding, request_encoding, original_input,
                        server_http_keepalive_peek() ? "keep-alive" : "close");
    write_all_fd(fd, head, hlen);
    if (wire_len > 0)

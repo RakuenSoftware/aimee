@@ -93,6 +93,24 @@ struct aimee_tool;
 char *dispatch_tool_call_ir_ctx_status(const struct aimee_tool *admitted,
                                        const char *canonical_arguments_json, int timeout_ms,
                                        int *is_error);
+/* Host-only, same-invocation source custody. Opaque owner receipts stay outside
+ * MCP content/arguments. The canonical result owner must transfer tool_source
+ * before restoring worker context; a TLS append is not durable custody. */
+typedef struct agent_tool_source_scope
+{
+   struct agent_tool_source_scope *previous;
+   struct cJSON *tool_source;
+   int active, failed;
+} agent_tool_source_scope_t;
+int aimee_tool_source_visible_valid(const struct cJSON *tool_source, const char *visible_text);
+int agent_tool_source_scope_begin(agent_tool_source_scope_t *scope);
+/* Copies one receipt after exact visible-byte validation. Missing scope,
+ * malformed/duplicate receipts and changed output refuse, never drop custody. */
+int agent_tool_source_attach(const struct cJSON *tool_source, const char *visible_text);
+int agent_tool_source_check(const char *visible_text);
+int agent_tool_source_scope_finish(agent_tool_source_scope_t *scope, const char *visible_text,
+                                   struct cJSON **tool_source);
+void agent_tool_source_scope_abort(agent_tool_source_scope_t *scope);
 int agent_tools_builtin_catalog(struct aimee_tool **out, int *count);
 /* Fresh owned definition from the current execution owner. Unregistered or
  * unavailable capabilities refuse; no process-global schema cache is used. */
@@ -102,6 +120,70 @@ int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
  * joins; only the forked child installs it. Never changes process environ.
  * Container/detached providers do not inherit host transport capabilities. */
 char *const *agent_tools_bind_bash_environment(char *const environment[]);
+
+/* Optional trusted module adapter. Startup-only; owned canonical definitions
+ * and policy metadata are copied. Version 1 accepts closed flat scalar schemas
+ * (string/boolean fields), using the existing form validator. All numeric
+ * coordinates use canonical decimal strings. No request
+ * selects a provider or callback. */
+typedef struct agent_module_native_definition
+{
+   const char *name, *description;
+   const struct cJSON *schema;
+   aimee_tool_metadata_t metadata;
+} agent_module_native_definition;
+typedef char *(*agent_module_native_call)(const char *, const struct cJSON *, int, int *, void *);
+extern const unsigned aimee_module_native_tools_contract_v1;
+int agent_tools_module_native_install(const agent_module_native_definition *, size_t,
+                                      agent_module_native_call, void *);
+/* Optional checked-module contract. The pure input callback runs before
+ * canonical persistence and before execution. It must not perform I/O, mint
+ * authority, retain inputs, cancel, longjmp or re-enter session emission.
+ * Existing install4 ABI/default behavior is unchanged. Selected requests use
+ * bounded buffered upstream admission; unexpected selected stream deltas refuse. */
+typedef int (*agent_module_native_input_admission)(const char *, const struct cJSON *, void *);
+extern const unsigned aimee_module_native_admission_contract_v1;
+int agent_tools_module_native_install_checked_v1(const agent_module_native_definition *, size_t,
+    agent_module_native_call, agent_module_native_input_admission, void *);
+int agent_tools_module_native_input_selected_v1(const char *);
+int agent_tools_module_native_input_admit_v1(const char *, const struct cJSON *);
+int agent_tools_module_native_requires_buffered_v1(const struct aimee_tool *, size_t);
+int agent_tools_module_native_has(const char *);
+int agent_tools_module_native_definition(const char *, struct aimee_tool *);
+int agent_tools_module_native_metadata(const char *, aimee_tool_metadata_t *);
+char *agent_tools_module_native_call(const char *, const char *, int, int *);
+int agent_tools_module_native_admitted(const struct aimee_tool *);
+
+/* Optional trusted-module READ completion control, version 1. No Model input
+ * invokes these functions. State is one fixed, zeroed slot per owned agent loop,
+ * shared only by the single installed native module provider. A READ callback
+ * sees transactional scratch; only non-error completion commits it. */
+#define AIMEE_MODULE_READ_STATE_BYTES_V1 128u
+extern const unsigned aimee_module_read_final_contract_v1;
+void *agent_tools_module_read_state_v1(size_t bytes);
+int agent_tools_module_request_final_v1(void);
+
+/* Host-only lifecycle plumbing. Stack-owned scopes must be paired with pthread
+ * cleanup handlers. Nested loops suspend and restore both scopes; cancellation
+ * discards uncommitted callback state. No RPC or tool argument selects a scope. */
+typedef struct agent_module_loop_scope_v1 {
+   struct agent_module_loop_scope_v1 *previous;
+   void *previous_execution;
+   uint64_t state[AIMEE_MODULE_READ_STATE_BYTES_V1 / sizeof(uint64_t)];
+   int final_requested;
+} agent_module_loop_scope_v1;
+typedef struct agent_module_read_scope_v1 {
+   struct agent_module_read_scope_v1 *previous;
+   agent_module_loop_scope_v1 *loop;
+   uint64_t state[AIMEE_MODULE_READ_STATE_BYTES_V1 / sizeof(uint64_t)];
+   int allowed, request_final;
+} agent_module_read_scope_v1;
+void agent_tools_module_loop_enter_v1(agent_module_loop_scope_v1 *);
+void agent_tools_module_loop_leave_v1(void *);
+int agent_tools_module_loop_final_v1(void);
+void agent_tools_module_read_enter_v1(agent_module_read_scope_v1 *, int trusted_read);
+void agent_tools_module_read_commit_v1(agent_module_read_scope_v1 *, int successful);
+void agent_tools_module_read_leave_v1(void *);
 
 /* Tool definition builders */
 struct cJSON *build_tools_array(void);

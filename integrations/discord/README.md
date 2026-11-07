@@ -432,3 +432,41 @@ checks the actual adapter against the selected owner without sending Discord
 messages. The existing guild/channel supplies live acceptance; no new channel
 is needed. See the [2026-10-11 qualification report](../../docs/validation/memory-backend-completion-2026-10-11/README.md)
 for the separately recorded synthetic trajectories and authenticated live checks.
+
+## Native memory transport profile (local experimental implementation)
+
+`memory_profile: "aims-native-v1"` selects the versioned `memory.conversation`
+HTTP contract. It carries admitted event data and exact HTTP bodies; memory
+selection, source admission and ontology policy belong to the private memory
+owner. It does not call the legacy `memory.serve`, `search_assertions` or unsigned
+collection-source guard routes. The existing profiles retain those legacy
+protocols explicitly.
+
+This profile requires the authenticated loopback knowledge API, a configured
+**direct TLS** model endpoint and tokenizer, plus an absolute
+`native_state_directory`. Do not configure `aimee_socket` in this profile: nested
+Aimee ingress would introduce another provider attempt around the native fence.
+The selected owner must have the actual connector subject, exact channel Project
+scope, source profile, Provider disclosure and writer permissions installed.
+Discord speaker IDs/labels never install grants or select User authority.
+
+The owner-only state directory contains opaque completion descriptors and actual
+transport outcome metadata, never prompts or source text. The sender fsyncs the
+descriptor before preparation, checks admission immediately before HTTP body
+bytes, and records the actual response status/digest. After restart it completes
+uncertain attempts without sending HTTP again. Receipt metadata is explicitly an
+authenticated producer report. The selected Discord sender uses fixed REST
+framing with the actual bot token and exact allowed mentions; tests contact only
+owned loopback sinks and send no Discord messages.
+
+New native context preparation fails closed after frontend restart until a fresh
+context is captured. A failure to persist completion is retained in the spool and
+prevents successful recovery. Separately authorized native Operator maintenance
+can reconcile an exact guard as external outcome UNKNOWN after the sender is
+quiesced. The original authenticated subject can then clean up its exact pending
+descriptor after read/write grant removal: the transport preserves an owner-only
+`.quarantine` hint and produces no delivery receipt or repeated send. Whole-subject
+removal still requires explicit operator cleanup or legitimate reprovisioning.
+Full selected process/deployment qualification remains separate.
+
+The native profile tracks the newest admitted event by an opaque source/version reference and includes it in native dispatch validation. Template, tokenization, generation, and Discord body writes each require a fresh bounded native send admission. Generated replies are retained only through the native delivered-response lineage operation; a retention refusal is separate from an already completed HTTP delivery and never triggers a resend. The owner-only local spool is a transport recovery hint, not a second database journal, and contains no prompt or source body.

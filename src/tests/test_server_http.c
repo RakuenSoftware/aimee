@@ -1,6 +1,8 @@
 /* test_server_http.c: unit tests for the aimee-server /v1 persona routes and
  * the per-session persona store (no socket I/O). */
 #include "server_http.h"
+#include "server/host_original_submission.h"
+#include "agent_exec.h"
 #include "server_session_control.h"
 #include "primary_session_adapter.h"
 #include "server/server_error_kind.h"
@@ -334,6 +336,19 @@ int agent_http_post_bytes(const char *url, const char *auth, const void *body, s
 {
    (void)body_len;
    return agent_http_post(url, auth, body, response, timeout, extra);
+}
+/* This surface fixture never opens a provider connection or acquires a send
+ * guard. Actual guard/effect behavior is tested by test_http_send_guard.c. */
+int agent_http_post_guarded_bytes(const char *url, const char *auth, const void *body,
+                                  size_t body_len, char **response, int timeout,
+                                  const char *extra, const agent_http_send_guard_t *guard)
+{
+   if (guard)
+   {
+      *response = NULL;
+      return -1;
+   }
+   return agent_http_post_bytes(url, auth, body, body_len, response, timeout, extra);
 }
 static char g_stream_principal[128];
 int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *request)
@@ -1232,8 +1247,68 @@ static void test_history_open_precedes_sse_headers(void)
    }
 }
 
+static host_text_status capture_failure_status;
+static int capture_failure_calls;
+static host_text_status http_capture_failure(const char *headers, const cJSON *request,
+                                              void **owned, void *state)
+{
+   (void)headers; (void)request; (void)state;
+   *owned = NULL;
+   capture_failure_calls++;
+   return capture_failure_status;
+}
+static host_text_status http_capture_unused_consume(void *owner, const cJSON *request,
+    host_original_submission_result *result, void *state)
+{
+   (void)owner; (void)request; (void)result; (void)state;
+   abort();
+}
+static void http_capture_unused_finish(void *owner, int admitted, void *state)
+{
+   (void)owner; (void)admitted; (void)state;
+   abort();
+}
+static void http_capture_unused_destroy(void *owner, void *state)
+{
+   (void)owner; (void)state;
+   abort();
+}
+static void test_original_http_capture_failure_status(void)
+{
+   for (int mode = 0; mode < 2; mode++)
+   {
+      pid_t child = fork();
+      assert(child >= 0);
+      if (!child)
+      {
+         alarm(10);
+         capture_failure_status = mode ? HOST_TEXT_REFUSED : HOST_TEXT_UNAVAILABLE;
+         host_original_submission_owner owner = {http_capture_failure,
+             http_capture_unused_consume, http_capture_unused_finish, http_capture_unused_destroy};
+         assert(!host_original_submission_install(&owner, NULL));
+         int pair[2];
+         assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+         const char *wire = "POST /v1/chat/stream HTTP/1.1\r\nHost: localhost\r\n"
+             "Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{}";
+         assert(write(pair[1], wire, strlen(wire)) == (ssize_t)strlen(wire));
+         int effects = history_open_effects;
+         handle_conn_inline(pair[0], 0);
+         char response[2048];
+         ssize_t size = read(pair[1], response, sizeof response - 1);
+         assert(size > 0); response[size] = 0;
+         assert(strstr(response, mode ? "400 Bad Request" : "503 Service Unavailable"));
+         assert(capture_failure_calls == 1 && history_open_effects == effects);
+         close(pair[0]); close(pair[1]);
+         _exit(0);
+      }
+      int status;
+      assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && !WEXITSTATUS(status));
+   }
+}
+
 int main(void)
 {
+   test_original_http_capture_failure_status();
    test_history_open_precedes_sse_headers();
    test_stream_handoff_retains_attested_owner();
    test_operator_control_reply_route();
@@ -2515,6 +2590,8 @@ int main(void)
       assert(server_capability_for_method("memory.delete") !=
              server_capability_for_method("memory.store"));
       assert(server_http_route_caps("POST", "/v1/memory/delete") == CAP_MEMORY_ADMIN);
+      assert(server_http_route_caps("POST", "/v1/console/memory") == CAP_MEMORY_ADMIN);
+      assert(server_http_route_caps("POST", "/v1/console/memory/") == CAP_MEMORY_ADMIN);
       /* update overwrites content, so it must be a write — not the memory.*
        * read-prefix default it used to fall through to. */
       assert(server_capability_for_method("memory.update") == CAP_MEMORY_WRITE);
@@ -2606,6 +2683,8 @@ int main(void)
        * pair is asserted together — they are easy to conflate, and conflating
        * them is how the gap got in. */
       assert(server_http_route_is_local_only("POST", "/v1/index/ingest") == 1);
+      assert(server_http_route_is_local_only("POST", "/v1/console/memory") == 1);
+      assert(server_http_route_is_local_only("POST", "/v1/console/memory/") == 1);
       /* The index READ family must stay ungated, or every query needs a grant. */
       assert(server_http_route_is_local_only("POST", "/v1/index/find") == 0);
       assert(server_http_route_is_local_only("POST", "/v1/index/deps") == 0);

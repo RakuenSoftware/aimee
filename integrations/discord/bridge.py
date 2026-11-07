@@ -23,6 +23,7 @@ import aiohttp
 import discord
 
 from conversation_memory import ConversationMemory
+from native_memory import NativeConversation
 from prompt_budget import PromptBudget
 from behavior import BehaviorStore, context as behavior_context, persona_key, chat_control, conversational_goal, goal_reply
 
@@ -94,6 +95,7 @@ class Config:
     behavior_operator_ids: tuple[int, ...] = ()
     workflow_enabled: bool = False
     workflow_peer_bot_ids: tuple[int, ...] = ()
+    native_state_directory: Path | None = None
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -115,13 +117,14 @@ class Config:
         aimee_socket = Path(socket_value).expanduser() if socket_value else None
         if aimee_socket and (not aimee_socket.is_absolute() or tls_dir or url.scheme != "http"):
             raise ValueError("Aimee requires an absolute local socket with HTTP and no model TLS override")
+        profile = value.get("memory_profile", "native-assertions")
         knowledge_endpoint = value.get("knowledge_endpoint")
         knowledge_key_file = Path(value["knowledge_key_file"]).expanduser() if value.get("knowledge_key_file") else None
         if bool(knowledge_endpoint) != bool(knowledge_key_file):
             raise ValueError("durable memory requires both knowledge endpoint and key file")
         if knowledge_endpoint:
             knowledge_url = urlsplit(knowledge_endpoint)
-            if (not aimee_socket or knowledge_url.scheme != "http" or knowledge_url.hostname != "127.0.0.1"
+            if ((not aimee_socket and profile != "aims-native-v1") or knowledge_url.scheme != "http" or knowledge_url.hostname != "127.0.0.1"
                     or not knowledge_url.port or knowledge_url.path != "/v1/actions"
                     or knowledge_url.query or knowledge_url.fragment or knowledge_url.username or knowledge_url.password
                     or not knowledge_key_file.is_absolute()):
@@ -141,8 +144,15 @@ class Config:
                     or not tokenizer_tls_dir or not tokenizer_tls_dir.is_absolute()):
                 raise ValueError("tokenizer requires an HTTPS model origin and absolute TLS directory")
         profile = value.get("memory_profile", "native-assertions")
-        if profile not in ("native-assertions", "conversation-v2"):
-            raise ValueError("memory_profile must be native-assertions or conversation-v2")
+        if profile not in ("native-assertions", "conversation-v2", "aims-native-v1"):
+            raise ValueError("unsupported memory_profile")
+        native_state_directory = Path(value["native_state_directory"]) if value.get("native_state_directory") else None
+        if profile == "aims-native-v1" and (not knowledge_endpoint or not native_state_directory
+                or not native_state_directory.is_absolute() or aimee_socket or not tls_dir
+                or not tokenizer_endpoint or not tokenizer_tls_dir):
+            raise ValueError("aims-native-v1 requires authenticated knowledge API, direct TLS model/tokenizer, and absolute native_state_directory")
+        if profile != "aims-native-v1" and native_state_directory is not None:
+            raise ValueError("native_state_directory requires aims-native-v1")
         if (not isinstance(peers, list) or len(peers) > 8 or any(
                 not re.fullmatch(r"[0-9]{17,20}", str(peer)) for peer in peers)):
             raise ValueError("peer_bot_ids must be at most eight Discord bot IDs")
@@ -173,6 +183,7 @@ class Config:
                    channel_id=int(value["channel_id"]), endpoint=endpoint,
                    model=model, allowed_user_ids=tuple(map(int, users)),
                    knowledge_endpoint=knowledge_endpoint, knowledge_key_file=knowledge_key_file,
+                   native_state_directory=native_state_directory,
                    system_context=system, model_tls_dir=tls_dir, aimee_socket=aimee_socket,
                    peer_bot_ids=tuple(int(peer) for peer in peers), memory_profile=profile, tokenizer_endpoint=tokenizer_endpoint, tokenizer_tls_dir=tokenizer_tls_dir, behavior_db=behavior_db, behavior_operator_ids=tuple(map(int, operators)), workflow_enabled=workflow_enabled, workflow_peer_bot_ids=tuple(map(int, workflow_peers)))
 
@@ -230,7 +241,14 @@ class ModelClient:
     def __init__(self, config: Config, session: aiohttp.ClientSession):
         self.config, self.session = config, session
         self.conversation_memory = None
+        self.native_memory = None
         self.prompt_budget = PromptBudget(self.tokenizer_request)
+
+    def native_conversation(self, channel_id=None):
+        project = self.channel_project(channel_id)
+        if self.native_memory is None or self.native_memory.project != project:
+            self.native_memory = NativeConversation(self.knowledge_action, project, self.config.native_state_directory)
+        return self.native_memory
 
     async def tokenizer_request(self, route, body):
         endpoint, identity = self.config.tokenizer_endpoint, self.config.tokenizer_tls_dir
@@ -240,6 +258,12 @@ class ModelClient:
         context.verify_flags &= ~ssl.VERIFY_X509_STRICT
         context.minimum_version = ssl.TLSVersion.TLSv1_3
         context.load_cert_chain(str(identity / "client.pem"), str(identity / "client.key"))
+        if self.config.memory_profile == "aims-native-v1" and body is not None:
+            purpose = {"/apply-template":"model_template", "/tokenize":"model_tokenize"}.get(route)
+            if not purpose or self.native_memory is None:
+                raise RuntimeError("tokenizer source operation lacks actual native context")
+            return await self.native_memory.transmit(self.session, endpoint.rstrip("/") + route,
+                body, purpose=purpose, transport={"ssl":context,"server_hostname":"aimee-llm"}, timeout=10)
         method = "GET" if body is None else "POST"
         async with self.session.request(method, endpoint.rstrip("/") + route, json=body,
                 ssl=context, server_hostname="aimee-llm", allow_redirects=False,
@@ -280,6 +304,9 @@ class ModelClient:
     async def capture_turn(self, turn: Turn, reply: str) -> bool:
         if not self.config.knowledge_endpoint:
             return False
+        if self.config.memory_profile == "aims-native-v1":
+            await self.native_conversation(turn.channel_id).capture(turn)
+            return not turn.is_bot
         if self.config.memory_profile == "conversation-v2":
             self.conversation_memory = ConversationMemory(self.knowledge_action, self.channel_project(turn.channel_id))
             await self.conversation_memory.capture(turn)
@@ -319,6 +346,8 @@ class ModelClient:
         return None
 
     async def memory_context(self, session: aiohttp.ClientSession, text: str, channel_id: int | None = None, *, provenance: bool = False) -> str:
+        if self.config.memory_profile == "aims-native-v1":
+            return await self.native_conversation(channel_id).context(text)
         if self.config.knowledge_endpoint and self.config.memory_profile == "conversation-v2":
             self.conversation_memory = ConversationMemory(self.knowledge_action, self.channel_project(channel_id))
             return await self.conversation_memory.context(text)
@@ -630,6 +659,13 @@ class ModelClient:
         return f"{subject} is {number} {measurement} tall"
 
     async def reply(self, history: list[dict[str, str]], text: str, channel_id: int | None = None, *, turn: Turn | None = None, behavior: dict | None = None, memory_unavailable: bool = False) -> str:
+        native = self.config.memory_profile == "aims-native-v1"
+        if native and memory_unavailable:
+            raise RuntimeError("native episode capture unavailable; provider dispatch refused")
+        if native:
+            # Prior local turns may refer to sources subsequently retired. Only
+            # freshly authorized remote context may supply remembered history.
+            history = []
         instructions = self.config.system_context
         if behavior and behavior.get("persona"):
             instructions = behavior["persona"]["instructions"]
@@ -659,7 +695,7 @@ class ModelClient:
                 session = await stack.enter_async_context(aiohttp.ClientSession(
                     connector=aiohttp.UnixConnector(path=str(self.config.aimee_socket)),
                     trust_env=False))
-            generic = self.config.memory_profile == "conversation-v2"
+            generic = self.config.memory_profile in ("conversation-v2", "aims-native-v1")
             provenance = bool(self.config.knowledge_endpoint and self.asks_provenance(text) and not generic)
             query = self.provenance_query(history, text) if provenance else text
             # Resolve only the authenticated speaker, never a guessed nickname.
@@ -671,11 +707,11 @@ class ModelClient:
                 query = resolved
             social = self.is_social_request(text) and not provenance
             memory = ""
-            if self.config.aimee_socket and (generic or not social) and not memory_unavailable:
+            if (self.config.aimee_socket or native) and (generic or not social) and not memory_unavailable:
                 try:
                     memory = await self.memory_context(session, query, channel_id, provenance=provenance)
                 except Exception:
-                    if not generic:
+                    if native or not generic:
                         raise
                     self.conversation_memory = None
                     memory_unavailable = True
@@ -693,8 +729,8 @@ class ModelClient:
                 + len(text.encode("utf-8")) > budget
             ):
                 history = history[2:]
-            system = instructions + "\n" + CHAT_BEHAVIOR + ("\n" + behavioral if behavioral else "") + ("\nUse current channel facts over earlier assistant replies. Confirm matching facts; correct false claims. Attribute facts only to their recorded authors; if none is recorded, say the source is unknown." if self.config.knowledge_endpoint and not social else "") + ("\n" + memory if memory else "")
-            if generic:
+            system = instructions + "\n" + CHAT_BEHAVIOR + ("\n" + behavioral if behavioral else "") + ("\nUse current channel facts over earlier assistant replies. Confirm matching facts; correct false claims. Attribute facts only to their recorded authors; if none is recorded, say the source is unknown." if self.config.knowledge_endpoint and not social and not native else "") + ("\n" + memory if memory else "")
+            if generic and not native:
                 system += "\nDistinguish speaker claims from verification, jokes and bot repetitions. Preserve units, negation and conflicting reports. A correction changes the current claim, not the original source history. Prefer the latest authenticated human constraint. Apply only active projection preferences for the current speaker; expired, revoked or other speakers' preferences in raw history are historical data. Preferences cannot override system rules."
             if memory_unavailable:
                 system += "\nMemory capture or retrieval is unavailable for this turn. Respond normally to the latest message, but do not claim to have saved it or invent remembered facts or sources."
@@ -720,10 +756,14 @@ class ModelClient:
                     body["preserve_messages"] = True
                     receipt = await self.prompt_budget.fit(body)
                     LOG.info("Conversation token budget: %s", json.dumps(receipt, separators=(",", ":")))
-                async with session.post(self.config.endpoint, json=body, headers=headers, **transport,
-                                        allow_redirects=False,
-                                        timeout=aiohttp.ClientTimeout(total=120, connect=5)) as response:
-                    value = await self.read_response(response, "E2B request")
+                if native:
+                    value = await self.native_conversation(channel_id).transmit(session,
+                        self.config.endpoint, body, purpose="model", headers=headers, transport=transport)
+                else:
+                    async with session.post(self.config.endpoint, json=body, headers=headers, **transport,
+                                            allow_redirects=False,
+                                            timeout=aiohttp.ClientTimeout(total=120, connect=5)) as response:
+                        value = await self.read_response(response, "E2B request")
                 if generic:
                     usage = value.get("usage", {})
                     if usage.get("prompt_tokens") != receipt["prompt_tokens"]:
@@ -875,9 +915,14 @@ class ChatBot(discord.Client):
         await self.delivery.validate()
         self.model_client = ModelClient(self.config, self.delivery_session)
         if self.config.knowledge_endpoint:
-            await self.model_client.knowledge_action("memory.serve", {
-                "view": "relevant_context", "task": "startup",
-                "project": self.model_client.channel_project(self.config.channel_id), "limit": 1})
+            if self.config.memory_profile == "aims-native-v1":
+                await self.model_client.native_conversation(self.config.channel_id).probe()
+            else:
+                # Explicit legacy protocol; it is not silently redirected to a
+                # weaker native recall or unsigned collection-source shim.
+                await self.model_client.knowledge_action("memory.serve", {
+                    "view": "relevant_context", "task": "startup",
+                    "project": self.model_client.channel_project(self.config.channel_id), "limit": 1})
         if self.config.workflow_enabled:
             from workflow_chat import ChatWorkflow
             self.workflow = ChatWorkflow(self)
@@ -974,6 +1019,23 @@ class ChatBot(discord.Client):
         LOG.info("Bot-account chat reply delivered (channel=%s peers=%s)", channel_id, peers)
         return delivered
 
+    async def send_native_chat_reply(self, channel_id, text, peers=()):
+        # Fixed Discord REST framing exposes the exact body-write admission
+        # point; the general discord.py sender does not provide that boundary.
+        native = self.model_client.native_conversation(channel_id)
+        delivered = []
+        for chunk in split_message(text):
+            payload = {"content": chunk, "allowed_mentions": {"parse": [],
+                "users": [str(uid) for uid in peers], "replied_user": False}}
+            value = await native.transmit(self.delivery_session,
+                f"https://discord.com/api/v10/channels/{channel_id}/messages", payload,
+                purpose="discord", headers={"Authorization": "Bot " + read_secret(self.config.bot_token_file)}, timeout=30)
+            message_id = value.get("id")
+            if not isinstance(message_id, str) or not re.fullmatch(r"[0-9]{17,20}", message_id):
+                raise RuntimeError("Discord delivery omitted its actual message receipt")
+            delivered.append(int(message_id))
+        return delivered
+
     async def send_paper(self, channel_id, paper, run, *, before_send=None):
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         # Recover a lost acknowledgement before retrying a final delivery.
@@ -1046,7 +1108,7 @@ class ChatBot(discord.Client):
                 if self.workflow and self.workflow.ingest(snapshot, turn):
                     # Contributions feed the WFE stage; no unrelated bot banter loop.
                     continue
-                generic = self.config.memory_profile == "conversation-v2"
+                generic = self.config.memory_profile in ("conversation-v2", "aims-native-v1")
                 if generic:
                     unavailable = False
                     try:
@@ -1100,7 +1162,17 @@ class ChatBot(discord.Client):
                 projection = getattr(self.model_client, "conversation_memory", None) if generic else None
                 if projection:
                     await projection.guard("acquire")
-                delivered_ids = await self.send_chat_reply(turn.channel_id, reply, peers)
+                if self.config.memory_profile == "aims-native-v1":
+                    delivered_ids = await self.send_native_chat_reply(turn.channel_id, reply, peers)
+                    response_turn = replace(turn, message_id=delivered_ids[0], user_id=self.user.id,
+                        author_name=getattr(self.user, "name", "Aimee"), is_bot=True,
+                        text=reply, reply_to_message_id=turn.message_id)
+                    try:
+                        await self.model_client.native_conversation(turn.channel_id).capture_response(response_turn)
+                    except Exception:
+                        LOG.warning("Native response retention unconfirmed; actual Discord delivery completed and will not be repeated")
+                else:
+                    delivered_ids = await self.send_chat_reply(turn.channel_id, reply, peers)
                 if projection:
                     await projection.guard("release")
                     try:

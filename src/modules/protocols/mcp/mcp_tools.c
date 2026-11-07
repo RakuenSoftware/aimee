@@ -8,7 +8,14 @@
 #include "log.h"
 #include "agent_code_capabilities.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+/* Optional host deployment capability filter; arguments/_meta cannot select it. */
+extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
+/* Optional host-owned presentation override: 0 unchanged, 1 owned replacement,
+ * -1 unavailable. The original schema is borrowed and must not be mutated. */
+extern int aimee_module_tool_input_schema(const char *, const cJSON *, cJSON **)
+    __attribute__((weak));
 static int tools_array_has_name(cJSON *tools, const char *name)
 {
    cJSON *tool = NULL;
@@ -2146,11 +2153,51 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
 
    add_session_context_tools(tools);
 
+   /* Filter before family collapse so unsupported operations cannot survive in
+    * a multiplexed enum or remain advertised by flat native discovery. */
+   for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
+   {
+      cJSON *tool = cJSON_GetArrayItem(tools, i);
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(tool, "name"));
+      if (name && aimee_module_tool_source_mode && aimee_module_tool_source_mode(name) < 0)
+      {
+         cJSON_DeleteItemFromArray(tools, i);
+         continue;
+      }
+   }
+
    /* Collapse coherent families into single multiplexed tools (P4). Runs after
     * every builtin member exists, before plugin/remote tools (which are left as
     * separate, namespaced entries). */
    if (collapse)
       mcp_collapse_families(tools);
+
+   /* Apply to the final public representation, including collapsed families.
+    * The same flat schema feeds native execution/provider advertisements. */
+   if (aimee_module_tool_input_schema)
+      for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
+      {
+         cJSON *tool = cJSON_GetArrayItem(tools, i);
+         const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(tool, "name"));
+         if (!name)
+            continue;
+         cJSON *replacement = NULL;
+         int changed = aimee_module_tool_input_schema(
+             name, cJSON_GetObjectItemCaseSensitive(tool, "inputSchema"), &replacement);
+         char *bytes = changed == 1 && cJSON_IsObject(replacement)
+                           ? cJSON_PrintUnformatted(replacement) : NULL;
+         int valid = changed == 0 ? replacement == NULL
+                                  : changed == 1 && bytes && strlen(bytes) <= 262144;
+         free(bytes);
+         if (!valid)
+         {
+            cJSON_Delete(replacement);
+            cJSON_DeleteItemFromArray(tools, i);
+            continue;
+         }
+         if (changed == 1)
+            cJSON_ReplaceItemInObjectCaseSensitive(tool, "inputSchema", replacement);
+      }
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
    if (cJSON_IsArray(remote_tools))

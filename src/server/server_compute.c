@@ -73,6 +73,16 @@ delegation_mailbox_t g_mailboxes[MAX_ACTIVE_DELEGATIONS];
 pthread_mutex_t g_mailbox_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_delegate_id_lock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned long g_delegate_id_seq = 0;
+static void delegate_append_bounded_error(char *out, size_t cap, const char *text)
+{
+   size_t used = strnlen(out, cap);
+   if (used == cap)
+      return;
+   size_t n = strnlen(text, cap - used - 1);
+   memcpy(out + used, text, n);
+   out[used + n] = '\0';
+}
+
 static void delegate_generate_id(char *out, size_t cap)
 {
    if (!out || cap == 0)
@@ -305,6 +315,9 @@ void compute_error(compute_ctx_t *cctx, const char *message)
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "error");
    cJSON_AddStringToObject(resp, "message", message);
+   cJSON *module_result = host_original_submission_outcome_json_v1(cctx->original_submission);
+   if (module_result)
+      cJSON_AddItemToObject(resp, "module_result", module_result);
    compute_respond(cctx, resp);
 }
 
@@ -357,9 +370,85 @@ void compute_ctx_release_budget(compute_ctx_t *cctx)
    cctx->compute_budget_acquired = 0;
 }
 
+static _Thread_local compute_ctx_t **compute_lifetime_slot;
+compute_ctx_t **compute_ctx_lifetime_bind(compute_ctx_t **slot)
+{
+   compute_ctx_t **previous = compute_lifetime_slot;
+   compute_lifetime_slot = slot;
+   return previous;
+}
+
+int server_chat_original_submission_prepare(compute_ctx_t *cctx)
+{
+   if (!cctx->original_submission)
+      return 0;
+   host_text_status original_status = host_original_submission_consume(
+       cctx->original_submission, cctx->req, &cctx->original_result);
+   if (original_status == HOST_TEXT_ALREADY_DELIVERED)
+   {
+      cJSON *receipt = host_original_submission_delivered_json_v1(cctx->original_submission);
+      if (!receipt) return -1;
+      cJSON_Delete(receipt);
+      host_original_submission_finish(cctx->original_submission, 0);
+      return 1; /* No fresh canonical append, history, job, or model execution. */
+   }
+   if (original_status != HOST_TEXT_OK) return -1;
+   cJSON *replacement = cJSON_CreateString(cctx->original_result.text);
+   cJSON *message = cJSON_GetObjectItemCaseSensitive(cctx->req, "message");
+   if (!replacement || !cJSON_IsString(message))
+   {
+      cJSON_Delete(replacement);
+      return -1;
+   }
+   OPENSSL_cleanse(message->valuestring, strlen(message->valuestring));
+   if (!cJSON_ReplaceItemInObjectCaseSensitive(cctx->req, "message", replacement))
+   {
+      cJSON_Delete(replacement);
+      return -1;
+   }
+   const char *session = cJSON_GetStringValue(
+       cJSON_GetObjectItemCaseSensitive(cctx->req, "aimee_session_id"));
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(cctx->req, "ir_version");
+   cctx->ir_delivery = cJSON_IsNumber(version) && version->valueint == 1;
+   if (server_chat_ir_begin_original(cctx, session, cctx->original_result.text,
+                                     cctx->original_result.attachment))
+      return -1;
+   cctx->original_admitted = 1;
+   host_original_submission_finish(cctx->original_submission, 1);
+   if (host_original_submission_documentary_required())
+   {
+      host_original_documentary *documentary = NULL;
+      if (host_original_submission_documentary_retain(cctx->original_submission, &documentary) != HOST_TEXT_OK)
+         return -1;
+      int result = server_session_capture_set_documentary(cctx->ir_capture, documentary);
+      host_original_documentary_release(&documentary);
+      if (result)
+         return -1;
+   }
+   return 0;
+}
+
 void compute_ctx_free(compute_ctx_t *cctx)
 {
-   server_chat_ir_close(cctx);
+   if (!cctx)
+      return;
+   int previous_cancel;
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel);
+   if (compute_lifetime_slot && *compute_lifetime_slot == cctx)
+      *compute_lifetime_slot = NULL;
+   if (cctx->original_submission && !cctx->original_admitted)
+      server_chat_ir_abort(cctx);
+   else
+      server_chat_ir_close(cctx);
+   if (cctx->original_submission)
+   {
+      cJSON *raw = cJSON_GetObjectItemCaseSensitive(cctx->req, "message");
+      if (cJSON_IsString(raw))
+         OPENSSL_cleanse(raw->valuestring, strlen(raw->valuestring));
+   }
+   host_original_submission_finish(cctx->original_submission, cctx->original_admitted);
+   host_original_submission_destroy(&cctx->original_submission);
+   host_original_submission_result_destroy(&cctx->original_result);
    if (cctx->background_job_id > 0)
       agent_set_durable_job(0);
    if (cctx->compute_grant > 0)
@@ -385,6 +474,7 @@ void compute_ctx_free(compute_ctx_t *cctx)
       workspace_turn_mirror_bind(bound);
    workspace_turn_mirror_release(cctx->source_mirror);
    free(cctx);
+   pthread_setcancelstate(previous_cancel, NULL);
 }
 
 /* --- delegate worker --- */
@@ -1286,11 +1376,12 @@ static void delegate_worker_run(void *arg)
 
    if (delegate_worktree_attempted && !delegate_worktree_path[0])
    {
-      char errmsg[512];
-      snprintf(errmsg, sizeof(errmsg),
-               "refusing to run delegate in parent worktree '%s': "
-               "could not create a dedicated delegate worktree",
-               cwd[0] ? cwd : delegate_git_root);
+      char errmsg[512] = {0};
+      delegate_append_bounded_error(errmsg, sizeof(errmsg),
+                                    "refusing to run delegate in parent worktree '");
+      delegate_append_bounded_error(errmsg, sizeof(errmsg), cwd[0] ? cwd : delegate_git_root);
+      delegate_append_bounded_error(errmsg, sizeof(errmsg),
+                                    "': could not create a dedicated delegate worktree");
       delegation_compute_error(cctx, errmsg);
       goto delegate_fail;
    }
@@ -1416,7 +1507,18 @@ static void delegate_worker_run(void *arg)
             if (named_paths[i][0] == '/')
                snprintf(full, sizeof(full), "%s", named_paths[i]);
             else
-               snprintf(full, sizeof(full), "%s/%s", check_root, named_paths[i]);
+            {
+               size_t root_n = strlen(check_root);
+               size_t path_n = strlen(named_paths[i]);
+               if (root_n >= sizeof(full) || path_n >= sizeof(full) - root_n - 1)
+               {
+                  delegation_compute_error(cctx, "delegate named file path is too long");
+                  goto delegate_fail;
+               }
+               memcpy(full, check_root, root_n);
+               full[root_n] = '/';
+               memcpy(full + root_n + 1, named_paths[i], path_n + 1);
+            }
             pre_run_files[i] = delegate_file_snapshot(full);
          }
       }
@@ -1847,9 +1949,13 @@ static void delegate_worker_run(void *arg)
       {
          rc = -1;
          result.success = 0;
-         snprintf(result.error, sizeof(result.error), "delegate %s: %s", role,
-                  delegate_apply_error[0] ? delegate_apply_error
-                                          : "failed to apply changes to parent worktree");
+         result.error[0] = '\0';
+         delegate_append_bounded_error(result.error, sizeof(result.error), "delegate ");
+         delegate_append_bounded_error(result.error, sizeof(result.error), role);
+         delegate_append_bounded_error(result.error, sizeof(result.error), ": ");
+         delegate_append_bounded_error(result.error, sizeof(result.error),
+                                       delegate_apply_error[0] ? delegate_apply_error
+                                           : "failed to apply changes to parent worktree");
       }
       else
          aimee_log(LOG_INFO, "delegate",
@@ -2084,8 +2190,20 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
    cctx->req = cJSON_Duplicate(req, 1);
 
    /* Create per-context write mutex */
-   cctx->write_mutex = malloc(sizeof(pthread_mutex_t));
-   pthread_mutex_init(cctx->write_mutex, NULL);
+   pthread_mutex_t *write_mutex = malloc(sizeof *write_mutex);
+   if (!cctx->req || !write_mutex)
+   {
+      free(write_mutex);
+      compute_ctx_free(cctx);
+      return NULL;
+   }
+   if (pthread_mutex_init(write_mutex, NULL))
+   {
+      free(write_mutex);
+      compute_ctx_free(cctx);
+      return NULL;
+   }
+   cctx->write_mutex = write_mutex;
 
    if (workspace_turn_mirror_capture(run_cmd_get_cwd(), &cctx->source_mirror))
    {

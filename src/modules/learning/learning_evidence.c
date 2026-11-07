@@ -2,6 +2,8 @@
  * See docs/proposals/done/cross-source-learning-substrate.md */
 
 #include "learning_evidence.h"
+#include "owned_feature.h"
+AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_promotion_legacy_guard_contract_v1);
 #include "module_commands.h"
 #include "aimee.h" /* memory_directive_t and friends, TIER_* */
 #include "modules/kb/c/artifacts.h"
@@ -402,6 +404,8 @@ extern int db1_working_profile_local_observe(const char *field, const char *valu
  * DB1 working-profile field observer (no bespoke DB1 write). */
 static int promote_working_profile(const kb_store_artifact_row_t *art, int flagged)
 {
+   if (aimee_owned_feature_status("working_profile"))
+      return -2; /* A Model artifact is not an authenticated User source. */
    if (!db1_working_profile_local_observe)
       return -2; /* DB1 not present in this process (e.g. aimee-kb) */
 
@@ -442,6 +446,9 @@ int learning_promote(const char *candidate_id, double threshold)
    const char *surface = ts[0] ? ts : learning_candidate_target_surface(art.kind);
    if (!surface || !surface[0])
       return -1;
+
+   if (!strcmp(surface, "working_profile") && aimee_owned_feature_status("working_profile"))
+      return -2;
 
    /* Below the borderline window: hold for review, do not auto-apply. */
    if (art.confidence < threshold - LEARNING_PROMOTE_BORDERLINE)

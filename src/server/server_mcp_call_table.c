@@ -156,9 +156,44 @@ static cJSON *mcph_list_facts(struct mcp_call *c)
 {
    return tool_list_facts(c->jargs);
 }
+/* Optional host deployment policy, not authority from MCP arguments/_meta. */
+extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
+extern int aimee_module_tool_source_render(const char *,const cJSON *,cJSON **) __attribute__((weak));
+#pragma weak agent_tool_source_attach
+static cJSON *mcph_source_unavailable(struct mcp_call *c)
+{
+   (void)c;
+   return text_content("{\"status\":\"error\",\"kind\":\"source_custody_unavailable\",\"message\":\"selected tool output requires an owner-issued source receipt\"}");
+}
 static cJSON *mcph_served_memory(struct mcp_call *c, int card)
 {
-   cJSON *reply = card ? memory_claim_card_command(c->jargs) : memory_serve_command(c->jargs);
+   int selected = aimee_module_tool_source_mode ? aimee_module_tool_source_mode(c->tool) : 0;
+   cJSON *reply = NULL;
+   if (selected)
+   {
+      /* The trusted module renderer issues a durable receipt without allocating
+       * the ordinary API's unused ephemeral projection/ticket cache entry. */
+      if (selected < 0 || !aimee_module_tool_source_render ||
+          aimee_module_tool_source_render(c->tool, c->jargs, &reply) != 1)
+      {
+         cJSON_Delete(reply);
+         return mcph_source_unavailable(c);
+      }
+   }
+   else
+      reply = card ? memory_claim_card_command(c->jargs) : memory_serve_command(c->jargs);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "native_tool_output");
+   const cJSON *source = cJSON_GetObjectItemCaseSensitive(reply, "native_tool_source");
+   if (selected || output || source)
+   {
+      cJSON *content = NULL;
+      if (selected >= 0 && cJSON_IsString(output) && source && agent_tool_source_attach &&
+          agent_tool_source_attach(source, output->valuestring) == 0)
+         content = text_content(output->valuestring);
+      cJSON_Delete(reply);
+      return content ? content : mcph_source_unavailable(c);
+   }
+   /* No native receipt-selected deployment: retain the legacy owner response. */
    char *raw = reply ? cJSON_PrintUnformatted(reply) : NULL;
    cJSON *content = text_content(raw ? raw : "{\"status\":\"error\",\"kind\":\"unavailable\"}");
    free(raw);
@@ -2281,7 +2316,8 @@ mcp_tool_handler_fn mcp_tool_lookup(const char *tool)
 {
    for (size_t i = 0; i < sizeof(mcp_tool_table) / sizeof(mcp_tool_table[0]); i++)
       if (strcmp(mcp_tool_table[i].name, tool) == 0)
-         return mcp_tool_table[i].fn;
+         return aimee_module_tool_source_mode && aimee_module_tool_source_mode(tool) < 0
+                    ? mcph_source_unavailable : mcp_tool_table[i].fn;
    return NULL;
 }
 
@@ -2293,6 +2329,8 @@ mcp_tool_handler_fn mcp_tool_lookup(const char *tool)
  * Caller owns the result. */
 static cJSON *mcp_native_advert(const char *tool)
 {
+   if (aimee_module_tool_source_mode && aimee_module_tool_source_mode(tool) < 0)
+      return NULL;
    static cJSON *list = NULL;
    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
    pthread_mutex_lock(&lock);
@@ -2315,7 +2353,9 @@ void mcp_tool_register_native_surface(void)
    agent_tools_set_mcp_provider(server_mcp_native_call, mcp_native_advert);
    for (size_t i = 0; i < sizeof(mcp_tool_table) / sizeof(mcp_tool_table[0]); i++)
    {
-      if (!mcp_tool_table[i].native)
+      if (!mcp_tool_table[i].native ||
+          (aimee_module_tool_source_mode &&
+           aimee_module_tool_source_mode(mcp_tool_table[i].name) < 0))
          continue;
       agent_tools_register_mcp_tool(mcp_tool_table[i].name);
       /* `native` is a comma-separated set list: one tool can belong to several

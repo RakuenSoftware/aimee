@@ -11,6 +11,7 @@
 #include "server_session_control.h"
 #include "server_session_capture.h"
 #include "request_context.h"
+#include "server/host_original_submission.h"
 #include <pthread.h>
 
 #define CLAUDE_LINE_MAX (256 * 1024)
@@ -48,6 +49,9 @@ typedef struct compute_ctx
     * never from request-body path claims. Released after worker callbacks join. */
    struct workspace_turn_mirror_lease *source_mirror;
    cJSON *req; /* owned by this context */
+   host_original_submission *original_submission;
+   host_original_submission_result original_result;
+   int original_admitted;
    int ir_enabled, ir_delivery, ir_failed, ir_completed, ir_native_owned;
    /* Set only after the canonical compaction owner commits its checkpoint. */
    int ir_history_checkpointed;
@@ -119,6 +123,9 @@ void compute_respond(compute_ctx_t *cctx, cJSON *resp);
 int server_chat_ir_replace_steer(cJSON *request, const char *message);
 int server_chat_ir_reject_steer(const char *session, const char *actor, const char *message);
 int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const char *message);
+int server_chat_ir_begin_original(compute_ctx_t *, const char *, const char *,
+                                  const struct cJSON *);
+void server_chat_ir_abort(compute_ctx_t *);
 int server_chat_ir_progress(compute_ctx_t *cctx);
 int server_chat_ir_finish(compute_ctx_t *cctx, const char *error);
 void server_chat_ir_close(compute_ctx_t *cctx);
@@ -126,6 +133,9 @@ void compute_error(compute_ctx_t *cctx, const char *message);
 void compute_ok(compute_ctx_t *cctx);
 void compute_ctx_release_budget(compute_ctx_t *cctx);
 void compute_ctx_free(compute_ctx_t *cctx);
+/* Worker-owned slot is cleared before context destruction, including cancellation. */
+compute_ctx_t **compute_ctx_lifetime_bind(compute_ctx_t **slot);
+int server_chat_original_submission_prepare(compute_ctx_t *);
 /* Worker-only owner binding. Copies are owned by cctx; clear after the worker
  * returns, even when it already freed cctx. */
 void compute_ctx_capture_request_context(compute_ctx_t *cctx, const server_conn_t *conn);

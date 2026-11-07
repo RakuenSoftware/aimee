@@ -16,6 +16,8 @@
 
 #include "aimee.h"
 #include "commands.h"
+#include "owned_feature.h"
+AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_management_legacy_guard_contract_v1);
 #include "cmd_review.h"
 #include "db1_client/db1.h"
 #include "working_profile.h"
@@ -67,6 +69,8 @@ cJSON *identity_charter_json(void)
 
 cJSON *identity_working_profile_json(void)
 {
+   if (aimee_owned_feature_status("working_profile"))
+      return aimee_owned_feature_management_json("working_profile", "read", NULL);
    cJSON *out = cJSON_CreateObject();
    if (!out)
       return NULL;
@@ -87,6 +91,26 @@ cJSON *identity_working_profile_json(void)
    }
    cJSON_AddNumberToObject(out, "entry_count", n);
    return out;
+}
+
+/* Selected owner JSON stays opaque: never synthesize legacy field counters,
+ * scores, timestamps or an observation source from a management command. */
+static void identity_owned_management(app_ctx_t *ctx, const char *operation, const char *request)
+{
+   cJSON *view = aimee_owned_feature_management_json("working_profile", operation, request);
+   if (!view)
+      fatal("owned management response unavailable");
+   if (ctx->json_output)
+      emit_json_ctx(view, ctx->json_fields, ctx->response_profile);
+   else
+   {
+      char *wire = cJSON_Print(view);
+      cJSON_Delete(view);
+      if (!wire)
+         fatal("owned management response unavailable");
+      puts(wire);
+      free(wire);
+   }
 }
 
 cJSON *identity_local_operator_json(void)
@@ -178,6 +202,11 @@ static void identity_show(app_ctx_t *ctx)
          printf("  Created at: %s\n", active_op.created_at);
    }
 
+   if (aimee_owned_feature_status("working_profile"))
+   {
+      identity_owned_management(ctx, "read", NULL);
+      return;
+   }
    printf("\nWorking profile (learned, threshold-gated updates):\n");
    db1_working_profile_local_state_t rows[16];
    int n = db1_working_profile_local_list(rows, 16);
@@ -195,6 +224,11 @@ static void identity_show(app_ctx_t *ctx)
 
 static void identity_working_profile_list(app_ctx_t *ctx)
 {
+   if (aimee_owned_feature_status("working_profile"))
+   {
+      identity_owned_management(ctx, "read", NULL);
+      return;
+   }
    db1_working_profile_local_state_t rows[32];
    int n = db1_working_profile_local_list(rows, 32);
    if (ctx->json_output)
@@ -215,6 +249,11 @@ static void identity_working_profile_list(app_ctx_t *ctx)
 
 static void identity_working_profile_observe(app_ctx_t *ctx, int argc, char **argv)
 {
+   if (aimee_owned_feature_status("working_profile"))
+   {
+      identity_owned_management(ctx, "observe", NULL);
+      return;
+   }
    const char *field = NULL;
    const char *value = NULL;
    double confidence = 0.5;
@@ -256,6 +295,16 @@ static void identity_working_profile_observe(app_ctx_t *ctx, int argc, char **ar
 
 static void identity_working_profile(app_ctx_t *ctx, int argc, char **argv)
 {
+   if (aimee_owned_feature_status("working_profile"))
+   {
+      if (!argc || (argc == 1 && !strcmp(argv[0], "list")))
+         identity_owned_management(ctx, "read", NULL);
+      else if (argc == 3 && !strcmp(argv[0], "reset") && !strcmp(argv[1], "--request"))
+         identity_owned_management(ctx, "reset", argv[2]);
+      else
+         identity_owned_management(ctx, "unsupported", NULL);
+      return;
+   }
    if (!db1_store_ready())
       fatal("identity working-profile: DB1 store unavailable");
 
@@ -315,7 +364,7 @@ static void identity_snapshot(app_ctx_t *ctx, int argc, char **argv)
    }
    if (platform_mkdir_p(out_dir, 0755) != 0)
       fatal("identity snapshot: could not create %s: %s", out_dir, strerror(errno));
-   if (!db1_store_ready())
+   if (!aimee_owned_feature_status("working_profile") && !db1_store_ready())
       fatal("identity snapshot: DB1 store unavailable");
    cJSON *snap = identity_snapshot_build();
    if (!snap)
@@ -439,6 +488,8 @@ static double obj_num(const cJSON *obj, const char *key)
  * Exposed so tests can exercise the classification logic directly. */
 cJSON *identity_diff_report(cJSON *snap_a, cJSON *snap_b, double flip_threshold)
 {
+   if (aimee_owned_feature_status("working_profile"))
+      return aimee_owned_feature_outcome("unsupported");
    cJSON *idx_a = working_profile_entries_by_field(snap_a);
    cJSON *idx_b = working_profile_entries_by_field(snap_b);
 
@@ -522,6 +573,11 @@ cJSON *identity_diff_report(cJSON *snap_a, cJSON *snap_b, double flip_threshold)
 
 static void identity_diff(app_ctx_t *ctx, int argc, char **argv)
 {
+   if (aimee_owned_feature_status("working_profile"))
+   {
+      identity_owned_management(ctx, "diff", NULL);
+      return;
+   }
    const char *path_a = NULL;
    const char *path_b = NULL;
    double flip_threshold = 0.3;

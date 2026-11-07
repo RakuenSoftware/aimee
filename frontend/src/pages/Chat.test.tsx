@@ -100,7 +100,7 @@ afterEach(() => {
 });
 
 describe('canonical browser chat', () => {
-  it('still auto-titles the first explicit message in an empty conversation', async () => {
+  it('auto-titles from the first committed User, never the optimistic input', async () => {
     const session = context.sessions[0];
     const originalMessages = session.messages;
     session.messages = [];
@@ -114,8 +114,12 @@ describe('canonical browser chat', () => {
       fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
       await act(async () => {});
       expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(1);
+      expect(context.patchSession.mock.calls.filter(([, patch]) => Object.hasOwn(patch, 'name'))).toEqual([]);
+      await tick(400);
+      expect(JSON.stringify(Object.entries(localStorage))).not.toContain('First explicit question');
+      await ir({ kind: 'message', message_id: 'committed-user', payload: { role: 'user', blocks: [{ type: 'text', text: 'Committed first question' }] } });
       expect(context.patchSession.mock.calls.filter(([, patch]) => Object.hasOwn(patch, 'name')))
-        .toEqual([['one', { name: 'First explicit question' }]]);
+        .toEqual([['one', { name: 'Committed first question' }]]);
       await close();
     } finally { session.messages = originalMessages; }
   });

@@ -257,3 +257,16 @@ summary. A native cache cannot be checkpointed after this event in its source
 turn. Once the child is quiescent, abort/recovery discards the derived cache and
 the next execution adopts canonical history afresh. Durable capture refusal
 prevents accepting an unrecorded compaction observation.
+
+
+## Shared Go canonical contract infrastructure
+
+The shared `server-go/ir` package remains application infrastructure, alongside
+its existing request/session/interruption/verification contracts. It is not
+claimed under this C module's module-local `go_sources` ownership: descriptor
+boundaries require Go module implementations below `server-go/modules/<id>`.
+`tool_source.go` and its tests extend that existing shared wire contract with a
+bounded opaque host receipt, exact visible-content SHA and explicit-null refusal.
+They contain no native memory policy, ontology, signing-key trust or database I/O.
+The DB1 implementation and tests for atomic host-only tool-source append are
+owned explicitly by `src/modules/aimee/module.yaml`.

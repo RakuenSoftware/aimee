@@ -21,14 +21,14 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 let stream: ReadableStreamDefaultController<Uint8Array>;
 let sequence = 0;
 let prompt = '';
-function emit(type: string, data: { content?: string } = {}) {
+function emit(type: string, data: { content?: string; input_attachment?: { operation_uuid: string } } = {}) {
   const event = (event: unknown) => stream.enqueue(new TextEncoder().encode(`event: ir\ndata: ${JSON.stringify({
     version: 1, session_id: 'one', sequence: String(++sequence), event_id: `event-${sequence}`,
     turn_id: 'turn', actor: 'owner', event,
   })}\n\n`));
   const delta = (payload: unknown) => event({ kind: 'delta', message_id: 'answer', role: 'assistant', payload });
   if (type === 'turn_start') {
-    event({ kind: 'message', message_id: 'prompt', payload: { role: 'user', blocks: [{ type: 'text', text: prompt }] } });
+    event({ kind: 'message', message_id: 'prompt', payload: { role: 'user', blocks: [{ type: 'text', text: prompt, ...(data.input_attachment ? { input_attachment: data.input_attachment } : {}) }] } });
     delta({ type: 'TURN_START' }); delta({ type: 'BLOCK_START', block_id: 0, kind: 'text' });
   } else if (type === 'text') delta({ type: 'BLOCK_DELTA', block_id: 0, kind: 'text', text_delta: data.content });
   else { delta({ type: 'BLOCK_STOP', block_id: 0, kind: 'text' }); delta({ type: 'TURN_STOP' }); }
@@ -54,7 +54,7 @@ beforeEach(() => {
     return json({});
   }));
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 function send(text: string) {
   prompt = text;
@@ -175,6 +175,8 @@ describe('chat transcript ownership', () => {
     context.sessions = [session('one'), session('two')]; context.active = context.sessions[0];
     const view = render(<Chat />);
     await tick();
+    const operation = '12345678-1234-4234-8234-123456789abc';
+    const identifiers = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(operation);
     send('work on project one');
     await tick();
     context.active = context.sessions[1];
@@ -182,15 +184,60 @@ describe('chat transcript ownership', () => {
     await tick();
     await act(async () => { attached.get('one')!(json({ session_id: 'one', attach_id: 'attachment' })); });
     const request = vi.mocked(fetch).mock.calls.find(([url]) => url === '/api/chat/send');
-    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ aimee_session_id: 'one', cwd: '/work/one' });
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ aimee_session_id: 'one', cwd: '/work/one', original_input_operation_uuid: operation });
+    expect(identifiers).toHaveBeenCalledTimes(1);
+    expect(context.patchSession.mock.calls.filter(([, patch]) => patch.name)).toEqual([]);
     await act(async () => {
+      prompt = 'Committed project one';
       emit('turn_start'); emit('text', { content: 'Finished project one' }); emit('turn_end'); stream.close();
     });
     await tick(500);
     expect(screen.queryByTestId('assistant')).toBeNull();
+    expect(context.patchSession.mock.calls.filter(([, patch]) => patch.name)).toEqual([['one', { name: 'Committed project one' }]]);
     context.active = context.sessions[0];
     view.rerender(<Chat />);
     await tick();
     expect(screen.getByTestId('assistant').textContent).toBe('Finished project one');
   });
+  it('keeps separate random operation IDs for identical sends owned by different tabs', async () => {
+    context.sessions = [session('one'), session('two')]; context.active = context.sessions[0];
+    const view = render(<Chat />); await tick();
+    const ids = vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('11111111-1111-4111-8111-111111111111')
+      .mockReturnValueOnce('22222222-2222-4222-8222-222222222222');
+    send('The same text'); await tick(); const first = stream;
+    context.active = context.sessions[1]; view.rerender(<Chat />); await tick();
+    send('The same text'); await tick();
+    const requests = vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/chat/send')
+      .map(([, init]) => JSON.parse(String(init?.body)));
+    expect(requests.map(req => [req.aimee_session_id, req.original_input_operation_uuid])).toEqual([
+      ['one', '11111111-1111-4111-8111-111111111111'],
+      ['two', '22222222-2222-4222-8222-222222222222'],
+    ]);
+    expect(ids).toHaveBeenCalledTimes(2);
+    await act(async () => { first.close(); stream.close(); });
+  });
+  it.each([false, true])('matches tagged canonical title to the queued operation (matching=%s)', async matching => {
+    render(<Chat />); await tick();
+    const operation = '12345678-1234-4234-8234-123456789abc';
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(operation);
+    send('Draft title'); await tick();
+    await act(async () => {
+      prompt = 'Committed tagged title';
+      emit('turn_start', { input_attachment: { operation_uuid: matching ? operation : '22345678-1234-4234-8234-123456789abc' } });
+    });
+    await tick();
+    expect(context.patchSession.mock.calls.filter(([, patch]) => patch.name)).toEqual(
+      matching ? [['one', { name: 'Committed tagged title' }]] : []);
+    await act(async () => { stream.close(); });
+  });
+  it('retains the draft and sends nothing when a random operation ID cannot be made', async () => {
+    render(<Chat />); await tick();
+    vi.stubGlobal('crypto', {});
+    send('Retain this draft'); await tick();
+    expect((screen.getByPlaceholderText(/Type a message/) as HTMLTextAreaElement).value).toBe('Retain this draft');
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect(context.patchSession.mock.calls.filter(([, patch]) => patch.name)).toEqual([]);
+  });
+
 });

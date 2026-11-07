@@ -7,7 +7,6 @@ import (
 	wire "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
-	memory "github.com/JBailes/aimee/server-go/modules/memory"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
 	"strings"
@@ -110,58 +109,7 @@ func TestExecutionGradeRecallPostgresNextRunScopeAndErasure(t *testing.T) {
 	if !strings.Contains(raw, `"configuration_sha256":"`+strings.Repeat("d", 64)+`"`) || !strings.Contains(raw, `"profile_sha256":"`+strings.Repeat("e", 64)+`"`) || strings.Contains(raw, `"configuration_digest"`) || strings.Contains(raw, `"profile_digest"`) {
 		t.Fatal("recall lost actual configuration/profile cohort keys", raw)
 	}
-	// A later host invocation consumes the durable projection with server-local
-	// memory placement and no KB/executor. This is test evidence, not instructions.
-
-	memoryHandler := memory.NewHandler(nil, memory.WithDataStore(memory.PlacementServer, nil))
-	runtimeCall := func(args map[string]any) map[string]any {
-		body, _ := json.Marshal(args)
-		frame, _ := bus.EncodeCommand("runtime", body)
-		rendered, status := memoryHandler(bus.ModuleInvocation{StageID: memory.StageCommand}, frame)
-		payload, err := bus.DecodeCommandResult(rendered)
-		var result map[string]any
-		if status != bus.ModuleStatusOK || err != nil || json.Unmarshal(payload, &result) != nil {
-			t.Fatal("runtime contract", status, err, string(rendered))
-		}
-		return result
-	}
-	releaseArgs := map[string]any{"operation": "ingress-assemble", "project": "project-a", "budget": 8192, "execution_test_grades": json.RawMessage(raw), "prepare_source_release": true, "request_id": "later-run", "principal": "operator"}
-	assembled := runtimeCall(releaseArgs)
-	if assembled["status"] != "ok" || !strings.Contains(assembled["envelope"].(string), "configured-test-history") {
-		t.Fatal("next-run canonical context", assembled)
-	}
-	ticket := assembled["source_release_ticket"]
-	if value, ok := ticket.(string); !ok || value == "" {
-		t.Fatal("assembly did not retain receipt source handle", assembled)
-	}
-	fenceArgs := map[string]any{"operation": "source-release-plan", "request_id": "later-run", "principal": "operator", "project": "project-a", "source_release_ticket": ticket}
-	// Prepare a provider check before the canonical source changes. The host
-	// re-reads the actual source after preparation, then submits its joined answer.
-	providerPlan := runtimeCall(fenceArgs)
-	runFence := func(plan map[string]any) map[string]any {
-		expected, _ := json.Marshal(plan["execution_grade_request"])
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer tx.Rollback(ctx)
-		status, fields, err := executionTestGradeRecall(ctx, sessionIRLiveTx{tx}, []string{"operator", "project-a", string(expected)})
-		if err != nil || status != store.StatusOK {
-			t.Fatal(status, err, "execution-grade request", string(expected), "source-release plan", plan)
-		}
-		answer := map[string]any{}
-		for k, v := range fenceArgs {
-			answer[k] = v
-		}
-		answer["operation"] = "source-release-result"
-		answer["execution_grade_response"] = json.RawMessage(fields[0])
-		return runtimeCall(answer)
-	}
-	if admitted := runFence(providerPlan); admitted["admitted"] != true {
-		t.Fatal("unchanged source refused", admitted)
-	}
-	providerPlan = runtimeCall(fenceArgs)
-
+	// Former Go memory consumer assertions are preserved in the private sidecar.
 	// Targeted provider fence re-reads these exact sources, independently of
 	// recent-history ordering, and echoes the current opaque admission attempt.
 	var expected map[string]any
@@ -201,10 +149,6 @@ func TestExecutionGradeRecallPostgresNextRunScopeAndErasure(t *testing.T) {
 	if _, err = pool.Exec(ctx, `UPDATE session_ir_events SET payload='{"kind":"execution","payload":{"status":"cancelled"}}' WHERE session_id='ours'`); err != nil {
 		t.Fatal(err)
 	}
-	if admitted := runFence(providerPlan); admitted["admitted"] == true {
-		t.Fatal("source changed after prepare but dispatch admitted", admitted)
-	}
-	providerPlan = runtimeCall(fenceArgs)
 	if checked := check(); strings.Contains(checked, `"session_id":"ours"`) {
 		t.Fatal("provider fence accepted cancelled source", checked)
 	}
@@ -214,9 +158,6 @@ func TestExecutionGradeRecallPostgresNextRunScopeAndErasure(t *testing.T) {
 	if _, err = pool.Exec(ctx, `DELETE FROM server_sessions WHERE id='failed'`); err != nil {
 		t.Fatal(err)
 	}
-	if admitted := runFence(providerPlan); admitted["admitted"] == true {
-		t.Fatal("source erased after prepare but dispatch admitted", admitted)
-	}
 	if raw = recall("operator", "project-a"); !strings.Contains(raw, `"items":[]`) {
 		t.Fatal("erased source recalled", raw)
 	}
@@ -225,14 +166,11 @@ func TestExecutionGradeRecallPostgresNextRunScopeAndErasure(t *testing.T) {
 	if _, err = pool.Exec(ctx, `UPDATE session_ir_events SET payload=$1 WHERE session_id='ours'`, terminals["ours"]); err != nil {
 		t.Fatal(err)
 	}
-	releaseArgs["execution_test_grades"] = json.RawMessage(recall("operator", "project-a"))
-	assembled = runtimeCall(releaseArgs)
-	fenceArgs["source_release_ticket"] = assembled["source_release_ticket"]
-	providerPlan = runtimeCall(fenceArgs)
 	if _, err = pool.Exec(ctx, `UPDATE server_sessions SET principal='foreign' WHERE id='ours'`); err != nil {
 		t.Fatal(err)
 	}
-	if admitted := runFence(providerPlan); admitted["admitted"] == true {
-		t.Fatal("changed session owner retained dispatch", admitted)
+	if checked := check(); strings.Contains(checked, `"session_id":"ours"`) {
+		t.Fatal("changed canonical owner retained source", checked)
 	}
+
 }

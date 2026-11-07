@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "cli_codex.h"
+#include "agent_exec.h"
 #include "provider_cli_adapter.h"
 #include "server_session_control.h"
 #include <aimee/ir/session_event.h>
@@ -1390,8 +1391,132 @@ static void test_execute_refuses_missing_configuration(void)
    assert(agent_execute_cli_codex(NULL, "system", "user", NULL) == -1);
 }
 
+#if defined(__linux__)
+/* Actual descriptor-launched controlled child: only initialize/config-read are
+ * accepted. Neither failure phase may proceed to thread/start or turn/start. */
+static int readiness_diagnostic_child(void)
+{
+   const char *configuration = getenv("AIMEE_TEST_READY_CONFIG");
+   const char *marker = getenv("AIMEE_TEST_READY_MARKER");
+   const char *home = getenv("HOME");
+   assert(configuration && marker && home);
+   char *line = NULL;
+   size_t capacity = 0;
+   while (getline(&line, &capacity, stdin) > 0)
+   {
+      cJSON *request = cJSON_Parse(line);
+      const char *method = cJSON_GetStringValue(cJSON_GetObjectItem(request, "method"));
+      assert(method);
+      FILE *log = fopen(marker, "a");
+      assert(log && fprintf(log, "%s\n", method) > 0 && !fclose(log));
+      assert(!strcmp(method, "initialize") || !strcmp(method, "config/read"));
+      cJSON *reply = cJSON_CreateObject(), *result = cJSON_AddObjectToObject(reply, "result");
+      assert(cJSON_AddItemToObject(reply, "id", cJSON_Duplicate(cJSON_GetObjectItem(request, "id"), 1)));
+      if (!strcmp(method, "config/read"))
+      {
+         cJSON *config = cJSON_Parse(configuration), *layers = cJSON_AddArrayToObject(result, "layers"),
+               *layer = cJSON_CreateObject(), *name = cJSON_AddObjectToObject(layer, "name");
+         char path[1024];
+         assert(snprintf(path, sizeof path, "%s/.codex/config.toml", home) < (int)sizeof path);
+         assert(config && cJSON_AddStringToObject(name, "type", "user") &&
+                cJSON_AddStringToObject(name, "file", path) &&
+                cJSON_AddItemToObject(layer, "config", cJSON_Duplicate(config, 1)) &&
+                cJSON_AddItemToArray(layers, layer));
+         if (getenv("AIMEE_TEST_READY_BAD_CONFIG"))
+            assert(cJSON_AddStringToObject(config, "unexpected", "refused"));
+         /* Extra config is not itself invalid: make an expected value differ. */
+         if (getenv("AIMEE_TEST_READY_BAD_CONFIG"))
+            assert(cJSON_ReplaceItemInObjectCaseSensitive(config, "sandbox_mode",
+                                                         cJSON_CreateString("workspace-write")));
+         assert(cJSON_AddItemToObject(result, "config", config));
+      }
+      char *wire = cJSON_PrintUnformatted(reply);
+      assert(wire && puts(wire) >= 0 && !fflush(stdout));
+      free(wire);
+      cJSON_Delete(reply);
+      cJSON_Delete(request);
+   }
+   free(line);
+   return 0;
+}
+static int diagnostic_ready_calls;
+static int diagnostic_ready_refused(const char *digest, cli_codex_host_replay_t *replay, void *context)
+{
+   assert(digest && strlen(digest) == 64 && replay && context == &diagnostic_ready_calls);
+   diagnostic_ready_calls++;
+   return -7; /* Preserve arbitrary nonzero callback refusal, called once. */
+}
+static void test_host_readiness_failure_phases(void)
+{
+   char root[512], marker[1024], executable[4096], home_env[600], config_env[8192],
+       marker_env[1100], build[65];
+   snprintf(root, sizeof root, "%s/aimee-codex-ready-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(root));
+   assert(snprintf(marker, sizeof marker, "%s/requests", root) < (int)sizeof marker);
+   ssize_t length = readlink("/proc/self/exe", executable, sizeof executable - 1);
+   assert(length > 0 && length < (ssize_t)sizeof executable - 1);
+   executable[length] = 0;
+   cJSON *expected = cJSON_Parse("{\"sandbox_mode\":\"read-only\",\"model_providers\":{\"aimee_ir\":{\"base_url\":\"http://127.0.0.1:1/v1\",\"http_headers\":{\"Authorization\":\"Bearer fixture-token\"}}}}");
+   cJSON *projects = cJSON_AddObjectToObject(expected, "projects");
+   assert(projects && cJSON_AddObjectToObject(projects, root));
+   char *configuration = cJSON_PrintUnformatted(expected);
+   assert(configuration);
+   assert(snprintf(home_env, sizeof home_env, "HOME=%s", root) < (int)sizeof home_env);
+   assert(snprintf(config_env, sizeof config_env, "AIMEE_TEST_READY_CONFIG=%s", configuration) < (int)sizeof config_env);
+   assert(snprintf(marker_env, sizeof marker_env, "AIMEE_TEST_READY_MARKER=%s", marker) < (int)sizeof marker_env);
+   memset(build, 'a', 64); build[64] = 0;
+   for (int caller = 0; caller < 2; caller++)
+      for (int invalid = 0; invalid < 2; invalid++)
+      {
+         char *environment[] = {home_env, config_env, marker_env,
+                                  "AIMEE_TEST_READY_DIAGNOSTIC=1",
+                                  invalid ? "AIMEE_TEST_READY_BAD_CONFIG=1" : NULL, NULL};
+         cli_codex_host_launch_t launch = {.executable_fd = open(executable, O_RDONLY | O_CLOEXEC),
+                                             .cwd_fd = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC),
+                                             .home = root, .cwd = root, .build_digest = build,
+                                             .gateway_url = "http://127.0.0.1:1", .gateway_token = "fixture-token",
+                                             .environment = environment, .expected_config = expected,
+                                             .ready = diagnostic_ready_refused, .context = &diagnostic_ready_calls};
+         assert(launch.executable_fd >= 0 && launch.cwd_fd >= 0);
+         diagnostic_ready_calls = 0;
+         const char *message = invalid ? "native SDK configuration could not be verified"
+                                       : "native SDK host launch readiness was refused";
+         if (caller)
+         {
+            agent_t agent = {0};
+            provider_cli_cfg_t cfg = {.agent = &agent, .user_prompt = "fixture", .codex_host = &launch};
+            agent_result_t out = {0};
+            assert(codex_provider_cli_adapter.execute(&cfg, &out) == AGENT_RC_CAPTURE_FAILED);
+            assert(!strcmp(out.error, message));
+            agent_result_clear_response(&out);
+         }
+         else
+         {
+            cli_codex_chat_request_t request = {.user_prompt = "fixture", .timeout_ms = 3000,
+                                                   .host_launch = &launch};
+            cli_codex_chat_result_t out = {0};
+            assert(cli_codex_chat_stream(&request, NULL, NULL, &out) == -1);
+            assert(!strcmp(out.error, message));
+         }
+         assert(diagnostic_ready_calls == !invalid);
+         FILE *file = fopen(marker, "r");
+         char methods[128] = {0};
+         assert(file && fread(methods, 1, sizeof methods - 1, file) && !ferror(file) && !fclose(file));
+         assert(!strcmp(methods, "initialize\nconfig/read\n"));
+         assert(!unlink(marker));
+         close(launch.executable_fd); close(launch.cwd_fd);
+      }
+   free(configuration); cJSON_Delete(expected); assert(!rmdir(root));
+   puts("host readiness diagnostics: four caller/phase cases passed before thread/turn");
+}
+#endif
+
 int main(int argc, char **argv)
 {
+#if defined(__linux__)
+   if (argc == 2 && !strcmp(argv[1], "app-server") && getenv("AIMEE_TEST_READY_DIAGNOSTIC"))
+      return readiness_diagnostic_child();
+#endif
    test_execute_refuses_missing_configuration();
    test_execute_rejects_missing_inputs();
    signal(SIGPIPE, SIG_IGN);
@@ -1552,5 +1677,8 @@ int main(int argc, char **argv)
 
    test_operator_replies_reach_native_child();
    printf("All cli_codex parse tests passed.\n");
+#if defined(__linux__)
+   test_host_readiness_failure_phases();
+#endif
    return 0;
 }

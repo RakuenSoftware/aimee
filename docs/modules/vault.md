@@ -38,6 +38,10 @@ Batch updates reject duplicate fields and unsupported backends, with no sequenti
 field emits only non-secret audit metadata. Production native activation and live subscription
 qualification remain outstanding.
 
+## Conditional immutable custody
+
+The opt-in [conditional custody contract](vault-conditional-custody.md) provides per-principal create/replay/conflict with authenticated immutable generations, mutable-overwrite refusal and generation-checked trusted use. Its optional fenced-use operation holds the provider retirement fence through a bounded trusted callback; the earlier snapshot-use operation retains its snapshot semantics. Unsupported providers refuse without a snapshot fallback; the reserved instance/server namespace retains its separate existing API. The separate local-use guard holds the actual local key/seal generation for an independently authorized use; it grants no entry access and does not replace the existing primary-epoch admission for organizational key use. This generic Vault contract supplies custody primitives, not application sensitivity classification, native database authorization or a model-facing secret getter. `test_vault_create_once.c`, `test_vault_fenced_use.c` and `test_vault_local_use.c` cover generation, failure, retirement and seal races, callback bounds, reentry and rotation paths.
+
 ## Public contracts
 
 Canonical implementation lives in `src/modules/vault`: the server-wrap retrieval path begins at
@@ -46,8 +50,8 @@ Canonical implementation lives in `src/modules/vault`: the server-wrap retrieval
 attested identities, and `vault_capability` limits delegated access. Direct calls to internal vault
 implementations outside these facades are boundary violations rather than alternate public APIs.
 
-The descriptor declares this module's twelve sources, thirteen module-root headers, eleven direct
-tests, and this document; it sets `ownership_complete: true`. All thirteen headers are declared
+The descriptor declares this module's canonical sources, module-root headers, direct
+tests and documentation; it sets `ownership_complete: true`. Module-root headers are declared
 as `private_headers` because they live at the module root rather than under
 `src/modules/vault/include/aimee/vault/`, the layout the header-layout checker treats as private;
 `vault_internal.h` is the backend-seam header and has no paired source. The four custody backends
@@ -123,8 +127,8 @@ principal, decision, and outcome metadata before transient plaintext is discarde
 
 ## Tests and failure behavior
 
-The descriptor's eleven direct tests are `test_vault_capability.c`, `test_vault_crypto.c`,
-`test_vault_kek_cache.c`, `test_vault_kms.c`, `test_vault_master_rotate.c`, `test_vault_principal.c`,
+The descriptor's direct tests are `test_vault_capability.c`, `test_vault_create_once.c`, `test_vault_crypto.c`, `test_vault_fenced_use.c`,
+`test_vault_kek_cache.c`, `test_vault_kms.c`, `test_vault_local_use.c`, `test_vault_master_rotate.c`, `test_vault_principal.c`,
 `test_vault_seam.c`, `test_vault_server_key.c`, `test_vault_service.c`, `test_vault_store.c`, and
 `test_vault_tpm2.c`. The last backs the `WITH_TPM2`-gated `p7-tpm2-harness` and is the only test that
 links and exercises the real `vault_custody_tpm2.c`, so it is claimed despite the gate. Several

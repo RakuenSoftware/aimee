@@ -611,7 +611,25 @@
       "ctest": false,
       "make": true,
       "module": "vault",
+      "test": "src/tests/test_vault_create_once.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
       "test": "src/tests/test_vault_crypto.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_fenced_use.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_generation_retirement.c"
     },
     {
       "ctest": false,
@@ -624,6 +642,12 @@
       "make": true,
       "module": "vault",
       "test": "src/tests/test_vault_kms.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_local_use.c"
     },
     {
       "ctest": false,

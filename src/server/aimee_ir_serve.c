@@ -141,7 +141,8 @@ static int ir_persona_delivery_already_satisfied(const aimee_request_t *ir)
    for (int i = 0; i < ir->n_messages; i++)
    {
       const aimee_message_t *message = &ir->messages[i];
-      if (message->role && strcmp(message->role, "assistant") == 0)
+      if (message->role && strcmp(message->role, "assistant") == 0 &&
+          !aimee_ir_message_runtime_advisory(message))
          return 1;
       if (!message->role || strcmp(message->role, "user") != 0)
          continue;

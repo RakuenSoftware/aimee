@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,7 +20,6 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		principal uint32
 		events    []uint32
 	}{
-		{"memory", 7, []uint32{5889, 5890, 5891, 5892, 5893, 5894, 5895, 5896, 6143}},
 		{"learning", 8, []uint32{6145, 6146, 6147}},
 		{"routing", 9, []uint32{6401, 6402}},
 		{"providers", 33, []uint32{12545, 12546, 12547}},
@@ -260,5 +260,16 @@ func TestMemoryBackendSetupPersistsAcrossConfigOwnerRestart(t *testing.T) {
 		if _, leaked := snapshot["memory_backend_token"]; leaked {
 			t.Fatal("credential in public configuration")
 		}
+	}
+}
+
+func TestBundledMemoryIsUnavailableBeforeBusAttachment(t *testing.T) {
+	config, ok := moduleConfigRuntime(context.Background(), "aimee-module-memory", "/nonexistent/memory-retirement-test.sock")
+	if ok || config.ModuleName != "memory" || config.Handler != nil || len(config.Stages) != 0 {
+		t.Fatalf("bundled memory falsely advertises readiness: %#v %v", config, ok)
+	}
+	err := run(context.Background(), []string{"aimee-module-memory", "/nonexistent/memory-retirement-test.sock"})
+	if err == nil || !strings.Contains(err.Error(), "memory capability unavailable") {
+		t.Fatalf("missing explicit unavailable diagnostic: %v", err)
 	}
 }

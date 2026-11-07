@@ -108,6 +108,66 @@ int vault_store_set_dual(const char *principal, const uint8_t kek[VAULT_KEK_LEN]
 int vault_store_set_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
                            const char *agent, const char *cred, const char *secret);
 
+/* Strong retained deployment contract: immutable generations plus Retired slots. */
+extern const unsigned aimee_vault_immutable_custody_contract_v2;
+extern const unsigned aimee_vault_generation_fenced_use_contract_v1;
+#define VAULT_IMMUTABLE_GENERATION_CAP 33
+#define VAULT_STORE_GENERATION_MISMATCH 3
+#define VAULT_STORE_RETIRED 4
+#define VAULT_STORE_GENERATION_UNSUPPORTED (-2)
+#define VAULT_STORE_USE_FAILED 5 /* callback may already have consumed/acted */
+typedef int (*vault_store_secret_use_fn)(const char *secret, size_t length, void *context);
+
+/* Closed result for provider-atomic server-wrapped immutable creation. The
+ * exact value comparison occurs inside custody; no value fingerprint escapes. */
+typedef enum
+{
+   VAULT_CREATE_ONCE_CREATED = 0,
+   VAULT_CREATE_ONCE_REPLAY = 1,
+   VAULT_CREATE_ONCE_CONFLICT = 2,
+   VAULT_CREATE_ONCE_RETIRED = 3,
+   VAULT_CREATE_ONCE_ERROR = -1,
+   VAULT_CREATE_ONCE_UNSUPPORTED = -2,
+   VAULT_CREATE_ONCE_BADARG = -3,
+   VAULT_CREATE_ONCE_CRYPTO = -4,
+   VAULT_CREATE_ONCE_IO = -5,
+} vault_create_once_result_t;
+/* Creates the principal file and entry in one provider transaction if absent.
+ * New entries carry an authenticated immutable generation. Existing unmarked
+ * slots conflict; marked equal plaintext returns Replay, unequal Conflict. Both leave
+ * ciphertext/file bytes unchanged. Only Created/Replay return generation.
+ * Mutable setters/batch cannot overwrite marked entries; deletion is allowed
+ * and retains a no-value Retired tombstone: same ID cannot be recreated by
+ * delayed retries. A new logical write requires a fresh slot ID.
+ * Reserved instance/server principal
+ * is Unsupported: it uses the existing primary-wrap contract, not this API.
+ * Missing backend support refuses;
+ * NEVER emulate with get followed by set. Secret <=64KiB; principal/slot names
+ * use existing bounded identifiers. A failed durable commit may have committed:
+ * retry the SAME tuple/value to reconcile, never assume failure means absence. */
+vault_create_once_result_t vault_store_create_server_once(
+    const char *principal, const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+    const char *cred, const char *secret, char *generation, size_t generation_capacity);
+/* Marked entries refuse legacy raw get/get_server/snapshot paths.
+ * Trusted low-level versioned use. Expected generation and marker must match;
+ * ordinary raw getters do NOT provide this contract. Non-success clears out.
+ * Missing backend support is explicit, never emulated with separate reads. */
+int vault_store_get_server_generation(const char *principal,
+    const uint8_t server_kek[VAULT_KEK_LEN], const char *agent, const char *cred,
+    const char *expected_generation, char *out, size_t out_len);
+
+/* Optional provider-backed entry-retirement/write fence spans exact generation
+ * check, decryption and one synchronous trusted callback. No plaintext result.
+ * Missing support refuses; NEVER substitute the snapshot getter. Callback must
+ * return promptly, retain no bytes and not reenter Vault/key/native operations.
+ * Known same-thread Vault/key lock reentry fails closed. This is not a timed-IO
+ * or native-ACL guard, seal-epoch admission or an exactly-once external effect.
+ * Callback failure/VAULT_STORE_USE_FAILED may follow effects: never auto-retry.
+ * Existing master-key rotation remains an OFFLINE operation. */
+int vault_store_use_server_generation_fenced(const char *principal,
+    const uint8_t server_kek[VAULT_KEK_LEN], const char *agent, const char *cred,
+    const char *expected_generation, vault_store_secret_use_fn use, void *context);
+
 /* Decrypt the (agent, cred) credential for `principal` using the SERVER wrap
  * ("wrapped_dek_server") under `server_kek` — NO user KEK / unlock required. This
  * is the autonomous server use-path. Returns 0 on success, VAULT_STORE_NO_ENTRY
@@ -175,5 +235,37 @@ int vault_store_rekey_field(const char *principal, const char *field,
  * written (>=0), or -1 on error. Used by master-key rotation to re-wrap every
  * principal that may hold a server wrap, not just the "server" principal. */
 int vault_store_list_principals(char (*out)[VAULT_PRINCIPAL_MAX], int max);
+
+/* Explicit expected-generation retirement. No absent-as-erased
+ * result. Confirmed means the matching immutable tombstone was file+directory
+ * fsynced under the same provider lock, including replay after unknown I/O. */
+typedef enum
+{
+   VAULT_RETIRE_GENERATION_CONFIRMED = 0,
+   VAULT_RETIRE_GENERATION_MISSING = 1,
+   VAULT_RETIRE_GENERATION_MISMATCH = 2,
+   VAULT_RETIRE_GENERATION_UNSUPPORTED = 3,
+   VAULT_RETIRE_GENERATION_BADARG = 4,
+   VAULT_RETIRE_GENERATION_IO = 5
+} vault_retire_generation_result_t;
+vault_retire_generation_result_t
+vault_store_retire_server_generation(const char *principal, const char *agent, const char *cred,
+                                     const char *expected_generation);
+extern const unsigned aimee_vault_generation_retirement_contract_v1;
+
+/* Explicit permanent closure of an immutable slot, including an absent slot.
+ * This is stronger than expected-generation retirement: the trusted caller must
+ * authorize closure of the SLOT itself, not merely a previously observed value.
+ * Under the same provider lock as create-once, persist a value-free tombstone
+ * and return its opaque generation only after file+directory durability barriers.
+ * Existing mutable/legacy entries refuse; there is no read/delete fallback.
+ * No plaintext, selected-value digest, CLI or model capability is returned.
+ * A confirmed closure must survive ordinary deletion and prevent every future
+ * create-once of this slot. Existing retire-generation missing semantics remain
+ * unchanged. On failure the output is empty when capacity permits. */
+vault_retire_generation_result_t
+vault_store_close_server_slot_once(const char *principal, const char *agent, const char *cred,
+                                  char *closed_generation, size_t generation_capacity);
+extern const unsigned aimee_vault_slot_closure_contract_v1;
 
 #endif /* DEC_VAULT_STORE_H */

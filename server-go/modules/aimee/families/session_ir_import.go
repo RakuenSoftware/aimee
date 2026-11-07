@@ -81,7 +81,7 @@ func sessionIRHistoryImport(ctx context.Context, q store.Queryer, f []string) (u
 		return store.StatusInvalid, nil, nil
 	}
 	for _, message := range messages {
-		if !canonical.ValidMessage(message) {
+		if !canonical.ValidMessage(message) || canonical.MessageHasInputAttachments(message) || canonical.MessageHasToolSources(message) {
 			return store.StatusInvalid, nil, nil
 		}
 	}
@@ -109,6 +109,15 @@ func sessionIRHistoryImport(ctx context.Context, q store.Queryer, f []string) (u
 	}
 	if !owned[f[0]] || !owned[f[3]] {
 		return store.StatusInvalid, nil, nil
+	}
+	if report.Outcome == "exact" || report.Outcome == "normalized" {
+		allowed, presenceErr := ordinaryInputHistoryAllowed(ctx, q, f[0], f[1])
+		if presenceErr != nil {
+			return 0, nil, presenceErr
+		}
+		if !allowed {
+			return store.StatusInvalid, nil, nil
+		}
 	}
 	provider := report.SourceProvider
 	raw, err := legacyPrimaryText(ctx, q, f[3], f[4], provider)

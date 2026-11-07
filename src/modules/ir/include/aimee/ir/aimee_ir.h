@@ -135,6 +135,10 @@ typedef struct
    char *tool_namespace;
    struct cJSON *tool_input;  /* owned */
    struct cJSON *tool_result; /* owned */
+   /* Host-only immutable source receipt; canonical persistence, never provider bytes. */
+   struct cJSON *tool_source; /* owned, TOOL_RESULT only */
+   /* Canonical host provenance only. Never model wire or effect authority. */
+   struct cJSON *input_attachment; /* owned, original User TEXT only */
    int tool_is_error;
    /* IMAGE / DOCUMENT: media_type (e.g. "image/png"), and either a base64 payload
     * or a URL in media_ref. */
@@ -410,6 +414,11 @@ int aimee_ir_response_builder_closed_prefix(const aimee_ir_response_builder_t *b
 void aimee_ir_response_builder_free(aimee_ir_response_builder_t *builder);
 
 /* ---- lifecycle ---- */
+/* Stateless transport class only, never an authority/capability. Requires
+ * assistant TEXT with the exact diagnostic/evidence provenance class. */
+int aimee_ir_message_runtime_advisory(const aimee_message_t *message);
+/* Only model wire lowers these advisory classes to the existing User shape. */
+const char *aimee_ir_model_message_role(const aimee_message_t *message);
 void aimee_message_free(aimee_message_t *message);
 /* Deep owned typed snapshot, including provenance and exact native sidecars.
  * out must be zero-initialized or owned; success atomically replaces it and
@@ -428,6 +437,12 @@ int aimee_ir_json_unique(const struct cJSON *json);
 struct cJSON *aimee_ir_json_parse_frame(const char *frame, size_t length);
 struct cJSON *aimee_ir_json_canonical_copy(const struct cJSON *json);
 int aimee_ir_thinking_binding_valid(const char *binding);
+/* Structural contract only. Host/persistence admission MUST also verify exact
+ * visible SHA-256 and owner receipt before a source-bearing result is used. */
+/* Pure preservation only, never capture authority; 1 retained, 0 invalid/lost. */
+int aimee_ir_original_inputs_preserved(const aimee_request_t *,const aimee_request_t *);
+int aimee_ir_input_attachment_shape_valid(const struct cJSON *attachment);
+int aimee_ir_tool_source_shape_valid(const struct cJSON *source);
 int aimee_ir_block_valid(const aimee_block_t *block);
 /* Validate completed request content before host policy or native rendering. */
 int aimee_ir_request_admit(const aimee_request_t *request);

@@ -26,6 +26,7 @@ int db1_delegate_execution_experience_record(const char *principal, const char *
 static cJSON *log_entries;
 static int writes, fail_store, disconnected, cancelled, delivered_sequence;
 static server_session_capture_t *page_writer;
+static int fail_page;
 static char owner[64] = "alice";
 void test_learning_observations_reset(void);
 int test_learning_observations(void);
@@ -105,6 +106,8 @@ int db1_session_ir_append_verified(const char *session, const char *event, const
 char *db1_session_ir_page(const char *sid, const char *after, int limit, const char *principal)
 {
    assert(!strcmp(sid, "session-one") && !strcmp(principal, owner) && limit == 128);
+   if (fail_page)
+      return NULL;
    cJSON *events = cJSON_CreateArray();
    if (page_writer)
    {

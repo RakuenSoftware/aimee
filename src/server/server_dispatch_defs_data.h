@@ -78,6 +78,8 @@
     /* Memory */
     {"memory.search", handle_memory_search},
     {"memory.store", handle_memory_store},
+    /* Human transport only; deliberately not a model/MCP command. */
+    {"memory.protected-intake", handle_memory_protected_intake},
     {"memory.list", handle_memory_list},
     {"memory.review_list", handle_memory_review_list},
     {"memory.reject", handle_memory_reject},

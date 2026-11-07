@@ -1,3 +1,5 @@
+> Memory extraction: statements below describing the former Go memory owner are historical deployment context. Current public packaging supplies only an explicit unavailable adapter and generic SDK; select an independently installed external memory implementation through the existing role manifest. See [Memory boundary](MEMORY.md). No former Go memory functionality is implied by the public binary.
+
 # Server and KB
 
 **Server assists one human. KB serves a shared corpus.** Each is an independent instance with its

@@ -56,6 +56,7 @@ static void test_provider_required(void)
 static void test_allowed_routes(void)
 {
    assert(allows("GET", "/v1/console/overview"));
+   assert(allows("POST", "/v1/console/memory"));
    assert(allows("POST", "/v1/enroll"));
    assert(allows("GET", "/v1/enrollments"));
    assert(allows("POST", "/v1/enrollments/abc123/revoke"));
@@ -81,6 +82,7 @@ static void test_denied_routes(void)
    static const char *const cases[][2] = {
        {"DELETE", "/v1/enrollments/abc/revoke"},
        {"POST", "/v1/console/overview"},
+       {"GET", "/v1/console/memory"},
        {"GET", "/v1/decisions/42/supersede"},
        {"get", "/v1/enrollments"},
        {"POST", "/v1/console/pipeline"},

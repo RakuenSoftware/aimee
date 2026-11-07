@@ -2,6 +2,7 @@
 #define AIMEE_SERVER_ERROR_KIND_H 1
 
 #include <stdint.h>
+#include "cJSON.h"
 
 /* Production registers the runtime-web event-bus adapter before dispatch
  * starts. Tests may inject the isolated module handler through this seam. */
@@ -12,5 +13,10 @@ void server_error_kind_register_http_status_provider(server_error_http_status_pr
 /* Ask the registered Go status owner. Zero means unavailable/invalid; callers
  * retain their existing transport-failure fallback. */
 int server_error_kind_http_status(const char *kind);
+
+/* Preserve the verifier-owned caller context through an explicitly selected
+ * module operation. No host identity is constructed from request arguments. */
+cJSON *server_invoke_module_caller_operation(const char *method, const char *operation,
+                                            const cJSON *args, const char *unavailable_message);
 
 #endif

@@ -110,6 +110,32 @@ static int peer_identity(int fd, uint32_t *uid_out, int *pid_out, char *exe, siz
 #endif
 }
 
+static int process_handle_exited(int fd);
+static void process_handle_close(int *fd);
+
+/* Called under host_lock, and only after grant and kernel-peer authentication.
+ * Reclaim this exact principal's exited slots before capacity is allocated. */
+static bus_attach_status_t release_exited_principal(bus_runtime_t *runtime,
+                                                   const bus_attach_request_t *request,
+                                                   uint32_t skip_slot)
+{
+   bus_host_t *host = runtime->host;
+   for (uint32_t i = 0; i < host->cfg.max_slots; ++i)
+   {
+      if (i == skip_slot || !host->slots[i].in_use ||
+          host->slots[i].principal_class != request->principal_class ||
+          host->slots[i].principal_ref != request->principal_ref)
+         continue;
+      /* No pidfd or a live process remains denied; heartbeat fallback is unchanged. */
+      if (!process_handle_exited(runtime->slot_pidfd[i]))
+         return BUS_ATTACH_DENIED_POLICY;
+      process_handle_close(&runtime->slot_pidfd[i]);
+      if (bus_host_release_slot(host, i) != BUS_HOST_OK)
+         return BUS_ATTACH_DENIED_POLICY;
+   }
+   return BUS_ATTACH_OK;
+}
+
 static bus_attach_status_t runtime_admit(void *ctx, int fd, const bus_attach_request_t *request)
 {
    bus_runtime_t *runtime = ctx;
@@ -129,6 +155,8 @@ static bus_attach_status_t runtime_admit(void *ctx, int fd, const bus_attach_req
       return BUS_ATTACH_DENIED_POLICY;
    uint32_t expected_uid = grant->uid == BUS_RUNTIME_SELF_UID ? (uint32_t)geteuid() : grant->uid;
    if (peer_uid != expected_uid || strcmp(peer_exe, grant->executable) != 0)
+      return BUS_ATTACH_DENIED_POLICY;
+   if (release_exited_principal(runtime, request, UINT32_MAX) != BUS_ATTACH_OK)
       return BUS_ATTACH_DENIED_POLICY;
    runtime->pending_peer_pid = peer_pid;
    return BUS_ATTACH_OK;
@@ -180,22 +208,8 @@ static bus_attach_status_t runtime_bind(void *ctx, bus_host_t *host, uint32_t sl
    const bus_runtime_grant_t *grant = grant_find(runtime, request);
    int peer_pidfd = process_handle_open(runtime->pending_peer_pid);
    runtime->pending_peer_pid = 0;
-   /* A crashed process cannot detach its shared-memory slot. Prefer an exact
-    * kernel process handle over the heartbeat timeout when its supervisor
-    * immediately launches the same principal again. A live duplicate is still
-    * denied, and kernels without pidfd support retain heartbeat-only reaping. */
-   for (uint32_t i = 0; grant && i < host->cfg.max_slots; ++i)
-   {
-      if (i == slot || !host->slots[i].in_use ||
-          host->slots[i].principal_class != request->principal_class ||
-          host->slots[i].principal_ref != request->principal_ref)
-         continue;
-      if (!process_handle_exited(runtime->slot_pidfd[i]))
-         goto denied;
-      process_handle_close(&runtime->slot_pidfd[i]);
-      if (bus_host_release_slot(host, i) != BUS_HOST_OK)
-         goto denied;
-   }
+   if (release_exited_principal(runtime, request, slot) != BUS_ATTACH_OK)
+      goto denied;
    if (!grant || bus_host_enforce_grants(host, slot) != BUS_HOST_OK ||
        grant_many(host, slot, grant->publish, grant->publish_count, BUS_GRANT_NOTIFY) != 0 ||
        grant_many(host, slot, grant->request, grant->request_count, BUS_GRANT_REQUEST) != 0)

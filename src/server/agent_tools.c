@@ -1717,12 +1717,18 @@ agent_mcp_call_fn agent_tools_mcp_call_provider(void)
    return g_mcp_call_fn;
 }
 
+static void module_native_collision(const char *name);
 void agent_tools_register_mcp_tool(const char *name)
 {
    if (!name || !name[0])
       return;
    if (agent_tools_is_mcp_derived(name))
       return;
+   if (agent_tools_module_native_has(name))
+   {
+      module_native_collision(name);
+      return;
+   }
    if (g_mcp_tool_count >= (int)(sizeof(g_mcp_tools) / sizeof(g_mcp_tools[0])))
    {
       LOG_ERROR("agent_tools", "MCP tool registry full (%d); '%s' DROPPED and uncallable",
@@ -1910,6 +1916,10 @@ static int builtin_ir_definition(const builtin_tool_def_t *definition, aimee_too
    return 0;
 }
 
+extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
+
+#include "module_native_tools.inc"
+
 int agent_tools_builtin_catalog(aimee_tool_t **out, int *count)
 {
    if (!out || !count)
@@ -1917,12 +1927,14 @@ int agent_tools_builtin_catalog(aimee_tool_t **out, int *count)
    *out = NULL;
    *count = 0;
    size_t n = sizeof(g_builtin_tools) / sizeof(g_builtin_tools[0]);
-   aimee_tool_t *catalog = calloc(n, sizeof *catalog);
+   aimee_tool_t *catalog = calloc(n + 16, sizeof *catalog);
    if (!catalog)
       return -1;
    for (size_t i = 0; i < n; i++)
    {
       const builtin_tool_def_t *definition = &g_builtin_tools[i];
+      if (aimee_module_tool_source_mode && aimee_module_tool_source_mode(definition->name) < 0)
+         continue;
       if (agent_tools_is_git_write(definition->name) && !g_git_write_fn)
          continue;
       if (builtin_ir_definition(definition, catalog + *count))
@@ -1935,6 +1947,26 @@ int agent_tools_builtin_catalog(aimee_tool_t **out, int *count)
       }
       (*count)++;
    }
+   pthread_mutex_lock(&module_native.lock);
+   module_native.sealed = 1;
+   int invalid = module_native.invalid;
+   size_t module_count = module_native.count;
+   pthread_mutex_unlock(&module_native.lock);
+   for (size_t i = 0; !invalid && i < module_count; i++)
+   {
+      if (aimee_module_tool_source_mode &&
+          aimee_module_tool_source_mode(module_native.definitions[i].name) < 0)
+         continue;
+      if (module_native_copy(module_native.definitions + i, catalog + *count))
+         invalid = 1;
+      else
+         (*count)++;
+   }
+   if (invalid)
+   {
+      for (int i = 0; i < *count; i++) aimee_tool_free(catalog + i);
+      free(catalog); *count = 0; return -1;
+   }
    *out = catalog;
    return 0;
 }
@@ -1944,13 +1976,16 @@ int agent_tools_execution_definition(const char *name, aimee_tool_t *out)
    if (!out)
       return -1;
    memset(out, 0, sizeof *out);
-   if (!name || !name[0])
+   if (!name || !name[0] ||
+       (aimee_module_tool_source_mode && aimee_module_tool_source_mode(name) < 0))
       return -1;
    for (size_t i = 0; i < sizeof g_builtin_tools / sizeof *g_builtin_tools; i++)
       if (!strcmp(name, g_builtin_tools[i].name))
          return agent_tools_is_git_write(name) && !g_git_write_fn
                     ? -1
                     : builtin_ir_definition(g_builtin_tools + i, out);
+   if (agent_tools_module_native_has(name))
+      return agent_tools_module_native_definition(name, out);
    if (agent_tools_is_mcp_derived(name) && g_mcp_call_fn && g_mcp_advert_fn)
    {
       cJSON *advert = g_mcp_advert_fn(name);
@@ -2008,6 +2043,8 @@ static int emit_builtin_tools(cJSON *tools, unsigned surface)
    for (size_t i = 0; i < n; i++)
    {
       const builtin_tool_def_t *definition = &g_builtin_tools[i];
+      if (aimee_module_tool_source_mode && aimee_module_tool_source_mode(definition->name) < 0)
+         continue;
       if (!(definition->surfaces & surface))
          continue;
       /* A missing git dispatcher means the capability is unavailable. */
@@ -2030,7 +2067,7 @@ static int emit_builtin_tools(cJSON *tools, unsigned surface)
 cJSON *build_tools_array(void)
 {
    cJSON *tools = cJSON_CreateArray();
-   if (!tools || emit_builtin_tools(tools, TSURF_CHAT))
+   if (!tools || emit_builtin_tools(tools, TSURF_CHAT) || module_native_emit(tools, TSURF_CHAT))
    {
       cJSON_Delete(tools);
       return NULL;
@@ -2044,7 +2081,7 @@ cJSON *build_tools_array(void)
 cJSON *build_tools_array_responses(void)
 {
    cJSON *tools = cJSON_CreateArray();
-   if (!tools || emit_builtin_tools(tools, TSURF_RESP))
+   if (!tools || emit_builtin_tools(tools, TSURF_RESP) || module_native_emit(tools, TSURF_RESP))
    {
       cJSON_Delete(tools);
       return NULL;

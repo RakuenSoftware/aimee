@@ -472,7 +472,8 @@ int main(int argc, char **argv)
    /* The removed in-process memory engine cannot be measured from this native
     * harness. Preserve its case names as unavailable so a historical baseline
     * cannot silently pass with those measurements omitted. Real Go memory
-    * measurements use aimee-memory-eval and its isolated PostgreSQL session. */
+    * measurements use the frozen private aims-db evaluator and its isolated
+    * PostgreSQL session; the public install does not ship that tool. */
    int unavailable = 0;
 
    /* Run each benchmark */
@@ -525,7 +526,7 @@ int main(int argc, char **argv)
    {
       fprintf(stderr,
               "%d memory benchmarks unavailable in the native harness; "
-              "use aimee-memory-eval. No baseline was saved or certified.\n",
+              "use the private aims-db legacy evaluator. No baseline was saved or certified.\n",
               unavailable);
       return 2;
    }

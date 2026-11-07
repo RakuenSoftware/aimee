@@ -88,8 +88,8 @@ cJSON *server_error_kind_json(const char *kind, const char *message, const char 
 
 /* Modules return the complete public envelope. The host only supplies its
  * existing HTTP error classification, which belongs to the server transport. */
-cJSON *server_invoke_module_operation(const char *method, const char *operation, const cJSON *args,
-                                      const char *unavailable_message)
+static cJSON *invoke_module_operation(const char *method, const char *operation, const cJSON *args,
+                                     const char *unavailable_message, int caller_context)
 {
    cJSON *request = args ? cJSON_Duplicate(args, 1) : cJSON_CreateObject();
    if (!cJSON_IsObject(request))
@@ -101,7 +101,9 @@ cJSON *server_invoke_module_operation(const char *method, const char *operation,
    cJSON *reply = NULL;
    int rc = -1;
    if (cJSON_AddStringToObject(request, "operation", operation))
-      rc = aimee_module_commands_dispatch_internal_timeout(method, request, 60000, &reply);
+      rc = caller_context
+               ? aimee_module_commands_dispatch_internal_caller_timeout(method, request, 60000, &reply)
+               : aimee_module_commands_dispatch_internal_timeout(method, request, 60000, &reply);
    cJSON_Delete(request);
    const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status"));
    if (rc <= 0 || !cJSON_IsObject(reply) || !status ||
@@ -130,4 +132,18 @@ int server_send_error_kind(server_conn_t *conn, const char *kind, const char *me
                            const char *request_id)
 {
    return server_send_ok(conn, server_error_kind_json(kind, message, request_id));
+}
+
+/* Opt-in host binding. Framing, timeout and public result classification stay
+ * shared with the unbound compatibility dispatcher above. */
+cJSON *server_invoke_module_caller_operation(const char *method, const char *operation,
+                                            const cJSON *args, const char *unavailable_message)
+{
+   return invoke_module_operation(method, operation, args, unavailable_message, 1);
+}
+
+cJSON *server_invoke_module_operation(const char *method, const char *operation, const cJSON *args,
+                                      const char *unavailable_message)
+{
+   return invoke_module_operation(method, operation, args, unavailable_message, 0);
 }

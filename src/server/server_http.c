@@ -46,6 +46,9 @@
 #include "shadow_mirror.h"        /* generic shadow-traffic mirror */
 #include "http_content_encoding.h"
 #include "cJSON.h"
+#include "server/host_original_submission.h"
+#include "server/owned_user_source.h"
+#include <aimee/ir/aimee_ir.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
@@ -1103,28 +1106,170 @@ static void write_ndjson_stream_headers(int fd, const char *request_id)
  * request), so the stack conn here is safe to tear down on return. Non-blocking
  * for the single-threaded listener: close(fd) by the caller just drops its own
  * reference while the worker keeps streaming on the dup. */
-static void handle_native_chat_stream(int fd, const char *body, uint32_t conn_caps,
-                                      const char *request_id)
+static void chat_ingress_wipe(cJSON *node)
 {
-   cJSON *req = body ? cJSON_Parse(body) : NULL;
-   if (!req)
+   for (cJSON *item = node; item; item = item->next)
    {
-      send_response(fd, 400, "{\"error\":\"invalid JSON body\"}", request_id);
+      chat_ingress_wipe(item->child);
+      if (!(item->type & cJSON_IsReference) && item->valuestring)
+      {
+         volatile char *p = item->valuestring;
+         size_t n = strlen(item->valuestring);
+         while (n--) *p++ = 0;
+      }
+   }
+}
+typedef struct
+{
+   host_original_submission *submission;
+   host_original_submission **previous;
+   cJSON *request;
+   server_conn_t connection;
+   int initialized, bound, protected_input;
+} chat_ingress_scope;
+static void chat_ingress_cleanup(void *state)
+{
+   chat_ingress_scope *scope = state;
+   if (scope->bound)
+      host_original_submission_pending_bind(scope->previous);
+   host_original_submission_destroy(&scope->submission);
+   if (scope->protected_input)
+      chat_ingress_wipe(scope->request);
+   cJSON_Delete(scope->request);
+   if (scope->initialized)
+   {
+      pthread_mutex_destroy(&scope->connection.mutex);
+      pthread_cond_destroy(&scope->connection.can_close);
+   }
+}
+static void handle_native_chat_stream_mode(int fd, const char *headers, const char *body,
+                                           size_t body_length, uint32_t conn_caps,
+                                           const char *request_id, int source_only)
+{
+   int previous_cancel;
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel);
+   chat_ingress_scope scope = {0};
+   host_text_status status = source_only
+       ? host_original_submission_capture_user_source(headers, body, body_length, &scope.submission)
+       : host_original_submission_capture(headers, body, body_length, &scope.submission);
+   if (status != HOST_TEXT_OK && status != HOST_TEXT_PASSTHROUGH)
+   {
+      send_response(fd, status == HOST_TEXT_UNAVAILABLE ? 503 : 400,
+                    "{\"error\":\"original input admission unavailable\"}", request_id);
+      pthread_setcancelstate(previous_cancel, NULL);
       return;
    }
+   scope.protected_input = status == HOST_TEXT_OK;
+   scope.request = body ? cJSON_Parse(body) : NULL;
+   if (!scope.request)
+   {
+      chat_ingress_cleanup(&scope);
+      send_response(fd, 400, "{\"error\":\"invalid JSON body\"}", request_id);
+      pthread_setcancelstate(previous_cancel, NULL);
+      return;
+   }
+   scope.connection.fd = fd;
+   scope.connection.capabilities = conn_caps;
+   server_http_identity_apply(&scope.connection);
+   pthread_mutex_init(&scope.connection.mutex, NULL);
+   pthread_cond_init(&scope.connection.can_close, NULL);
+   scope.initialized = 1;
+   scope.previous = host_original_submission_pending_bind(&scope.submission);
+   scope.bound = 1;
+   pthread_cleanup_push(chat_ingress_cleanup, &scope);
+   pthread_setcancelstate(previous_cancel, NULL);
    write_ndjson_stream_headers(fd, request_id);
-   server_conn_t sc;
-   memset(&sc, 0, sizeof(sc));
-   sc.fd = fd;
-   sc.capabilities = conn_caps;
-   server_http_identity_apply(&sc);
-   pthread_mutex_init(&sc.mutex, NULL);
-   pthread_cond_init(&sc.can_close, NULL);
-   handle_chat_send_stream(server_active_ctx(), &sc, req);
-   pthread_mutex_destroy(&sc.mutex);
-   pthread_cond_destroy(&sc.can_close);
-   cJSON_Delete(req);
+   handle_chat_send_stream(server_active_ctx(), &scope.connection, scope.request);
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+   pthread_cleanup_pop(1);
+   pthread_setcancelstate(previous_cancel, NULL);
 }
+
+static void handle_native_chat_stream(int fd, const char *headers, const char *body,
+                                      size_t body_length, uint32_t conn_caps,
+                                      const char *request_id)
+{
+   handle_native_chat_stream_mode(fd, headers, body, body_length, conn_caps, request_id, 0);
+}
+struct owned_user_source_scope { char *frame; size_t length; void *purpose; };
+static void owned_user_source_cleanup(void *pointer)
+{
+   struct owned_user_source_scope *scope = pointer;
+   if (aimee_module_owned_user_source_release_v1)
+      aimee_module_owned_user_source_release_v1(scope->purpose);
+   if (scope->frame && scope->length <= HOST_TEXT_MAX_INPUT + HOST_TEXT_MAX_SIDECARS + 8192u)
+   {
+      volatile char *bytes = scope->frame;
+      for (size_t i = 0; i < scope->length; ++i) bytes[i] = 0;
+   }
+   free(scope->frame);
+}
+/* Generic terminal action. No operation, identity, source or module policy
+ * is parsed by the host. Normal source-only preparation stays byte-compatible
+ * when the optional module callback declines this request. */
+struct owned_user_action_scope { char *result; size_t length, capacity; };
+static void owned_user_action_cleanup(void *pointer)
+{
+   struct owned_user_action_scope *scope = pointer;
+   if (scope->result && scope->capacity <= 16385)
+   {
+      volatile char *bytes = scope->result;
+      for (size_t i = 0; i < scope->capacity; ++i) bytes[i] = 0;
+   }
+   free(scope->result);
+}
+static int handle_owned_user_action(int fd, const char *headers, const char *body,
+                                   size_t body_length, const char *request_id)
+{
+   if (!aimee_module_owned_user_action_v1) return 0;
+   struct owned_user_action_scope scope = {0};
+   volatile int handled = 1;
+   pthread_cleanup_push(owned_user_action_cleanup, &scope);
+   int status = aimee_module_owned_user_action_v1(headers, body, body_length,
+                                                &scope.result, &scope.length, &scope.capacity);
+   if (status == 0 && !scope.result && !scope.length && !scope.capacity) handled = 0;
+   else
+   {
+      cJSON *data = NULL;
+      if ((status == 1 || status == 2) && scope.result && scope.length &&
+          scope.length <= 16384 && scope.capacity == scope.length + 1 &&
+          memchr(scope.result, 0, scope.capacity) == scope.result + scope.length)
+         data = aimee_ir_json_parse_frame(scope.result, scope.length);
+      if (cJSON_IsObject(data)) send_response(fd, 200, scope.result, request_id);
+      else send_response(fd, 503, "{\"error\":\"owned action unavailable\"}", request_id);
+      cJSON_Delete(data);
+   }
+   pthread_cleanup_pop(1);
+   return handled;
+}
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_owned_user_action_handoff_contract_v1 = 1;
+
+static void handle_owned_user_source(int fd, const char *headers, const char *body,
+                                     size_t body_length, uint32_t conn_caps,
+                                     const char *request_id)
+{
+   if (handle_owned_user_action(fd, headers, body, body_length, request_id)) return;
+   if (!aimee_module_owned_user_source_prepare_v1 || !aimee_module_owned_user_source_release_v1)
+   {
+      send_response(fd, 503, "{\"error\":\"owned user input unavailable\"}", request_id);
+      return;
+   }
+   struct owned_user_source_scope scope = {0};
+   pthread_cleanup_push(owned_user_source_cleanup, &scope);
+   int prepared = aimee_module_owned_user_source_prepare_v1(headers, body, body_length,
+       &scope.frame, &scope.length, &scope.purpose);
+   if (prepared || !scope.purpose || !scope.frame || !scope.length ||
+       scope.length > HOST_TEXT_MAX_INPUT + HOST_TEXT_MAX_SIDECARS + 8192u ||
+       memchr(scope.frame, 0, scope.length + 1) != scope.frame + scope.length)
+      send_response(fd, 503, "{\"error\":\"owned user input unavailable\"}", request_id);
+   else
+      handle_native_chat_stream_mode(fd, headers, scope.frame, scope.length, conn_caps,
+                                     request_id, 1);
+   pthread_cleanup_pop(1);
+}
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_owned_user_source_handoff_contract_v1 = 1;
 
 static int append_sse_text(char *buf, size_t n, size_t *pos, const char *s, size_t len)
 {
@@ -1956,7 +2101,8 @@ void handle_conn(int fd, int is_tcp, int is_management)
 
    /* Reject invalid JSON before streaming dispatch or completion mirroring. */
    if (strcmp(method, "POST") == 0 &&
-       (shadow_mirror_is_mirrorable_path(path) || strcmp(path, "/v1/chat/stream") == 0) &&
+       (shadow_mirror_is_mirrorable_path(path) || strcmp(path, "/v1/chat/stream") == 0 ||
+        strcmp(path, "/v1/modules/user-source") == 0) &&
        !server_http_json_body_is_single_value(body, body_len))
    {
       send_response(fd, 400, "{\"error\":\"invalid JSON body\"}", request_id);
@@ -1975,7 +2121,8 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * streams newline-delimited aimee events. The outer route-allowed gate (TCP)
     * already enforces CAP_CHAT via server_http_route_caps; re-check here so the
     * UDS path is explicit too. */
-   if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/chat/stream") == 0)
+   if (strcmp(method, "POST") == 0 && (strcmp(path, "/v1/chat/stream") == 0 ||
+                                      strcmp(path, "/v1/modules/user-source") == 0))
    {
       uint32_t need = server_capability_for_method("chat.send_stream");
       uint32_t have = effective_caps;
@@ -1986,8 +2133,16 @@ void handle_conn(int fd, int is_tcp, int is_management)
          free(body);
          return;
       }
-      handle_native_chat_stream(fd, body, have, request_id);
+      if (!strcmp(path, "/v1/modules/user-source"))
+         handle_owned_user_source(fd, buf, body, (size_t)body_len, have, request_id);
+      else
+         handle_native_chat_stream(fd, buf, body, (size_t)body_len, have, request_id);
       LOG_INFO("server.http", "%s %s -> 200 (chat stream) req_id=%s", method, path, request_id);
+      if (body)
+      {
+         volatile char *raw = body;
+         for (int i = 0; i < body_len; i++) raw[i] = 0;
+      }
       free(body);
       return;
    }

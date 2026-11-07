@@ -134,6 +134,8 @@ static int durable_module_sink(const char *role, const char *principal, const ch
    return 0;
 }
 
+#include "module_command_cancellation_cases.inc"
+
 int main(void)
 {
    printf("obs_bus_module_concurrency:\n");
@@ -145,6 +147,7 @@ int main(void)
       return 1;
    }
    setenv("AIMEE_HOME", home, 1);
+   direct_setup(home);
    audit_log_open();
    assert(obs_bus_set_durable_sink(durable_module_sink, NULL) == 0);
    if (obs_bus_start() != 0)
@@ -156,13 +159,16 @@ int main(void)
    obs_bus_emit_durable_event("test.provider.audit", "startup", "ok", "{}");
    test_calls_overlap();
    test_expired_deadline_does_not_block();
+   direct_cases();
 
    atomic_store(&durable_ready, 1);
    obs_bus_flush();
    assert(atomic_load(&durable_writes) == 1);
    for (int i = 0; i < 8; i++)
       obs_bus_emit_durable_event("test.provider.audit", "shutdown", "ok", "{}");
+   uint64_t stop_started=now_ns();
    obs_bus_stop();
+   assert(now_ns()-stop_started<3000000000ULL);
    assert(atomic_load(&durable_writes) == 9);
    assert(obs_bus_dropped() == 0);
    printf("ok\n");

@@ -14,6 +14,8 @@
 #include "tool_local_availability.h"
 #include "web_page_cache.h"
 #include "working_profile_local.h"
+#include "owned_feature.h"
+AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_store_legacy_guard_contract_v1);
 
 #include "db1_module_api.h"
 #include "transport.h"
@@ -596,6 +598,8 @@ int db1_model_price_delete(const char *model)
 
 int db1_working_profile_local_observe(const char *field, const char *value, double confidence, const char *session_id, int threshold)
 {
+   if (aimee_owned_feature_status("working_profile"))
+      return -1; /* Selected ownership never consults or mutates the legacy store. */
    if (!field || !field[0])
       return -1;
    char arg2[32];
@@ -614,6 +618,8 @@ int db1_working_profile_local_observe(const char *field, const char *value, doub
 
 int db1_working_profile_local_list(db1_working_profile_local_state_t *out, int max)
 {
+   if (aimee_owned_feature_status("working_profile"))
+      return -1; /* Selected ownership never consults or mutates the legacy store. */
    if (!out || max <= 0)
       return -1;
    if (max > 128)
@@ -667,6 +673,8 @@ int db1_working_profile_local_list(db1_working_profile_local_state_t *out, int m
 
 int db1_working_profile_local_get(const char *field, db1_working_profile_local_state_t *out)
 {
+   if (aimee_owned_feature_status("working_profile"))
+      return -1; /* Selected ownership never consults or mutates the legacy store. */
    if (!field || !field[0] || !out)
       return -1;
    const char *fields[] = {field};
@@ -687,6 +695,8 @@ int db1_working_profile_local_get(const char *field, db1_working_profile_local_s
 
 int db1_working_profile_local_reset_field(const char *field)
 {
+   if (aimee_owned_feature_status("working_profile"))
+      return -1; /* Selected ownership never consults or mutates the legacy store. */
    if (!field || !field[0])
       return -1;
    const char *fields[] = {field};

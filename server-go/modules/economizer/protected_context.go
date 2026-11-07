@@ -7,6 +7,11 @@ func protectedMessage(message *JSONValue) bool {
 	if message == nil {
 		return false
 	}
+	// Source metadata is a dependency, not a trust label. Even an invalid claim
+	// must not be stripped while keeping its bytes; the owner/host validates it.
+	if messageHasToolSource(message) {
+		return true
+	}
 	switch message.GetString("role") {
 	case "system", "developer":
 		return true
@@ -68,6 +73,20 @@ func insertEvidenceNotice(messages, note *JSONValue, retained int) bool {
 			messages.Items = append(messages.Items, nil)
 			copy(messages.Items[i+1:], messages.Items[i:len(messages.Items)-1])
 			messages.Items[i] = note
+			return true
+		}
+	}
+	return false
+}
+
+// Sidecars travel only on canonical blocks, never through labels in tool prose.
+func messageHasToolSource(message *JSONValue) bool {
+	content := messageContent(message)
+	if !content.IsArray() {
+		return false
+	}
+	for _, block := range content.Items {
+		if block.Get("tool_source") != nil || block.Get("input_attachment") != nil {
 			return true
 		}
 	}

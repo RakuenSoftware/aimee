@@ -178,6 +178,18 @@ int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    int db1_count = db1_server_session_erase_subject(request_id, js->valuestring);
+   if (db1_count == DB1_SESSION_DELETE_CONFLICT)
+   {
+      cJSON_Delete(begin);
+      cJSON *conflict = cJSON_CreateObject();
+      if (!conflict) return server_send_error(conn, "out of memory", NULL);
+      cJSON_AddStringToObject(conflict, "status", "error");
+      cJSON_AddStringToObject(conflict, "kind", "input_delivery_conflict");
+      cJSON_AddStringToObject(conflict, "message", "original input delivery requires reconciliation");
+      cJSON_AddStringToObject(conflict, "request_id", request_id);
+      cJSON_AddNumberToObject(conflict, "http_status", 409);
+      return server_send_ok(conn, conflict);
+   }
    if (db1_count < 0)
    {
       cJSON_Delete(begin);

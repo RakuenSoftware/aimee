@@ -273,6 +273,8 @@ int ingress_preinject_acquire_send_guard(void **state)
 {
    send_acquires++;
    *state = &send_acquires;
+   if (send_refuse == 2)
+      strcpy(context.context_refusal_kind, "protected_context_overflow");
    return send_refuse ? -1 : 0;
 }
 void ingress_preinject_release_send_guard(void *state)
@@ -398,6 +400,38 @@ static void test_stream_receipt_admission_and_commitment(void)
    puts("stream admission and exact incremental commitments survive partial/failed observations");
 }
 
+static void test_send_guard_refusal_replaces_stale_pipeline_error(void)
+{
+   for (unsigned route = 1; route <= 3; route++)
+      for (int refusal = 1; refusal <= 2; refusal++)
+      {
+         memset(&context, 0, sizeof(context));
+         have_context = 1;
+         wire_fence_t *snapshot = NULL;
+         wire_fence_bytes_t selected = {0};
+         assert(wire_fence_select(0, (wire_fence_route_t)route, "abc", 3, &snapshot,
+                                  &selected) == 0);
+         /* A successful selection leaves the old default error behind. The
+          * later socket-send refusal must classify its own failure. */
+         assert(!strcmp(wire_fence_last_error(), "request_pipeline_unavailable"));
+         strcpy(context.memory_source_release, "opaque-source-handle");
+         send_refuse = refusal;
+         send_acquires = send_releases = 0;
+         stream_refuse = stream_abort = stream_after_failure = 0;
+         stream_before_calls = stream_after_calls = stream_transport_calls = 0;
+         stream_consumed = 0;
+         int status = wire_fence_post_stream("fixture", "", "abc", 3, consume_stream,
+                                             NULL, 1000, "", "fixture", "fixture-model",
+                                             (wire_fence_route_t)route);
+         assert(status == HTTP_RETRY_ADMISSION_REFUSED);
+         assert(send_acquires == 1 && send_releases == 1 && !stream_transport_calls);
+         assert(!strcmp(wire_fence_last_error(), refusal == 2
+                            ? "protected_context_overflow" : "unavailable"));
+      }
+   memset(&context, 0, sizeof(context));
+   send_refuse = 0;
+}
+
 static int retry_calls, retry_refuse, retry_transport_calls;
 int server_clean_retry_admit(const void *body, size_t length, const char *receipt)
 {
@@ -450,6 +484,7 @@ int main(void)
    test_retry_reserves_every_actual_provider_attempt();
    test_external_backend_cannot_ignore_hard_limits();
    test_stream_receipt_admission_and_commitment();
+   test_send_guard_refusal_replaces_stale_pipeline_error();
    operator_policy(NULL);
    test_source_handle_requires_host_transport();
    test_context_refusal_blocks_every_route();

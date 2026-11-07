@@ -67,7 +67,7 @@ import json, sys
 # grants exactly two principals and stands up no store, so it cannot host it;
 # the aimee module is covered by docs/validation/aimee-module-on-a-clean-container.md,
 # which brings a real stack up.
-EXTERNAL = {"config", "aimee"}
+EXTERNAL = {"config", "aimee", "memory"}  # Bundled memory is unavailable, not a serving owner.
 contract = json.load(open("src/modules/process-contracts.json"))
 print(" ".join(
     component["id"]
@@ -76,20 +76,23 @@ print(" ".join(
     and component["id"] not in EXTERNAL
 ))')
 memory_probe="$repo_root/src/build/obj/tests/aimee-memory-bus-probe"
-( cd server-go && CGO_ENABLED=0 go build -trimpath -o "$memory_probe" ./modules/memory/cmd/aimee-memory-bus-probe )
+( cd server-go && CGO_ENABLED=0 go build -trimpath -o "$memory_probe" ./cmd/aimee-memory-bus-probe )
 for module_id in $module_ids; do
    executable="$repo_root/src/build/obj/tests/aimee-module-$module_id"
    install -m 0755 "$go_multicall" "$executable"
-   if [ "$module_id" = memory ]; then
-      for placement in server kb; do
-         AIMEE_TEST_MEMORY_PLACEMENT="$placement" timeout 60s "$module_harness" "$executable" "$module_id" "$memory_probe"
-      done
-   else
-      timeout 60s "$module_harness" "$executable" "$module_id"
-   fi
+   timeout 60s "$module_harness" "$executable" "$module_id"
 done
 
 echo "== 3. single-host (D8) =="
 "$repo_root/scripts/check_bus_single_host.sh"
 
 echo "test_bus_conformance: ok"
+
+# Explicit unavailable-adapter check, separate from serving-process conformance.
+memory_adapter="$repo_root/src/build/obj/tests/aimee-module-memory"
+install -m 0755 "$go_multicall" "$memory_adapter"
+if "$memory_adapter" /nonexistent/retired-memory-bus.sock >"$memory_adapter.log" 2>&1; then
+  echo "bundled memory adapter falsely reported success" >&2; exit 1
+fi
+grep -q 'memory capability unavailable' "$memory_adapter.log"
+echo "Bundled memory unavailable; external implementation requires its own capability-qualified conformance"

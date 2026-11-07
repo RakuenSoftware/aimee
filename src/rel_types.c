@@ -1,6 +1,6 @@
-/* Remaining native typed-relationship helpers, pending Go migration.
- * Seed metadata is generated from the shared Go memory owner; edit
- * server-go/modules/memory/ontology_seed.go and run aimee-memory-seed. */
+/* Remaining native typed-relationship helpers. Legacy seed data is generated
+ * by the separately preserved private aims-db legacy-aimee-go baseline; the
+ * public module ships no concrete memory ontology or seed executable. */
 #include "rel_types.h"
 
 #include <ctype.h>

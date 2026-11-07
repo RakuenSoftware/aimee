@@ -180,7 +180,7 @@ SERVER_DASHBOARD_FALLBACK char *api_dashboard_maintenance(void)
 {
    cJSON *args = cJSON_CreateObject(), *response = NULL;
    cJSON_AddStringToObject(args, "operation", "maintenance-dashboard");
-   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   int rc = aimee_module_commands_dispatch_internal_caller("memory.runtime", args, &response);
    cJSON_Delete(args);
    if (rc <= 0 || !cJSON_IsObject(response))
    {

@@ -82,6 +82,14 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "The multicall binary module processes are spawned as, and the dispatch "
         "table binding each module id to its stages.",
     ),
+    "server-go/cmd/aimee-memory-bus-probe": (
+        "contract",
+        "Test-only executable consumer of the generic memory caller contract. "
+        "It attaches as explicit broker principal 200 and requests existing "
+        "module events; it never serves stages or owns memory state. Exported "
+        "with the SDK for external compatibility tests, with no shipped runtime "
+        "grant. Its bus requests remain attributable to that explicit principal.",
+    ),
     "server-go/cmd/aimee-server": (
         "host",
         "The server process entrypoint.",

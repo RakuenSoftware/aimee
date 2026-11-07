@@ -1694,8 +1694,10 @@ static int cli_codex_adopt_history(cli_codex_t *c, const char *thread_id,
 }
 
 static int cli_codex_host_ready(cli_codex_t *c, cli_codex_host_replay_t *replay, int *next_id,
-                                long long *deadline_ms, int idle_timeout_ms)
+                                long long *deadline_ms, int idle_timeout_ms,
+                                int *launch_refused)
 {
+   *launch_refused = 0;
    const cli_codex_host_launch_t *host = c->host_launch;
    if (!host)
       return 0;
@@ -1714,7 +1716,11 @@ static int cli_codex_host_ready(cli_codex_t *c, cli_codex_host_replay_t *replay,
    char digest[65];
    int rc = cli_codex_profile_verify(host, reply, digest);
    cJSON_Delete(reply);
-   return rc ? -1 : host->ready(digest, replay, host->context);
+   if (rc)
+      return -1;
+   int ready_rc = host->ready(digest, replay, host->context);
+   *launch_refused = ready_rc != 0;
+   return ready_rc;
 }
 
 int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_event_cb cb,
@@ -1783,10 +1789,14 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
    }
 
    cli_codex_host_replay_t replay = {.history = req->history, .resume_id = req->thread_id};
-   if (cli_codex_host_ready(&c, &replay, &next_id, &deadline_ms, idle_timeout_ms))
+   int launch_refused = 0;
+   if (cli_codex_host_ready(&c, &replay, &next_id, &deadline_ms, idle_timeout_ms,
+                            &launch_refused))
    {
       if (out)
-         snprintf(out->error, sizeof out->error, "native SDK configuration could not be verified");
+         snprintf(out->error, sizeof out->error, "%s",
+                  launch_refused ? "native SDK host launch readiness was refused"
+                                 : "native SDK configuration could not be verified");
       aimee_ir_session_fail_capture();
       cli_codex_close(&c);
       return -1;
@@ -2132,9 +2142,13 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
    }
 
    cli_codex_host_replay_t replay = {.history = cfg->history, .resume_id = cfg->resume_id};
-   if (cli_codex_host_ready(&c, &replay, &next_id, &deadline_ms, idle_timeout_ms))
+   int launch_refused = 0;
+   if (cli_codex_host_ready(&c, &replay, &next_id, &deadline_ms, idle_timeout_ms,
+                            &launch_refused))
    {
-      snprintf(out->error, sizeof out->error, "native SDK configuration could not be verified");
+      snprintf(out->error, sizeof out->error, "%s",
+                  launch_refused ? "native SDK host launch readiness was refused"
+                                 : "native SDK configuration could not be verified");
       aimee_ir_session_fail_capture();
       cli_codex_close(&c);
       return AGENT_RC_CAPTURE_FAILED;

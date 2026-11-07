@@ -113,7 +113,7 @@ static void policy_observe_memory_owner(cJSON *request)
    cJSON_AddStringToObject(probe, "principal", ctx->principal);
    cJSON_AddStringToObject(probe, "caller_subject", ctx->caller_subject);
    cJSON *reply = NULL;
-   int rc = aimee_module_commands_dispatch_internal_timeout("memory.runtime", probe, 500, &reply);
+   int rc = aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", probe, 500, &reply);
    cJSON_Delete(probe);
    if (rc == 1 && cJSON_IsObject(reply))
    {

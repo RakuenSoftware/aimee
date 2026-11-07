@@ -447,6 +447,7 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int server_memory_store_selection(const cJSON *req);
 int server_memory_scope_begin(cJSON *req);
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_protected_intake(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* The same command in the shape the core command table routes: takes arguments,
  * RETURNS the result, writes to no connection. The handler above is now only the
  * RPC surface's connection write. This is the shape every surface needs, and the

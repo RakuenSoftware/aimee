@@ -32,6 +32,13 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+/* Versioned public-host promise: retained tool-source custody is checked on
+ * ordinary provider construction, including source-required bare results.
+ * Keep a strong final-link symbol so owner-enabled packaging rejects old hosts.
+ * Runtime authority still comes from current owner verification, not this flag. */
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_source_custody_contract_v1 = 1;
+
 /* ================================================================
  * From: agent_protocol.c
  * ================================================================ */
@@ -555,6 +562,9 @@ int agent_request_with_tools_supported(const aimee_request_t *request)
    if (!request || request->n_messages < 1 || request->n_messages > AIMEE_IR_MAX_BLOCKS ||
        !request->messages)
       return 0;
+   aimee_request_t output = {.output_format = request->output_format};
+   if (aimee_ir_request_admit(&output))
+      return 0;
    int content = 0;
    for (int i = 0; i < request->n_messages; i++)
    {
@@ -578,13 +588,15 @@ int agent_request_with_tools_supported(const aimee_request_t *request)
             request->metadata || request->service_tier || request->prompt_cache_key ||
             request->prompt_cache_retention || request->prompt_cache_options || request->n_stop ||
             request->has_top_p || request->has_top_k || request->has_parallel_tool_calls ||
-            request->reasoning_summary || request->reasoning_effort ||
-            request->output_format.kind > AIMEE_OUTPUT_TEXT);
+            request->reasoning_summary || request->reasoning_effort);
 }
 
-int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
-                             const char *system_prompt, int max_tokens, double temperature,
-                             aimee_wire_t wire, int is_delegate, aimee_request_t *out)
+static int agent_prepare_request_ir_with_output(const agent_t *agent, const cJSON *messages,
+                                                cJSON *tools, const char *system_prompt,
+                                                int max_tokens, double temperature,
+                                                aimee_wire_t wire, int is_delegate,
+                                                const aimee_output_format_t *output_format,
+                                                aimee_request_t *out)
 {
    if (!agent || !out || !cJSON_IsArray(messages))
       return -1;
@@ -618,6 +630,17 @@ int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON 
    }
    if (wire == AIMEE_WIRE_OPENAI_CHAT && agent_shape_ir_user(agent, &ir))
       goto fail;
+   if (output_format)
+   {
+      aimee_request_t borrowed = {.output_format = *output_format}, owned = {0};
+      if (aimee_ir_request_admit(&borrowed) || aimee_ir_request_clone(&borrowed, &owned))
+         goto fail;
+      aimee_request_t previous = {.output_format = ir.output_format};
+      ir.output_format = owned.output_format;
+      owned.output_format = (aimee_output_format_t){0};
+      aimee_request_free(&previous);
+      aimee_request_free(&owned);
+   }
    aimee_ir_classify_context(&ir);
    int policy_changes = gateway_delegate_run_request_pipeline(&ir, is_delegate);
    if (policy_changes < 0)
@@ -633,15 +656,91 @@ fail:
    return -1;
 }
 
+int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
+                             const char *system_prompt, int max_tokens, double temperature,
+                             aimee_wire_t wire, int is_delegate, aimee_request_t *out)
+{
+   return agent_prepare_request_ir_with_output(agent, messages, tools, system_prompt, max_tokens,
+                                               temperature, wire, is_delegate, NULL, out);
+}
+
+/* The source owner validates only retained canonical tool results. This hook
+ * transports opaque custody; request shaping cannot turn a missing owner into
+ * permission to send a stored copy. Source-free builds need no owner hook. */
+extern int server_native_history_accept_message_tool_sources(const aimee_message_t *)
+    __attribute__((weak));
+extern int server_native_history_tool_sources_preserved(const aimee_request_t *,
+                                                        const aimee_request_t *)
+    __attribute__((weak));
+static int agent_accept_retained_tool_sources(const cJSON *messages,
+                                              const aimee_request_t *retained)
+{
+   int attached = 0,original_attached=0;
+   const cJSON *raw, *block;
+   cJSON_ArrayForEach(raw, messages)
+      cJSON_ArrayForEach(block, cJSON_GetObjectItemCaseSensitive(raw, "blocks"))
+         {attached |= cJSON_HasObjectItem(block, "tool_source");original_attached|=cJSON_HasObjectItem(block,"input_attachment");}
+   for (int i = 0; i < retained->n_messages; i++)
+      for (int j = 0; j < retained->messages[i].n_blocks; j++)
+         {attached |= retained->messages[i].blocks[j].tool_source != NULL;original_attached|=retained->messages[i].blocks[j].input_attachment!=NULL;}
+   /* Missing metadata is itself relevant for source-required historical tools.
+    * Run the host preservation/required-source gate even when no receipt is
+    * present. Only a source-free legacy build may lack that host gate. */
+   if (!server_native_history_tool_sources_preserved)
+      return attached || original_attached ? -1 : 0;
+   if (attached && !server_native_history_accept_message_tool_sources)
+      return -1;
+   aimee_request_t canonical = {0};
+   int count = cJSON_GetArraySize(messages), rc = -1;
+   if (count < 0 || count > AIMEE_IR_MAX_BLOCKS)
+      return -1;
+   canonical.messages = count ? calloc((size_t)count, sizeof *canonical.messages) : NULL;
+   if (count && !canonical.messages)
+      return -1;
+   for (int i = 0; i < count; i++)
+   {
+      canonical.n_messages = i + 1;
+      if (aimee_ir_message_parse(cJSON_GetArrayItem(messages, i), &canonical.messages[i]))
+         goto done;
+   }
+   if (server_native_history_tool_sources_preserved(&canonical, retained))
+      goto done;
+   for (int i = 0; i < retained->n_messages; i++)
+   {
+      int sourced = 0;
+      for (int j = 0; j < retained->messages[i].n_blocks; j++)
+         sourced |= retained->messages[i].blocks[j].tool_source != NULL;
+      if (sourced && server_native_history_accept_message_tool_sources(&retained->messages[i]))
+         goto done;
+   }
+   rc = 0;
+done:
+   aimee_request_free(&canonical);
+   return rc;
+}
+
 cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
                               const char *system_prompt, int max_tokens, double temperature,
                               aimee_wire_t wire, int is_delegate, aimee_request_t *dispatch_catalog)
 {
+   return agent_build_request_ir_with_output(agent, messages, tools, system_prompt, max_tokens,
+                                             temperature, wire, is_delegate, NULL,
+                                             dispatch_catalog);
+}
+
+cJSON *agent_build_request_ir_with_output(const agent_t *agent, const cJSON *messages, cJSON *tools,
+                                          const char *system_prompt, int max_tokens,
+                                          double temperature, aimee_wire_t wire, int is_delegate,
+                                          const aimee_output_format_t *output_format,
+                                          aimee_request_t *dispatch_catalog)
+{
    aimee_request_t ir = {0};
    cJSON *rendered = NULL;
-   if (agent_prepare_request_ir(agent, messages, tools, system_prompt, max_tokens, temperature,
-                                wire, is_delegate, &ir))
+   if (agent_prepare_request_ir_with_output(agent, messages, tools, system_prompt, max_tokens,
+                                            temperature, wire, is_delegate, output_format, &ir))
       return NULL;
+   if (agent_accept_retained_tool_sources(messages, &ir))
+      goto fail;
    aimee_wire_projection_report_t projection;
    aimee_backend_projection_report(&ir, wire, &projection);
    if (aimee_ir_session_emit_projection_controls(ir.model, projection.omitted_reasoning_blocks,

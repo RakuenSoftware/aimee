@@ -24,6 +24,8 @@ class GoOnlyMemoryTest(unittest.TestCase):
             (self.root / relative).mkdir(parents=True)
         self.write("src/modules/memory/module.yaml", '{"sources": [], "public_headers": []}')
         self.write("server-go/modules/memory/client.go", "package memory\n")
+        self.write("server-go/memory/client.go", "package memory\n")
+        self.write("server-go/modules/memory/adapter/unavailable.go", "package memoryadapter\n")
         self.manifest = {
             "version": 1,
             "native_symbols": ["memory_get", "memory_node_kind_t"],

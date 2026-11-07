@@ -88,12 +88,13 @@ static int delegate_append_response(cJSON *messages, const aimee_response_t *res
    return 0;
 }
 
-static int delegate_append_tool_result(cJSON *messages, const char *id, const char *text,
-                                       int failed)
+static int delegate_append_tool_result_source(cJSON *messages, const char *id, const char *text,
+                                              int failed, const cJSON *source)
 {
    aimee_block_t block = {.type = AIMEE_BLK_TOOL_RESULT,
                           .tool_id = (char *)id,
                           .tool_is_error = failed,
+                          .tool_source = (cJSON *)source,
                           .tool_result = cJSON_CreateString(text ? text : "")};
    aimee_message_t message = {.role = "tool", .blocks = &block, .n_blocks = 1};
    aimee_request_t request = {.messages = &message, .n_messages = 1};
@@ -104,6 +105,34 @@ static int delegate_append_tool_result(cJSON *messages, const char *id, const ch
    {
       cJSON_Delete(item);
       return -1;
+   }
+   return 0;
+}
+
+static int delegate_append_tool_result(cJSON *messages, const char *id, const char *text,
+                                       int failed)
+{
+   return delegate_append_tool_result_source(messages, id, text, failed, NULL);
+}
+
+/* A provider may ignore a text-only request after its native ToolUse has
+ * already entered canonical capture. Retain that exact response and close each
+ * call with the existing failed-result protocol without ToolSource or execution.
+ * Partial append/persistence failure is terminal; never retry invalid history. */
+static int delegate_reject_final_native_calls(cJSON *messages, aimee_response_t *response)
+{
+   static const char refused[] =
+       "error: tool was not executed because a text-only final response is required";
+   if (delegate_append_response(messages, response))
+      return -1;
+   int count = aimee_ir_response_tool_count(response);
+   for (int i = 0; i < count; i++)
+   {
+      const aimee_block_t *call = aimee_ir_response_tool(response, i);
+      if (!call || !call->tool_id ||
+          delegate_append_tool_result(messages, call->tool_id, refused, 1) ||
+          aimee_ir_session_emit_tool_result(call->tool_id, refused, 1))
+         return -1;
    }
    return 0;
 }
@@ -503,9 +532,17 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
    int previous_script_origin = previous_context ? previous_context->operator_script_origin : 0;
    int previous = request_context_set_model_execution(1);
    aimee_response_t final = {0};
-   int rc = agent_execute_with_tools_impl(agent, network, role, system_prompt, user_prompt,
-                                          max_tokens, temperature, initial_messages,
-                                          updated_messages, out, seed, &final);
+   int rc;
+   agent_module_loop_scope_v1 module_loop_scope;
+   int module_loop_prior_cancel;
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &module_loop_prior_cancel);
+   agent_tools_module_loop_enter_v1(&module_loop_scope);
+   pthread_cleanup_push(agent_tools_module_loop_leave_v1, &module_loop_scope);
+   pthread_setcancelstate(module_loop_prior_cancel, NULL);
+   rc = agent_execute_with_tools_impl(agent, network, role, system_prompt, user_prompt,
+                                       max_tokens, temperature, initial_messages,
+                                       updated_messages, out, seed, &final);
+   pthread_cleanup_pop(1);
    if (!rc && out->success)
    {
       /* Native/nested owners may already retain their original response. */
@@ -1083,7 +1120,7 @@ native_provider_http:
 
          if (mw_res.action == MW_INJECT && mw_res.message[0])
          {
-            cJSON *inject_ir = agent_session_text_message("user", mw_res.message);
+            cJSON *inject_ir = agent_session_control_message(mw_res.message);
             if (inject_ir)
                cJSON_AddItemToArray(messages, inject_ir);
          }
@@ -1130,6 +1167,10 @@ native_provider_http:
        * turn, which is ROUTED as "code"), so max_turns=0 and HARD never fires. */
       liveness_final_response_mode_t final_mode = liveness_final_response_mode(
           turn, budget_role ? max_t : 0, total_calls, final_after_turns);
+      /* A trusted successful module READ may request existing synthesis-only
+       * handling. History admission above and all evidence/privacy gates remain. */
+      if (final_mode == LIVENESS_FINAL_RESPONSE_NONE && agent_tools_module_loop_final_v1())
+         final_mode = LIVENESS_FINAL_RESPONSE_SOFT;
       int final_instruction_turn = final_mode != LIVENESS_FINAL_RESPONSE_NONE;
       int final_text_only_turn = !liveness_final_response_allows_tools(final_mode);
       /* A final-only turn cannot satisfy an evidence gate. Keep read-only tools
@@ -1269,17 +1310,20 @@ native_provider_http:
       /* Build request (use fb_agent which may have fallback model after turn 0) */
       cJSON *req;
       if (chatgpt)
-         req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_RESPONSES, role != NULL, &dispatch_catalog);
+         req = agent_build_request_ir_with_output(
+             &fb_agent, eff_messages, active_tools, sys, tok, temperature, AIMEE_WIRE_RESPONSES,
+             role != NULL, seed ? &seed->output_format : NULL, &dispatch_catalog);
       else if (anthropic)
       {
          track_anthropic_payload_rewrite(driver, &fb_agent, eff_messages, sys);
-         req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_ANTHROPIC, role != NULL, &dispatch_catalog);
+         req = agent_build_request_ir_with_output(
+             &fb_agent, eff_messages, active_tools, sys, tok, temperature, AIMEE_WIRE_ANTHROPIC,
+             role != NULL, seed ? &seed->output_format : NULL, &dispatch_catalog);
       }
       else
-         req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_OPENAI_CHAT, role != NULL, &dispatch_catalog);
+         req = agent_build_request_ir_with_output(
+             &fb_agent, eff_messages, active_tools, sys, tok, temperature, AIMEE_WIRE_OPENAI_CHAT,
+             role != NULL, seed ? &seed->output_format : NULL, &dispatch_catalog);
 
       char *body = cJSON_PrintUnformatted(req);
       cJSON_Delete(req);
@@ -1392,20 +1436,20 @@ native_provider_http:
 
          cJSON *fb_req;
          if (chatgpt)
-            fb_req =
-                agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok, temperature,
-                                       AIMEE_WIRE_RESPONSES, role != NULL, &dispatch_catalog);
+            fb_req = agent_build_request_ir_with_output(
+                &fb_agent, messages, active_tools, sys, tok, temperature, AIMEE_WIRE_RESPONSES,
+                role != NULL, seed ? &seed->output_format : NULL, &dispatch_catalog);
          else if (anthropic)
          {
             track_anthropic_payload_rewrite(driver, &fb_agent, messages, sys);
-            fb_req =
-                agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok, temperature,
-                                       AIMEE_WIRE_ANTHROPIC, role != NULL, &dispatch_catalog);
+            fb_req = agent_build_request_ir_with_output(
+                &fb_agent, messages, active_tools, sys, tok, temperature, AIMEE_WIRE_ANTHROPIC,
+                role != NULL, seed ? &seed->output_format : NULL, &dispatch_catalog);
          }
          else
-            fb_req =
-                agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok, temperature,
-                                       AIMEE_WIRE_OPENAI_CHAT, role != NULL, &dispatch_catalog);
+            fb_req = agent_build_request_ir_with_output(
+                &fb_agent, messages, active_tools, sys, tok, temperature, AIMEE_WIRE_OPENAI_CHAT,
+                role != NULL, seed ? &seed->output_format : NULL, &dispatch_catalog);
          char *fb_body = cJSON_PrintUnformatted(fb_req);
          cJSON_Delete(fb_req);
          if (fb_body)
@@ -1527,7 +1571,12 @@ native_provider_http:
       char *response_text = NULL;
       char **tool_arguments = NULL;
       int rescue_enabled = !fb_agent.ablation.configured || fb_agent.ablation.rescue;
-      int rescue_mode = rescue_enabled ? agent_allows_json_content_rescue(&fb_agent) : -1;
+      /* Explicit structured output is answer data, including text that resembles a
+       * tool call. Native provider tool-use blocks remain independently typed. */
+      int structured_output = seed && (seed->output_format.kind == AIMEE_OUTPUT_JSON_OBJECT ||
+                                       seed->output_format.kind == AIMEE_OUTPUT_JSON_SCHEMA);
+      int rescue_mode = rescue_enabled && !structured_output
+                            ? agent_allows_json_content_rescue(&fb_agent) : -1;
       int n_rescued = 0;
       int decode_rc;
       if (chatgpt)
@@ -1546,8 +1595,8 @@ native_provider_http:
       {
          capture_failed = decode_rc == AGENT_IR_CAPTURE_FAILED || aimee_ir_session_capture_failed();
          snprintf(out->error, sizeof(out->error), "%s",
-                  decode_rc == AGENT_IR_CAPTURE_FAILED
-                      ? "canonical response persistence failed"
+                  decode_rc == AGENT_IR_INPUT_ADMISSION_FAILED ? "module tool input admission refused"
+                      : decode_rc == AGENT_IR_CAPTURE_FAILED ? "canonical response persistence failed"
                       : "provider response could not be admitted as IR");
          if (capture_failed)
             snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
@@ -1716,6 +1765,14 @@ native_provider_http:
                delegate_response_release(&response, response_text, tool_arguments, call_count);
                break;
             }
+            if (call_count > 0 && delegate_reject_final_native_calls(messages, &response))
+            {
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
+               delegate_capture_stop(out, &capture_failed);
+               snprintf(out->error, sizeof out->error,
+                        "cannot retain rejected final tool result IR");
+               goto ir_capture_failed;
+            }
             if (agent_session_retry_final_tool_violation(messages, attempted_tool, &turn, &max_t,
                                                          initial_max_t, &final_tool_retry_count,
                                                          out->error, sizeof(out->error)))
@@ -1755,6 +1812,14 @@ native_provider_http:
 
       if (final_text_only_turn && (call_count > 0))
       {
+         if (delegate_reject_final_native_calls(messages, &response))
+         {
+            delegate_response_release(&response, response_text, tool_arguments, call_count);
+            delegate_capture_stop(out, &capture_failed);
+            snprintf(out->error, sizeof out->error,
+                     "cannot retain rejected final tool result IR");
+            goto ir_capture_failed;
+         }
          const char *attempted_tool =
              (call_count > 0 && aimee_ir_response_tool(&response, 0)->tool_name[0])
                  ? aimee_ir_response_tool(&response, 0)->tool_name
@@ -2104,6 +2169,15 @@ native_provider_http:
                db1_agent_job_heartbeat_ext(dj, aimee_ir_response_tool(&response, i)->tool_name,
                                            api_call_count);
          }
+         agent_tool_source_scope_t source_scope = {0};
+         cJSON *tool_source = NULL;
+         if (agent_tool_source_scope_begin(&source_scope))
+         {
+            delegate_response_release(&response, response_text, tool_arguments, call_count);
+            snprintf(out->error, sizeof out->error, "cannot capture tool source custody");
+            delegate_capture_stop(out, &capture_failed);
+            goto ir_capture_failed;
+         }
          agent_tools_set_effect_authorized(1);
          int tool_result_error = 1;
          char *result_str = dispatch_tool_call_ir_ctx_status(advertised, tool_arguments[i],
@@ -2111,20 +2185,32 @@ native_provider_http:
          agent_tools_set_effect_authorized(0);
          result_str = policy_annotate_indexed(aimee_ir_response_tool(&response, i)->tool_name,
                                               tool_arguments[i], exploration_attempt, result_str);
+         if (agent_tool_source_scope_finish(&source_scope, result_str, &tool_source))
+         {
+            free(result_str);
+            delegate_response_release(&response, response_text, tool_arguments, call_count);
+            snprintf(out->error, sizeof out->error, "tool source custody or visible bytes changed");
+            delegate_capture_stop(out, &capture_failed);
+            goto ir_capture_failed;
+         }
          snprintf(last_tool_name, sizeof last_tool_name, "%s",
                   aimee_ir_response_tool(&response, i)->tool_name);
          snprintf(last_tool_result, sizeof last_tool_result, "%.500s",
                   result_str ? result_str : "");
-         if (aimee_ir_session_emit_tool_result(aimee_ir_response_tool(&response, i)->tool_id,
-                                               result_str, tool_result_error) != 0)
+         if (aimee_ir_session_emit_tool_result_with_source(
+                 aimee_ir_response_tool(&response, i)->tool_id, result_str,
+                 tool_result_error, tool_source) != 0)
          {
+            cJSON_Delete(tool_source);
             free(result_str);
             delegate_response_release(&response, response_text, tool_arguments, call_count);
             snprintf(out->error, sizeof(out->error), "canonical tool result persistence failed");
             delegate_capture_stop(out, &capture_failed);
             goto ir_capture_failed;
          }
-         result_str = agent_economize_fresh_tool_result(result_str);
+         /* Owner-attested bytes cannot be compressed into an unattested copy. */
+         if (!tool_source)
+            result_str = agent_economize_fresh_tool_result(result_str);
          {
             int dj = agent_get_durable_job_id();
             if (dj > 0)
@@ -2167,9 +2253,11 @@ native_provider_http:
          snprintf(last_tool_result, sizeof(last_tool_result), "%.500s",
                   result_str ? result_str : "");
 
-         if (delegate_append_tool_result(messages, aimee_ir_response_tool(&response, i)->tool_id,
-                                         result_str, tool_result_error) != 0)
+         if (delegate_append_tool_result_source(messages,
+                                                aimee_ir_response_tool(&response, i)->tool_id,
+                                                result_str, tool_result_error, tool_source) != 0)
          {
+            cJSON_Delete(tool_source);
             free(result_str);
             delegate_response_release(&response, response_text, tool_arguments, call_count);
             snprintf(out->error, sizeof out->error, "cannot retain tool result IR");
@@ -2177,6 +2265,7 @@ native_provider_http:
             goto ir_capture_failed;
          }
 
+         cJSON_Delete(tool_source);
          free(result_str);
       }
 
@@ -2204,7 +2293,7 @@ native_provider_http:
          char progress_hint[768];
          liveness_format_progress_hint(&progress, progress_action, progress_hint,
                                        sizeof(progress_hint));
-         cJSON *hint_ir = agent_session_text_message("user", progress_hint);
+         cJSON *hint_ir = agent_session_control_message(progress_hint);
          if (hint_ir)
             cJSON_AddItemToArray(messages, hint_ir);
          aimee_log(LOG_WARN, "agent.progress",
@@ -2240,9 +2329,9 @@ native_provider_http:
                   break;
                }
                /* Inject a hint to the LLM that it appears stuck */
-               cJSON *hint_ir = agent_session_text_message(
-                   "user", "Warning: You appear to be repeating the same operation. "
-                           "Try a different approach or summarize your findings.");
+               cJSON *hint_ir = agent_session_control_message(
+                   "Warning: You appear to be repeating the same operation. "
+                   "Try a different approach or summarize your findings.");
                if (hint_ir)
                   cJSON_AddItemToArray(messages, hint_ir);
                repeat_count = 0;

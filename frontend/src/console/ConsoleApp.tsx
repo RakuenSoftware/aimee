@@ -9,6 +9,7 @@ import Pipeline from './pages/Pipeline';
 import Settings from './pages/Settings';
 import TypedFacts from './pages/TypedFacts';
 import Memories from './pages/Memories';
+import NativeMemory from './pages/NativeMemory';
 
 // ConsoleApp is the shell for the aimee-kb web console: a session gate wrapping a
 // nav + the Dashboard / Accounts / Governance / Pipeline / Typed facts / Settings
@@ -44,8 +45,9 @@ export default function ConsoleApp() {
         <NavLink to="/governance">Governance</NavLink>
         <NavLink to="/fleet">Fleet</NavLink>
         <NavLink to="/pipeline">Pipeline</NavLink>
-        <NavLink to="/typed-facts">Typed facts</NavLink>
-        <NavLink to="/memories">Memories</NavLink>
+        <NavLink to="/memory">Memory administration</NavLink>
+        <NavLink to="/typed-facts">Legacy SQL typed facts</NavLink>
+        <NavLink to="/memories">Legacy memory review</NavLink>
         <NavLink to="/settings">Settings</NavLink>
       </nav>
       <main className="kbc-main">
@@ -55,6 +57,7 @@ export default function ConsoleApp() {
           <Route path="/governance" element={<Governance />} />
           <Route path="/fleet" element={<Fleet mutationBlocked={fleetMutationBlocked} onMutationBlocked={() => setFleetMutationBlocked(true)} />} />
           <Route path="/pipeline" element={<Pipeline />} />
+          <Route path="/memory" element={<NativeMemory />} />
           <Route path="/typed-facts" element={<TypedFacts />} />
           <Route path="/memories" element={<Memories />} />
           <Route path="/settings" element={<Settings />} />

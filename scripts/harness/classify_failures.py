@@ -10,7 +10,7 @@ a hunch.
 
 It is the runnable reference implementation of the classifier specced in
 docs/proposals/pending/four-part-harness-taxonomy.md. The heuristics mirror the
-signals in server-go/modules/memory/trace_patterns.go (the retry-loop detector
+signals in the private legacy-aimee-go baseline trace_patterns.go (the retry-loop detector
 and error-result indicators).
 
 Input is execution-trace rows — the same shape src/trace_analysis.c mines
@@ -33,7 +33,7 @@ import json
 import re
 import sys
 
-# Mirror tracePatterns in server-go/modules/memory/trace_patterns.go: at least
+# Mirror tracePatterns in the private legacy-aimee-go baseline trace_patterns.go: at least
 # three consecutive same-tool calls with two errors. Runs group by plan/tool;
 # direction and arguments do not change the existing detector's grouping.
 RETRY_THRESHOLD = 3
@@ -110,7 +110,7 @@ TOOL_FAULT_PATTERNS = _compile_markers(TOOL_FAULT_MARKERS)
 
 def looks_like_error(result):
     # Case-sensitive substring match, kept byte-for-byte identical to
-    # traceResultError in server-go/modules/memory/trace_patterns.go.
+    # traceResultError in the private legacy-aimee-go baseline trace_patterns.go.
     if not result:
         return False
     return any(m in result for m in ERROR_MARKERS)

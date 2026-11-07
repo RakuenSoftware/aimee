@@ -16,9 +16,12 @@ int trace_mine(void)
 {
    int result = -1;
    db1_execution_trace_mining_row_t *rows = NULL;
-   cJSON *request = cJSON_CreateObject(), *response = NULL;
+   cJSON *request = cJSON_CreateObject(), *response = NULL, *context = NULL;
+   if (aimee_module_commands_capture_caller_context(&context) < 0)
+      goto done;
    if (!request || !cJSON_AddStringToObject(request, "operation", "trace-state") ||
-       aimee_module_commands_dispatch_internal("memory.runtime", request, &response) <= 0 ||
+       aimee_module_commands_dispatch_internal_context_timeout("memory.runtime", request, context,
+                                                               125000, &response) <= 0 ||
        strcmp(jo_cstr(response, "status"), "ok"))
       goto done;
    const char *cursor = jo_cstr(response, "last_id");
@@ -67,7 +70,8 @@ int trace_mine(void)
           !cJSON_AddStringToObject(row, "tool_result", rows[i].tool_result))
          goto done;
    }
-   if (aimee_module_commands_dispatch_internal("memory.runtime", request, &response) <= 0 ||
+   if (aimee_module_commands_dispatch_internal_context_timeout("memory.runtime", request, context,
+                                                               125000, &response) <= 0 ||
        strcmp(jo_cstr(response, "status"), "ok") || strcmp(jo_cstr(response, "last_id"), decimal))
       goto done;
    const cJSON *emitted = cJSON_GetObjectItemCaseSensitive(response, "emitted");
@@ -77,6 +81,7 @@ int trace_mine(void)
 done:
    cJSON_Delete(request);
    cJSON_Delete(response);
+   cJSON_Delete(context);
    free(rows);
    return result;
 }

@@ -266,6 +266,7 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools_dispatch.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools_effect_contract.c
+        ${AIMEE_SRC_DIR}/modules/tools/agent_tools_tool_source.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools_anchored.c
         ${AIMEE_SRC_DIR}/posix/web_egress.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
@@ -322,6 +323,7 @@ else()
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools_dispatch.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools_effect_contract.c
+        ${AIMEE_SRC_DIR}/modules/tools/agent_tools_tool_source.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools_anchored.c
         ${AIMEE_SRC_DIR}/posix/web_egress.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
@@ -672,6 +674,8 @@ set(DATA_SRCS
 )
 
 set(AGENT_SRCS
+    ${AIMEE_SRC_DIR}/server/host_original_text.c
+    ${AIMEE_SRC_DIR}/server/host_original_submission.c
     ${AIMEE_SRC_DIR}/server/agent_runtime.c
     ${AIMEE_SRC_DIR}/server/agent_result_cache.c
     ${AIMEE_SRC_DIR}/server/agent_parallel.c
@@ -1519,22 +1523,8 @@ add_custom_target(agent_help_header DEPENDS "${AGENT_HELP_HEADER}")
 # builds only the `aimee` target) races the generated header.
 add_dependencies(aimee agent_help_header)
 
-# Optional local corpus evaluation helper. It owns the isolated PostgreSQL
-# session and shared Go memory implementation; it is not a second memory daemon.
-find_program(AIMEE_EVAL_GO_EXECUTABLE go)
-if(AIMEE_EVAL_GO_EXECUTABLE)
-    file(GLOB_RECURSE AIMEE_EVAL_GO_SOURCES CONFIGURE_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/server-go/*.go")
-    set(AIMEE_EVAL_BINARY "${CMAKE_CURRENT_BINARY_DIR}/aimee-memory-eval${CMAKE_EXECUTABLE_SUFFIX}")
-    add_custom_command(OUTPUT "${AIMEE_EVAL_BINARY}"
-        COMMAND "${CMAKE_COMMAND}" -E env CGO_ENABLED=0 "${AIMEE_EVAL_GO_EXECUTABLE}" build
-            -o "${AIMEE_EVAL_BINARY}" ./modules/memory/cmd/aimee-memory-eval
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/server-go"
-        DEPENDS ${AIMEE_EVAL_GO_SOURCES}
-            "${CMAKE_CURRENT_SOURCE_DIR}/server-go/go.mod"
-            "${CMAKE_CURRENT_SOURCE_DIR}/server-go/go.sum")
-    add_custom_target(memory_eval_helper ALL DEPENDS "${AIMEE_EVAL_BINARY}")
-endif()
+# Concrete legacy memory evaluators are private aims-db experiments. The
+# public build ships the runtime adapters and generic bus probe only.
 
 # --- Non-thin-client targets ------------------------------------------------
 # CMake builds ONLY the `aimee` thin client (+ the unit-test suite below).

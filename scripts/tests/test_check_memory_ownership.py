@@ -19,7 +19,7 @@ class MemoryOwnershipTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
-        for name in ("src/modules/memory", "server-go/modules/memory", "tests/baselines/modules"):
+        for name in ("src/modules/memory", "server-go/modules/memory", "server-go/modules/memory/adapter", "server-go/memory", "tests/baselines/modules"):
             (root / name).mkdir(parents=True)
         (root / "src/modules/memory/module.yaml").write_text('{"sources": []}')
         (root / "evidence.go").write_text("package evidence")

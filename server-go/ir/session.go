@@ -12,6 +12,8 @@ import (
 
 // Block retains typed structure and treats tool input/result JSON as opaque values.
 type Block struct {
+	InputAttachment *InputAttachment `json:"input_attachment,omitempty"`
+	ToolSource       *ToolSource     `json:"tool_source,omitempty"`
 	Type             string          `json:"type"`
 	Text             *string         `json:"text,omitempty"`
 	Signature        *string         `json:"signature,omitempty"`
@@ -309,6 +311,18 @@ func ValidBlock(encoded []byte) bool {
 	if !Decode(encoded, &b) || !irBlockKind(b.Type) || (b.MessageGroup != nil && (*b.MessageGroup < 1 || *b.MessageGroup > 4096)) {
 		return false
 	}
+	var members map[string]json.RawMessage
+	if !Decode(encoded, &members) {
+		return false
+	}
+	if raw, present := members["input_attachment"]; present {
+        if b.InputAttachment == nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || b.Type != "text" || b.Text == nil || !ValidInputAttachment(raw, *b.Text) { return false }
+    }
+	if raw, present := members["tool_source"]; present {
+		if b.ToolSource == nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || b.Type != "tool_result" || !ValidToolSource(raw, b.Content) {
+			return false
+		}
+	}
 	if b.ThinkingBinding != nil {
 		value := *b.ThinkingBinding
 		if b.Type != "thinking" || len(value) != 198 || value[:4] != "ap1:" || (value[68] != ':' || value[133] != ':') {
@@ -425,6 +439,8 @@ func ValidMessage(raw json.RawMessage) bool {
 		return false
 	}
 	for _, block := range message.Blocks {
+        var b Block
+        if !Decode(block,&b) || b.InputAttachment != nil && message.Role != "user" { return false }
 		if !ValidBlock(block) {
 			return false
 		}

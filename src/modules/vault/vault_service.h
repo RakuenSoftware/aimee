@@ -31,6 +31,8 @@ typedef enum
                                 unavailable until an out-of-band unseal (P7 §3). Only an
                                 external-anchor custody returns this; the file provider
                                 (server profile) never seals, so never yields it. */
+   VAULT_ERR_GENERATION_MISMATCH, /* expected immutable generation no longer exists */
+   VAULT_ERR_RETIRED,             /* immutable slot permanently retired, no value */
 } vault_status_t;
 
 /* A short human-readable label for a status (for error responses/logging). */
@@ -146,6 +148,36 @@ vault_status_t vault_service_get_server_principal(const char *agent, const char 
 vault_status_t vault_service_set_server_wrap(const char *principal, const char *agent,
                                              const char *cred, const char *secret);
 
+/* Trusted host facade: derive principal from actual verified transport, never
+ * request JSON. Creates/reconciles only; returns NO plaintext or value hash.
+ * Optional provider support is mandatory. Existing mutable setters are unchanged.
+ * Slot names should be opaque IDs if their labels would disclose private data. */
+vault_create_once_result_t vault_service_create_server_wrap_once(
+    const char *principal, const char *agent, const char *cred, const char *secret,
+    char *generation, size_t generation_capacity);
+/* Trusted bounded-use callback only: no CLI/model route and no read capability
+ * implied by a locator. Caller must authenticate/authorize principal and purpose.
+ * A missing/deleted incarnation is a hard generation refusal, not the legacy
+ * VAULT_NO_ENTRY/environment-fallback result.
+ * Exact generation and authenticated marker are checked before invoking use;
+ * the temporary plaintext is cleansed afterward. Snapshot use is not a durable
+ * external guard spanning later effects. Callback must not retain secret bytes.
+ * It is invoked at most once: its failure may follow consumption or effects;
+ * an error is NOT proof of non-use and must never cause automatic replay. */
+typedef int (*vault_secret_use_fn)(const char *secret, size_t length, void *context);
+vault_status_t vault_service_use_server_wrap_generation(
+    const char *principal, const char *agent, const char *cred, const char *expected_generation,
+    vault_secret_use_fn use, void *context);
+/* Same trusted principal/purpose boundary, with a provider entry-retirement/
+ * write fence held THROUGH the callback. No snapshot fallback. No raw output,
+ * native authorization or seal-epoch authorization is implied. The callback
+ * must be bounded synchronous work and MUST NOT call Vault/key/native APIs or
+ * retain secret bytes. A non-OK return after callback entry is an unknown effect,
+ * not permission to retry. Existing snapshot API above remains unchanged. */
+vault_status_t vault_service_use_server_wrap_generation_fenced(
+    const char *principal, const char *agent, const char *cred, const char *expected_generation,
+    vault_secret_use_fn use, void *context);
+
 /* Autonomous per-principal read via the server wrap of a dual-wrapped credential
  * (vault_service_set stores both a user-KEK and a server-KEK wrap). Resolves
  * (agent, cred) for ANY `principal` (e.g. a `webuser:` git credential) using the
@@ -198,4 +230,14 @@ vault_status_t vault_service_lock(const char *principal);
 vault_status_t vault_service_inject_api_key(const char *principal, const char *agent, char *api_key,
                                             size_t api_key_len, long now_epoch);
 
+/* Trusted attested-principal adapter only. Missing never attests erasure. */
+vault_status_t vault_service_retire_server_wrap_generation(const char *principal, const char *agent,
+                                                           const char *cred,
+                                                           const char *expected_generation);
+/* Trusted attested-principal adapter only; authorize permanent SLOT closure.
+ * Absence is closed durably rather than reported as erasure of a known value.
+ * Never infers caller permission or exposes plaintext. No CLI/model route. */
+vault_status_t vault_service_close_server_wrap_slot_once(
+    const char *principal, const char *agent, const char *cred,
+    char *closed_generation, size_t generation_capacity);
 #endif /* DEC_VAULT_SERVICE_H */

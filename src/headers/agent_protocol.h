@@ -39,6 +39,16 @@ struct cJSON *agent_build_request_ir(const agent_t *agent, const struct cJSON *m
                                      double temperature, aimee_wire_t wire, int is_delegate,
                                      aimee_request_t *dispatch_catalog);
 
+/* Preserve the caller's explicit output contract through each tool-loop
+ * request, including fallback and final-only requests. The format is borrowed;
+ * provider translation owns its wire representation and schema semantics. */
+struct cJSON *agent_build_request_ir_with_output(const agent_t *agent, const struct cJSON *messages,
+                                                 struct cJSON *tools, const char *system_prompt,
+                                                 int max_tokens, double temperature,
+                                                 aimee_wire_t wire, int is_delegate,
+                                                 const aimee_output_format_t *output_format,
+                                                 aimee_request_t *dispatch_catalog);
+
 /* Set the Anthropic `system` field on an outbound request (§3 cache-aware
  * shaping). When cache_marking is non-zero, the STABLE prefix (the text before
  * the volatile per-turn <aimee-context> envelope) is emitted as a cache_control
@@ -69,6 +79,7 @@ struct cJSON *agent_responses_sse_response_object(const char *body);
  * rescue_mode < 0 skips rescue, 0 admits dialect calls, 1 also admits bare JSON;
  * n_rescued receives the admitted recovered-call count when provided. */
 #define AGENT_IR_CAPTURE_FAILED (-2)
+#define AGENT_IR_INPUT_ADMISSION_FAILED (-3)
 struct aimee_anthropic_replay;
 int agent_ir_decode_json_response_bound(const struct cJSON *root, int anthropic, int rescue_mode,
                                         int *n_rescued,

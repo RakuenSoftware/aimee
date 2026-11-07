@@ -171,10 +171,17 @@ static void build_exclusions_add(build_exclusion_list_t *exclusions, const char 
       return;
 
    char rel[256];
-   if (base_dir && *base_dir)
-      snprintf(rel, sizeof(rel), "%s/%s", base_dir, token);
-   else
-      snprintf(rel, sizeof(rel), "%s", token);
+   size_t base_len = base_dir ? strlen(base_dir) : 0;
+   size_t token_len = strlen(token);
+   if (base_len >= sizeof(rel) ||
+       token_len >= sizeof(rel) - base_len - (base_len ? 1 : 0))
+      return;
+   if (base_len)
+   {
+      memcpy(rel, base_dir, base_len);
+      rel[base_len++] = '/';
+   }
+   memcpy(rel + base_len, token, token_len + 1);
 
    const char *slash = strrchr(rel, '/');
    const char *dot = strrchr(rel, '.');
@@ -246,12 +253,12 @@ static void parse_build_manifest(const char *root, const char *path,
    }
 
    char base_dir[256] = "";
-   snprintf(base_dir, sizeof(base_dir), "%s", rel);
-   char *slash = strrchr(base_dir, '/');
-   if (slash)
-      *slash = '\0';
-   else
-      base_dir[0] = '\0';
+   const char *slash = strrchr(rel, '/');
+   size_t base_len = slash ? (size_t)(slash - rel) : 0;
+   if (base_len >= sizeof(base_dir))
+      return;
+   memcpy(base_dir, rel, base_len);
+   base_dir[base_len] = '\0';
 
    FILE *f = fopen(path, "r");
    if (!f)
@@ -381,7 +388,11 @@ static int dir_contains_git(const char *path)
 {
    char git_path[MAX_PATH_LEN];
    struct stat st;
-   snprintf(git_path, sizeof(git_path), "%s/.git", path);
+   size_t len = strlen(path);
+   if (len > sizeof(git_path) - sizeof("/.git"))
+      return 1; /* Unrepresentable paths are conservatively traversal boundaries. */
+   memcpy(git_path, path, len);
+   memcpy(git_path + len, "/.git", sizeof("/.git"));
    return stat(git_path, &st) == 0;
 }
 

@@ -613,8 +613,36 @@ static void test_adjacent_messages_preserve_distinct_source_boundaries(void)
    PASS("adjacent canonical messages keep distinct instruction/evidence source boundaries");
 }
 
+static void test_source_result_keeps_cycle_and_dependencies(void)
+{
+   for (int from_record = 0; from_record <= 1; from_record++)
+   {
+      cJSON *messages = cJSON_Parse(
+          "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"task\"}]},"
+          "{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"native-call\","
+          "\"name\":\"memory_serve\",\"input\":{}}]},"
+          "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"native-call\","
+          "\"is_error\":false,\"content\":\"native source\",\"tool_source\":{\"schema_version\":1,"
+          "\"owner\":\"10000000-0000-4000-8000-000000000001\","
+          "\"visible_sha256\":\"b18a65f14ec019da46fd1d60c9423284aa4c9e6f646cdeee3e82e4774b3c026b\",\"receipt\":\"{}\"}}]}]");
+      assert(messages);
+      for (int i = 0; i < 12; i++)
+         cJSON_AddItemToArray(messages, make_msg("assistant", "progress evidence"));
+      cJSON *before = cJSON_Duplicate(messages, 1);
+      session_compact_config_t cfg = {.retain_tail = 3, .from_record = from_record};
+      session_compact_result_t result;
+      assert(session_compact(messages, &cfg, &result) == 0);
+      assert(!result.compacted && cJSON_Compare(messages, before, 1));
+      assert(result.summary[0] == 0);
+      cJSON_Delete(before);
+      cJSON_Delete(messages);
+   }
+   PASS("source-attached tool cycles refuse lossy summary without dropping dependencies");
+}
+
 int main(void)
 {
+   test_source_result_keeps_cycle_and_dependencies();
    test_adjacent_messages_preserve_distinct_source_boundaries();
    test_incomplete_cycles_refuse_without_repair();
    test_pressure_unknown_window();

@@ -509,8 +509,41 @@ static atomic_ulong g_chat_turn_seq;
 static int chat_stream_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx);
 static char *chat_sanitize_message_transcript_tail(const char *message);
 
+typedef struct
+{
+   compute_ctx_t **context;
+   compute_ctx_t **previous_lifetime;
+   cJSON *steer;
+   request_context_snapshot_t *request;
+   const workspace_turn_mirror_lease_t *previous_mirror;
+   turn_entry_t *cancel_entry;
+   int async_slot, locked;
+   const char *session, *turn;
+} chat_worker_cleanup;
+static void chat_worker_cancelled(void *state)
+{
+   chat_worker_cleanup *scope = state;
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+   compute_ctx_free(*scope->context);
+   compute_ctx_lifetime_bind(scope->previous_lifetime);
+   compute_ctx_clear_request_context();
+   workspace_turn_mirror_bind(scope->previous_mirror);
+   agent_set_request_cancel(NULL);
+   if (scope->locked)
+      presence_turn_release(scope->session, scope->turn);
+   else if (scope->session[0])
+      presence_emit_turn_done(scope->session, scope->turn);
+   turn_registry_clear(scope->cancel_entry);
+   cJSON_Delete(scope->steer);
+   request_context_snapshot_clear(scope->request);
+   async_slot_release(scope->async_slot);
+   chat_thread_release();
+}
+
 static void chat_stream_worker_pooled(void *arg)
 {
+   int previous_cancel;
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel);
    aimee_ir_session_begin_task();
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
    int async_slot = cctx->async_slot;
@@ -519,10 +552,12 @@ static void chat_stream_worker_pooled(void *arg)
     * cctx: the request template (to clone with the steer message swapped in), the
     * session's attested principal, and the server ctx. Cheap clone per turn;
     * freed below unless a steer is dispatched. */
-   cJSON *steer_tmpl = cJSON_Duplicate(cctx->req, 1);
+   int original_mode = cctx->original_submission != NULL;
+   cJSON *steer_tmpl = original_mode ? NULL : cJSON_Duplicate(cctx->req, 1);
    request_context_snapshot_t steer_request = cctx->request_context;
    char steer_principal[128];
-   snprintf(steer_principal, sizeof(steer_principal), "%s", cctx->vault_principal);
+   snprintf(steer_principal, sizeof(steer_principal), "%.*s",
+            (int)sizeof(steer_principal) - 1, cctx->vault_principal);
    server_ctx_t *steer_ctx = cctx->server;
 
    /* Copy what we need before chat_stream_worker runs — its sub-workers free
@@ -634,7 +669,18 @@ static void chat_stream_worker_pooled(void *arg)
     * clear always runs on return; together the two make the guard robust. */
    const workspace_turn_mirror_lease_t *previous = workspace_turn_mirror_bind(cctx->source_mirror);
    compute_ctx_bind_request_context(cctx);
+   compute_ctx_t *live_context = cctx;
+   compute_ctx_t **previous_lifetime = compute_ctx_lifetime_bind(&live_context);
+   chat_worker_cleanup cleanup = {
+       &live_context, previous_lifetime, steer_tmpl, &steer_request, previous,
+       cancel_entry, async_slot, locked, locked ? lock_session : sid,
+       locked ? lock_turn : turn_id};
+   pthread_cleanup_push(chat_worker_cancelled, &cleanup);
+   pthread_setcancelstate(previous_cancel, NULL);
    chat_stream_worker(arg);
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+   pthread_cleanup_pop(0);
+   compute_ctx_lifetime_bind(previous_lifetime);
    compute_ctx_clear_request_context();
    workspace_turn_mirror_bind(previous);
    agent_set_request_cancel(NULL);
@@ -660,7 +706,7 @@ static void chat_stream_worker_pooled(void *arg)
     * retained as an explicit failed admission. It must never resend the old
     * request after a clone/replacement failure, nor vanish on a busy handoff. */
    char *steer_msg = NULL;
-   if (sid[0] && chat_steer_take(sid, &steer_msg) && steer_msg)
+   if (!original_mode && sid[0] && chat_steer_take(sid, &steer_msg) && steer_msg)
    {
       int dispatched = 0;
       char *clean = chat_sanitize_message_transcript_tail(steer_msg);
@@ -696,6 +742,7 @@ static void chat_stream_worker_pooled(void *arg)
 
    async_slot_release(async_slot);
    chat_thread_release();
+   pthread_setcancelstate(previous_cancel, NULL);
 }
 
 int (*g_chat_dispatch_override)(compute_ctx_t *cctx) = NULL;
@@ -958,34 +1005,17 @@ static presence_turn_result_t retry_after_reclaiming_abandoned_turn(const char *
                                              infl_n, NULL);
 }
 
-int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+static void chat_send_cancelled(void *state)
 {
-   cJSON *dispatch_req = req;
-   cJSON *owned_req = NULL;
-   char *clean_message = NULL;
-   cJSON *jmessage = cJSON_GetObjectItemCaseSensitive(req, "message");
-   if (cJSON_IsString(jmessage))
-      clean_message = chat_sanitize_message_transcript_tail(jmessage->valuestring);
-   if (clean_message)
-   {
-      owned_req = cJSON_Duplicate(req, 1);
-      if (owned_req)
-      {
-         cJSON *replacement = cJSON_CreateString(clean_message);
-         if (replacement)
-         {
-            cJSON_ReplaceItemInObjectCaseSensitive(owned_req, "message", replacement);
-            dispatch_req = owned_req;
-         }
-      }
-   }
-
-   compute_ctx_t *cctx = create_compute_ctx(ctx, conn, dispatch_req);
-   cJSON_Delete(owned_req);
-   free(clean_message);
-   if (!cctx)
-      return server_send_error(conn, "out of memory", NULL);
-
+   compute_ctx_t **slot = state;
+   if (*slot && (*slot)->presence_locked)
+      presence_turn_release((*slot)->presence_session, (*slot)->presence_turn_id);
+   compute_ctx_free(*slot);
+   compute_ctx_lifetime_bind(NULL);
+}
+static int chat_send_with_context(server_ctx_t *ctx, server_conn_t *conn, cJSON *req,
+                                  compute_ctx_t *cctx, compute_ctx_t **live)
+{
    /* (see retry_after_reclaiming_abandoned_turn above)
     *
     * An identified attachment uses its existing arbitration/queueing contract.
@@ -1029,7 +1059,6 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                                     sizeof(turn_id), inflight, sizeof(inflight));
       if (tr == PRESENCE_TURN_BUSY)
       {
-         compute_ctx_free(cctx);
          char msg[160];
          snprintf(msg, sizeof(msg),
                   "presence_busy: a turn (%s) is already in flight for this "
@@ -1041,6 +1070,7 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
           * turn holding it up. */
          LOG_WARN("chat", "presence_busy: session %s declined; turn %s is in flight (%lds)", sid,
                   inflight[0] ? inflight : "unknown", presence_turn_inflight_age(sid, NULL, 0));
+         compute_ctx_free(cctx);
          return server_send_error(conn, msg, NULL);
       }
       if (tr == PRESENCE_TURN_ACQUIRED)
@@ -1056,7 +1086,13 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       }
    }
 
-   if (chat_stream_dispatch(ctx, cctx) != 0)
+   int previous_cancel;
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel);
+   int dispatched = chat_stream_dispatch(ctx, cctx);
+   if (!dispatched)
+      *live = NULL; /* Ownership was published; never dereference cctx again. */
+   pthread_setcancelstate(previous_cancel, NULL);
+   if (dispatched != 0)
    {
       if (cctx->presence_locked)
          presence_turn_release(cctx->presence_session, cctx->presence_turn_id);
@@ -1065,4 +1101,53 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    return 0;
+}
+
+int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   int previous_cancel;
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel);
+   host_original_submission *original = host_original_submission_pending_take();
+   cJSON *dispatch_req = req;
+   cJSON *owned_req = NULL;
+   char *clean_message = NULL;
+   cJSON *jmessage = cJSON_GetObjectItemCaseSensitive(req, "message");
+   if (!original && cJSON_IsString(jmessage))
+      clean_message = chat_sanitize_message_transcript_tail(jmessage->valuestring);
+   if (clean_message)
+   {
+      owned_req = cJSON_Duplicate(req, 1);
+      if (owned_req)
+      {
+         cJSON *replacement = cJSON_CreateString(clean_message);
+         if (replacement)
+         {
+            cJSON_ReplaceItemInObjectCaseSensitive(owned_req, "message", replacement);
+            dispatch_req = owned_req;
+         }
+      }
+   }
+
+   compute_ctx_t *cctx = create_compute_ctx(ctx, conn, dispatch_req);
+   cJSON_Delete(owned_req);
+   free(clean_message);
+   if (!cctx)
+   {
+      host_original_submission_destroy(&original);
+      pthread_setcancelstate(previous_cancel, NULL);
+      return server_send_error(conn, "out of memory", NULL);
+   }
+   cctx->original_submission = original;
+
+   compute_ctx_t *live = cctx;
+   compute_ctx_t **previous_lifetime = compute_ctx_lifetime_bind(&live);
+   int result;
+   pthread_cleanup_push(chat_send_cancelled, &live);
+   pthread_setcancelstate(previous_cancel, NULL);
+   result = chat_send_with_context(ctx, conn, req, cctx, &live);
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+   pthread_cleanup_pop(0);
+   compute_ctx_lifetime_bind(previous_lifetime);
+   pthread_setcancelstate(previous_cancel, NULL);
+   return result;
 }

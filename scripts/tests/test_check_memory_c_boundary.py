@@ -30,6 +30,8 @@ class MemoryCBoundaryTest(unittest.TestCase):
         (root / "src/modules/memory").mkdir(parents=True)
         (root / "src/modules/kb/c").mkdir(parents=True)
         (root / "server-go/modules/memory").mkdir(parents=True)
+        (root / "server-go/modules/memory/adapter").mkdir(parents=True)
+        (root / "server-go/memory").mkdir(parents=True)
         for relative in ALLOWED_C:
             path = root / relative
             path.write_text("/* event bus adapter */\n", encoding="utf-8")

@@ -81,7 +81,7 @@ CANONICAL_FILES = {
     "server-go/modules/aimee/families/session_ir_search.go",
 }
 CANONICAL_HOOK_FILES = {"src/cmd_hooks.c", "src/server/server_hooks.c"}
-CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/")
+CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/", "server-go/modules/memory/adapter/", "server-go/memory/")
 # These call sites consume the tool/receipt owner's semantic outcome. The other
 # native output/compatibility boundaries are not declared globally migrated.
 CLASSIFIED_DISPATCH_FILES = {

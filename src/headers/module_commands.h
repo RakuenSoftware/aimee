@@ -15,6 +15,29 @@
  * rather than relying on every includer having pulled it in first. */
 #include "cJSON.h"
 
+/* Additive diagnostic sibling. Stages describe only communication/byte
+ * validation, never operation completion or response authority. sdk_result is
+ * the exact aimee_module_call_result_t numeric value, or -1 before a call.
+ * BODY_READY follows this API's existing JSON/raw-node construction; callers
+ * remain responsible for strict private DTO/receipt validation. */
+typedef enum {
+   AIMEE_COMMAND_UNSENT = 0,
+   AIMEE_COMMAND_SDK_RESULT = 1,
+   AIMEE_COMMAND_FRAME_INVALID = 2,
+   AIMEE_COMMAND_BODY_INVALID = 3,
+   AIMEE_COMMAND_BODY_READY = 4,
+   AIMEE_COMMAND_LOCAL_FAILURE = 5
+} aimee_module_command_stage_v1;
+typedef struct {
+   uint32_t schema_version;
+   aimee_module_command_stage_v1 stage;
+   int sdk_result;
+} aimee_module_command_outcome_v1;
+extern const unsigned aimee_module_command_outcome_contract_v1;
+int aimee_module_commands_dispatch_internal_raw_outcome_context_timeout_v1(
+    const char *, const cJSON *, const cJSON *, int, cJSON **,
+    aimee_module_command_outcome_v1 *);
+
 /* Principal refs reserved for plugin instances. MUST match
  * PluginRefFirst/PluginRefLimit in server-go/modules/mcp/mcp.go, and the
  * reservation recorded in tests/baselines/modules/canonical-inventory.yaml. */
@@ -63,11 +86,45 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
  * Discovery and route copying retain their normal behavior. */
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
                                                     int timeout_ms, cJSON **result);
+/* Opt-in host caller transport: snapshot the optional verifier-owned context
+ * factory once. A selected failed/malformed factory refuses before dispatch;
+ * an absent factory retains legacy context-free framing. Existing APIs do not
+ * select this behavior implicitly. Result/context ownership is unchanged. */
+int aimee_module_commands_dispatch_internal_caller(const char *method, const cJSON *args,
+                                                   cJSON **result);
+int aimee_module_commands_dispatch_internal_caller_timeout(const char *method, const cJSON *args,
+                                                           int timeout_ms, cJSON **result);
+/* Capture once for multi-call workflows: 1 with owned context, 0 if the optional
+ * factory is absent, -1 on selected factory failure. Never reconstruct context
+ * after intervening I/O; delete the owned value when the workflow completes. */
+int aimee_module_commands_capture_caller_context(cJSON **context);
+/* Optional installed service owner, using the same bus thin-client contract
+ * for native adapters. Borrowed arguments, owned exact JSON result; 0 means no
+ * installed handler, -1 means selected failure and must never trigger a second
+ * transport. No authority or destination is selected by this SDK helper. */
+int aimee_module_commands_owner_action_raw(const char *method, const cJSON *args,
+                                           int timeout_ms, char **result);
+
 /* The host may attach verified request context to the same internal fixed-module
  * route. This does not publish the command or permit plugin context claims. */
 int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
                                                             const cJSON *context, int timeout_ms,
                                                             cJSON **result);
+/* Serialization-only internal callers retain exact reply numeric tokens. The
+ * returned owned raw node may be printed/copied, not inspected. Raw argument
+ * nodes likewise preserve a caller-validated complete JSON body. */
+int aimee_module_commands_dispatch_internal_raw_context_timeout(const char *method,
+                                                                const cJSON *args,
+                                                                const cJSON *context,
+                                                                int timeout_ms, cJSON **result);
+/* Trusted-host opt-in to an exact advertised fixed-module command, including
+ * CLI/MCP-only commands. Plugins, absent and ambiguous routes are refused.
+ * This does not publish an RPC surface or grant authority; the selected owner
+ * authenticates the original caller. Reply and raw argument tokens stay exact. */
+int aimee_module_commands_dispatch_declared_raw_context_timeout(const char *method,
+                                                                const cJSON *args,
+                                                                const cJSON *context,
+                                                                int timeout_ms, cJSON **result);
 /* Verified request context stays separate from untrusted command arguments.
  * Only fixed modules receive the v2 frame; plugin invocation remains v1. */
 int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,
@@ -82,6 +139,14 @@ cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id,
 cJSON *aimee_module_command_call_context_timeout(uint32_t event_kind, uint32_t stage_id,
                                                  const char *verb, const cJSON *args,
                                                  const cJSON *context, int timeout_ms);
+
+/* Same fixed route/context/deadline, retaining exact untrusted JSON bytes in
+ * an owned raw node for serialization or strict downstream parsing only.
+ * No JSON validity or authority is implied. Literal NUL bytes are refused;
+ * the receiver must validate the complete body and its closed schema. */
+cJSON *aimee_module_command_call_raw_context_timeout(uint32_t event_kind, uint32_t stage_id,
+                                                     const char *verb, const cJSON *args,
+                                                     const cJSON *context, int timeout_ms);
 
 /* Collect again only if the last collect is older than ttl_ms.
  *
@@ -136,5 +201,15 @@ int aimee_module_commands_snapshot(aimee_plugin_status_t *out, int max);
 
 /* Serialise the plugin-instance table into a response object. */
 void aimee_module_commands_report(cJSON *resp);
+
+/* Optional private intake client, called by an authenticated human transport
+ * before ordinary module request serialization or canonical tool capture.
+ * Raw bytes are borrowed; the caller cleanses its original input. The client
+ * returns only owned safe JSON: 1 handled, 0 unavailable, -1 internal failure.
+ * It owns custody policy and verified-subject binding. This is not a model
+ * command, and absence must never fall back to an ordinary memory store. */
+int aimee_module_protected_intake_raw(const char *operation_uuid, const void *raw_value,
+                                     size_t raw_length, int timeout_ms,
+                                     char **safe_response_json);
 
 #endif /* DEC_MODULE_COMMANDS_H */

@@ -4450,11 +4450,12 @@ paths:
     post:
       summary: Serve a named authorized memory view
       description: >-
-        Runs in the selected memory owner. Recomputes eligibility and temporal
-        selection on every request, including projection-cache reuse. Returns
-        exact memory-envelope byte accounting and an invocation receipt;
-        provider dispatch is a separate operation. Unavailable placement
-        capabilities are explicit omissions, never filled from another store.
+        Web adapter over the same typed memory-query bus client used by model
+        adapters. Returns that service's data without independent HTTP query
+        policy. Native temporal coordinates select historical observations;
+        historical answers retain explicit view/belief/axis labels and require
+        current disclosure authorization. Provider dispatch remains separately
+        guarded. Missing owners never trigger an internal memory HTTP fallback.
       requestBody:
         required: true
         content:
@@ -4470,11 +4471,63 @@ paths:
                 store: { type: string, enum: [user, kb], default: user }
                 project: { type: string }
                 workspace: { type: string }
-                valid_at: { type: string }
-                believed_at: { type: string }
+                cwd: { type: string }
+                scope:
+                  oneOf:
+                    - { type: string, enum: [current, all] }
+                    - type: object
+                      required: [type]
+                      additionalProperties: false
+                      properties:
+                        type: { type: string, enum: [global, workspace, project] }
+                        value: { type: string, maxLength: 1024 }
+                  description: Current uses authorized active context plus Global/shared; all spans authorized G/W/P. User remains exact authenticated User.
+                native_belief:
+                  type: string
+                  pattern: '^(0|[1-9][0-9]{0,19})$'
+                  description: Canonical unsigned 64-bit native belief coordinate, not a wall-clock timestamp.
+                native_region_json:
+                  type: string
+                  maxLength: 65536
+                  description: Opaque native Region JSON with full signed 64-bit interval endpoints. Historical context only, mutually exclusive with native_region; no current-clock override. Validated by the native owner.
+                native_region:
+                  type: object
+                  maxProperties: 256
+                  propertyNames: { format: uuid }
+                  additionalProperties:
+                    type: object
+                    required: [start, end]
+                    additionalProperties: false
+                    properties:
+                      start: { type: [integer, 'null'], minimum: -9007199254740991, maximum: 9007199254740991 }
+                      end: { type: [integer, 'null'], minimum: -9007199254740991, maximum: 9007199254740991 }
+                  description: Sparse half-open intervals over native UUID time axes; null endpoints are unbounded.
                 limit: { type: integer, minimum: 0, maximum: 64 }
-                context_limits: { type: object }
-                evidence_requirements: { type: object }
+                context_limits:
+                  type: object
+                  required: [schema_version]
+                  additionalProperties: false
+                  properties:
+                    schema_version: { type: integer, const: 1 }
+                    max_context_bytes: { type: integer, minimum: 2, maximum: 1048576 }
+                    max_context_tokens: { type: integer, minimum: 1, maximum: 262144 }
+              allOf:
+                - if:
+                    required: [view]
+                    properties:
+                      view: { const: historical_context }
+                  then:
+                    anyOf:
+                      - required: [native_belief]
+                      - required: [native_region]
+                      - required: [native_region_json]
+                - not:
+                    required: [native_region, native_region_json]
+                - if:
+                    required: [native_region_json]
+                  then:
+                    properties:
+                      view: { const: historical_context }
       responses:
         "200":
           description: Authorized projection or explicit empty/degraded result
@@ -4494,6 +4547,7 @@ paths:
   /memory/claim-card:
     post:
       summary: Inspect a canonical memory claim card
+      description: Web serialization of the same typed claim_card bus result used by model adapters; only current authorized records are selected.
       requestBody:
         required: true
         content:
@@ -4507,6 +4561,16 @@ paths:
                 store: { type: string, enum: [user, kb], default: user }
                 project: { type: string }
                 workspace: { type: string }
+                cwd: { type: string }
+                scope:
+                  oneOf:
+                    - { type: string, enum: [current, all] }
+                    - type: object
+                      required: [type]
+                      additionalProperties: false
+                      properties:
+                        type: { type: string, enum: [global, workspace, project] }
+                        value: { type: string, maxLength: 1024 }
       responses:
         "200":
           description: Version-bound card and governed canonical correction descriptor
@@ -4728,6 +4792,50 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /memory/protected-intake:
+    post:
+      summary: Submit a protected value through an optional private intake client
+      description: >
+        Human-only input transport. The selected private client takes custody before
+        ordinary memory request serialization and returns only opaque references.
+        This route is not a model/MCP command. It requires an attested per-principal
+        human context and memory-write permission; absent private support returns
+        unavailable without falling back to ordinary storage. Retrying requires the
+        same operation UUID and value. The full encrypted envelope must fit the
+        selected custody provider's limit, which may be smaller than this input cap.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [operation_uuid, value]
+              properties:
+                operation_uuid:
+                  type: string
+                  format: uuid
+                  pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                value:
+                  type: string
+                  minLength: 1
+                  maxLength: 65536
+                  writeOnly: true
+                  description: Nonempty UTF-8 input; at most 64 KiB encoded bytes before envelope overhead.
+      responses:
+        "200":
+          description: Safe reference/publication result; no submitted value
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid bounded input
+        "403":
+          description: Not an authorized human intake context
+        "409":
+          description: Conflicting retry or retired operation
+        "503":
+          description: Private intake unavailable or outcome requires reconciliation
   /memory/store:
     post:
       summary: Store a memory (local-only)
@@ -4756,6 +4864,10 @@ paths:
                 project: { type: string }
                 workspace: { type: string }
                 scope: { type: string, enum: [all] }
+                native_applicability_json:
+                  type: string
+                  maxLength: 16384
+                  description: Opaque native Region JSON for world applicability, with at most 128 UUID axes and full signed 64-bit interval endpoints. The owner validates it; omitted preserves existing UTC/lifecycle behavior. Null or non-string values are refused.
                 idempotency_key:
                   type: string
                   minLength: 16

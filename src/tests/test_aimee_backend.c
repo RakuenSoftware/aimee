@@ -13,6 +13,8 @@
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/ir/aimee_ir.h>
 #include "cJSON.h"
+#include "agent_runtime_messages.h"
+#include <aimee/ir/session_event.h>
 
 static const char *ANTHROPIC =
     "{\"model\":\"claude-3-5-sonnet-20241022\",\"max_tokens\":1024,"
@@ -41,8 +43,133 @@ static void parse_anthropic(const char *json, aimee_request_t *ir)
    cJSON_Delete(j);
 }
 
+static void assert_wire_role(aimee_message_t *message, const char *role)
+{
+   aimee_request_t request = {
+       .model = "controlled", .messages = message, .n_messages = 1, .max_tokens = 128};
+   cJSON *built[] = {openai_backend_build(&request), responses_backend_build(&request),
+                     anthropic_backend_build(&request)};
+   for (int i = 0; i < 3; i++)
+   {
+      assert(built[i]);
+      const cJSON *m = cJSON_GetArrayItem(
+          cJSON_GetObjectItemCaseSensitive(built[i], i == 1 ? "input" : "messages"), 0);
+      assert(m && !strcmp(cJSON_GetObjectItemCaseSensitive(m, "role")->valuestring, role));
+      cJSON_Delete(built[i]);
+   }
+}
+
+static void test_runtime_advisory_wire_roles(void)
+{
+   for (int kind = 1; kind <= 2; kind++)
+   {
+      const char *text = "exact advisory \"text\"\nbytes";
+      cJSON *json = kind == 1 ? agent_session_control_message(text)
+                              : agent_session_tool_evidence_message(text);
+      aimee_message_t first = {0}, message = {0};
+      assert(json && !aimee_ir_message_parse(json, &first));
+      cJSON *serialized = aimee_ir_message_json(&first);
+      assert(serialized);
+      char *bytes = cJSON_PrintUnformatted(serialized);
+      assert(bytes);
+      cJSON *decoded = cJSON_Parse(bytes);
+      assert(decoded && !aimee_ir_message_parse(decoded, &message));
+      free(bytes);
+      cJSON_Delete(serialized);
+      cJSON_Delete(decoded);
+      aimee_message_free(&first);
+      aimee_request_t request = {
+          .model = "controlled", .messages = &message, .n_messages = 1, .max_tokens = 128};
+      aimee_ir_classify_context(&request);
+      assert(!strcmp(message.role, "assistant") &&
+             aimee_ir_message_runtime_advisory(&message) == kind);
+      cJSON *chat = openai_backend_build(&request), *responses = responses_backend_build(&request),
+            *anthropic = anthropic_backend_build(&request);
+      assert(chat && responses && anthropic);
+      const cJSON *m = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(chat, "messages"), 0);
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(m, "role")->valuestring, "user") &&
+             !strcmp(cJSON_GetObjectItemCaseSensitive(m, "content")->valuestring, text));
+      m = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(responses, "input"), 0);
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(m, "role")->valuestring, "user"));
+      const cJSON *part = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(m, "content"), 0);
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(part, "type")->valuestring, "input_text") &&
+             !strcmp(cJSON_GetObjectItemCaseSensitive(part, "text")->valuestring, text));
+      m = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(anthropic, "messages"), 0);
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(m, "role")->valuestring, "user"));
+      part = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(m, "content"), 0);
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(part, "text")->valuestring, text));
+      cJSON_Delete(chat);
+      cJSON_Delete(responses);
+      cJSON_Delete(anthropic);
+      aimee_block_t saved = message.blocks[0];
+      message.blocks[0].context.origin = AIMEE_CTX_ORIGIN_MODEL;
+      assert_wire_role(&message, "assistant");
+      message.blocks[0] = saved;
+      message.blocks[0].type = AIMEE_BLK_THINKING;
+      assert(!aimee_ir_message_runtime_advisory(&message));
+      message.blocks[0] = saved;
+      /* Pointer presence alone must exclude source-bearing messages; no source is parsed or
+       * granted. */
+      message.blocks[0].input_attachment = (void *)&saved;
+      assert(!aimee_ir_message_runtime_advisory(&message));
+      message.blocks[0] = saved;
+      message.blocks[0].tool_source = (void *)&saved;
+      assert(!aimee_ir_message_runtime_advisory(&message));
+      message.blocks[0] = saved;
+      aimee_block_t mixed[] = {saved, saved};
+      mixed[1].context.origin = kind == 1 ? AIMEE_CTX_ORIGIN_TOOL : AIMEE_CTX_ORIGIN_PLATFORM;
+      mixed[1].context.authority = kind == 1 ? AIMEE_CTX_AUTH_EVIDENCE : AIMEE_CTX_AUTH_DIAGNOSTIC;
+      mixed[1].context.trust = kind == 1 ? AIMEE_CTX_TRUST_UNTRUSTED : AIMEE_CTX_TRUST_UNVERIFIED;
+      aimee_block_t *original = message.blocks;
+      message.blocks = mixed;
+      message.n_blocks = 2;
+      assert_wire_role(&message, "assistant");
+      message.blocks = original;
+      message.n_blocks = 1;
+      cJSON *ordinary_user = agent_session_text_message("user", "actual user input");
+      cJSON *ordinary_answer = agent_session_text_message("assistant", "actual model answer");
+      aimee_message_t ordered[3] = {0};
+      assert(!aimee_ir_message_parse(ordinary_user, &ordered[0]));
+      assert(!aimee_ir_message_parse(json, &ordered[1]));
+      assert(!aimee_ir_message_parse(ordinary_answer, &ordered[2]));
+      request.messages = ordered;
+      request.n_messages = 3;
+      cJSON *ordered_wire[] = {openai_backend_build(&request), responses_backend_build(&request),
+                               anthropic_backend_build(&request)};
+      for (int i = 0; i < 3; i++)
+      {
+         assert(ordered_wire[i]);
+         const cJSON *list =
+             cJSON_GetObjectItemCaseSensitive(ordered_wire[i], i == 1 ? "input" : "messages");
+         assert(cJSON_GetArraySize(list) == 3);
+         for (int j = 0; j < 3; j++)
+         {
+            const cJSON *entry = cJSON_GetArrayItem(list, j);
+            assert(!strcmp(cJSON_GetObjectItemCaseSensitive(entry, "role")->valuestring,
+                           j == 2 ? "assistant" : "user"));
+            const char *expected = j == 0   ? "actual user input"
+                                   : j == 1 ? text
+                                            : "actual model answer";
+            const cJSON *content = cJSON_GetObjectItemCaseSensitive(entry, "content");
+            const char *actual = i == 0 ? cJSON_GetStringValue(content)
+                                        : cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                                              cJSON_GetArrayItem(content, 0), "text"));
+            assert(actual && !strcmp(actual, expected));
+         }
+         cJSON_Delete(ordered_wire[i]);
+      }
+      for (int i = 0; i < 3; i++)
+         aimee_message_free(&ordered[i]);
+      cJSON_Delete(ordinary_user);
+      cJSON_Delete(ordinary_answer);
+      aimee_message_free(&message);
+      cJSON_Delete(json);
+   }
+}
+
 int main(void)
 {
+   test_runtime_advisory_wire_roles();
    printf("aimee-backend: ");
    char err[128];
 

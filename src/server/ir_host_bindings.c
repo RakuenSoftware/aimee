@@ -32,6 +32,26 @@ static cJSON *context_call(const cJSON *args, void *context)
    free(text);
    return result;
 }
+/* Optional private current-context connection. The module selects opaque kind
+ * and arguments; no domain policy or grant selection belongs in this host. */
+extern char *aimee_module_owned_context_query(const char *, const cJSON *) __attribute__((weak));
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((externally_visible))
+#endif
+__attribute__((used, retain))
+const unsigned aimee_ir_owner_context_binding_contract_v1 = 1;
+static cJSON *owner_context_call(const cJSON *args, void *context)
+{
+   (void)context;
+   if (!aimee_module_owned_context_query || !cJSON_IsObject(args)) return NULL;
+   const char *kind = field(args, "kind");
+   const cJSON *opaque_args = cJSON_GetObjectItemCaseSensitive(args, "args");
+   if (!kind || !kind[0] || strlen(kind) > 64 || !cJSON_IsObject(opaque_args)) return NULL;
+   char *text = aimee_module_owned_context_query(kind, opaque_args);
+   cJSON *result = text ? cJSON_CreateString(text) : NULL;
+   free(text);
+   return result;
+}
 static cJSON *audit_call(const cJSON *args, void *context)
 {
    (void)context;
@@ -61,6 +81,7 @@ static cJSON *log_call(const cJSON *args, void *context)
    return cJSON_CreateBool(1);
 }
 const aimee_ir_plan_binding_t server_ir_plan_bindings[] = {{"context", context_call},
+                                                           {"owner_context", owner_context_call},
                                                            {"audit", audit_call},
                                                            {"epoch", epoch_call},
                                                            {"log", log_call},

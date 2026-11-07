@@ -484,6 +484,7 @@ static maintenance_registry_t g_maintenance;
 static uintptr_t g_next_guard_token = 1;
 static _Thread_local vault_maintenance_guard_t *g_owned_guard;
 static _Thread_local int g_owned_use;
+static _Thread_local int g_local_use_cancel_saved, g_local_use_prior_cancel;
 static pthread_once_t g_atfork_once = PTHREAD_ONCE_INIT;
 static int g_atfork_status = -1;
 
@@ -546,6 +547,7 @@ static void maintenance_child_atfork(void)
    g_maintenance.arena_len = 0;
    g_owned_guard = NULL;
    g_owned_use = 0;
+   g_local_use_cancel_saved = 0;
    g_primary_seal_epoch = 0;
    g_primary_epoch_initialized = 0;
    if (g_use_epoch != UINT64_MAX)
@@ -625,6 +627,7 @@ static int maintenance_validate(vault_maintenance_guard_t *guard)
  * restores the built-in file provider. See vault_internal.h. */
 void vault_custody_set_provider(const vault_custody_provider_t *provider)
 {
+   if (vault_fenced_use_callback_active()) return;
    if (g_fork_child_invalid || g_owned_guard || g_owned_use)
       return;
    if (ensure_atfork() != 0)
@@ -642,6 +645,7 @@ void vault_custody_set_provider(const vault_custody_provider_t *provider)
 
 void vault_server_key_reset_for_test(void)
 {
+   if (vault_fenced_use_callback_active()) return;
    if (g_fork_child_invalid || g_owned_guard || g_owned_use)
       return;
    if (ensure_atfork() != 0)
@@ -657,7 +661,7 @@ void vault_server_key_reset_for_test(void)
 
 int vault_server_kek(uint8_t kek[VAULT_KEK_LEN])
 {
-   if (g_fork_child_invalid || g_owned_guard || ensure_atfork() != 0)
+   if (vault_fenced_use_callback_active() || g_fork_child_invalid || g_owned_guard || ensure_atfork() != 0)
    {
       if (kek)
          OPENSSL_cleanse(kek, VAULT_KEK_LEN);
@@ -669,6 +673,7 @@ int vault_server_kek(uint8_t kek[VAULT_KEK_LEN])
 int vault_server_key_rotate(const char *server_principal, int *out_principals, int *out_creds,
                             char *backup_path, size_t backup_path_len, char *errbuf, size_t errlen)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    if (g_fork_child_invalid || g_owned_guard || g_owned_use || ensure_atfork() != 0)
       return -1;
    return g_custody->rotate(g_custody->ctx, server_principal, out_principals, out_creds,
@@ -681,6 +686,7 @@ int vault_server_key_rotate(const char *server_principal, int *out_principals, i
  * (file custody) never seals and vault_is_sealed() is always 0 for it. */
 int vault_is_sealed(void)
 {
+   if (vault_fenced_use_callback_active()) return 1;
    if (g_fork_child_invalid || ensure_atfork() != 0)
       return 1;
    return custody_is_sealed_unlocked();
@@ -688,6 +694,7 @@ int vault_is_sealed(void)
 
 vault_custody_local_status_t vault_custody_selected_local_status(void)
 {
+   if (vault_fenced_use_callback_active()) return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
    if (g_fork_child_invalid || ensure_atfork() != 0)
       return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
 
@@ -713,6 +720,7 @@ vault_custody_auth_result_t
 vault_custody_selected_authorization_preflight(const void *secret, size_t secret_len,
                                                uint64_t expected_generation)
 {
+   if (vault_fenced_use_callback_active()) return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
    if (g_fork_child_invalid || ensure_atfork() != 0 || g_owned_guard || g_owned_use || !secret ||
        secret_len == 0 || secret_len > VAULT_CUSTODY_AUTH_SECRET_MAX || expected_generation == 0 ||
        expected_generation > INT64_MAX)
@@ -737,7 +745,7 @@ vault_custody_selected_authorization_preflight_current(const void *secret, size_
 {
    if (generation)
       *generation = 0;
-   if (!generation || g_fork_child_invalid || ensure_atfork() != 0 || g_owned_guard ||
+   if (vault_fenced_use_callback_active() || !generation || g_fork_child_invalid || ensure_atfork() != 0 || g_owned_guard ||
        g_owned_use || !secret || secret_len == 0 || secret_len > VAULT_CUSTODY_AUTH_SECRET_MAX)
       return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
 
@@ -762,6 +770,7 @@ vault_custody_selected_authorization_preflight_current(const void *secret, size_
 
 int vault_unseal(const void *params, size_t len)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    if (g_fork_child_invalid || g_owned_guard || g_owned_use || ensure_atfork() != 0)
       return -1;
    pthread_rwlock_wrlock(&g_use_lock);
@@ -772,6 +781,7 @@ int vault_unseal(const void *params, size_t len)
 
 int vault_seal(void)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    if (g_fork_child_invalid || g_owned_guard || g_owned_use || ensure_atfork() != 0)
       return -1;
    pthread_rwlock_wrlock(&g_use_lock);
@@ -780,8 +790,10 @@ int vault_seal(void)
    return rc;
 }
 
+__attribute__((used, externally_visible, retain))
 uint64_t vault_use_epoch_snapshot(void)
 {
+   if (vault_fenced_use_callback_active()) return 0;
    if (g_fork_child_invalid || g_owned_guard || g_owned_use || ensure_atfork() != 0)
       return 0;
    pthread_rwlock_rdlock(&g_use_lock);
@@ -790,20 +802,21 @@ uint64_t vault_use_epoch_snapshot(void)
    return epoch;
 }
 
-int vault_use_begin(uint64_t expected_epoch, uint64_t admitted_primary_epoch,
-                    uint8_t kek[VAULT_KEK_LEN])
+static int use_begin_checked(uint64_t expected_epoch, uint64_t admitted_primary_epoch,
+                             int require_primary, uint8_t kek[VAULT_KEK_LEN])
 {
    if (!kek)
       return -1;
    /* Every rejection path leaves caller-owned key storage clean, including
     * malformed epochs rejected before custody is consulted. */
    OPENSSL_cleanse(kek, VAULT_KEK_LEN);
-   if (g_fork_child_invalid || g_owned_guard || g_owned_use || ensure_atfork() != 0 ||
-       !expected_epoch || expected_epoch == UINT64_MAX || !admitted_primary_epoch ||
-       admitted_primary_epoch > INT64_MAX || pthread_rwlock_rdlock(&g_use_lock) != 0)
+   if (vault_fenced_use_callback_active() || g_fork_child_invalid || g_owned_guard || g_owned_use || ensure_atfork() != 0 ||
+       !expected_epoch || expected_epoch == UINT64_MAX ||
+       (require_primary && (!admitted_primary_epoch || admitted_primary_epoch > INT64_MAX)) || pthread_rwlock_rdlock(&g_use_lock) != 0)
       return -1;
-   if (g_use_epoch != expected_epoch || !g_primary_epoch_initialized ||
-       g_primary_seal_epoch != admitted_primary_epoch || custody_is_sealed_unlocked() ||
+   if (g_use_epoch != expected_epoch ||
+       (require_primary && (!g_primary_epoch_initialized || g_primary_seal_epoch != admitted_primary_epoch)) ||
+       custody_is_sealed_unlocked() ||
        custody_get_kek_unlocked(kek) != 0)
    {
       OPENSSL_cleanse(kek, VAULT_KEK_LEN);
@@ -814,16 +827,53 @@ int vault_use_begin(uint64_t expected_epoch, uint64_t admitted_primary_epoch,
    return 0;
 }
 
+int vault_use_begin(uint64_t expected_epoch, uint64_t admitted_primary_epoch,
+                    uint8_t kek[VAULT_KEK_LEN])
+{
+   return use_begin_checked(expected_epoch, admitted_primary_epoch, 1, kek);
+}
+
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_vault_local_use_contract_v1 = 1;
+
+__attribute__((used, externally_visible, retain))
+int vault_local_use_begin(uint64_t expected_local_epoch, uint8_t kek[VAULT_KEK_LEN])
+{
+   if (!kek) return -1;
+   OPENSSL_cleanse(kek, VAULT_KEK_LEN);
+   if (g_local_use_cancel_saved || g_owned_use || g_owned_guard ||
+       g_fork_child_invalid || vault_fenced_use_callback_active()) return -1;
+   int previous;
+   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous)) return -1;
+   if (use_begin_checked(expected_local_epoch, 0, 0, kek))
+   {
+      (void)pthread_setcancelstate(previous, NULL);
+      return -1;
+   }
+   g_local_use_prior_cancel = previous;
+   g_local_use_cancel_saved = 1;
+   return 0;
+}
+
+__attribute__((used, externally_visible, retain))
 void vault_use_end(void)
 {
+   if (vault_fenced_use_callback_active()) return;
    if (!g_owned_use)
       return;
    g_owned_use = 0;
    pthread_rwlock_unlock(&g_use_lock);
+   if (g_local_use_cancel_saved)
+   {
+      int previous = g_local_use_prior_cancel;
+      g_local_use_cancel_saved = 0;
+      (void)pthread_setcancelstate(previous, NULL);
+   }
 }
 
 int vault_primary_epoch_initialize(uint64_t primary_epoch)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    if (g_fork_child_invalid || g_owned_guard || g_owned_use)
       return VAULT_MAINTENANCE_BUSY;
    if (ensure_atfork() != 0 || !primary_epoch || primary_epoch > INT64_MAX ||
@@ -852,6 +902,7 @@ int vault_primary_epoch_initialize(uint64_t primary_epoch)
 
 int vault_maintenance_guard_begin(vault_maintenance_guard_t **guard)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    if (g_fork_child_invalid || !guard || *guard || g_owned_use || ensure_atfork() != 0)
       return VAULT_MAINTENANCE_INVALID;
    if (g_owned_guard)
@@ -894,6 +945,7 @@ int vault_maintenance_guard_begin(vault_maintenance_guard_t **guard)
 int vault_maintenance_guard_sync_primary_epoch(vault_maintenance_guard_t *guard,
                                                uint64_t primary_epoch)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    int valid = maintenance_validate(guard);
    if (valid != VAULT_MAINTENANCE_OK)
       return valid;
@@ -914,6 +966,7 @@ int vault_maintenance_guard_sync_primary_epoch(vault_maintenance_guard_t *guard,
 int vault_maintenance_guard_with_active_kek(vault_maintenance_guard_t *guard,
                                             vault_maintenance_kek_fn callback, void *ctx)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    int valid = maintenance_validate(guard);
    if (valid != VAULT_MAINTENANCE_OK || !callback)
       return valid == VAULT_MAINTENANCE_OK ? VAULT_MAINTENANCE_INVALID : valid;
@@ -952,6 +1005,7 @@ int vault_maintenance_guard_with_active_kek(vault_maintenance_guard_t *guard,
 
 int vault_maintenance_guard_unseal(vault_maintenance_guard_t *guard, const void *params, size_t len)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    int valid = maintenance_validate(guard);
    return valid == VAULT_MAINTENANCE_OK ? custody_unseal_unlocked(params, len) : valid;
 }
@@ -959,6 +1013,7 @@ int vault_maintenance_guard_unseal(vault_maintenance_guard_t *guard, const void 
 vault_custody_auth_result_t vault_maintenance_guard_unseal_typed(vault_maintenance_guard_t *guard,
                                                                  const void *params, size_t len)
 {
+   if (vault_fenced_use_callback_active()) return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
    int valid = maintenance_validate(guard);
    if (valid != VAULT_MAINTENANCE_OK || !params || len == 0 || len > VAULT_CUSTODY_AUTH_SECRET_MAX)
       return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
@@ -967,12 +1022,14 @@ vault_custody_auth_result_t vault_maintenance_guard_unseal_typed(vault_maintenan
 
 int vault_maintenance_guard_seal(vault_maintenance_guard_t *guard)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    int valid = maintenance_validate(guard);
    return valid == VAULT_MAINTENANCE_OK ? custody_seal_failclosed_unlocked() : valid;
 }
 
 int vault_maintenance_guard_end(vault_maintenance_guard_t **guard)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    if (!guard)
       return VAULT_MAINTENANCE_INVALID;
    if (g_fork_child_invalid)
@@ -1005,6 +1062,7 @@ int vault_maintenance_guard_end(vault_maintenance_guard_t **guard)
 int vault_maintenance_guard_end_operational(vault_maintenance_guard_t **guard,
                                             uint64_t committed_primary_epoch)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    if (!guard)
       return VAULT_MAINTENANCE_INVALID;
    int valid = maintenance_validate(*guard);
@@ -1062,6 +1120,7 @@ int vault_maintenance_guard_end_operational(vault_maintenance_guard_t **guard,
 int vault_hwm_read(const char *key_id, uint64_t *version, uint8_t *att, size_t att_cap,
                    size_t *att_len)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    if (version)
       *version = 0;
    if (att_len)
@@ -1091,6 +1150,7 @@ int vault_hwm_read(const char *key_id, uint64_t *version, uint8_t *att, size_t a
 int vault_hwm_cas(const char *key_id, uint64_t expected, uint64_t next, uint8_t *att,
                   size_t att_cap, size_t *att_len)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    if (att_len)
       *att_len = 0;
    if (g_fork_child_invalid || ensure_atfork() != 0 || !key_id || !key_id[0] ||
@@ -1116,6 +1176,7 @@ int vault_hwm_cas(const char *key_id, uint64_t expected, uint64_t next, uint8_t 
 
 int vault_hwm_verify(const char *key_id, uint64_t version, const uint8_t *att, size_t att_len)
 {
+   if (vault_fenced_use_callback_active()) return -1;
    if (g_fork_child_invalid || ensure_atfork() != 0 || !key_id || !key_id[0] || !version || !att ||
        !att_len)
       return -1;

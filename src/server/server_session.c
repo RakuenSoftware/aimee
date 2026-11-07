@@ -35,7 +35,18 @@ int handle_session_close(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       aimee_log(LOG_WARN, "session_close", "episode card generation produced no row for session %s",
                 sid);
 
-   if (db1_server_session_delete(sid) != 0)
+   int deleted = db1_server_session_delete(sid);
+   if (deleted == DB1_SESSION_DELETE_CONFLICT)
+   {
+      cJSON *conflict = cJSON_CreateObject();
+      if (!conflict) return server_send_error(conn, "failed to close session", NULL);
+      cJSON_AddStringToObject(conflict, "status", "error");
+      cJSON_AddStringToObject(conflict, "kind", "input_delivery_conflict");
+      cJSON_AddStringToObject(conflict, "message", "original input delivery requires reconciliation");
+      cJSON_AddNumberToObject(conflict, "http_status", 409);
+      return server_send_ok(conn, conflict);
+   }
+   if (deleted != 0)
       return server_send_error(conn, "failed to close session", NULL);
 
    (void)verify_cancel_session(sid);

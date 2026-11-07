@@ -1,5 +1,6 @@
 /* Corpus seeding, embedding, malformed inputs and baseline regression now run
- * in Go: modules/memory/cmd/aimee-memory-eval/corpus_test.go. Graph traversal
+ * in private aims-db experiments/legacy-aimee-go/source/server-go/modules/memory/
+ * cmd/aimee-memory-eval/corpus_test.go. Graph traversal
  * regressions run in modules/memory/graph_score_test.go. */
 #include "json_fluent.h"
 #include "module_commands.h"

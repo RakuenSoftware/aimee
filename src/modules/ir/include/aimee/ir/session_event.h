@@ -113,6 +113,7 @@ void aimee_ir_session_begin_task(void);
 /* Restore a nested execution owner without clearing its capture failure. */
 void aimee_ir_session_restore_sink(aimee_ir_session_sink_fn sink, void *context, int failed);
 aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context);
+extern const unsigned aimee_ir_module_input_admission_contract_v1;
 int aimee_ir_session_emit(const aimee_session_event_t *event);
 int aimee_ir_session_emit_projection_controls(const char *model, int reasoning, int opaque,
                                               int cache_controls, const char *boundary);
@@ -127,7 +128,23 @@ int aimee_ir_session_emit_response(const aimee_response_t *response, const char 
 /* Buffered response: TURN_START, complete typed message, TURN_STOP with usage. */
 int aimee_ir_session_emit_buffered_response(const aimee_response_t *response,
                                             const char *message_id);
+/* Optional explicit failure provenance. Sink return codes are opaque and may
+ * equal admission return codes. This out-parameter has no retained/TLS state;
+ * the existing entry point and all return-code/capture behavior stay intact. */
+typedef enum {
+   AIMEE_IR_CAPTURE_CAUSE_NONE = 0,
+   AIMEE_IR_CAPTURE_CAUSE_INPUT_ADMISSION,
+   AIMEE_IR_CAPTURE_CAUSE_SINK,
+   AIMEE_IR_CAPTURE_CAUSE_PREVIOUS_FAILURE
+} aimee_ir_capture_cause_t;
+int aimee_ir_session_emit_buffered_response_checked(const aimee_response_t *response,
+                                                    const char *message_id,
+                                                    aimee_ir_capture_cause_t *cause);
 
 int aimee_ir_session_emit_tool_result(const char *tool_id, const char *result, int is_error);
+/* Borrowed source receipt, synchronously serialized atomically with the result.
+ * Pure IR validates shape; the installed host capture verifies digest/issuer. */
+int aimee_ir_session_emit_tool_result_with_source(const char *tool_id, const char *result,
+                                                  int is_error, const struct cJSON *source);
 
 #endif

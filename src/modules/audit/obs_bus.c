@@ -1051,9 +1051,15 @@ static void module_clients_destroy(void)
 /* Check out a client for one call. A caller waits only within its own deadline:
  * blocking past it is what turned a busy pool into the hang this pool exists to
  * prevent, so exhaustion is reported as a deadline rather than absorbed. */
+static void module_pool_unlock(void *lock)
+{
+   pthread_mutex_unlock(lock);
+}
 static int module_client_acquire(uint64_t deadline_ns)
 {
+   volatile int slot = -1;
    pthread_mutex_lock(&g.module_client_lock);
+   pthread_cleanup_push(module_pool_unlock, &g.module_client_lock);
    for (;;)
    {
       for (int i = 0; i < OBS_BUS_MODULE_CLIENTS; ++i)
@@ -1063,8 +1069,8 @@ static int module_client_acquire(uint64_t deadline_ns)
             g.module_clients[i].in_use = 1;
             if (++g.module_in_flight > g.module_peak_in_flight)
                g.module_peak_in_flight = g.module_in_flight;
-            pthread_mutex_unlock(&g.module_client_lock);
-            return i;
+            slot = i;
+            goto acquired;
          }
       }
       if (atomic_load(&g.module_stop))
@@ -1086,8 +1092,9 @@ static int module_client_acquire(uint64_t deadline_ns)
       if (pthread_cond_timedwait(&g.module_client_free, &g.module_client_lock, &wait) == ETIMEDOUT)
          break;
    }
-   pthread_mutex_unlock(&g.module_client_lock);
-   return -1;
+acquired:
+   pthread_cleanup_pop(1);
+   return slot;
 }
 
 static void module_client_release(int index)
@@ -1570,6 +1577,23 @@ static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *p
    }
 }
 
+typedef struct
+{
+   int slot;
+   int normal_return;
+} module_caller_scope_t;
+static void module_caller_cleanup(void *opaque)
+{
+   volatile module_caller_scope_t *scope = opaque;
+   int prior;
+   (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &prior);
+   if (scope->slot >= 0)
+      module_client_release(scope->slot);
+   atomic_fetch_sub(&g.module_callers, 1);
+   if (scope->normal_return)
+      (void)pthread_setcancelstate(prior, NULL);
+}
+
 aimee_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
@@ -1579,28 +1603,24 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    if (response_len)
       *response_len = 0;
    atomic_fetch_add(&g.module_callers, 1); /* seq_cst: pairs with stop admission gate */
+   volatile module_caller_scope_t owned = {.slot = -1};
+   volatile aimee_module_call_result_t result = AIMEE_MODULE_CALL_TRANSPORT;
+   pthread_cleanup_push(module_caller_cleanup, (void *)&owned);
    if (!atomic_load(&g.accepting_calls))
+      goto done;
+   owned.slot = module_client_acquire(deadline_ns);
+   if (owned.slot < 0)
    {
-      atomic_fetch_sub(&g.module_callers, 1);
-      /* Logged like every other failure below: a caller that reports "no answer"
-       * because the bus is shutting down looks exactly like one whose module
-       * refused it. */
-      obs_bus_log_module_call_failure(event_kind, stage_id, AIMEE_MODULE_CALL_TRANSPORT);
-      return AIMEE_MODULE_CALL_TRANSPORT;
-   }
-   int slot = module_client_acquire(deadline_ns);
-   if (slot < 0)
-   {
-      atomic_fetch_sub(&g.module_callers, 1);
-      obs_bus_log_module_call_failure(event_kind, stage_id, AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
-      return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+      result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+      goto done;
    }
    module_cancel_context_t state = {.external = cancelled, .context = cancel_context};
-   aimee_module_call_result_t result = aimee_module_client_call(
-       &g.module_clients[slot].client, event_kind, stage_id, trace_id, deadline_ns, request_body,
+   result = aimee_module_client_call(
+       &g.module_clients[owned.slot].client, event_kind, stage_id, trace_id, deadline_ns, request_body,
        request_len, response_body, response_capacity, response_len, module_call_cancelled, &state);
-   module_client_release(slot);
-   atomic_fetch_sub(&g.module_callers, 1);
+done:
+   owned.normal_return = 1;
+   pthread_cleanup_pop(1);
    if (result != AIMEE_MODULE_CALL_OK)
       obs_bus_log_module_call_failure(event_kind, stage_id, result);
    return result;

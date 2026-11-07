@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-LEDGER = Path("tests/baselines/modules/memory-ownership.json")
+LEDGER = Path("tests/baselines/modules/memory-ownership-current.json")
 spec = importlib.util.spec_from_file_location("native_inventory", ROOT / "scripts/check_memory_go_only.py")
 assert spec and spec.loader
 inventory = importlib.util.module_from_spec(spec)
@@ -86,4 +86,4 @@ if __name__ == "__main__":
         validate(ROOT)
     except (ValueError, KeyError, OSError) as exc:
         raise SystemExit(f"memory-ownership: {exc}")
-    print("memory-ownership: all original files/APIs and external findings classified; C bus retained")
+    print("memory-ownership: original native inventory retained; current external implementation requirement and unavailable public adapter classified")

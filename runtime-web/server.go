@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -27,15 +28,18 @@ import (
 )
 
 type server struct {
-	cfg      *config
-	db       *sql.DB
-	sessions sessionStore
-	rl       *auth.RateLimiter
-	accounts setupAccountSystem
-	identity webchatIdentityStore
-	authMode *authModeResolver
-	spaCSP   string
-	loginCSP string
+	// Startup-only strictness; native readiness may strengthen it per request.
+	originalInputMode     bool
+	originalInputContract atomic.Uint32
+	cfg                   *config
+	db                    *sql.DB
+	sessions              sessionStore
+	rl                    *auth.RateLimiter
+	accounts              setupAccountSystem
+	identity              webchatIdentityStore
+	authMode              *authModeResolver
+	spaCSP                string
+	loginCSP              string
 }
 
 func run(cfg *config) error {
@@ -75,15 +79,16 @@ func run(cfg *config) error {
 	rl := auth.NewRateLimiter(db, 10, 15*time.Minute)
 
 	s := &server{
-		cfg:      cfg,
-		db:       db,
-		sessions: sessions,
-		rl:       rl,
-		authMode: newAuthModeResolver(),
-		accounts: identities,
-		identity: identities,
-		spaCSP:   contentSecurityPolicy(spaHTML),
-		loginCSP: contentSecurityPolicy([]byte(loginHTML)),
+		originalInputMode: cfg.requireOriginalInput,
+		cfg:               cfg,
+		db:                db,
+		sessions:          sessions,
+		rl:                rl,
+		authMode:          newAuthModeResolver(),
+		accounts:          identities,
+		identity:          identities,
+		spaCSP:            contentSecurityPolicy(spaHTML),
+		loginCSP:          contentSecurityPolicy([]byte(loginHTML)),
 	}
 
 	mux := http.NewServeMux()

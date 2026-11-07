@@ -24,21 +24,44 @@ func pathWithin(child, parent string) bool {
 
 // webuserWorkspaceRoot returns the caller's scoped workspace root (the path the
 // agent's cwd must stay within), via aimee-server's /v1/workspace/projects.
-func (s *server) webuserWorkspaceRoot(ctx context.Context, user string) (string, error) {
-	st, data, err := s.v1RequestWebuser(ctx, user, http.MethodGet, "/v1/workspace/projects", nil)
+func (s *server) webuserWorkspaceRoot(ctx context.Context, user string) (string, bool, error) {
+	st, data, headers, err := s.v1RequestWebuserTCapabilityHeaders(ctx, user, http.MethodGet, "/v1/workspace/projects", nil, socketCallTimeout, false)
+	strict := s.originalInputMode
 	if err != nil {
-		return "", err
+		return "", strict, err
+	}
+	values := headers.Values("X-Aimee-Original-Input")
+	var mode uint32
+	if len(values) == 1 && values[0] == "optional" {
+		mode = 1
+	}
+	if len(values) == 1 && values[0] == "required" {
+		mode = 2
+	}
+	if len(values) != 0 && mode == 0 {
+		return "", true, fmt.Errorf("invalid native original input contract")
+	}
+	for mode > 0 {
+		prior := s.originalInputContract.Load()
+		if prior >= mode || s.originalInputContract.CompareAndSwap(prior, mode) {
+			break
+		}
+	}
+	required := s.originalInputContract.Load() == 2
+	strict = strict || mode == 2 || required
+	if (strict && mode != 2) || (mode == 0 && s.originalInputContract.Load() != 0) {
+		return "", strict, fmt.Errorf("native original input contract unavailable")
 	}
 	if st != http.StatusOK {
-		return "", fmt.Errorf("workspace lookup status %d", st)
+		return "", strict, fmt.Errorf("workspace lookup status %d", st)
 	}
 	var d struct {
 		Root string `json:"root"`
 	}
 	if json.Unmarshal(data, &d) != nil {
-		return "", fmt.Errorf("bad workspace response")
+		return "", strict, fmt.Errorf("bad workspace response")
 	}
-	return d.Root, nil
+	return d.Root, strict, nil
 }
 
 type chatProject struct {
@@ -96,16 +119,43 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		AimeeSessionID  string `json:"aimee_session_id"`
-		Message         string `json:"message"`
-		ClaudeSessionID string `json:"claude_session_id"`
-		Cwd             string `json:"cwd"`
-		AttachID        string `json:"attach_id"`
+	root, strictInput, rootErr := s.webuserWorkspaceRoot(r.Context(), currentUser(r))
+	if rootErr != nil && (strictInput || s.originalInputMode || s.originalInputContract.Load() != 0) {
+		writeJSONError(w, http.StatusServiceUnavailable, "native chat readiness unavailable")
+		return
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var req struct {
+		OriginalInputOperationUUID json.RawMessage `json:"original_input_operation_uuid"`
+		ProtectedSpans             json.RawMessage `json:"protected_spans"`
+		AimeeSessionID             string          `json:"aimee_session_id"`
+		Message                    string          `json:"message"`
+		ClaudeSessionID            string          `json:"claude_session_id"`
+		Cwd                        string          `json:"cwd"`
+		AttachID                   string          `json:"attach_id"`
+	}
+	var decodeErr error
+	if strictInput {
+		encoded, e := io.ReadAll(io.LimitReader(r.Body, (1<<20)+1))
+		if e != nil || len(encoded) > 1<<20 || !canonical.ValidJSON(encoded) {
+			decodeErr = fmt.Errorf("invalid bounded original input request")
+		} else {
+			decodeErr = json.Unmarshal(encoded, &req)
+		}
+	} else {
+		decodeErr = json.NewDecoder(r.Body).Decode(&req)
+	}
+	if decodeErr != nil {
 		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
 		return
+	}
+	var original *originalInputMetadata
+	if strictInput {
+		var e error
+		original, e = originalInputTransport(req.Message, req.AimeeSessionID, req.OriginalInputOperationUUID, req.ProtectedSpans)
+		if e != nil {
+			writeJSONError(w, http.StatusBadRequest, e.Error())
+			return
+		}
 	}
 	if req.Message == "" {
 		http.Error(w, `{"error":"message required"}`, http.StatusBadRequest)
@@ -121,7 +171,7 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	// workspace. The attested web user is also forwarded to aimee-server. Default to the
 	// user's workspace when no project is selected; refuse anything outside it
 	// (fail closed: a selected cwd we can't verify is also refused).
-	if root, rerr := s.webuserWorkspaceRoot(r.Context(), currentUser(r)); rerr == nil && root != "" {
+	if rootErr == nil && root != "" {
 		if req.Cwd == "" {
 			cwd = root
 		} else if !pathWithin(cwd, root) {
@@ -139,6 +189,10 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "aimee_session_id required")
 		return
 	}
+	if !strictInput && s.originalInputContract.Load() == 2 {
+		writeJSONError(w, http.StatusServiceUnavailable, "native chat contract changed; retry this action")
+		return
+	}
 	if s.db != nil {
 		owned, exists, oerr := s.chatSessionOwned(username, stableSID)
 		if oerr != nil {
@@ -149,7 +203,15 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusForbidden, "session belongs to another user")
 			return
 		}
-		if err = s.touchChatSession(username, stableSID, cwd, req.Message); err != nil {
+		initialCwd := cwd
+		initialTitleMessage := req.Message
+		if strictInput {
+			// A normalized acknowledgment is not yet available. Persisting a
+			// raw-derived title here precedes the C custody/canonical boundary.
+			initialTitleMessage = ""
+			initialCwd = ""
+		}
+		if err = s.touchChatSession(username, stableSID, initialCwd, initialTitleMessage); err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to persist session metadata")
 			return
 		}
@@ -160,7 +222,16 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	err = chatIRHTTP(r.Context(), s.cfg.socketPath, username, req.Message, stableSID, cwd, req.AttachID, func(line []byte) error {
+	metadataCommitted := false
+	err = chatIRHTTPInput(r.Context(), s.cfg.socketPath, username, req.Message, stableSID, cwd, req.AttachID, original, func(line []byte) error {
+		if original != nil && !metadataCommitted {
+			if text, ok := committedUserText(line, stableSID, original.OperationUUID); ok {
+				if e := s.touchChatSession(username, stableSID, cwd, text); e != nil {
+					return fmt.Errorf("failed to persist admitted session metadata")
+				}
+				metadataCommitted = true
+			}
+		}
 		if _, err := w.Write([]byte("event: ir\ndata: ")); err != nil {
 			return err
 		}

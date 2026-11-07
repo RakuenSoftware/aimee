@@ -1,3 +1,9 @@
+/* Compiled sender format only. Source3 prepare/admission independently enforces it. */
+__attribute__((used,retain)) const unsigned aims_server_original_turn_lowerhex32_contract_v1=1;
+#include "server/host_original_submission.h"
+#include "server/original_input_created.h"
+#include "server/host_input_attachment.h"
+#include <pthread.h>
 /* Durable session capture owned by the server compute task. */
 #include "server_compute_impl.h"
 #include "agent_config.h"
@@ -112,7 +118,8 @@ static int chat_ir_legacy_envelope(compute_ctx_t *c, const char *json)
    {
       aimee_message_t message = {0};
       rc = aimee_ir_message_parse(payload, &message);
-      for (int i = 0; !rc && i < message.n_blocks; i++)
+      for (int i = 0; !rc && !aimee_ir_message_runtime_advisory(&message) && i < message.n_blocks;
+           i++)
       {
          const aimee_block_t *block = &message.blocks[i];
          if (block->type == AIMEE_BLK_TEXT || block->type == AIMEE_BLK_THINKING)
@@ -316,7 +323,8 @@ int server_chat_ir_reject_steer(const char *session, const char *actor, const ch
    return result || terminal ? -1 : 0;
 }
 
-int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text)
+static int chat_ir_begin_internal(compute_ctx_t *c, const char *session, const char *text,
+                                  const cJSON *attachment)
 {
    if (!c->presence_locked || !session || !session[0] || strlen(session) >= sizeof(c->ir_session) ||
        !c->vault_principal[0])
@@ -353,6 +361,18 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
    c->ir_previous_sink = aimee_ir_session_get_sink(&c->ir_previous_context);
    c->ir_enabled = 1;
    aimee_ir_session_set_sink(chat_ir_sink, c);
+   if (attachment)
+   {
+      aimee_block_t block = {
+          .type = AIMEE_BLK_TEXT, .text = (char *)text, .input_attachment = (cJSON *)attachment};
+      aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+      int result = server_session_capture_original_input_begin(c->ir_capture, &message);
+      if (!result && server_session_capture_original_input_before(c->ir_capture, c->ir_sequence))
+         result = -1;
+      if (result != 0)
+         server_chat_ir_abort(c);
+      return result;
+   }
    aimee_session_event_t lifecycle = {.kind = AIMEE_SESSION_EXECUTION,
                                       .execution_status = "running"};
    if (aimee_ir_session_emit(&lifecycle) != 0)
@@ -366,6 +386,48 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
    return aimee_ir_session_emit(&event);
 }
 
+int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text)
+{
+   return chat_ir_begin_internal(c, session, text, NULL);
+}
+static void original_chat_cancelled(void *context)
+{
+   server_chat_ir_abort(context);
+}
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_chat_original_input_contract_v1 = 1;
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_chat_original_input_delivery_contract_v1 = 1;
+__attribute__((used, externally_visible, retain)) int
+server_chat_ir_begin_original(compute_ctx_t *c, const char *session, const char *text,
+                              const cJSON *attachment)
+{
+   if (!c || c->ir_enabled || !text || !text[0] ||
+       !aimee_ir_input_attachment_shape_valid(attachment) ||
+       !server_input_created_owner_configured())
+      return -1;
+   int previous_cancel;
+   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel))
+      return -1;
+   int result;
+   pthread_cleanup_push(original_chat_cancelled, c);
+   result = chat_ir_begin_internal(c, session, text, attachment);
+   pthread_setcancelstate(previous_cancel, NULL);
+   if (previous_cancel == PTHREAD_CANCEL_ENABLE)
+      pthread_testcancel();
+   /* Deliver the committed BEGIN/User pair through the existing canonical gap
+    * reader. The callback has returned and its fresh capability is revoked.
+    * Delivery remains cancellable; failure/cancellation aborts without execution.
+    * Never infer original-input authority from a replayed event envelope. */
+   if (!result && server_chat_ir_progress(c))
+   {
+      server_chat_ir_abort(c);
+      result = -1;
+   }
+   pthread_cleanup_pop(0);
+   return result;
+}
+
 int server_chat_ir_finish(compute_ctx_t *c, const char *error)
 {
    if (!c->ir_enabled || c->ir_completed)
@@ -374,7 +436,8 @@ int server_chat_ir_finish(compute_ctx_t *c, const char *error)
    server_session_capture_counts_t counts = {0};
    if (server_session_capture_counts(c->ir_capture, &counts))
       error = "canonical capture owner unavailable";
-   if (!error && !agent_request_cancelled() && !counts.model_events && !c->ir_history_checkpointed)
+   if (!error && !agent_request_cancelled() && !counts.model_events && !c->ir_history_checkpointed &&
+       !host_original_submission_user_source_only(c->original_submission))
       error = "Selected harness produced no canonical model output";
    aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION,
                                   .execution_status = agent_request_cancelled()
@@ -384,11 +447,11 @@ int server_chat_ir_finish(compute_ctx_t *c, const char *error)
    return aimee_ir_session_emit(&event);
 }
 
-void server_chat_ir_close(compute_ctx_t *c)
+static void chat_ir_close_internal(compute_ctx_t *c, int terminal)
 {
    if (!c->ir_enabled)
       return;
-   if (!c->ir_completed)
+   if (terminal && !c->ir_completed)
       server_chat_ir_finish(c, "execution ended without completion");
    aimee_ir_session_set_sink(c->ir_previous_sink, c->ir_previous_context);
    server_session_capture_bind(c->ir_previous_capture);
@@ -402,4 +465,14 @@ void server_chat_ir_close(compute_ctx_t *c)
    c->ir_legacy_emit = NULL;
    c->ir_legacy_bytes = 0;
    c->ir_enabled = 0;
+}
+
+void server_chat_ir_close(compute_ctx_t *c)
+{
+   chat_ir_close_internal(c, 1);
+}
+__attribute__((used, externally_visible, retain)) void server_chat_ir_abort(compute_ctx_t *c)
+{
+   if (c)
+      chat_ir_close_internal(c, 0);
 }

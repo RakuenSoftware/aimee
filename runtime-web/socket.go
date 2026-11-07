@@ -200,7 +200,20 @@ func chatStreamHTTP(ctx context.Context, socketPath, username, message, aimeeSes
 // The browser transport does not interpret conversation events. Native adapters
 // have already produced and persisted canonical IR before these bytes arrive.
 func chatIRHTTP(ctx context.Context, socketPath, username, message, sid, cwd, attachID string, cb func([]byte) error) error {
-	payload, err := json.Marshal(map[string]any{"message": message, "aimee_session_id": sid, "cwd": cwd, "attach_id": attachID, "ir_version": 1,"queue":true,"queue_wait_ms":30000})
+	return chatIRHTTPInput(ctx, socketPath, username, message, sid, cwd, attachID, nil, cb)
+}
+func chatIRHTTPInput(ctx context.Context, socketPath, username, message, sid, cwd, attachID string, original *originalInputMetadata, cb func([]byte) error) error {
+	fields := map[string]any{"message": message, "aimee_session_id": sid, "cwd": cwd, "ir_version": 1, "queue": true, "queue_wait_ms": 30000}
+	if attachID != "" {
+		fields["attach_id"] = attachID
+	}
+	if original != nil {
+		fields["original_input_operation_uuid"] = original.OperationUUID
+		if original.ProtectedSpans != nil {
+			fields["protected_spans"] = original.ProtectedSpans
+		}
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		return err
 	}

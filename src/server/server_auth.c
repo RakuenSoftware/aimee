@@ -1,3 +1,4 @@
+#include "host_original_text.h"
 /* server_auth.c: authentication, capability tokens, and per-method capability checks */
 #include "aimee.h"
 #include "db1_client/db1.h"
@@ -49,6 +50,7 @@ const method_policy_t method_registry[] = {
     {"task.projection", CAP_MEMORY_WRITE,
      "operate on owned disposable task state and promotion drafts"},
     {"memory.store", CAP_MEMORY_WRITE, "store memory"},
+    {"memory.protected-intake", CAP_MEMORY_WRITE, "submit protected human input"},
     /* Destructive: hard-deletes the row and its provenance, and the audit event
      * carries only the id — the content is not recoverable afterwards. Graded
      * memory:admin, not memory:write, for the same reason rules.delete is graded
@@ -401,6 +403,20 @@ int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJS
    if ((jct && (!cJSON_IsString(jct) || strcmp(jct->valuestring, client_type))) ||
        (provider && (!cJSON_IsString(provider) || strcmp(provider->valuestring, client_type))))
       return server_send_error(conn, "unsupported external transcript source", NULL);
+   char fallback[32];
+   const char *caller = session_caller_principal(conn, fallback);
+
+   /* Check an existing owner before parsing/hashing content. A missing row is
+    * not registered until the upload is valid and this lane is supported. */
+   db1_server_session_t existing;
+   int missing_session = db1_server_session_get(sid, &existing) != 0;
+   if (!missing_session && strcmp(existing.principal, caller) != 0)
+      return server_send_error(conn, "session_id owned by another principal", NULL);
+
+   /* Authenticated upload ownership is not proof of original authorship of
+    * each imported role:user segment. No adapter for safe-source-v2 exists. */
+   if (host_text_required())
+      return server_send_error(conn, "original transcript provenance unsupported", NULL);
    cJSON *observations = aimee_frontend_claude_transcript_import(jmsgs, sid);
    if (!observations)
       return server_send_error(conn, "unsupported or invalid external transcript", NULL);
@@ -425,19 +441,8 @@ int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJS
       free(messages_json);
       return server_send_error(conn, "failed to bind external transcript", NULL);
    }
-   char fallback[32];
-   const char *caller = session_caller_principal(conn, fallback);
 
-   /* Register (idempotent) so the session is locatable even if SessionStart never
-    * ran, then enforce ownership on the FINAL row before any durable write. When
-    * the row is missing we create it and always re-read: success requires a row to
-    * actually be present afterwards (not merely a create that returned ok), which
-    * also covers a create that raced a concurrent create. Whether the row
-    * pre-existed, we just created it, or it appeared via a race, it must belong to
-    * the caller — otherwise a caller could overwrite another principal's transcript
-    * under a known session id. */
-   db1_server_session_t existing;
-   if (db1_server_session_get(sid, &existing) != 0)
+   if (missing_session)
    {
       (void)db1_server_session_create(sid, client_type, caller);
       if (db1_server_session_get(sid, &existing) != 0)
@@ -445,11 +450,11 @@ int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJS
          free(messages_json);
          return server_send_error(conn, "failed to register session", NULL);
       }
-   }
-   if (strcmp(existing.principal, caller) != 0)
-   {
-      free(messages_json);
-      return server_send_error(conn, "session_id owned by another principal", NULL);
+      if (strcmp(existing.principal, caller) != 0)
+      {
+         free(messages_json);
+         return server_send_error(conn, "session_id owned by another principal", NULL);
+      }
    }
 
    int rc = db1_session_ir_history_save(sid, checkpoint, "external-sdk:claude-code", caller,

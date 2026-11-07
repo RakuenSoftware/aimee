@@ -6,6 +6,8 @@
 
 #include "aimee.h"
 #include "working_profile.h"
+#include "owned_feature.h"
+AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_observation_legacy_guard_contract_v1);
 #include "db1_client/db1.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -73,6 +75,8 @@ static const working_profile_autoobserve_rule_t AUTOOBSERVE_RULES[] = {
 
 int working_profile_autoobserve_from_feedback(const char *text)
 {
+   if (aimee_owned_feature_status("working_profile"))
+      return -1; /* No source-backed User observation is implied by a hint. */
    if (!text || !text[0])
       return 0;
 

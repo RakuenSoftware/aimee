@@ -405,7 +405,8 @@
     "missing",
     "invalid",
     "too_long",
-    "failed"
+    "failed",
+    "conflict"
   ],
   "operations": [
     {
@@ -8913,7 +8914,8 @@
       "results": [
         "ok",
         "invalid",
-        "failed"
+        "failed",
+        "conflict"
       ],
       "request": {
         "fields": [
@@ -10055,7 +10057,8 @@
       "results": [
         "ok",
         "invalid",
-        "failed"
+        "failed",
+        "conflict"
       ],
       "request": {
         "fields": [
@@ -29379,6 +29382,853 @@
             "name": "sequence",
             "type": "text",
             "required": true
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 54,
+      "name": "session_tool_source_append",
+      "c_name": "db1_session_tool_source_append",
+      "c_params": [
+        "session_id",
+        "event_id",
+        "turn",
+        "actor",
+        "payload",
+        "out_sequence"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "event_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "turn",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "payload",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "sequence",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 55,
+      "name": "session_tool_source_history_save",
+      "c_name": "db1_session_tool_source_history_save",
+      "c_params": [
+        "session_id",
+        "checkpoint",
+        "scope",
+        "actor",
+        "active_turn",
+        "messages_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed",
+        "missing"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "checkpoint",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "scope",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "active_turn",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "messages_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 16777216
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 56,
+      "name": "session_original_input_begin",
+      "c_name": "db1_session_original_input_begin",
+      "c_params": [
+        "session_id",
+        "operation_uuid",
+        "proposed_turn",
+        "actor",
+        "batch_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "operation_uuid",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "proposed_turn",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "batch_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "begin_sequence",
+            "type": "text"
+          },
+          {
+            "name": "input_sequence",
+            "type": "text"
+          },
+          {
+            "name": "original_turn",
+            "type": "text"
+          },
+          {
+            "name": "contract_version",
+            "type": "text"
+          },
+          {
+            "name": "outcome",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 57,
+      "name": "session_input_attachment_history_save",
+      "c_name": "db1_session_input_attachment_history_save",
+      "c_params": [
+        "session_id",
+        "checkpoint",
+        "scope",
+        "actor",
+        "active_turn",
+        "messages_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "checkpoint",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "scope",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "active_turn",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "messages_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "contract_version",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 58,
+      "name": "session_original_input_begin_delivery",
+      "c_name": "db1_session_original_input_begin_delivery",
+      "c_params": [
+        "session_id",
+        "operation_uuid",
+        "proposed_turn",
+        "actor",
+        "batch_json",
+        "delivery_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "operation_uuid",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "proposed_turn",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "batch_json",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "delivery_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "begin_sequence",
+            "type": "text"
+          },
+          {
+            "name": "input_sequence",
+            "type": "text"
+          },
+          {
+            "name": "original_turn",
+            "type": "text"
+          },
+          {
+            "name": "contract_version",
+            "type": "text"
+          },
+          {
+            "name": "outcome",
+            "type": "text"
+          },
+          {
+            "name": "delivery_id",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 59,
+      "name": "session_original_input_delivery_get",
+      "c_name": "db1_session_original_input_delivery_get",
+      "c_params": [
+        "session_id",
+        "operation_uuid",
+        "actor",
+        "receiver_tag"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "operation_uuid",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "receiver_tag",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "delivery_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 4194304
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 60,
+      "name": "session_original_input_delivery_page",
+      "c_name": "db1_session_original_input_delivery_page",
+      "c_params": [
+        "receiver_tag",
+        "actor",
+        "after_id",
+        "limit",
+        "max_bytes"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "receiver_tag",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "after_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "limit",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "max_bytes",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "page_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 4194304
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 61,
+      "name": "session_original_input_delivery_ack",
+      "c_name": "db1_session_original_input_delivery_ack",
+      "c_params": [
+        "delivery_id",
+        "receiver_tag",
+        "actor",
+        "intent_key",
+        "outcome",
+        "result_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "delivery_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "receiver_tag",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "intent_key",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "outcome",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "result_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "contract_version",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 62,
+      "name": "session_original_input_probe",
+      "c_name": "db1_session_original_input_probe",
+      "c_params": [
+        "session_id",
+        "operation_uuid",
+        "actor"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed",
+        "conflict"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "operation_uuid",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "state_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 524288
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 63,
+      "name": "session_original_input_plan_reserve",
+      "c_name": "db1_session_original_input_plan_reserve",
+      "c_params": [
+        "session_id",
+        "operation_uuid",
+        "actor",
+        "receiver_tag",
+        "safe_text_sha256",
+        "plan_sha256",
+        "opaque_plan"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed",
+        "conflict"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "operation_uuid",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "receiver_tag",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "safe_text_sha256",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "plan_sha256",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "opaque_plan",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "plan_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 524288
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 64,
+      "name": "session_original_input_begin_planned_delivery",
+      "c_name": "db1_session_original_input_begin_planned_delivery",
+      "c_params": [
+        "session_id",
+        "operation_uuid",
+        "proposed_turn",
+        "actor",
+        "batch_json",
+        "delivery_json",
+        "plan_id",
+        "plan_sha256"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed",
+        "conflict"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "operation_uuid",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "proposed_turn",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "batch_json",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "delivery_json",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "plan_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "plan_sha256",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "begin_sequence",
+            "type": "text"
+          },
+          {
+            "name": "input_sequence",
+            "type": "text"
+          },
+          {
+            "name": "original_turn",
+            "type": "text"
+          },
+          {
+            "name": "contract_version",
+            "type": "text"
+          },
+          {
+            "name": "outcome",
+            "type": "text"
+          },
+          {
+            "name": "delivery_id",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 65,
+      "name": "session_original_input_plan_terminal",
+      "c_name": "db1_session_original_input_plan_terminal",
+      "c_params": [
+        "plan_id",
+        "session_id",
+        "operation_uuid",
+        "actor",
+        "receiver_tag",
+        "plan_sha256",
+        "result_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed",
+        "conflict"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "plan_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "operation_uuid",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "receiver_tag",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "plan_sha256",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "result_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "contract_version",
+            "type": "text"
           }
         ],
         "max_bytes": 32768
