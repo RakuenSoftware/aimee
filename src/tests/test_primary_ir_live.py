@@ -135,6 +135,26 @@ def main():
         finally:
             connection.close()
 
+    def replay_session(session):
+        # Read the real owner-authenticated immutable log until its transport
+        # readiness boundary. This is source evidence, not a screened export or
+        # a newly reconstructed model-history authority.
+        connection = Local("localhost")
+        try:
+            connection.request("GET", f"/v1/sessions/{session}/events?format=ir&cursor=0")
+            response = connection.getresponse()
+            assert response.status == 200, response.status
+            replay = []
+            while True:
+                line = response.readline()
+                assert line, "Canonical replay ended before readiness"
+                if line.startswith(b"event: replay_complete"):
+                    return replay
+                if line.startswith(b"data: "):
+                    replay.append(json.loads(line[6:]))
+        finally:
+            connection.close()
+
     provider = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     thread = threading.Thread(target=provider.serve_forever, daemon=True)
     thread.start()
@@ -219,17 +239,23 @@ def main():
 
         # Export exercises transport-attested ownership through the actual HTTP
         # dispatch hop, not ambient worker state or an interaction-event fixture.
-        exported = api("/v1/trajectory/export", {"session_id": sid, "compress": False})
-        artifact = exported["trajectory"]
-        assert artifact["schema"] == "aimee.trajectory.v2" and artifact["session_id"] == sid, exported
-        assert artifact["source"] == "canonical_session_log" and "outcome" not in artifact, exported
-        assert "governed_actions" not in artifact and "steps" not in artifact, exported
-        assert len(artifact["messages"]) == 8, artifact
-        assert all("blocks" in message for message in artifact["messages"]), artifact
-        assert "fixture-signature" in json.dumps(artifact), artifact
-        for earlier in range(4):
-            assert f"IR_TURN_{earlier}" in json.dumps(artifact), artifact
-        print("canonical trajectory: real HTTP owner identity, complete typed primary history and native signature retained")
+        if os.environ.get("AIMEE_TEST_LEGACY_MEMORY_OWNER"):
+            exported = api("/v1/trajectory/export", {"session_id": sid, "compress": False})
+            artifact = exported["trajectory"]
+            assert artifact["schema"] == "aimee.trajectory.v2" and artifact["session_id"] == sid, exported
+            assert artifact["source"] == "canonical_session_log" and "outcome" not in artifact, exported
+            assert "governed_actions" not in artifact and "steps" not in artifact, exported
+            assert len(artifact["messages"]) == 8, artifact
+            assert all("blocks" in message for message in artifact["messages"]), artifact
+            assert "fixture-signature" in json.dumps(artifact), artifact
+            for earlier in range(4):
+                assert f"IR_TURN_{earlier}" in json.dumps(artifact), artifact
+            print("canonical trajectory: real HTTP owner identity, complete typed primary history and native signature retained")
+        else:
+            refused = json.loads(api("/v1/trajectory/export", {"session_id": sid, "compress": False}, expected=502))
+            assert refused == {"status": "error", "message": "trajectory export failed"}, refused
+            assert "fixture-signature" not in json.dumps(refused) and "IR_TURN_" not in json.dumps(refused), refused
+            print("canonical trajectory: absent screening owner refuses export without disclosing transcript")
 
         # Replay through the authenticated HTTP subscriber, not direct SQL or
         # the in-memory projection. Both initial replay and a resumed cursor
@@ -316,14 +342,14 @@ def main():
         assert "ir" not in json.loads(refused.stdout), refused.stdout
         print("canonical evaluation: registered real CLI -> admitted tool-free owner -> actual HTTP fixture -> full canonical success/refusal/MAX/tool observations; no history/hints/effects")
 
-        # Exercise the shipped Go QA consumer through the same genuine CLI and
+        # Exercise the generic Go canonical consumer through the same genuine CLI and
         # local provider. Counting actual requests prevents a fake CLI envelope
         # or an accidentally skipped Go integration case from passing this gate.
         before = len(observed)
         consumer = subprocess.run([os.environ.get("GO", "go"), "-C",
             str(Path(__file__).resolve().parents[2] / "server-go"), "test",
-            "./modules/memory/cmd/aimee-memory-eval", "-run",
-            "^TestAgentModelLiveRegisteredCLI$", "-count=1", "-v"],
+            "./ir", "-run",
+            "^TestCanonicalResponseLiveRegisteredCLI$", "-count=1", "-v"],
             env={**os.environ, "AIMEE_QA_LIVE_CLI": cli},
             capture_output=True, text=True, timeout=120)
         assert consumer.returncode == 0, consumer.stdout + consumer.stderr
@@ -334,7 +360,7 @@ def main():
             assert not sent.get("tools") and "IR_TURN_0" not in json.dumps(sent), sent
             assert marker in json.dumps(sent), sent
         assert not (home / "qa-must-not-exist").exists(), "QA consumer executed a returned tool"
-        print("canonical evaluation consumer: actual Go QA -> registered real CLI -> local HTTP canonical success/refusal/MAX/tool observations; no declined answer or effects")
+        print("canonical evaluation consumer: actual generic Go IR -> registered real CLI -> local HTTP canonical success/refusal/MAX/tool observations; no declined answer or effects")
 
         # Repeated cache-eligible prompts still produce private canonical
         # executions. A flat role-cache hit must not bypass the durable owner.
@@ -343,18 +369,28 @@ def main():
             prompt="IR_TRAJECTORY_BATCH", success_check={"type": "contains", "value": "PRIMARY_OK"}))
             for i in range(2)) + "\n")
         before_batch = len(observed)
-        batch = api("/v1/trajectory/batch", dict(session_id=sid, tasks_path=str(tasks),
-            out_dir=str(home / "ir-trajectories"), toolset_dist="research", compress=False))
-        assert batch["failures"] == 0 and len(batch["written"]) == 2, batch
-        assert len(observed) == before_batch + 2, "A repeated prompt bypassed canonical execution"
-        child_ids = {item["session_id"] for item in batch["written"]}
-        assert len(child_ids) == 2 and sid not in child_ids, batch
-        for item in batch["written"]:
-            child = json.loads(Path(item["path"]).read_text())
-            assert child["schema"] == "aimee.trajectory.v2" and child["session_id"] == item["session_id"], child
-            assert "IR_TRAJECTORY_BATCH" in json.dumps(child) and "PRIMARY_OK" in json.dumps(child), child
-            assert "IR_TURN_0" not in json.dumps(child), "Parent history leaked into child export"
-        print("canonical batch: two real private executions, repeated-prompt cache bypass and source references passed")
+        batch_request = dict(session_id=sid, tasks_path=str(tasks),
+            out_dir=str(home / "ir-trajectories"), toolset_dist="research", compress=False)
+        if os.environ.get("AIMEE_TEST_LEGACY_MEMORY_OWNER"):
+            batch = api("/v1/trajectory/batch", dict(session_id=sid, tasks_path=str(tasks),
+                out_dir=str(home / "ir-trajectories"), toolset_dist="research", compress=False))
+            assert batch["failures"] == 0 and len(batch["written"]) == 2, batch
+            assert len(observed) == before_batch + 2, "A repeated prompt bypassed canonical execution"
+            child_ids = {item["session_id"] for item in batch["written"]}
+            assert len(child_ids) == 2 and sid not in child_ids, batch
+            for item in batch["written"]:
+                child = json.loads(Path(item["path"]).read_text())
+                assert child["schema"] == "aimee.trajectory.v2" and child["session_id"] == item["session_id"], child
+                assert "IR_TRAJECTORY_BATCH" in json.dumps(child) and "PRIMARY_OK" in json.dumps(child), child
+                assert "IR_TURN_0" not in json.dumps(child), "Parent history leaked into child export"
+            print("canonical batch: two real private executions, repeated-prompt cache bypass and source references passed")
+        else:
+            refused = json.loads(api("/v1/trajectory/batch", batch_request, expected=502))
+            assert refused == {"status": "error", "message": "trajectory batch failed"}, refused
+            assert len(observed) == before_batch + 2, "Repeated prompts must still execute rather than return a flat role cache"
+            assert not list((home / "ir-trajectories").glob("*.jsonl")), "Unscreened transcript artifact was written"
+            print("canonical batch: two actual provider calls; absent screener refuses export and writes no artifacts")
+
 
 
         # A real Responses continuation: canonical signed thinking and every
@@ -498,10 +534,16 @@ def main():
         assert calls[0]["max_tokens"] == 1024 and calls[0]["temperature"] == 0.25, calls[0]
         assert finished["usage"]["input_tokens"] == 20 and finished["usage"]["output_tokens"] == 4, finished
         source = finished["canonical_session_id"]
-        saved = api("/v1/trajectory/export", dict(session_id=source, compress=False))["trajectory"]
+        events = api(f"/v1/runs/{run['id']}/events")
+        if os.environ.get("AIMEE_TEST_LEGACY_MEMORY_OWNER"):
+            saved = api("/v1/trajectory/export", dict(session_id=source, compress=False))["trajectory"]
+        else:
+            refused = json.loads(api("/v1/trajectory/export", dict(session_id=source, compress=False), expected=502))
+            assert refused == {"status": "error", "message": "trajectory export failed"}, refused
+            # This is the actual authenticated canonical log, not an export artifact.
+            saved = replay_session(source)
         assert original in json.dumps(saved, ensure_ascii=False) and "q" * 400 in json.dumps(saved), saved
         assert "IDENTITY_READ_CONTROL" in json.dumps(saved) and '"type": "image"' in json.dumps(saved), saved
-        events = api(f"/v1/runs/{run['id']}/events")
         assert "tool_call.started" in events and "message.completed" in events and "RUN_TOOL_OK" in events, events
         partial = api("/v1/runs", dict(model="ir-live-run", input="IR_RUN_TRUNCATED"))
         partial = await_run(partial["id"])
@@ -509,7 +551,12 @@ def main():
         assert "RUN_PARTIAL" in json.dumps(partial) and "error" not in partial, partial
         assert partial["usage"]["input_tokens"] == 10 and partial["usage"]["output_tokens"] == 2, partial
         partial_source = partial["canonical_session_id"]
-        partial_history = api("/v1/trajectory/export", dict(session_id=partial_source, compress=False))["trajectory"]
+        if os.environ.get("AIMEE_TEST_LEGACY_MEMORY_OWNER"):
+            partial_history = api("/v1/trajectory/export", dict(session_id=partial_source, compress=False))["trajectory"]
+        else:
+            refused = json.loads(api("/v1/trajectory/export", dict(session_id=partial_source, compress=False), expected=502))
+            assert refused == {"status": "error", "message": "trajectory export failed"}, refused
+            partial_history = replay_session(partial_source)
         assert "RUN_PARTIAL" in json.dumps(partial_history) and "IR_RUN_TRUNCATED" in json.dumps(partial_history), partial_history
         cancelled = api("/v1/runs", dict(model="ir-live-run", input="IR_RUN_CANCEL"))
         try:
@@ -695,10 +742,16 @@ def main():
         legacy = api("/v1/chat/stream", {"message": "IR_LEGACY_SUBSCRIBER say PRIMARY_OK",
                      "session_id": legacy_sid, "cwd": str(home)})
         assert "PRIMARY_OK" in legacy and '"error"' not in legacy, legacy
-        legacy_export = api("/v1/trajectory/export", {"session_id": legacy_sid, "compress": False})["trajectory"]
-        assert legacy_export["source"] == "canonical_session_log", legacy_export
-        assert len(legacy_export["messages"]) == 2, legacy_export
-        assert "IR_LEGACY_SUBSCRIBER" in json.dumps(legacy_export), legacy_export
+        if os.environ.get("AIMEE_TEST_LEGACY_MEMORY_OWNER"):
+            legacy_export = api("/v1/trajectory/export", {"session_id": legacy_sid, "compress": False})["trajectory"]
+            assert legacy_export["source"] == "canonical_session_log", legacy_export
+            assert len(legacy_export["messages"]) == 2, legacy_export
+            assert "IR_LEGACY_SUBSCRIBER" in json.dumps(legacy_export), legacy_export
+        else:
+            refused = json.loads(api("/v1/trajectory/export", {"session_id": legacy_sid, "compress": False}, expected=502))
+            assert refused == {"status": "error", "message": "trajectory export failed"}, refused
+            replay = replay_session(legacy_sid)
+            assert "IR_LEGACY_SUBSCRIBER" in json.dumps(replay) and "PRIMARY_OK" in json.dumps(replay), replay
         print("chat admission: no-attachment API, legacy subscriber canonical durability and invalid attachment refusal pass")
 
 

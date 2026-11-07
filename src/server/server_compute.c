@@ -141,136 +141,6 @@ int write_all(int fd, const char *data, size_t len)
    return 0;
 }
 
-/* Durable terminal state is a projection of admitted model IR plus the host's
- * execution outcome. Compatibility display strings are never evidence of work. */
-typedef struct
-{
-   const char *status;
-   const char *result;
-   char *display;
-   char diagnostic[2048];
-} compute_terminal_outcome_t;
-
-static void compute_terminal_outcome(const cJSON *resp, compute_terminal_outcome_t *out)
-{
-   memset(out, 0, sizeof *out);
-   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "status"));
-   const char *message = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "message"));
-   out->status = status && !strcmp(status, "cancelled") ? "cancelled" : "failed";
-   snprintf(out->diagnostic, sizeof out->diagnostic,
-            "delegate did not return a complete canonical answer");
-   out->result = message && message[0] ? message : out->diagnostic;
-   aimee_response_t ir = {0};
-   if (aimee_ir_response_parse(cJSON_GetObjectItemCaseSensitive(resp, "ir"), &ir))
-      return; /* A pre-provider host failure need not have model IR. */
-   out->display = aimee_ir_response_text_alloc(&ir);
-   if (!out->display)
-      goto finish;
-
-   int authored = 0, pending_tool = 0, media = 0;
-   for (int i = 0; i < ir.n_content; i++)
-   {
-      const aimee_block_t *block = &ir.content[i];
-      media |= block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT;
-      authored |= (block->type == AIMEE_BLK_TEXT && block->text && block->text[0]) ||
-                  block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT;
-      pending_tool |= block->type == AIMEE_BLK_TOOL_USE || block->type == AIMEE_BLK_TOOL_RESULT;
-   }
-   if (status && !strcmp(status, "ok") && !aimee_ir_response_complete_valid(&ir))
-   {
-      const cJSON *turns = cJSON_GetObjectItemCaseSensitive(resp, "turns");
-      const cJSON *tools = cJSON_GetObjectItemCaseSensitive(resp, "tool_calls");
-      int unexecuted = (!cJSON_IsNumber(turns) || turns->valueint == 0) &&
-                       (!cJSON_IsNumber(tools) || tools->valueint == 0) &&
-                       liveness_is_unexecuted_tool_plan_response(out->display);
-      if (!media && (liveness_is_degenerate_response(out->display) || unexecuted))
-         snprintf(out->diagnostic, sizeof out->diagnostic,
-                  unexecuted
-                      ? "delegate returned an unexecuted tool-use plan without tool execution"
-                      : "delegate returned raw tool-call markup or another degenerate response");
-      else
-      {
-         out->status = "done";
-         out->result = out->display;
-      }
-   }
-   else if (status && !strcmp(status, "error") && ir.stop_reason == AIMEE_STOP_MAX_TOKENS &&
-            !ir.error_message && !ir.refusal && !pending_tool && authored)
-   {
-      out->status = "partial";
-      snprintf(out->diagnostic, sizeof out->diagnostic,
-               "Partial result; delegate ended with error: %.500s\n\n%.1300s",
-               message && message[0] ? message : "model token limit reached", out->display);
-      out->result = out->diagnostic;
-   }
-   else if ((!message || !message[0]) && ir.error_message && ir.error_message[0])
-      snprintf(out->diagnostic, sizeof out->diagnostic, "%s", ir.error_message);
-finish:
-   aimee_response_free(&ir);
-}
-
-static void compute_update_background_job(compute_ctx_t *cctx, cJSON *resp)
-{
-   if (!cctx || cctx->background_job_id <= 0 || !resp)
-      return;
-   compute_terminal_outcome_t outcome;
-   compute_terminal_outcome(resp, &outcome);
-   cJSON *turns = cJSON_GetObjectItemCaseSensitive(resp, "turns");
-   cJSON *cost_usd = cJSON_GetObjectItemCaseSensitive(resp, "cost_usd");
-   int cursor_turn = 0;
-   if (cJSON_IsNumber(turns))
-      cursor_turn = turns->valueint;
-   else
-   {
-      db1_agent_job_t job;
-      if (db1_agent_job_get(cctx->background_job_id, &job) == 0)
-         cursor_turn = job.cursor_turn;
-      db1_agent_job_free(&job); /* zero-init by get on miss; safe either way */
-   }
-
-   cJSON *cost_known = cJSON_GetObjectItemCaseSensitive(resp, "cost_known");
-   /* An absent or false cost_known means the delegate produced no measurement.
-    * Leave the stored cost unknown rather than recording a false zero. */
-   int has_cost =
-       cJSON_IsTrue(cost_known) && cJSON_IsNumber(cost_usd) && cost_usd->valuedouble >= 0.0;
-   if (db1_agent_job_complete(cctx->background_job_id, outcome.status, cursor_turn, outcome.result,
-                              has_cost, has_cost ? cost_usd->valuedouble : 0.0) != 0)
-      aimee_log(LOG_ERROR, "delegate", "background job %d terminal status/cost write failed",
-                cctx->background_job_id);
-   free(outcome.display);
-}
-
-static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
-{
-   if (!cctx || cctx->coord_task_id <= 0 || !resp)
-      return;
-   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "status"));
-   if (status && !strcmp(status, "preempted"))
-   {
-      if (db1_coord_job_release_task_bounded_owned(cctx->coord_task_id, cctx->coord_claim_owner,
-                                                   config_concurrency_preempt_requeue_max()) == 0)
-      {
-         server_coord_dispatcher_notify();
-         return;
-      }
-      db1_coord_job_fail_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
-                                    "preempt requeue cap exhausted");
-   }
-   else
-   {
-      compute_terminal_outcome_t outcome;
-      compute_terminal_outcome(resp, &outcome);
-      if (!strcmp(outcome.status, "done"))
-         db1_coord_job_complete_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
-                                           outcome.result);
-      else
-         db1_coord_job_fail_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
-                                       outcome.result);
-      free(outcome.display);
-   }
-   server_coord_dispatcher_notify();
-}
-
 /* Write response and free context */
 void compute_respond(compute_ctx_t *cctx, cJSON *resp)
 {
@@ -301,8 +171,8 @@ void compute_respond(compute_ctx_t *cctx, cJSON *resp)
          cJSON_AddStringToObject(resp, "message", "canonical session persistence failed");
       }
    }
-   compute_update_background_job(cctx, resp);
-   compute_update_coord_task(cctx, resp);
+   compute_ctx_update_background_job(cctx, resp);
+   compute_ctx_update_coord_task(cctx, resp);
 
    if (cctx->conn_fd < 0)
    {
@@ -370,27 +240,6 @@ static void delegation_compute_error(compute_ctx_t *cctx, const char *message)
    char buf[2048];
    delegation_augment_error(message, buf, sizeof(buf));
    compute_error(cctx, buf);
-}
-
-void compute_ctx_release_budget(compute_ctx_t *cctx)
-{
-   if (!cctx || cctx->compute_grant <= 0)
-      return;
-
-   if (g_aimee_compute_threads_override == cctx->compute_grant)
-      g_aimee_compute_threads_override = 0;
-   if (cctx->compute_budget_acquired || cctx->compute_executor_threads <= 0)
-      server_compute_budget_release(cctx->server, cctx->compute_grant);
-   cctx->compute_grant = 0;
-   cctx->compute_budget_acquired = 0;
-}
-
-static _Thread_local compute_ctx_t **compute_lifetime_slot;
-compute_ctx_t **compute_ctx_lifetime_bind(compute_ctx_t **slot)
-{
-   compute_ctx_t **previous = compute_lifetime_slot;
-   compute_lifetime_slot = slot;
-   return previous;
 }
 
 int server_chat_original_submission_prepare(compute_ctx_t *cctx)
@@ -476,58 +325,6 @@ int server_chat_original_submission_prepare(compute_ctx_t *cctx)
          return -1;
    }
    return 0;
-}
-
-void compute_ctx_free(compute_ctx_t *cctx)
-{
-   if (!cctx)
-      return;
-   int previous_cancel;
-   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel);
-   if (compute_lifetime_slot && *compute_lifetime_slot == cctx)
-      *compute_lifetime_slot = NULL;
-   if (cctx->original_submission && !cctx->original_admitted)
-      server_chat_ir_abort(cctx);
-   else
-      server_chat_ir_close(cctx);
-   if (cctx->original_submission)
-   {
-      cJSON *raw = cJSON_GetObjectItemCaseSensitive(cctx->req, "message");
-      if (cJSON_IsString(raw))
-         OPENSSL_cleanse(raw->valuestring, strlen(raw->valuestring));
-   }
-   host_original_submission_finish(cctx->original_submission, cctx->original_admitted);
-   host_original_submission_destroy(&cctx->original_submission);
-   host_original_submission_result_destroy(&cctx->original_result);
-   aimee_message_free(&cctx->ir_input);
-   aimee_request_free(&cctx->delegate_request);
-   free(cctx->delegate_task);
-   if (cctx->background_job_id > 0)
-      agent_set_durable_job(0);
-   if (cctx->compute_grant > 0)
-   {
-      compute_ctx_release_budget(cctx);
-   }
-   if (cctx->req)
-      cJSON_Delete(cctx->req);
-   free(cctx->delta_buf); /* presence-ring text-coalescing buffer (WP-1) */
-   free(cctx->live_text); /* db1 live-turn mirror accumulator */
-   if (cctx->write_mutex)
-   {
-      pthread_mutex_destroy(cctx->write_mutex);
-      free(cctx->write_mutex);
-   }
-#ifdef AIMEE_POSIX
-   if (cctx->conn_fd >= 0)
-      close(cctx->conn_fd);
-#endif
-   request_context_snapshot_clear(&cctx->request_context);
-   const workspace_turn_mirror_lease_t *bound = workspace_turn_mirror_bind(NULL);
-   if (bound != cctx->source_mirror)
-      workspace_turn_mirror_bind(bound);
-   workspace_turn_mirror_release(cctx->source_mirror);
-   free(cctx);
-   pthread_setcancelstate(previous_cancel, NULL);
 }
 
 /* --- delegate worker --- */

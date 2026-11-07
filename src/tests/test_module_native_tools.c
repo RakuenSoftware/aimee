@@ -14,18 +14,39 @@
 #include <sys/wait.h>
 #include <unistd.h>
 extern cJSON *openai_ir_render_tool(const aimee_tool_t *, int);
-static const struct
+#include "../server/module_native_tools.h"
+int agent_tools_builtin_name_reserved(const char *name)
 {
-   const char *name;
-} g_builtin_tools[] = {{"builtin_tool"}};
-static int agent_tools_is_mcp_derived_fixture(const char *name)
+   return !strcmp(name, "builtin_tool");
+}
+int agent_tools_is_mcp_derived(const char *name)
 {
    return !strcmp(name, "existing_mcp");
 }
-#define agent_tools_is_mcp_derived agent_tools_is_mcp_derived_fixture
-#define TSURF_RESP                 2u
-#include "../server/module_native_tools.inc"
-#undef agent_tools_is_mcp_derived
+#define TSURF_RESP              2u
+#define module_native_collision agent_tools_module_native_collision
+extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
+static int module_native_emit(cJSON *tools, unsigned surface)
+{
+   aimee_request_t snapshot = {0};
+   if (agent_tools_module_native_snapshot(&snapshot))
+      return -1;
+   int rc = 0;
+   for (int i = 0; !rc && i < snapshot.n_tools; ++i)
+   {
+      const aimee_tool_t *definition = snapshot.tools + i;
+      if (aimee_module_tool_source_mode && aimee_module_tool_source_mode(definition->name) < 0)
+         continue;
+      cJSON *entry = openai_ir_render_tool(definition, surface == TSURF_RESP);
+      if (!entry || !cJSON_AddItemToArray(tools, entry))
+      {
+         cJSON_Delete(entry);
+         rc = -1;
+      }
+   }
+   aimee_request_free(&snapshot);
+   return rc;
+}
 
 static int calls, cancel_callback, null_callback;
 static char *callback(const char *name, const cJSON *args, int timeout, int *error, void *state)

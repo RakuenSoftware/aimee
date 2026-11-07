@@ -191,6 +191,15 @@ cJSON *server_invoke_module_operation(const char *method, const char *operation,
        "\"private local memory\"}}");
 }
 
+static int caller_operation_calls;
+cJSON *server_invoke_module_caller_operation(const char *method, const char *operation,
+                                             const cJSON *request, const char *unavailable_message)
+{
+   assert(!strcmp(method, "memory.runtime") && !strcmp(operation, "personal-recall"));
+   caller_operation_calls++;
+   return server_invoke_module_operation(method, operation, request, unavailable_message);
+}
+
 static const char *review_reply, *review_method;
 static int review_calls;
 static const char *expected_search_keyword;
@@ -892,6 +901,7 @@ static void test_private_command_envelopes(void)
 
 static void test_personal_recall_owner_envelope(void)
 {
+   caller_operation_calls = 0;
    personal_recall_reply = "{\"status\":\"ok\",\"store\":\"user\",\"recall\":{\"identity\":[{"
                            "\"id\":9007199254740993,\"text\":\"個人設定\"}],\"approx_tokens\":81}}";
    char *body = server_user_memory_recall_json("private query", 8192, 1);
@@ -909,6 +919,7 @@ static void test_personal_recall_owner_envelope(void)
    personal_quarantine = 0;
    personal_recall_reply = NULL;
    assert(server_user_memory_recall_json("private query", 8192, 1) == NULL);
+   assert(caller_operation_calls == 4);
 }
 
 int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,

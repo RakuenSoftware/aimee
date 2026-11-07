@@ -1285,8 +1285,6 @@ int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
    return rc;
 }
 
-#include "server_http_module_console.inc"
-
 static void protected_http_wipe_strings(cJSON *value)
 {
    for (cJSON *item = value; item; item = item->next)

@@ -1525,7 +1525,7 @@ agent_mcp_call_fn agent_tools_mcp_call_provider(void)
    return g_mcp_call_fn;
 }
 
-static void module_native_collision(const char *name);
+#include "module_native_tools.h"
 void agent_tools_register_mcp_tool(const char *name)
 {
    if (!name || !name[0])
@@ -1534,7 +1534,7 @@ void agent_tools_register_mcp_tool(const char *name)
       return;
    if (agent_tools_module_native_has(name))
    {
-      module_native_collision(name);
+      agent_tools_module_native_collision(name);
       return;
    }
    if (g_mcp_tool_count >= (int)(sizeof(g_mcp_tools) / sizeof(g_mcp_tools[0])))
@@ -1688,7 +1688,15 @@ static int builtin_ir_definition(const builtin_tool_def_t *definition, aimee_too
 
 extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
 
-#include "module_native_tools.inc"
+int agent_tools_builtin_name_reserved(const char *name)
+{
+   if (!name)
+      return 0;
+   for (size_t i = 0; i < sizeof g_builtin_tools / sizeof *g_builtin_tools; ++i)
+      if (!strcmp(name, g_builtin_tools[i].name))
+         return 1;
+   return 0;
+}
 
 /* The immutable canonical schema cache owns borrowed lookup pointers until exit. */
 static aimee_request_t g_schema_cache;
@@ -1750,7 +1758,6 @@ static int catalog_advert(aimee_request_t *catalog, const char *name, const cJSO
 
 int agent_tools_catalog(aimee_wire_t exposure, aimee_request_t *out)
 {
-   (void)module_native_emit;
    if (!out || (exposure != AIMEE_WIRE_OPENAI_CHAT && exposure != AIMEE_WIRE_RESPONSES &&
                 exposure != AIMEE_WIRE_ANTHROPIC))
       return -1;
@@ -1773,14 +1780,13 @@ int agent_tools_catalog(aimee_wire_t exposure, aimee_request_t *out)
       if (rc)
          goto failed;
    }
-   pthread_mutex_lock(&module_native.lock);
-   module_native.sealed = 1;
-   int invalid = module_native.invalid;
-   size_t module_count = module_native.count;
-   pthread_mutex_unlock(&module_native.lock);
-   for (size_t i = 0; !invalid && i < module_count; ++i)
+   aimee_request_t module_catalog = {0};
+   if (agent_tools_module_native_snapshot(&module_catalog))
+      goto failed;
+   int invalid = 0;
+   for (int i = 0; !invalid && i < module_catalog.n_tools; ++i)
    {
-      const aimee_tool_t *definition = module_native.definitions + i;
+      const aimee_tool_t *definition = module_catalog.tools + i;
       if (aimee_module_tool_source_mode && aimee_module_tool_source_mode(definition->name) < 0)
          continue;
       if (catalog_contains(&catalog, definition->name) ||
@@ -1788,6 +1794,7 @@ int agent_tools_catalog(aimee_wire_t exposure, aimee_request_t *out)
                          cJSON_Duplicate(definition->schema, 1)))
          invalid = 1;
    }
+   aimee_request_free(&module_catalog);
    if (invalid)
       goto failed;
    if (g_mcp_call_fn && g_mcp_advert_fn)

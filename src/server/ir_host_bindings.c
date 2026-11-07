@@ -107,6 +107,11 @@ int server_ir_plan_enabled(const char *method, const char *operation, const char
    }
    int rc = aimee_module_commands_dispatch_internal_timeout(method, args, 500, &reply);
    cJSON_Delete(args);
+   if (rc == 0)
+   {
+      cJSON_Delete(reply);
+      return -1; /* No registered owner; distinct from a selected owner failure. */
+   }
    const char *status = field(reply, "status");
    int enabled = !(rc > 0 && status && strcmp(status, "ok") == 0 &&
                    cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(reply, "enabled")));

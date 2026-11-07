@@ -28,7 +28,7 @@
 #include <pthread.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include "module_native_surface_cases.inc"
+void module_surface_cases(void);
 #endif
 
 /* Only external catalogue owners are substituted; canonical construction/filtering

@@ -41,7 +41,7 @@ $(OBJDIR)/tests/postgres-client/%.o: modules/postgres/client/%.c | $(OBJDIR)/aim
 	@mkdir -p $(dir $@)
 	$(CC) $(C_FLAGS) -DAIMEE_POSTGRES_LOCAL_PROVIDER='"$(abspath $(OBJDIR)/aimee-module)"' -c -o $@ $<
 
-KB_STORE_TEST_BACKEND_OBJ = $(OBJDIR)/tests/aimee_pg_sqlite_shim.o
+KB_STORE_TEST_BACKEND_OBJ = $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/kb_store/index_observer.o
 KB_STORE_TEST_BACKEND_LIB =
 ifeq ($(AIMEE_TEST_PG),1)
 # entity_edges.o rides along because kb_store_init calls kb_store_entity_edge_build_unique_index
@@ -50,7 +50,7 @@ ifeq ($(AIMEE_TEST_PG),1)
 # name the object; against real libpq the branch is live and 54 of them stop
 # linking. Carrying it with the backend keeps the choice to this one place instead
 # of editing every recipe.
-KB_STORE_TEST_BACKEND_OBJ = $(OBJDIR)/kb_store/db_postgres.o $(TEST_POSTGRES_CLIENT_OBJS) $(OBJDIR)/kb_store/entity_edges.o
+KB_STORE_TEST_BACKEND_OBJ = $(OBJDIR)/kb_store/db_postgres.o $(TEST_POSTGRES_CLIENT_OBJS) $(OBJDIR)/kb_store/entity_edges.o $(OBJDIR)/kb_store/index_observer.o
 KB_STORE_TEST_BACKEND_LIB =
 # Lets the shim tell "you forgot AIMEE_TEST_KB_STORE_TEMPLATE_URL" apart from "you
 # wanted sqlite", which are otherwise the same code path and abort identically.
@@ -112,7 +112,7 @@ TEST_RUN_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/n
 # obs_bus now exposes the authenticated external-module listener. Focused tests
 # link the bus as loose objects, so keep its two new implementation objects in
 # one fixture rather than duplicating them in every target below.
-OBS_BUS_LINK_OBJS = $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/instance_identity.o \
+OBS_BUS_LINK_OBJS = $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/obs_bus_call.o $(OBJDIR)/modules/audit/instance_identity.o \
                     $(OURO_RING_LIB) \
                     $(OBJDIR)/aimee_sha256.o
 TEST_WORM_OBJS = $(OBJDIR)/modules/audit/audit_worm.o \
@@ -231,6 +231,36 @@ BUS_TEST_OBJS = $(OBS_BUS_LINK_OBJS) \
                 $(OURO_RING_LIB)
 # The delegate loop builds requests and imports history through translation.
 # Carry its complete IR boundary in every fixture that links the runtime bundle.
+TEST_WORKSPACE_OBJS_EXTRA += $(OBJDIR)/server/module_native_tools.o
+# Actual runtime owners shared by every fixture linking the workspace/delegate loop.
+TEST_WORKSPACE_OBJS_EXTRA += $(DB1_CLIENT_OBJS) \
+    $(OBJDIR)/modules/delegates/delegate_role.o $(OBJDIR)/role_templates.o \
+    $(OBJDIR)/modules/delegates/delegate_driver.o $(OBJDIR)/modules/delegates/delegate_openai.o \
+    $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(TEST_MEMORY_TRANSPORT_OBJS) \
+    $(OBJDIR)/server/ingress_project_scope.o $(OBJDIR)/modules/kb_client/kb_client_code_graph.o \
+    $(OBJDIR)/server/retrieval_outcome_bridge.o $(OBJDIR)/server/server_governed_action.o \
+    $(OBJDIR)/server/agent_admission.o \
+    $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
+    $(OBJDIR)/server/agent_runtime_liveness.o \
+    $(OBJDIR)/db1_client/delegation.o \
+    $(OBJDIR)/db1_client/agent_work.o \
+    $(OBJDIR)/db1_client/conversation.o \
+    $(OBJDIR)/db1_client/workflow.o \
+    $(OBJDIR)/db1_client/git_ownership.o \
+    $(OBJDIR)/db1_client/sessions.o \
+    $(OBJDIR)/db1_client/guardrail_state.o \
+    $(OBJDIR)/db1_store_ready.o \
+    $(OBJDIR)/server/ingress_preinject.o \
+    $(OBJDIR)/server/liveness.o \
+    $(OBJDIR)/server/middleware.o \
+    $(OBJDIR)/server/otel.o \
+    $(OBJDIR)/payload_rewrite.o \
+    $(OBJDIR)/server/execution_policy_bus.o \
+    $(OBJDIR)/server/rounds_to_resume.o \
+    $(OBJDIR)/server/session_compact.o \
+    $(OBJDIR)/server/agent_fallback.o \
+    $(OBJDIR)/core/turn_integrity/turn_integrity.o
+
 TEST_WORKSPACE_OBJS_EXTRA += $(BUS_TEST_OBJS) \
     $(OBJDIR)/modules/translation/history_ir.o \
     $(OBJDIR)/modules/translation/aimee_backend_openai.o
@@ -286,6 +316,8 @@ TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/test
                  $(OBJDIR)/kb_store/bandit.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o \
                  $(OBJDIR)/kb/kb_mdl.o \
                  $(OBJDIR)/server/computer_use.o
+
+TEST_DATA_OBJS += $(DB1_CLIENT_OBJS) $(BUS_TEST_OBJS) $(OBJDIR)/module_json_call.o
 
 # Same as TEST_DATA_OBJS but with the agent_http_* mock appended. Used by
 # targets that exercise the embedding/vector path without pulling in the
@@ -1207,9 +1239,9 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_PROXY_PREREQ) $(OBJDIR)
 	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
 	fd="$$(mktemp -d /tmp/autf.XXXXXX)"; \
 	export HOME="$$th" TMPDIR="$$th" AIMEE_VERIFY_LOCK_FILE="$$th/nested-verify.lock"; \
-	unset AIMEE_TEST_RUNTIME_FIXTURE AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN \
+	unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN \
 	  AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL \
-	  AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET; \
+	  AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET AIMEE_TEST_RUNTIME_FIXTURE; \
 	trap 'rm -rf "$$th" "$$fd"' EXIT; \
 	export AIMEE_TEST_FAILURE_DIR="$$fd"; \
 	export AIMEE_TEST_MODULE_BIN="$(CURDIR)/$(OBJDIR)/aimee-module"; \
@@ -1559,7 +1591,7 @@ $(TESTPREFIX)/unit-test-curator-queue: \
 # working vector query from a broken one. This one target swaps the shim for
 # db_postgres.o so the query runs where halfvec actually lives.
 TEST_CORE_OBJS_PG = $(filter-out $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o,$(TEST_CORE_OBJS)) \
-                    $(OBJDIR)/kb_store/db_postgres.o $(TEST_POSTGRES_CLIENT_OBJS) $(OBJDIR)/kb_store/entity_edges.o
+                    $(OBJDIR)/kb_store/db_postgres.o $(TEST_POSTGRES_CLIENT_OBJS) $(OBJDIR)/kb_store/entity_edges.o $(OBJDIR)/kb_store/index_observer.o
 
 $(TESTPREFIX)/unit-test-pgvec: $(OBJDIR)/tests/test_pgvec.o \
                     $(OBJDIR)/kb_store/pgvec_transport.o $(OBJDIR)/kb_store/kb_vectors.o \
@@ -1685,7 +1717,7 @@ $(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/tests/test_guardrails.o $(OBJDIR)/
                             $(OBJDIR)/server/obs_bus_adapter.o \
                             $(TEST_WORM_OBJS) \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/db1_client/git_ownership.o $(OBJDIR)/db1_client/guardrail_state.o $(OBJDIR)/db1_client/telemetry.o,$^) $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-hooks-scope: $(OBJDIR)/tests/test_cmd_hooks_scope.o \
                              $(OBJDIR)/modules/translation/hook_ir.o $(OBJDIR)/modules/ir/aimee_ir.o \
@@ -1708,7 +1740,7 @@ $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/support/agent_admission_st
                       $(OBJDIR)/server/cli_session.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o
-	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/server/ingress_preinject.o $(OBJDIR)/server/server_governed_action.o $(OBJDIR)/server/otel.o,$(filter-out $(OBJDIR)/role_templates.o,$^)) $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(OBJDIR)/tests/test_script_rpc_admission.o: C_FLAGS += -Imodules/execution-policy/include
 
@@ -2879,7 +2911,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/modules/delegates/delegate_routing.o $(
                       $(OBJDIR)/server/model_provider.o   \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o
-	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/server/ingress_preinject.o $(OBJDIR)/server/server_governed_action.o $(OBJDIR)/server/otel.o,$(filter-out $(OBJDIR)/role_templates.o,$^)) $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
 # Restored. Deleted with the C store as "store-coupled": its only matches for
 # /db1/ were an <sqlite3.h> include it never used, a db_schema.h include it never
@@ -2899,7 +2931,7 @@ $(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/tests/test_mcp_git.o $(OBJDIR)/tests/
                         $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o \
                         $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
                         $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/db1_client/git_ownership.o $(OBJDIR)/db1_client/guardrail_state.o,$^) $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-verify-select: $(OBJDIR)/tests/test_git_verify_select.o \
                         $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o \
@@ -4373,7 +4405,7 @@ $(TESTPREFIX)/unit-test-toolset-thread-scope: \
                                        $(OBJDIR)/modules/delegates/delegate_role.o \
                                        $(OBJDIR)/toolset.o \
                                        $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/role_templates.o,$^) $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-toolset: \
                                        $(OBJDIR)/tests/test_toolset.o \
@@ -5298,13 +5330,12 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
     $(OBJDIR)/db1_client/guardrail_state.o \
     $(OBJDIR)/db1_store_ready.o \
     $(OBJDIR)/server/ingress_preinject.o \
-    $(OBJDIR)/server/modules/kb/c/index_observer.o \
     $(OBJDIR)/server/liveness.o \
     $(OBJDIR)/server/middleware.o \
     $(OBJDIR)/server/otel.o \
-    $(OBJDIR)/server/payload_rewrite.o \
+    $(OBJDIR)/payload_rewrite.o \
     $(OBJDIR)/server/execution_policy_bus.o \
-    $(OBJDIR)/server/role_templates.o \
+    $(OBJDIR)/role_templates.o \
     $(OBJDIR)/server/rounds_to_resume.o \
     $(OBJDIR)/server/session_compact.o \
     $(OBJDIR)/server/agent_fallback.o \
@@ -5339,7 +5370,7 @@ AGENT_CONTEXT_REFUSAL_TEST_COMMON = $(OBJDIR)/server/agent_admission.o \
                                 $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o \
                                 $(OBJDIR)/server/agent_tools.o \
                                 $(OBJDIR)/modules/delegates/delegate_role.o \
-                                $(TEST_DATA_OBJS) $(filter-out $(OBJDIR)/server/http_retry.o,$(TEST_WORKSPACE_OBJS_EXTRA)) \
+                                $(TEST_DATA_OBJS) $(filter-out $(OBJDIR)/server/http_retry.o $(OBJDIR)/role_templates.o,$(TEST_WORKSPACE_OBJS_EXTRA)) \
                                 $(DB1_CLIENT_OBJS) $(OBJDIR)/db1_store_ready.o \
                                 $(OBJDIR)/server/agent_fallback.o $(OBJDIR)/server/server_error_kind.o \
                                 $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/middleware.o \
@@ -5353,7 +5384,7 @@ AGENT_CONTEXT_REFUSAL_TEST_COMMON = $(OBJDIR)/server/agent_admission.o \
     $(OBJDIR)/modules/translation/aimee_frontend_responses.o
 
 $(TESTPREFIX)/unit-test-agent-context-refusal: $(OBJDIR)/tests/test_agent_context_refusal.o $(AGENT_CONTEXT_REFUSAL_TEST_COMMON)
-	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/module_commands.o $(OBJDIR)/server/ingress_preinject.o $(OBJDIR)/server/server_governed_action.o,$^) $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 # Links the real dispatch TU against the shared test object sets — no stubs needed
 # (TEST_DATA_OBJS + TEST_WORKSPACE_OBJS_EXTRA already cover every td_* handler's
@@ -5373,7 +5404,7 @@ $(TESTPREFIX)/unit-test-mcp-native-dispatch: \
                                        $(OBJDIR)/toolset.o \
                                        $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o
-	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/role_templates.o,$^) $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 # Catalog/render-only fixture: real registry, all provider renderers and their
 # ordinary read/config transports. Do not link server/agent_bridge or the whole
@@ -6858,7 +6889,7 @@ $(TESTPREFIX)/unit-test-module-native-tools: $(OBJDIR)/tests/test_module_native_
     $(OBJDIR)/text.o $(OBJDIR)/util.o
 	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS) -lpthread -lm -lcrypto
 
-$(OBJDIR)/server/server_session_capture.o: server/original_input_delivery.h server/original_input_delivery.inc
+$(OBJDIR)/server/server_session_capture.o: server/original_input_delivery.h
 
 $(TESTPREFIX)/unit-test-server-session-delivery-conflict: $(OBJDIR)/tests/test_server_session_delivery_conflict.o \
     $(OBJDIR)/server/server_session.o $(OBJDIR)/server/server_http_response.o \
@@ -6870,7 +6901,7 @@ $(TESTPREFIX)/unit-test-db1-original-input-delivery-client: $(OBJDIR)/tests/test
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(L_MINIMAL)
 
 # Operational original-input safe-plan client and genuine capability boundary.
-$(OBJDIR)/server/server_session_capture.o: server/original_input_plan.h server/original_input_plan.inc db1_client/original_input_plan.h
+$(OBJDIR)/server/server_session_capture.o: server/original_input_plan.h db1_client/original_input_plan.h
 $(OBJDIR)/tests/test_server_original_input_plan.o: tests/test_server_original_input_delivery.c tests/test_server_session_log.c
 $(TESTPREFIX)/unit-test-server-original-input-plan: $(OBJDIR)/tests/test_server_original_input_plan.o \
     $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_log.o $(OBJDIR)/server/server_learning_outcome.o $(OBJDIR)/server/server_session_control.o \
@@ -6890,7 +6921,7 @@ $(TESTPREFIX)/unit-test-runtime-hint-summary: $(OBJDIR)/tests/test_runtime_hint_
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Direct-route cancellation cases share the real authenticated bus fixture.
-$(OBJDIR)/tests/test_obs_bus_module_concurrency.o: tests/module_command_cancellation_cases.inc headers/module_commands.h
+$(OBJDIR)/tests/module_command_cancellation_cases.o: headers/module_commands.h
 
 $(TESTPREFIX)/unit-test-ir-request-codec: $(OBJDIR)/tests/test_ir_request_codec.o \
     $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
@@ -6950,7 +6981,7 @@ $(TESTPREFIX)/unit-test-agent-usage-audit: $(OBJDIR)/tests/test_agent_usage_audi
 	$(TESTLINK) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-provider-attempt-usage: $(OBJDIR)/tests/test_provider_attempt_usage.o $(OBJDIR)/modules/delegates/delegate_launch_args.o $(filter-out $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/posix/agent_runtime.o $(OBJDIR)/server/agent_result_cache.o,$(AGENT_CONTEXT_REFUSAL_TEST_COMMON)) $(OBJDIR)/tests/job_progress_agent_runtime.o $(OBJDIR)/tests/job_progress_result_cache.o $(OBJDIR)/tests/agent_job_progress_owner.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/posix/agent_bridge.o
-	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -Wl,--wrap=db1_delegation_spawn_is_stopped -Wl,--wrap=db1_delegation_spawn_stop_reason
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/module_commands.o $(OBJDIR)/server/ingress_preinject.o $(OBJDIR)/server/server_governed_action.o,$^) $(OURO_RING_LIB) $(TEST_L_FLAGS) -Wl,--wrap=db1_delegation_spawn_is_stopped -Wl,--wrap=db1_delegation_spawn_stop_reason
 
 # Actual thin-CLI forwarding consumers share the canonical identity closure.
 $(TESTPREFIX)/unit-test-cli-argspec \
@@ -7006,3 +7037,76 @@ CORE_LIB_LINKED_EXTRA_TARGETS := $(addprefix $(TESTPREFIX)/, \
    virtual-context-inspect)
 
 $(CORE_LIB_LINKED_EXTRA_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
+
+# Store/index test consumers share the actual optional mutation observer.
+# Unused observer sections are discarded for targets without a store.
+
+$(TESTPREFIX)/unit-test-obs-bus-module-concurrency: $(OBJDIR)/tests/module_command_cancellation_cases.o
+$(TESTPREFIX)/unit-test-mcp-native-surface: $(OBJDIR)/tests/module_native_surface_cases.o
+
+$(TESTPREFIX)/unit-test-module-native-tools: $(OBJDIR)/server/module_native_tools.o
+
+
+$(TESTPREFIX)/unit-test-server-module-console: $(OBJDIR)/server/server_http_module_console.o
+
+# These surface fixtures use the same real runtime owners as agent HTTP.
+$(TESTPREFIX)/unit-test-mcp-native-surface: \
+    $(OBJDIR)/server/ingress_project_scope.o $(OBJDIR)/modules/kb_client/kb_client_code_graph.o \
+    $(OBJDIR)/server/retrieval_outcome_bridge.o $(OBJDIR)/server/server_governed_action.o \
+    $(OBJDIR)/server/agent_admission.o \
+    $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
+    $(OBJDIR)/server/agent_runtime_liveness.o \
+    $(OBJDIR)/db1_client/delegation.o \
+    $(OBJDIR)/db1_client/agent_work.o \
+    $(OBJDIR)/db1_client/conversation.o \
+    $(OBJDIR)/db1_client/workflow.o \
+    $(OBJDIR)/db1_client/git_ownership.o \
+    $(OBJDIR)/db1_client/sessions.o \
+    $(OBJDIR)/db1_client/guardrail_state.o \
+    $(OBJDIR)/db1_store_ready.o \
+    $(OBJDIR)/server/ingress_preinject.o \
+    $(OBJDIR)/server/liveness.o \
+    $(OBJDIR)/server/middleware.o \
+    $(OBJDIR)/server/otel.o \
+    $(OBJDIR)/payload_rewrite.o \
+    $(OBJDIR)/server/execution_policy_bus.o \
+    $(OBJDIR)/role_templates.o \
+    $(OBJDIR)/server/rounds_to_resume.o \
+    $(OBJDIR)/server/session_compact.o \
+    $(OBJDIR)/server/agent_fallback.o \
+    $(OBJDIR)/core/turn_integrity/turn_integrity.o
+
+$(OBJDIR)/tests/support/store_module_fixture.o: C_FLAGS += $(PQ_CFLAGS)
+$(TESTPREFIX)/unit-test-kb-store $(TESTPREFIX)/unit-test-schema-subst: $(OBJDIR)/kb_store/index_observer.o
+$(TESTPREFIX)/unit-test-delegate-result-envelope: $(OBJDIR)/server/server_compute_owner.o
+$(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/server/server_http_owned_source.o $(OBJDIR)/server/server_http_module_console.o
+
+$(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/aimee_sha256.o
+$(TESTPREFIX)/unit-test-server-chat-ir: $(OBJDIR)/server/host_original_submission.o
+
+$(TESTPREFIX)/unit-test-canonical-cancel-compute: $(OBJDIR)/server/server_compute_lifetime.o $(OBJDIR)/server/host_original_submission.o
+$(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/command_registry.o
+
+$(TESTPREFIX)/unit-test-kb-vault-key-use-live $(TESTPREFIX)/unit-test-kb-vault-rotation-live $(TESTPREFIX)/unit-test-kb-vault-rotation-worker-live $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live $(TESTPREFIX)/unit-test-vault-server-key: $(OBJDIR)/modules/vault/vault_store.o
+
+$(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/server/module_native_tools.o $(OBJDIR)/tests/support/http_empty_module_registry.o $(OBJDIR)/modules/tools/agent_tools_effect_contract.o $(OBJDIR)/core/turn_integrity/turn_integrity.o
+
+$(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: EXTRA_L_FLAGS += -lm
+
+$(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/server/tool_args_coerce.o
+
+$(TESTPREFIX)/unit-test-kb-vault-key-use-live $(TESTPREFIX)/unit-test-kb-vault-rotation-live $(TESTPREFIX)/unit-test-kb-vault-rotation-worker-live $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live $(TESTPREFIX)/unit-test-oauth-pkce $(TESTPREFIX)/unit-test-oauth-reauth $(TESTPREFIX)/unit-test-oauth-refresh-diagnostics: $(OBJDIR)/modules/audit/obs_bus_call.o
+$(TESTPREFIX)/unit-test-server-native-runtime: $(OBJDIR)/server/module_native_tools.o $(OBJDIR)/tests/support/http_empty_module_registry.o $(OBJDIR)/modules/tools/agent_tools_effect_contract.o $(OBJDIR)/server/tool_args_coerce.o $(OBJDIR)/core/turn_integrity/turn_integrity.o
+$(TESTPREFIX)/unit-test-server-native-owned-guard: $(OBJDIR)/command_registry.o
+
+# Preserve explicit fixture peers while linking the remaining real protocol API.
+$(OBJDIR)/tests/session_state_protocol_client.o: db1_client/guardrail_state.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Ddb1_session_state_save=unused_fixture_session_state_save -Ddb1_session_state_load=unused_fixture_session_state_load -Ddb1_session_state_delete=unused_fixture_session_state_delete -c -o $@ $<
+$(OBJDIR)/tests/guardrail_telemetry_protocol_client.o: db1_client/telemetry.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Ddb1_interaction_event_record=unused_fixture_interaction_event_record -Ddb1_guardrail_event_insert=unused_fixture_guardrail_event_insert -c -o $@ $<
+$(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/tests/session_state_protocol_client.o
+$(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/tests/guardrail_telemetry_protocol_client.o
+
+$(TESTPREFIX)/unit-test-module-json-call: EXTRA_L_FLAGS += -lcrypto

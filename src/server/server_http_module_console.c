@@ -1,3 +1,8 @@
+#include "server_http_internal.h"
+#include <aimee/ir/session_event.h>
+#include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
 /* The optional module owns command semantics. HTTP supplies only verified
  * request context and bounded bytes, through the same hook as the KB adapter. */
 #include "kb_http_console.h"
@@ -16,7 +21,7 @@ static void module_console_http_cleanup(void *opaque)
    free(scope->context_json);
    free(scope->body);
 }
-static int rh_module_console_admin(const route_req_t *rq, char *resp, int cap)
+int rh_module_console_admin(const route_req_t *rq, char *resp, int cap)
 {
    if (!rq || !resp || cap < 3)
       return 500;

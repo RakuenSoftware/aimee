@@ -29,8 +29,13 @@
 static int ir_memory_enabled(void)
 {
    int tri = config_present() ? config_module_memory() : -1;
-   return config_module_enabled(tri, server_ir_plan_enabled("memory.runtime", "gateway-enabled",
-                                                            getenv("AIMEE_STAGE_MEMORY")));
+   int selected =
+       server_ir_plan_enabled("memory.runtime", "gateway-enabled", getenv("AIMEE_STAGE_MEMORY"));
+   /* An explicit operator enable remains required even if its selected owner
+    * has disappeared. Otherwise an absent optional owner supplies no plans. */
+   if (selected < 0)
+      return tri > 0 ? 1 : -1;
+   return config_module_enabled(tri, selected);
 }
 
 static int ir_stage_context_authority(aimee_request_t *ir, void *ud)
@@ -167,11 +172,12 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
    const aimee_ir_transform_t stages[] = {
        {"context_authority", ir_stage_context_authority, NULL, 1},
        {"knowledge_freshness", ir_stage_knowledge_freshness, NULL, 1},
-       {"memory", aimee_ir_stage_module_plan, &context_plan, memory_enabled},
+       {"memory", aimee_ir_stage_module_plan, &context_plan, memory_enabled > 0},
        /* Runs AFTER memory, so the opening turn already carries the guidance that
-        * names what replaces the shell it is about to lose. Always on: an agent
-        * that never reaches aimee's tools is not using aimee. */
-       {"first_turn_shell_block", aimee_ir_stage_module_plan, &tools_plan, 1},
+        * names what replaces the shell it is about to lose. A selected owner
+        * retains this phase even when context injection is disabled. No owner
+        * means no module-owned tool policy; selected failures still refuse. */
+       {"first_turn_shell_block", aimee_ir_stage_module_plan, &tools_plan, memory_enabled >= 0},
        /* Reads the transcript the other stages just shaped, so it judges the turn
         * that will actually be sent rather than the one that arrived. */
        {"session_assist", aimee_ir_stage_session_assist, NULL, 1},

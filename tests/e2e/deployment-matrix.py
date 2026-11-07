@@ -49,8 +49,62 @@ def command(*argv, env=None, data=None, timeout=300):
     return result.stdout.strip()
 
 
+REFERENCE_TARGET = '/opt/aimee-test-memory-reference/aimee-module-memory'
+
+
+def validate_reference_owner(path):
+    """Accept only the explicitly pinned, external test implementation."""
+    path = Path(path).absolute()
+    expected = json.loads((ROOT / 'tests/fixtures/legacy-memory-owner.json').read_text())
+    sidecar = Path(str(path) + '.json')
+    if (path.is_symlink() or not path.is_file() or not os.access(path, os.X_OK)
+            or sidecar.is_symlink() or not sidecar.is_file()):
+        raise ValueError('reference owner must be a regular executable with provenance')
+    actual = json.loads(sidecar.read_text())
+    if any(actual.get(key) != value for key, value in expected.items()):
+        raise ValueError('reference owner provenance does not match the frozen fixture')
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual.get('binary_sha256') != digest:
+        raise ValueError('reference owner binary does not match its provenance')
+    return path, dict(expected, binary_sha256=digest)
+
+
+def reference_overlay(role, image, owner, output, project):
+    """Change the selected executable; retain every existing grant capability."""
+    path, provenance = validate_reference_owner(owner)
+    manifest_target = f'/opt/aimee/module-grants/{role}.modules'
+    grant_target = f'/opt/aimee/module-grants/{role}/memory.grant'
+    def metadata(target):
+        return command('docker', 'run', '--rm', '--network', 'none', '--read-only',
+                       '--entrypoint', 'cat', image, target)
+    manifest = metadata(manifest_target).splitlines()
+    rows = [i for i, row in enumerate(manifest) if row.split('\t', 1)[0] == 'memory']
+    grant = metadata(grant_target).splitlines()
+    executables = [i for i, row in enumerate(grant) if row.startswith('executable=')]
+    if len(rows) != 1 or len(executables) != 1:
+        raise ValueError('candidate must declare exactly one memory owner and executable grant')
+    old = manifest[rows[0]].split('\t')
+    if len(old) != 2 or grant[executables[0]] != 'executable=' + old[1]:
+        raise ValueError('candidate memory manifest and grant disagree')
+    manifest[rows[0]] = 'memory\t' + REFERENCE_TARGET
+    grant[executables[0]] = 'executable=' + REFERENCE_TARGET
+    mounts = [(path, REFERENCE_TARGET)]
+    for name, lines, target in (('modules', manifest, manifest_target), ('grant', grant, grant_target)):
+        overlay = output.resolve() / (project + '-reference.' + name)
+        overlay.write_text('\n'.join(lines) + '\n')
+        overlay.chmod(0o644)
+        provenance[name + '_sha256'] = hashlib.sha256(overlay.read_bytes()).hexdigest()
+        mounts.append((overlay, target))
+    (output / (project + '-reference.json')).write_text(json.dumps(provenance, indent=2) + '\n')
+    # JSON scalars are valid YAML and preserve paths containing spaces/colons.
+    return '    volumes:\n' + ''.join(
+        '      - type: bind\n        source: ' + json.dumps(str(source)) +
+        '\n        target: ' + json.dumps(target) + '\n        read_only: true\n'
+        for source, target in mounts)
+
+
 class Stack:
-    def __init__(self, role, env, output):
+    def __init__(self, role, env, output, reference_memory_owner=None):
         self.role = role
         self.project = 'aimee-e2e-' + role + '-' + uuid.uuid4().hex[:10]
         self.env = dict(env)
@@ -73,10 +127,13 @@ class Stack:
         # mappings can collide on newer Docker daemons, especially mixed
         # loopback and wildcard bindings. Keep the production service intact.
         self.network_override = output.resolve() / (self.project + '-network.yaml')
+        reference = (reference_overlay(role, env['AIMEE_APPLICATION_IMAGE'],
+                     reference_memory_owner, output, self.project)
+                     if reference_memory_owner else '')
         self.network_override.write_text(
             'services:\n  aimee-' + role + ':\n    ports: !reset []\n' +
             ('    environment:\n      AIMEE_MEMORY_HEALTH_ENABLED: \"1\"\n'
-             if role == 'server' and env.get('AIMEE_MEMORY_HEALTH_FIXTURE') == '1' else ''))
+             if role == 'server' and env.get('AIMEE_MEMORY_HEALTH_FIXTURE') == '1' else '') + reference)
 
     def compose_args(self):
         encryption = ('-f', 'compose.kb.luks.yaml' if self.role == 'kb' else 'compose.luks.yaml') if self.env.get('AIMEE_POSTGRES_STORAGE') == 'luks' else ()
@@ -125,7 +182,8 @@ class Stack:
             if status == 'healthy' and embedding == 'healthy':
                 return
             time.sleep(2)
-        raise RuntimeError(self.role + ' application and embedder did not become healthy')
+        safe = lambda value: value if value in ('healthy', 'unhealthy', 'starting') else 'unknown'
+        raise RuntimeError(f'{self.role} health timeout: application={safe(status)} embedder={safe(embedding)}')
 
     def kb_request(self, path, body=None, authenticated=True):
         code = '''import http.client,json,sys
@@ -1271,6 +1329,8 @@ def main():
     parser.add_argument('--topology', choices=('T1', 'T2', 'T3'), required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--keep', action='store_true')
+    parser.add_argument('--reference-memory-owner', type=Path,
+                        help='explicit frozen external reference owner for compatibility gates; not shipped')
     # Each storage-agnostic gate runs in exactly one CI leg. These two switches
     # are how a leg declines a gate another leg owns; neither is a fast mode for
     # a single local run, which should run everything.
@@ -1305,7 +1365,7 @@ def main():
     try:
         kb = None
         if args.topology in ('T1', 'T2'):
-            kb = Stack('kb', env, args.output)
+            kb = Stack('kb', env, args.output, args.reference_memory_owner)
             stacks.append(kb)
             kb.start()
             check('KB application metadata contains no database or enrollment credential', application_metadata_is_private(kb))
@@ -1362,7 +1422,7 @@ def main():
             # skip the setup required by authenticated recovery below.
             activate_embedding_generation(kb, check, 'recovery-' + uuid.uuid4().hex)
         if args.topology in ('T2', 'T3'):
-            server = Stack('server', env, args.output)
+            server = Stack('server', env, args.output, args.reference_memory_owner)
             stacks.append(server)
             server.start()
             check('Server boots without a KB connection', True)
@@ -1437,16 +1497,35 @@ def main():
         # Export only this fixed diagnostic grammar. Full Docker output may
         # contain bootstrap credentials, request bodies or SQL driver details.
         failures = []
+        startup = []
         pattern = re.compile(r'memory data failure operation="([a-z-]{1,64})" trace=([0-9]+) status=([0-9]+) class=(internal|deadline|cancelled|store_unavailable|result_capacity|transaction_closed|sqlstate_[0-9A-Z]{5})(?=\s|$)')
         for stack in stacks:
             try:
                 logs = subprocess.run(['docker', 'logs', '--tail', '2000', stack.application],
                     capture_output=True, text=True, timeout=15)
+                # Only fixed categories, never raw logs, credential values or request data.
+                text = (logs.stdout + logs.stderr).lower()
+                categories = ('config module unavailable', 'module bus failed',
+                              'memory capability unavailable', 'permission denied',
+                              'connection refused', 'vault initialization failed',
+                              'no such file or directory')
+                states = {}
+                for label, container in (('application', stack.application), ('embedder', stack.embedder)):
+                    state = json.loads(command('docker', 'inspect', '--format', '{{json .State}}', container))
+                    health = state.get('Health', {}).get('Status', 'absent')
+                    status = state.get('Status', 'unknown')
+                    states[label] = dict(
+                        status=status if status in ('created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead') else 'unknown',
+                        health=health if health in ('healthy', 'unhealthy', 'starting', 'absent') else 'unknown',
+                        exit_code=int(state.get('ExitCode', -1)), oom_killed=state.get('OOMKilled') is True)
+                startup.append(dict(role=stack.role, states=states,
+                                    categories=[category for category in categories if category in text]))
                 for operation, trace, status, kind in pattern.findall(logs.stdout + logs.stderr):
                     failures.append(dict(role=stack.role, operation=operation, trace=trace,
                                          status=int(status), error_class=kind))
-            except (OSError, subprocess.SubprocessError):
+            except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, TypeError, KeyError):
                 failures.append(dict(role=stack.role, diagnostics='unavailable'))
+        (args.output / 'startup.json').write_text(json.dumps(startup, indent=2) + '\n')
         (args.output / 'memory-failures.json').write_text(json.dumps(failures, indent=2) + '\n')
         if not args.keep:
             for stack in reversed(stacks):

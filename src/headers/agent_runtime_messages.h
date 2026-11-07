@@ -2,7 +2,13 @@
 #define DEC_AGENT_RUNTIME_MESSAGES_H 1
 
 #include "cJSON.h"
+#include <aimee/ir/aimee_ir.h>
 #include <stddef.h>
+
+int agent_exec_context_append_text(aimee_message_t *context, const char *text,
+                                   aimee_context_origin_t origin,
+                                   aimee_context_authority_t authority);
+char *agent_exec_context_text_view(const aimee_message_t *context);
 
 #define AGENT_FINAL_TOOL_RETRY_LIMIT          2
 #define AGENT_DEGENERATE_RESPONSE_RETRY_LIMIT 1

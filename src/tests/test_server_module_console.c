@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "../server/server_http_module_console.inc"
 #ifndef MODULE_CONSOLE_ABSENT_TEST
 static int context_mode, response_mode, calls;
 static pthread_mutex_t ready_lock = PTHREAD_MUTEX_INITIALIZER;

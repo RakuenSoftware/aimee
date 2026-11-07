@@ -303,7 +303,9 @@ def go_process_shared_sources(module_id: str) -> list[str]:
     """Return shared contracts and helpers needed by independently built Go modules."""
     sources: list[str] = []
     if module_id == "memory":
-        return sorted([path.relative_to(ROOT).as_posix() for path in (ROOT / "server-go/memory").glob("*.go") if not path.name.endswith("_test.go")] + ["server-go/cmd/aimee-memory-bus-probe/main.go"])  # Generic SDK/probe, not concrete-owner sources.
+        # Ship the generic SDK with its executable contract tests and probe,
+        # never the retired concrete owner or its database/backend dependencies.
+        return sorted([path.relative_to(ROOT).as_posix() for path in (ROOT / "server-go/memory").glob("*.go")] + ["server-go/cmd/aimee-memory-bus-probe/main.go"])
     for directory, importers in GO_SHARED_CONTRACTS.items():
         if module_id not in importers:
             continue
@@ -378,8 +380,8 @@ def go_module_requirements(module_id: str) -> tuple[list[str], list[str]]:
     indirect: list[str] = []
     if module_id == "config":
         direct.append("go.yaml.in/yaml/v3")
-    # The memory export includes PostgreSQL integration tests, while its
-    # production storage remains the pure-Go bus client.
+    # Only the PostgreSQL owner needs the database driver; the memory export
+    # carries the generic ring SDK and an explicitly unavailable adapter.
     if module_id == "postgres":
         direct.append("github.com/jackc/pgx/v5")
         indirect.extend([

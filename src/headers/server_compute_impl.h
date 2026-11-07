@@ -109,6 +109,8 @@ typedef struct compute_ctx
     * (e.g. internal/compact paths). Owned by the registry, not freed here. */
    struct turn_entry *turn_entry;
 } compute_ctx_t;
+void compute_ctx_update_background_job(compute_ctx_t *cctx, cJSON *resp);
+void compute_ctx_update_coord_task(compute_ctx_t *cctx, cJSON *resp);
 
 /* Defined in server_compute.c; used by platform implementations */
 int write_all(int fd, const char *data, size_t len);

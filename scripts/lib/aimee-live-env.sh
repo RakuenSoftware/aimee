@@ -569,8 +569,6 @@ live_env_prepare_modules() {
    }
    [ -x src/build/obj/aimee-module-postgres ] ||
       cp "$multicall" src/build/obj/aimee-module-postgres
-   [ -x src/build/obj/aimee-module-memory ] ||
-      cp "$multicall" src/build/obj/aimee-module-memory
    # Native bootstrap and operator tools invoke this fixed provider executable.
    # These rigs run as root on disposable hosts; refuse to replace an installed
    # provider from a different build.
@@ -638,7 +636,6 @@ live_env_start_kb_modules() {
       src/build/obj/module-bundle/grants/kb/config.grant >"$grants/config.grant"
    sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-postgres|" \
       src/build/obj/module-bundle/grants/kb/postgres.grant >"$grants/postgres.grant"
-   live_env_memory_grants kb "$grants" || return 2
    live_env_arm_module "$PWD/src/build/obj/aimee-module-config" "$bus" \
       "$AIMEE_HOME/kb-config-module.log" LIVE_KB_CONFIG_PID \
       "AIMEE_MODULE_POLICY_DIR=$grants"
@@ -646,15 +643,10 @@ live_env_start_kb_modules() {
       "$AIMEE_HOME/kb-postgres-module.log" LIVE_KB_POSTGRES_PID \
       "AIMEE_MODULE_POLICY_DIR=$grants" "AIMEE_STORE_URL=$AIMEE_STORE_URL" \
       "AIMEE_STORE_MIGRATION_URL=$AIMEE_STORE_MIGRATION_URL"
-   live_env_arm_module "$PWD/src/build/obj/aimee-module-memory" "$bus" \
-      "$AIMEE_HOME/kb-memory-module.log" LIVE_KB_MEMORY_PID \
-      "AIMEE_MODULE_POLICY_DIR=$grants" "AIMEE_MODULE_PLACEMENT=kb"
 }
 
-live_env_memory_grants() {
-   echo "$LIVE_NAME: bundled memory owner retired; this legacy rig requires a separately provisioned external memory fixture with exact executable grants" >&2
-   return 2
-}
+# Authentication rigs exercise config, PostgreSQL and the application store.
+# They do not select an external memory owner or require its private grants.
 
 live_env_stop_kb_modules() {
    local var pid
@@ -720,7 +712,6 @@ live_env_start_module() {
       src/build/obj/module-bundle/grants/server/config.grant \
       >"$AIMEE_HOME/modules.d/server/config.grant"
    local bus="$AIMEE_HOME/server-module-bus.sock"
-   live_env_memory_grants server "$AIMEE_HOME/modules.d/server" || return 2
    # Postgres first: the store checks for its backend as it comes up.
    live_env_arm_module "$PWD/$pgmodule" "$bus" "$AIMEE_HOME/pg-module.log" \
       LIVE_PG_MODULE_PID "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" \
@@ -733,9 +724,6 @@ live_env_start_module() {
    live_env_arm_module "$PWD/src/build/obj/aimee-module-config" "$bus" \
       "$AIMEE_HOME/server-config-module.log" LIVE_SERVER_CONFIG_PID \
       "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server"
-   live_env_arm_module "$PWD/src/build/obj/aimee-module-memory" "$bus" \
-      "$AIMEE_HOME/server-memory-module.log" LIVE_SERVER_MEMORY_PID \
-      "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" "AIMEE_MODULE_PLACEMENT=server"
 }
 
 # Everything the store's own processes said, for a failure that cannot say why.

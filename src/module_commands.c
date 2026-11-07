@@ -55,8 +55,8 @@ int aimee_module_commands_owner_action_raw(const char *method, const cJSON *args
    return 1;
 }
 
-/* Declaration wire format. MUST match server-go/modules/memory/commands.go and
- * server-go/modules/mcp/commands.go -- one decoder for both, which is the point:
+/* Declaration wire format. MUST match server-go/modules/mcp/commands.go and
+ * independently installed command owners -- one host decoder, which is the point:
  * a second format for plugin commands would rebuild the divergence the registry
  * removed.
  *

@@ -2652,9 +2652,9 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "7e766cb6b1aead4b0720b9657e6e3e7ad0579db4b6f9eca5e529980e3a600dda",
+      "sha256": "17ee0462a889a408c001025d633c48a094788da0d591c6b7d396a2322ee0e1dc",
       "review": "2026-10-18: async op-run lifecycle moved to server_http_op_runs.c; the memory_stats catalog entry and Go memory-owner calls remain here unchanged. Browser control replies now require an actual interactive attested request, excluding inherited compute owners. 2026-10-19: the browser control-reply handler now uses the canonical exact-frame JSON codec before selecting routing fields. The sole memory_stats catalog symbol and all Go memory routing/authority remain unchanged; the diff contains only this control-frame parser replacement.",
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+      "boundary_review": "PR #3091 CI repair: replace the included generic console implementation with its separately compiled server_http_module_console.c owner. The sole memory_stats protocol-catalog finding is unchanged; no memory policy moves into the host.",
       "source_revisions": [
         {
           "disposition": "protocol-catalog",
@@ -2673,6 +2673,16 @@
           "sha256": "5465d57c1d79d73c83d51df9c89e5bed34e88b90df35fd307c4d0cf8e73ae83e",
           "review": "2026-10-18: async op-run lifecycle moved to server_http_op_runs.c; the memory_stats catalog entry and Go memory-owner calls remain here unchanged. Browser control replies now require an actual interactive attested request, excluding inherited compute owners. 2026-10-19: the browser control-reply handler now uses the canonical exact-frame JSON codec before selecting routing fields. The sole memory_stats catalog symbol and all Go memory routing/authority remain unchanged; the diff contains only this control-frame parser replacement.",
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+        },
+        {
+          "disposition": "protocol-catalog",
+          "symbols": [
+            "memory_stats"
+          ],
+          "sha256": "7e766cb6b1aead4b0720b9657e6e3e7ad0579db4b6f9eca5e529980e3a600dda",
+          "review": "2026-10-18: async op-run lifecycle moved to server_http_op_runs.c; the memory_stats catalog entry and Go memory-owner calls remain here unchanged. Browser control replies now require an actual interactive attested request, excluding inherited compute owners. 2026-10-19: the browser control-reply handler now uses the canonical exact-frame JSON codec before selecting routing fields. The sole memory_stats catalog symbol and all Go memory routing/authority remain unchanged; the diff contains only this control-frame parser replacement.",
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
       ],
       "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
@@ -3002,9 +3012,9 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "ee4f1fa6553f5fe1f29dcb54ef98db06be9e1b9c7eedef61dc55abed1611b430",
+      "sha256": "4c246de2c9a0a131e9f4a0bfb83546cdf98d90f51cc1b1861c759163599dff7c",
       "boundary_change": "Canonical gateway_policy view and descending catalog paths; the fixture calls the real Go memory owner for namespace policy. C retains host schema data and validates/applies the returned patch; no C memory or shell-selection policy is introduced.",
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+      "boundary_review": "PR #3091 native SDK repair: add optional unselected owner versus selected disabled/error/malformed response assertions; retain all selected required-plan refusal and actual frozen Go namespace policy assertions. A no-factory NULL-context transport fixture forwards the current canonical dispatch API; no memory policy or authenticated owner is fabricated.",
       "source_revisions": [
         {
           "disposition": "host-fixture",
@@ -3018,6 +3028,19 @@
           "sha256": "ca2c667810eca2d2aae6ee3e933770d51e767c8856be5493719c20e5c6b84ee2",
           "boundary_change": "Canonical gateway_policy view and descending catalog paths; the fixture calls the real Go memory owner for namespace policy. C retains host schema data and validates/applies the returned patch; no C memory or shell-selection policy is introduced.",
           "boundary_review": "2026-10-20 PR #3052: Adds only a null historical-receipt DB1 stub for an ordinary nonverification IR plan. Existing source/typed memory assertions remain unchanged. This records source-boundary review, not independent production-promotion approval."
+        },
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "kb_client_memory_assemble_typed_context_json",
+            "kb_client_memory_assemble_typed_context_requirements_json",
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_set"
+          ],
+          "sha256": "ee4f1fa6553f5fe1f29dcb54ef98db06be9e1b9c7eedef61dc55abed1611b430",
+          "boundary_change": "Canonical gateway_policy view and descending catalog paths; the fixture calls the real Go memory owner for namespace policy. C retains host schema data and validates/applies the returned patch; no C memory or shell-selection policy is introduced.",
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
         }
       ]
     },
@@ -3090,7 +3113,7 @@
         "server_module_memory_data",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "26bdcd85d3657dd75d46bd2c995e3a362d8ab960ebd0d4a0c84cf3ce7aadedf8",
+      "sha256": "d10fbbd1e1bb31ae859ad13bfa8e903a33d7f926e8d8db0428d432fd90510e18",
       "source_revisions": [
         {
           "disposition": "host-fixture",
@@ -3100,9 +3123,19 @@
             "server_module_memory_reset_derived"
           ],
           "sha256": "f8076b8da80ee143adb7ffe6afb84541a8eaba855fc2589c6da6435d76a847e6"
+        },
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "AIMEE_MEMORY_BACKEND",
+            "server_module_memory_data",
+            "server_module_memory_reset_derived"
+          ],
+          "sha256": "26bdcd85d3657dd75d46bd2c995e3a362d8ab960ebd0d4a0c84cf3ce7aadedf8",
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
         }
       ],
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+      "boundary_review": "PR #3091 final JSON transport fixture repair: provide the current MCP effect-discovery seam with an unconditional assertion if unexpectedly invoked, preserving strict header/API compilation and all existing JSON transport assertions. The fixture installs no MCP effects or memory policy; no discovery call is authorized or fabricated."
     },
     "src/tests/test_server_dispatch.c": {
       "disposition": "host-fixture",
@@ -3159,8 +3192,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "e91b40d93bd93ccbcf1dafe2e0d7a3558ceb6fc029b34752a27fd72ad6a2dea6",
-      "boundary_review": "2026-10-26 local extraction: preserve native_applicability_json and native_region_json as opaque UTF-8 strings through User/Shared web adapters. Private owner validates bounds and meaning; no public temporal or ontology policy added. Strong capability marker prevents pairing a new private frontend with a host that drops these fields. Actual User/KB adapter tests preserve coordinates beyond binary64 range; ownership symbols unchanged. This is local source-boundary review, not deployment approval. 2026-10-26 local protected-intake transport review: optional human-only verified-context raw intake hook, fixed bounded preallocated buffers/full-capacity cleansing, opaque safe reply transport and retained web capability marker. Actual Vault/native custody, scope, admission and semantic policy remain outside this generic web adapter; no public memory engine or model/MCP raw-value route added. No independent deployment or package promotion is implied.",
+      "sha256": "b5715c6eca75c3f14f0cc13fb5678acbd4455879c67864394d7663f8aab31876",
+      "boundary_review": "PR #3091 CI fixture repair: add the current caller-context personal-recall transport seam, assert its exact memory.runtime/personal-recall route and all four calls, then forward to the existing owner-envelope fixture. Existing assertions and memory ownership symbols are retained; no authenticated caller or memory policy is fabricated.",
       "source_revisions": [
         {
           "disposition": "host-fixture",
@@ -3172,6 +3205,18 @@
           ],
           "sha256": "8d48a64993ae1ba33cbe19c0c7de432737d94751743e67a3064f9500987f0699",
           "boundary_review": "2026-10-26 local extraction: preserve native_applicability_json and native_region_json as opaque UTF-8 strings through User/Shared web adapters. Private owner validates bounds and meaning; no public temporal or ontology policy added. Strong capability marker prevents pairing a new private frontend with a host that drops these fields. Actual User/KB adapter tests preserve coordinates beyond binary64 range; ownership symbols unchanged. This is local source-boundary review, not deployment approval. 2026-10-26 local protected-intake transport review: optional human-only verified-context raw intake hook, fixed bounded preallocated buffers/full-capacity cleansing, opaque safe reply transport and retained web capability marker. Actual Vault/native custody, scope, admission and semantic policy remain outside this generic web adapter; no public memory engine or model/MCP raw-value route added. No independent deployment or package promotion is implied."
+        },
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "kb_client_memory_audit_note",
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_set"
+          ],
+          "sha256": "e91b40d93bd93ccbcf1dafe2e0d7a3558ceb6fc029b34752a27fd72ad6a2dea6",
+          "boundary_review": "2026-10-26 local extraction: preserve native_applicability_json and native_region_json as opaque UTF-8 strings through User/Shared web adapters. Private owner validates bounds and meaning; no public temporal or ontology policy added. Strong capability marker prevents pairing a new private frontend with a host that drops these fields. Actual User/KB adapter tests preserve coordinates beyond binary64 range; ownership symbols unchanged. This is local source-boundary review, not deployment approval. 2026-10-26 local protected-intake transport review: optional human-only verified-context raw intake hook, fixed bounded preallocated buffers/full-capacity cleansing, opaque safe reply transport and retained web capability marker. Actual Vault/native custody, scope, admission and semantic policy remain outside this generic web adapter; no public memory engine or model/MCP raw-value route added. No independent deployment or package promotion is implied.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
       ],
       "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
@@ -3428,7 +3473,7 @@
         "kb_client_memory_scope_context_snapshot",
         "kb_client_memory_scope_context_state_t"
       ],
-      "sha256": "524318ecdc26dd80682ddef2a1a6046a85f4b67b6f2062beeb9f18d5c9fa3228",
+      "sha256": "a2335328ba9c01287ea3fefc94f28ac8422a3ede6e96a3a4d52f81d2665029f2",
       "source_revisions": [
         {
           "disposition": "host-fixture",
@@ -3440,9 +3485,22 @@
             "kb_client_memory_scope_context_state_t"
           ],
           "sha256": "a20c0126c974b27590520d5a6fc55c737bb94ba94fda9d7dece7501bc78ee400"
+        },
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_restore",
+            "kb_client_memory_scope_context_set",
+            "kb_client_memory_scope_context_snapshot",
+            "kb_client_memory_scope_context_state_t"
+          ],
+          "sha256": "524318ecdc26dd80682ddef2a1a6046a85f4b67b6f2062beeb9f18d5c9fa3228",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
       ],
-      "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+      "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions.",
+      "boundary_review": "PR #3091 CI repair: migrate the fixture from retired direct session briefing helpers to the current KB wrappers and actual body envelope. Exercise both model_execution and memory_receipt_required contexts with the same transport and proof/refusal assertions (12 refusals retained). The host fixture supplies no memory admission policy."
     },
     "src/tests/test_server_session_delivery_conflict.c": {
       "disposition": "host-fixture",
@@ -3501,12 +3559,12 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "19c8ac88626f3bce744a88de41f01852497021bed0f65fb345c2bd8a41c565e7",
+      "sha256": "de7918e8fcfd8095fb9a44e24684c3d261cf41fa6bf8253607a63c8db67fc6fa",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "2b9867b9958eb306c2363e31bfdb255b74c4fcaeaff4ff18fd647d3dd8c2678c"
+        "api/openapi-server-v1.yaml": "3565020e223e6f50cb5b16d822875f9d7cd552c3b619c09f63dc93d7b5e0d4ac"
       },
-      "boundary_review": "2026-10-20 PR #3052: reviewed only /runs native Codex/Claude workspace cwd documentation/property. Reversing those additions reproduces both previously pinned source and generated output hashes exactly. Memory routes, symbols and Go ownership are unchanged. 2026-10-21 PR #3057: Reviewed the sole added /chat/graceful_cancel documentation path and its regenerated output using the unchanged pinned generator. Exact actor-owned operator cancellation, no queued message and no effect-quiescence claim are documented; existing memory paths, symbols and Go ownership are unchanged. This is source-boundary review, not independent production approval. 2026-10-26 local extraction: serve/claim-card web schemas now describe the shared typed bus query, native historical coordinates, exact scope and bounded context fields. The unchanged generator and 392 endpoint conformance pass; ownership symbols remain unchanged. 2026-10-26 local extraction: preserve native_applicability_json and native_region_json as opaque UTF-8 strings through User/Shared web adapters. Private owner validates bounds and meaning; no public temporal or ontology policy added. Strong capability marker prevents pairing a new private frontend with a host that drops these fields. Actual User/KB adapter tests preserve coordinates beyond binary64 range; ownership symbols unchanged. This is local source-boundary review, not deployment approval. 2026-10-26 local protected-intake transport review: optional human-only verified-context raw intake hook, fixed bounded preallocated buffers/full-capacity cleansing, opaque safe reply transport and retained web capability marker. Actual Vault/native custody, scope, admission and semantic policy remain outside this generic web adapter; no public memory engine or model/MCP raw-value route added. No independent deployment or package promotion is implied. PR #3091: schema inputs change Vault rotation persistence; OpenAPI adds canonical chat/steer and generic host endpoints; tool catalog retires legacy phase metadata. Generators and memory-symbol ownership remain unchanged.",
+      "boundary_review": "PR #3091 CI repair: document existing generic console forwarding and user-source terminal/source-only routes, then regenerate using the unchanged generator. Optional module owners retain policy and the generated memory-symbol finding set is unchanged.",
       "source_revisions": [
         {
           "disposition": "protocol-catalog",
@@ -3520,6 +3578,19 @@
             "api/openapi-server-v1.yaml": "97188fd6e9c2d60c250140264bfbcbca0b0830ba4ff11e063a6e3c9566b00fc6"
           },
           "boundary_review": "2026-10-20 PR #3052: reviewed only /runs native Codex/Claude workspace cwd documentation/property. Reversing those additions reproduces both previously pinned source and generated output hashes exactly. Memory routes, symbols and Go ownership are unchanged. 2026-10-21 PR #3057: Reviewed the sole added /chat/graceful_cancel documentation path and its regenerated output using the unchanged pinned generator. Exact actor-owned operator cancellation, no queued message and no effect-quiescence claim are documented; existing memory paths, symbols and Go ownership are unchanged. This is source-boundary review, not independent production approval. 2026-10-26 local extraction: serve/claim-card web schemas now describe the shared typed bus query, native historical coordinates, exact scope and bounded context fields. The unchanged generator and 392 endpoint conformance pass; ownership symbols remain unchanged. 2026-10-26 local extraction: preserve native_applicability_json and native_region_json as opaque UTF-8 strings through User/Shared web adapters. Private owner validates bounds and meaning; no public temporal or ontology policy added. Strong capability marker prevents pairing a new private frontend with a host that drops these fields. Actual User/KB adapter tests preserve coordinates beyond binary64 range; ownership symbols unchanged. This is local source-boundary review, not deployment approval. 2026-10-26 local protected-intake transport review: optional human-only verified-context raw intake hook, fixed bounded preallocated buffers/full-capacity cleansing, opaque safe reply transport and retained web capability marker. Actual Vault/native custody, scope, admission and semantic policy remain outside this generic web adapter; no public memory engine or model/MCP raw-value route added. No independent deployment or package promotion is implied."
+        },
+        {
+          "disposition": "protocol-catalog",
+          "symbols": [
+            "AIMEE_MEMORY_HEALTH_ENABLED",
+            "memory_stats"
+          ],
+          "sha256": "19c8ac88626f3bce744a88de41f01852497021bed0f65fb345c2bd8a41c565e7",
+          "inputs": {
+            "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
+            "api/openapi-server-v1.yaml": "2b9867b9958eb306c2363e31bfdb255b74c4fcaeaff4ff18fd647d3dd8c2678c"
+          },
+          "boundary_review": "2026-10-20 PR #3052: reviewed only /runs native Codex/Claude workspace cwd documentation/property. Reversing those additions reproduces both previously pinned source and generated output hashes exactly. Memory routes, symbols and Go ownership are unchanged. 2026-10-21 PR #3057: Reviewed the sole added /chat/graceful_cancel documentation path and its regenerated output using the unchanged pinned generator. Exact actor-owned operator cancellation, no queued message and no effect-quiescence claim are documented; existing memory paths, symbols and Go ownership are unchanged. This is source-boundary review, not independent production approval. 2026-10-26 local extraction: serve/claim-card web schemas now describe the shared typed bus query, native historical coordinates, exact scope and bounded context fields. The unchanged generator and 392 endpoint conformance pass; ownership symbols remain unchanged. 2026-10-26 local extraction: preserve native_applicability_json and native_region_json as opaque UTF-8 strings through User/Shared web adapters. Private owner validates bounds and meaning; no public temporal or ontology policy added. Strong capability marker prevents pairing a new private frontend with a host that drops these fields. Actual User/KB adapter tests preserve coordinates beyond binary64 range; ownership symbols unchanged. This is local source-boundary review, not deployment approval. 2026-10-26 local protected-intake transport review: optional human-only verified-context raw intake hook, fixed bounded preallocated buffers/full-capacity cleansing, opaque safe reply transport and retained web capability marker. Actual Vault/native custody, scope, admission and semantic policy remain outside this generic web adapter; no public memory engine or model/MCP raw-value route added. No independent deployment or package promotion is implied. PR #3091: schema inputs change Vault rotation persistence; OpenAPI adds canonical chat/steer and generic host endpoints; tool catalog retires legacy phase metadata. Generators and memory-symbol ownership remain unchanged."
         }
       ]
     },

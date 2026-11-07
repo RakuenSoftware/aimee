@@ -15,8 +15,17 @@
 extern int agent_tools_module_native_input_selected_v1(const char *) __attribute__((weak));
 extern int agent_tools_module_native_input_admit_v1(const char *, const cJSON *)
     __attribute__((weak));
-const unsigned aimee_ir_module_input_admission_contract_v1
-    __attribute__((used, externally_visible, retain)) = 1;
+/* Retain the capability marker using the native object-format mechanism.
+ * ELF retain is not valid on PE, and Apple Clang has no externally_visible. */
+#if defined(_WIN32)
+__declspec(dllexport)
+#elif defined(__ELF__) && __has_attribute(retain)
+__attribute__((retain))
+#endif
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((externally_visible))
+#endif
+__attribute__((used)) const unsigned aimee_ir_module_input_admission_contract_v1 = 1;
 static int module_input_event_admit(const aimee_session_event_t *event)
 {
    if (!event)

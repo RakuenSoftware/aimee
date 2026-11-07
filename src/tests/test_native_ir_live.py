@@ -24,7 +24,8 @@ from urllib.parse import urlsplit
 
 class NativeCatalogObservations:
     """Full observed declarations, separate from transport/user/auth data."""
-    def __init__(self, directory=None):
+    def __init__(self, directory=None, *, opening_shell_policy=False):
+        self.opening_shell_policy = opening_shell_policy
         self.directory = Path(directory) if directory else None
         self.references = {}
         self.records = []
@@ -49,8 +50,9 @@ class NativeCatalogObservations:
 
     @staticmethod
     def opening_tools(tools):
-        # Expected projection from the existing memory gateway_plan.go native-shell
-        # policy. MCP groups keep their callable surface; definitions/order remain exact.
+        # Historical external-owner policy only: MCP groups keep their callable
+        # surface; definitions/order remain exact. Unselected generic execution
+        # does not invent this optional memory-module policy.
         aliases = {"exec_command", "local_shell", "shell", "bash", "run_command",
                    "container.exec", "shell_command", "run_shell_command", "Bash", "Shell"}
         def shell(tool, namespace=""):
@@ -104,13 +106,16 @@ class NativeCatalogObservations:
         # Internal HTTP delegates use their role-scoped Aimee catalog, not the
         # external SDK/gateway bootstrap pipeline. Still record declarations and
         # enforce exact stability within each observed phase for every owner.
-        if kind != "http-child" and phase == "opening":
+        if self.opening_shell_policy and kind != "http-child" and phase == "opening":
             assert self.opening_tools(tools) == tools, ("opening catalog exposes native shell", key)
         opening = self.references.get((kind, wire, scope, "opening"))
         established = self.references.get((kind, wire, scope, "established"))
         if kind != "http-child" and opening is not None and established is not None:
-            assert json.loads(opening) == self.opening_tools(json.loads(established)), (
-                "catalog differs beyond opening native-shell policy", key)
+            expected = (self.opening_tools(json.loads(established)) if self.opening_shell_policy
+                        else json.loads(established))
+            assert json.loads(opening) == expected, (
+                "catalog differs beyond opening native-shell policy" if self.opening_shell_policy
+                else "catalog changed without a selected opening policy", key)
         return record
 
     def finish(self):
@@ -147,6 +152,31 @@ def api(path, body=None, expected=200, limits=None):
         text = response.read().decode()
         assert response.status == expected, (path, response.status, text)
         return text if path == "/v1/chat/stream" or path.endswith("/events") else json.loads(text)
+    finally:
+        connection.close()
+
+
+def canonical_source_evidence(session):
+    if os.environ.get("AIMEE_TEST_LEGACY_MEMORY_OWNER"):
+        return api("/v1/trajectory/export", {"session_id": session, "compress": False})["trajectory"]
+    refused = api("/v1/trajectory/export", {"session_id": session, "compress": False}, expected=502)
+    assert refused == {"status": "error", "message": "trajectory export failed"}, refused
+    # No screened export exists without its owner. Verify retained source bytes
+    # through the existing owner-authenticated canonical event replay instead;
+    # these events are neither an export artifact nor new model-history authority.
+    connection = Local("localhost")
+    try:
+        connection.request("GET", f"/v1/sessions/{session}/events?format=ir&cursor=0")
+        response = connection.getresponse()
+        assert response.status == 200, response.status
+        records = []
+        while True:
+            line = response.readline()
+            assert line, "Canonical source replay ended before readiness"
+            if line.startswith(b"event: replay_complete"):
+                return records
+            if line.startswith(b"data: "):
+                records.append(json.loads(line[6:]))
     finally:
         connection.close()
 
@@ -263,7 +293,8 @@ def main():
     errors = []
     count = 0
     artifact = os.environ.get("AIMEE_TEST_NATIVE_ARTIFACT_DIR")
-    catalogs = NativeCatalogObservations(Path(artifact) / "native-catalogs" if artifact else None)
+    catalogs = NativeCatalogObservations(Path(artifact) / "native-catalogs" if artifact else None,
+        opening_shell_policy=bool(os.environ.get("AIMEE_TEST_LEGACY_MEMORY_OWNER")))
 
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -600,7 +631,7 @@ def main():
             assert finished["status"] == "completed" and marker + "_FINAL" in json.dumps(finished), finished
             assert count == 2, (active, count)
             assert finished["usage"]["input_tokens"] == 200 and finished["usage"]["output_tokens"] == 20, finished
-            saved = api("/v1/trajectory/export", {"session_id": finished["canonical_session_id"], "compress": False})["trajectory"]
+            saved = canonical_source_evidence(finished["canonical_session_id"])
             encoded = json.dumps(saved, ensure_ascii=False)
             assert "NATIVE_RUN_PRIOR" in encoded and "NATIVE_RUN_END" in encoded
             assert "canonical delegate fixture" in encoded and "iVBORw0KGgo" in encoded
@@ -761,7 +792,7 @@ def main():
                 assert isinstance(reason, str) and "could not be given a sandboxed container" in reason, child
                 assert child["api_call_count"] == 0 and child["cursor_turn"] == 0, child
                 assert len(child_requests) == child_before, child_requests[child_before:]
-            saved = api("/v1/trajectory/export", dict(session_id=sid, compress=False))["trajectory"]
+            saved = canonical_source_evidence(sid)
             assert active[3] in json.dumps(saved) and active[3] + "_status" in json.dumps(saved) and "job_id" in json.dumps(saved), saved
             print("native integration:", kind, "original delegation, inherited mirror and queued child ownership pass", flush=True)
         delegation_case = False

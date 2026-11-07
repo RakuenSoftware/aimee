@@ -5336,6 +5336,50 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /console/memory:
+    post:
+      summary: Forward an optional module console command
+      description: >
+        Requires CAP_MEMORY_ADMIN and verified host identity. The host forwards
+        one JSON object of at most 1 MiB with its authenticated context. The
+        installed module owns command schemas, authorization and response meaning.
+        An absent module returns 503; the host supplies no memory implementation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Module-owned JSON response }
+        "400": { description: Invalid or oversized JSON object }
+        "403": { description: Required capability or verified identity absent }
+        "503": { description: Optional module or valid response unavailable }
+        default: { description: Module-owned status and JSON object }
+  /modules/user-source:
+    post:
+      summary: Submit an authenticated user operation to an optional source owner
+      description: >
+        Requires CAP_CHAT. The installed owner validates the operation and may
+        return a bounded JSON terminal response or prepare an opaque source-only
+        input for canonical chat delivery. Host identity comes from authenticated
+        transport, never request-body claims. Module absence or failed preparation
+        returns 503. This endpoint grants no model or operator authority.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Owner response or canonical source-only delivery
+          content:
+            application/json:
+              schema: { type: object }
+            application/x-ndjson:
+              schema: { type: string }
+        "400": { description: Invalid JSON body }
+        "403": { description: Required chat capability absent }
+        "503": { description: Optional source owner or prepared input unavailable }
   /chat/stream:
     post:
       summary: Stream a native chat turn

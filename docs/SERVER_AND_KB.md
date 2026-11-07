@@ -74,7 +74,7 @@ not authorize merging Server and KB installations or their volumes.
 Source contracts: [role identity](../server-go/modules/module-runtime/identity/),
 [Server composition](../server-go/modules/server/role.go),
 [KB composition](../server-go/modules/kb/role.go),
-[memory placement](../server-go/modules/memory/scope.go), and
+[selected memory ownership](modules/memory.md), and
 [Server store selection](../src/server/server_memory.c).
 
 ## Select memory deliberately

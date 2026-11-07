@@ -1,8 +1,8 @@
 #include "db1_client/primary_sessions.h"
 #include "db1_client/transport.h"
 #include "db1_client/db1_module_api.h"
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_protocol.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,11 +26,11 @@ uint64_t aimee_module_call_deadline_ns(uint64_t ms)
 {
    return ms * 1000000;
 }
-aimee_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, uint64_t trace,
-                                               uint64_t deadline, const void *request,
-                                               uint32_t request_len, void *response, uint32_t cap,
-                                               uint32_t *response_len,
-                                               aimee_module_cancelled_fn cancel, void *context)
+ouro_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, uint64_t trace,
+                                              uint64_t deadline, const void *request,
+                                              uint32_t request_len, void *response, uint32_t cap,
+                                              uint32_t *response_len,
+                                              ouro_module_cancelled_fn cancel, void *context)
 {
    (void)event;
    (void)stage;
@@ -43,7 +43,7 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, u
    calls++;
    memcpy(response, frame, length < cap ? length : cap);
    *response_len = override_length ? override_length : length;
-   return length > cap ? AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE : AIMEE_MODULE_CALL_OK;
+   return length > cap ? OURO_MODULE_CALL_RESPONSE_TOO_LARGE : OURO_MODULE_CALL_OK;
 }
 static void put(uint32_t at, uint32_t n)
 {
@@ -85,18 +85,18 @@ int main(void)
    assert(!db1_request_frame_size(NULL, 0, &request_size) && request_size == 8);
    assert(db1_request_frame_size(NULL, 1, &request_size) == -1);
    assert(db1_request_frame_size(NULL, 0, NULL) == -1);
-   char *maximum = malloc(AIMEE_MODULE_MESSAGE_MAX_BODY);
+   char *maximum = malloc(OURO_MODULE_MESSAGE_MAX_BODY);
    assert(maximum);
-   memset(maximum, 'x', AIMEE_MODULE_MESSAGE_MAX_BODY - 12);
-   maximum[AIMEE_MODULE_MESSAGE_MAX_BODY - 12] = 0;
+   memset(maximum, 'x', OURO_MODULE_MESSAGE_MAX_BODY - 12);
+   maximum[OURO_MODULE_MESSAGE_MAX_BODY - 12] = 0;
    const char *single[] = {maximum}, *extra[] = {maximum, ""};
    assert(!db1_request_frame_size(single, 1, &request_size) &&
-          request_size == AIMEE_MODULE_MESSAGE_MAX_BODY);
+          request_size == OURO_MODULE_MESSAGE_MAX_BODY);
    fprintf(stderr, "checking exactMAX plus empty-cell refusal\n");
    assert(db1_request_frame_size(extra, 2, &request_size) == -1);
-   maximum[AIMEE_MODULE_MESSAGE_MAX_BODY - 16] = 0;
+   maximum[OURO_MODULE_MESSAGE_MAX_BODY - 16] = 0;
    assert(!db1_request_frame_size(extra, 2, &request_size) &&
-          request_size == AIMEE_MODULE_MESSAGE_MAX_BODY);
+          request_size == OURO_MODULE_MESSAGE_MAX_BODY);
    const char *three_fields[] = {maximum, "", ""};
    assert(db1_request_frame_size(three_fields, 3, &request_size) == -1);
    free(maximum);

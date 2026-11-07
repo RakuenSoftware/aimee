@@ -1,5 +1,8 @@
 #include "agent_runtime_messages.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
 #include <aimee/ir/session_event.h>
 
 cJSON *agent_session_text_message(const char *role, const char *text)
@@ -218,4 +221,54 @@ int agent_required_evidence_needs_fallback(int required, int successful_evidence
 {
    return evidence_pending(required, successful_evidence_calls) && chatgpt_provider &&
           remaining_calls == 0;
+}
+
+int agent_exec_context_append_text(aimee_message_t *context, const char *text,
+                                   aimee_context_origin_t origin,
+                                   aimee_context_authority_t authority)
+{
+   if (!text || !text[0])
+      return 0;
+   if (context->n_blocks >= AIMEE_IR_MAX_BLOCKS)
+      return -1;
+   aimee_block_t *blocks =
+       realloc(context->blocks, (size_t)(context->n_blocks + 1) * sizeof *blocks);
+   if (!blocks)
+      return -1;
+   context->blocks = blocks;
+   aimee_block_t *block = &blocks[context->n_blocks++];
+   *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup(text)};
+   if (!block->text)
+      return -1;
+   aimee_ir_block_set_context(block, origin, authority,
+                              authority == AIMEE_CTX_AUTH_POLICY ? AIMEE_CTX_TRUST_VERIFIED
+                                                                 : AIMEE_CTX_TRUST_UNVERIFIED,
+                              AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   return 0;
+}
+
+/* Read-only token/compaction view. It is never supplied to the model renderer. */
+char *agent_exec_context_text_view(const aimee_message_t *context)
+{
+   size_t size = 1;
+   for (int i = 0; i < context->n_blocks; ++i)
+      if (context->blocks[i].text)
+      {
+         size_t n = strlen(context->blocks[i].text);
+         if (n > SIZE_MAX - size)
+            return NULL;
+         size += n;
+      }
+   char *view = calloc(1, size);
+   if (!view)
+      return NULL;
+   size_t used = 0;
+   for (int i = 0; i < context->n_blocks; ++i)
+      if (context->blocks[i].text)
+      {
+         size_t n = strlen(context->blocks[i].text);
+         memcpy(view + used, context->blocks[i].text, n);
+         used += n;
+      }
+   return view;
 }

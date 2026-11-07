@@ -105,17 +105,17 @@ int main(void)
    text[sizeof(text) - 1] = 0;
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "status", "ok");
-   cJSON_AddStringToObject(body, "block", text);
+   cJSON_AddStringToObject(body, "body", text);
    char *encoded = cJSON_PrintUnformatted(body);
    reply = encoded;
    expected_operation = "prospective-briefing";
    expected_limit = 0;
-   char *value = session_briefing_render_commitments(expected_limit);
+   char *value = kb_client_session_briefing_commitments(expected_limit);
    assert(value && strcmp(value, text) == 0);
    free(value);
    expected_operation = "directive-briefing";
    expected_limit = 2;
-   value = session_briefing_render_directives(expected_limit);
+   value = kb_client_session_briefing_directives(expected_limit);
    assert(value && strcmp(value, text) == 0);
    free(value);
    free(encoded);
@@ -151,43 +151,47 @@ int main(void)
    expected_operation = "directive-briefing";
    expected_limit = 1;
    reply = "{\"status\":\"error\",\"block\":\"must not inject\"}";
-   assert(session_briefing_render_directives(1) == NULL);
+   assert(kb_client_session_briefing_directives(1) == NULL);
    reply = "{\"status\":\"ok\",\"block\":17}";
-   assert(session_briefing_render_directives(1) == NULL);
-   /* Controlled prompt consumers enroll exact native text before returning it.
-    * Both direct and remote KB wrappers preserve proof; no callback is needed
-    * for ordinary human/session-start presentation-only exports. */
-   char *(*briefings[])(int) = {
-       session_briefing_render_commitments, session_briefing_render_directives,
-       kb_client_session_briefing_commitments, kb_client_session_briefing_directives};
+   assert(kb_client_session_briefing_directives(1) == NULL);
+   /* Existing KB wrappers enroll exact native text before returning it for
+    * model execution and receipt-required assembly. Human/session-start
+    * presentation-only exports need no provider callback. */
+   char *(*briefings[])(int) = {kb_client_session_briefing_commitments,
+                                kb_client_session_briefing_directives};
    selected_native = 1;
    has_provider = 1;
-   provider.model_execution = 1;
-   for (size_t i = 0; i < sizeof(briefings) / sizeof(briefings[0]); i++)
+   for (int context_kind = 0; context_kind < 2; context_kind++)
    {
-      expected_operation = i % 2 ? "directive-briefing" : "prospective-briefing";
-      expected_limit = 1;
-      reply = "{\"status\":\"ok\",\"block\":\"exact native text\",\"body\":\"exact native "
-              "text\",\"native_context\":{\"text\":\"exact native text\"}}";
-      int before_accept = accepts;
-      value = briefings[i](1);
-      assert(value && !strcmp(value, "exact native text"));
-      free(value);
-      assert(accepts == before_accept + 1);
-      accept_result = -1;
-      assert(briefings[i](1) == NULL);
-      accept_result = 0;
-      reply = "{\"status\":\"ok\",\"block\":\"changed\",\"body\":\"changed\",\"native_context\":{"
-              "\"text\":\"original\"}}";
-      before_accept = accepts;
-      assert(briefings[i](1) == NULL && accepts == before_accept);
-      reply = "{\"status\":\"ok\",\"block\":\"unfenced\",\"body\":\"unfenced\"}";
-      assert(briefings[i](1) == NULL);
-      has_provider = 0;
-      value = briefings[i](1);
-      assert(value && !strcmp(value, "unfenced"));
-      free(value);
-      has_provider = 1;
+      provider.model_execution = context_kind == 0;
+      provider.memory_receipt_required = context_kind == 1;
+      for (size_t i = 0; i < sizeof(briefings) / sizeof(briefings[0]); i++)
+      {
+         expected_operation = i % 2 ? "directive-briefing" : "prospective-briefing";
+         expected_limit = 1;
+         reply = "{\"status\":\"ok\",\"block\":\"exact native text\",\"body\":\"exact native "
+                 "text\",\"native_context\":{\"text\":\"exact native text\"}}";
+         int before_accept = accepts;
+         value = briefings[i](1);
+         assert(value && !strcmp(value, "exact native text"));
+         free(value);
+         assert(accepts == before_accept + 1);
+         accept_result = -1;
+         assert(briefings[i](1) == NULL);
+         accept_result = 0;
+         reply =
+             "{\"status\":\"ok\",\"block\":\"changed\",\"body\":\"changed\",\"native_context\":{"
+             "\"text\":\"original\"}}";
+         before_accept = accepts;
+         assert(briefings[i](1) == NULL && accepts == before_accept);
+         reply = "{\"status\":\"ok\",\"block\":\"unfenced\",\"body\":\"unfenced\"}";
+         assert(briefings[i](1) == NULL);
+         has_provider = 0;
+         value = briefings[i](1);
+         assert(value && !strcmp(value, "unfenced"));
+         free(value);
+         has_provider = 1;
+      }
    }
    assert(refuses == 12);
    has_provider = 0;

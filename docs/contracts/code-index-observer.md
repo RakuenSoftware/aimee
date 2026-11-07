@@ -16,7 +16,16 @@ The guarded public paths include project upsert/reattach, raw file upsert/replac
 
 A standalone raw file upsert that creates a row without its contents cannot publish a complete snapshot. Source-owner code must group that upsert and replacement in an outer mutation scope, as the guarded scan paths do. Invalid legacy paths, missing content or an observer's own bounds also prevent ready publication rather than silently dropping rows.
 
-Run the real PostgreSQL qualification with:
+This is an optional local integration qualification, separate from generic lint.
+It requires PostgreSQL tools including `initdb`, a local C toolchain, libpq headers,
+and the selected Ouroboros ring installation. Run its explicit Make target with:
+
+```sh
+make -C src code-index-observer-postgres-check \
+  AIMEE_TEST_POSTGRES_BIN=/path/to/owned/postgresql/bin
+```
+
+For an explicit new evidence directory, invoke the same runner directly:
 
 ```sh
 python3 scripts/validation/code-index-observer-postgres.py \

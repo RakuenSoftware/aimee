@@ -1126,145 +1126,6 @@ static void handle_native_chat_stream(int fd, const char *headers, const char *b
 {
    handle_native_chat_stream_mode(fd, headers, body, body_length, conn_caps, request_id, 0);
 }
-struct owned_user_source_scope
-{
-   char *frame;
-   size_t length;
-   void *purpose;
-};
-static void owned_user_source_cleanup(void *pointer)
-{
-   struct owned_user_source_scope *scope = pointer;
-   if (aimee_module_owned_user_source_release_v1)
-      aimee_module_owned_user_source_release_v1(scope->purpose);
-   if (scope->frame && scope->length <= HOST_TEXT_MAX_INPUT + HOST_TEXT_MAX_SIDECARS + 8192u)
-   {
-      volatile char *bytes = scope->frame;
-      for (size_t i = 0; i < scope->length; ++i)
-         bytes[i] = 0;
-   }
-   free(scope->frame);
-}
-/* Generic terminal action. No operation, identity, source or module policy
- * is parsed by the host. Normal source-only preparation stays byte-compatible
- * when the optional module callback declines this request. */
-struct owned_user_action_scope
-{
-   char *result;
-   size_t length, capacity;
-};
-static void owned_user_action_cleanup(void *pointer)
-{
-   struct owned_user_action_scope *scope = pointer;
-   if (scope->result && scope->capacity <= 16385)
-   {
-      volatile char *bytes = scope->result;
-      for (size_t i = 0; i < scope->capacity; ++i)
-         bytes[i] = 0;
-   }
-   free(scope->result);
-}
-static int handle_owned_user_action(int fd, const char *headers, const char *body,
-                                    size_t body_length, const char *request_id)
-{
-   if (!aimee_module_owned_user_action_v1)
-      return 0;
-   struct owned_user_action_scope scope = {0};
-   volatile int handled = 1;
-   pthread_cleanup_push(owned_user_action_cleanup, &scope);
-   int status = aimee_module_owned_user_action_v1(headers, body, body_length, &scope.result,
-                                                  &scope.length, &scope.capacity);
-   if (status == 0 && !scope.result && !scope.length && !scope.capacity)
-      handled = 0;
-   else
-   {
-      cJSON *data = NULL;
-      if ((status == 1 || status == 2) && scope.result && scope.length && scope.length <= 16384 &&
-          scope.capacity == scope.length + 1 &&
-          memchr(scope.result, 0, scope.capacity) == scope.result + scope.length)
-         data = aimee_ir_json_parse_frame(scope.result, scope.length);
-      if (cJSON_IsObject(data))
-         send_response(fd, 200, scope.result, request_id);
-      else
-         send_response(fd, 503, "{\"error\":\"owned action unavailable\"}", request_id);
-      cJSON_Delete(data);
-   }
-   pthread_cleanup_pop(1);
-   return handled;
-}
-__attribute__((used, externally_visible, retain))
-const unsigned aimee_owned_user_action_handoff_contract_v1 = 1;
-
-static void handle_owned_user_source(int fd, const char *headers, const char *body,
-                                     size_t body_length, uint32_t conn_caps, const char *request_id)
-{
-   if (handle_owned_user_action(fd, headers, body, body_length, request_id))
-      return;
-   if (!aimee_module_owned_user_source_prepare_v1 || !aimee_module_owned_user_source_release_v1)
-   {
-      send_response(fd, 503, "{\"error\":\"owned user input unavailable\"}", request_id);
-      return;
-   }
-   struct owned_user_source_scope scope = {0};
-   pthread_cleanup_push(owned_user_source_cleanup, &scope);
-   int prepared = aimee_module_owned_user_source_prepare_v1(
-       headers, body, body_length, &scope.frame, &scope.length, &scope.purpose);
-   if (prepared || !scope.purpose || !scope.frame || !scope.length ||
-       scope.length > HOST_TEXT_MAX_INPUT + HOST_TEXT_MAX_SIDECARS + 8192u ||
-       memchr(scope.frame, 0, scope.length + 1) != scope.frame + scope.length)
-      send_response(fd, 503, "{\"error\":\"owned user input unavailable\"}", request_id);
-   else
-      handle_native_chat_stream_mode(fd, headers, scope.frame, scope.length, conn_caps, request_id,
-                                     1);
-   pthread_cleanup_pop(1);
-}
-__attribute__((used, externally_visible, retain))
-const unsigned aimee_owned_user_source_handoff_contract_v1 = 1;
-
-static int append_sse_text(char *buf, size_t n, size_t *pos, const char *s, size_t len)
-{
-   if (buf && *pos < n)
-   {
-      size_t avail = n - *pos;
-      size_t copy = len < avail ? len : avail - 1;
-      if (copy)
-         memcpy(buf + *pos, s, copy);
-      buf[*pos + copy] = '\0';
-   }
-   *pos += len;
-   return (int)*pos;
-}
-
-int server_http_sse_event_format(const char *event, const char *data_json, char *buf, size_t n)
-{
-   size_t pos = 0;
-   const char *p;
-
-   if (buf && n)
-      buf[0] = '\0';
-   if (!data_json)
-      return 0;
-   if (event && event[0])
-   {
-      append_sse_text(buf, n, &pos, "event: ", 7);
-      append_sse_text(buf, n, &pos, event, strlen(event));
-      append_sse_text(buf, n, &pos, "\n", 1);
-   }
-   p = data_json;
-   for (;;)
-   {
-      const char *nl = strchr(p, '\n');
-      append_sse_text(buf, n, &pos, "data: ", 6);
-      append_sse_text(buf, n, &pos, p, nl ? (size_t)(nl - p) : strlen(p));
-      append_sse_text(buf, n, &pos, "\n", 1);
-      if (!nl)
-         break;
-      p = nl + 1;
-   }
-   append_sse_text(buf, n, &pos, "\n", 1);
-   return (int)pos;
-}
-
 /* Responses and Anthropic handlers emit typed SSE with their own terminal
  * event. Share the live writer without appending the OpenAI [DONE] trailer. */
 static void handle_typed_stream(int fd, const char *body, server_http_responses_stream_fn handler,
@@ -2065,7 +1926,8 @@ static void handle_conn_impl(int fd, int is_tcp, int is_management)
    }
 
    /* Recheck chat capability for UDS as well as the outer TCP route gate. */
-   if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/chat/stream") == 0)
+   if (strcmp(method, "POST") == 0 &&
+       (!strcmp(path, "/v1/chat/stream") || !strcmp(path, "/v1/modules/user-source")))
    {
       uint32_t need = server_capability_for_method("chat.send_stream");
       uint32_t have = effective_caps;
@@ -2077,7 +1939,8 @@ static void handle_conn_impl(int fd, int is_tcp, int is_management)
          return;
       }
       if (!strcmp(path, "/v1/modules/user-source"))
-         handle_owned_user_source(fd, buf, body, (size_t)body_len, have, request_id);
+         server_http_owned_user_source(fd, buf, body, (size_t)body_len, have, request_id,
+                                       handle_native_chat_stream_mode);
       else
          handle_native_chat_stream(fd, buf, body, (size_t)body_len, have, request_id);
       LOG_INFO("server.http", "%s %s -> 200 (chat stream) req_id=%s", method, path, request_id);

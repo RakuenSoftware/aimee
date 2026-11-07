@@ -124,6 +124,10 @@ DB1_ONLY_TABLES = {
     "server_sessions",
     # Ordered canonical transcript, owned and retained with its DB1 session.
     "session_ir_events",
+    # Host-owned input reservation/delivery and plan CAS journals. These retain
+    # canonical source pointers and execution state, never KB knowledge rows.
+    "session_input_deliveries",
+    "session_input_plans",
     # Source-pointer delivery metadata and explicit cutover belong to DB1 only.
     "learning_projection_coverage",
     "learning_projection_outbox",

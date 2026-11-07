@@ -330,7 +330,7 @@ fi
 
 # 2. Every .c in CORE/DATA/AGENT/CMD_SRCS actually exists
 for var in CORE_SRCS DATA_SRCS AGENT_SRCS CMD_SRCS CLI_SRCS SERVER_SRCS; do
-    files=$(make -p 2>/dev/null | grep "^$var = " | sed "s/^$var = //" | tr ' ' '\n' | grep '\.c$')
+    files=$(make -qp 2>/dev/null | grep "^$var = " | sed "s/^$var = //" | tr ' ' '\n' | grep '\.c$')
     missing=""
     for f in $files; do
         [ -f "$f" ] || missing="$missing $f"
@@ -343,7 +343,7 @@ for var in CORE_SRCS DATA_SRCS AGENT_SRCS CMD_SRCS CLI_SRCS SERVER_SRCS; do
 done
 
 # 3. Every test source listed in TEST_TARGETS has a corresponding .c file
-targets=$(make -p 2>/dev/null | grep "^TEST_TARGETS" | sed "s/^TEST_TARGETS[: ]*= //" | tr ' ' '\n')
+targets=$(make -qp 2>/dev/null | grep "^TEST_TARGETS" | sed "s/^TEST_TARGETS[: ]*= //" | tr ' ' '\n')
 missing_tests=""
 for t in $targets; do
     # Targets look like "<prefix>/unit-test-foo" where prefix varies with OBJDIR.
@@ -753,7 +753,7 @@ if find "$objdir" -name '*.d' 2>/dev/null | grep -q .; then
         : # non-writable /tmp: the structural check above still stands
     if [ -f /tmp/aimee_bi_print.mk ]; then
         find "$objdir" -name '*.d' | sort -u > /tmp/aimee_bi_ondisk.txt
-        make -f "$makefile_file" -f /tmp/aimee_bi_print.mk print-DEPS 2>/dev/null |
+        make -n -f "$makefile_file" -f /tmp/aimee_bi_print.mk print-DEPS 2>/dev/null |
             tr ' ' '\n' | grep '\.d$' | sort -u > /tmp/aimee_bi_included.txt
         uncovered=$(comm -13 /tmp/aimee_bi_included.txt /tmp/aimee_bi_ondisk.txt | wc -l)
         if [ "$uncovered" -ne 0 ]; then

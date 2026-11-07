@@ -131,6 +131,13 @@ while IFS= read -r hit; do
    case "$file" in
    src/build/*|src/modules/audit/obs_bus.c|src/modules/audit/audit_replay.c|src/tests/test_bus_*|src/tests/test_module_runtime.c) continue ;;
    esac
+   # Factored from the concurrency test into a normal TU: this real Unix peer
+   # attaches/polls/replies to verify cancellation and stale-reply isolation.
+   # Only its two client transport headers belong here, not host/arena access.
+   if [[ "$file" == src/tests/module_command_cancellation_cases.c ]] &&
+      grep -Eq '^[^:]+:[0-9]+:[[:space:]]*#include[[:space:]]*[<"]ouroboros/(client|endpoint)\.h[">]' <<<"$hit"; then
+      continue
+   fi
    printf 'FAIL: ring header escaped the local ring/adapter boundary: %s\n' "$hit" >&2
    fail=1
 done < <(grep -rnE '#include[[:space:]]*[<"]ouroboros/(attach|arena|capture|client|endpoint|host|local_attach|region|ring|route|wire)\.h[">]' src 2>/dev/null || true)

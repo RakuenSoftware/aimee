@@ -1252,24 +1252,26 @@ static void test_host_readiness_failure_phases(void)
          diagnostic_ready_calls = 0;
          const char *message = invalid ? "native SDK configuration could not be verified"
                                        : "native SDK host launch readiness was refused";
+         agent_t agent = {0};
+         provider_cli_cfg_t cfg = {
+             .agent = &agent, .user_prompt = "fixture", .codex_host = &launch};
+         agent_result_t out = {0};
+         int rc;
          if (caller)
          {
-            agent_t agent = {0};
-            provider_cli_cfg_t cfg = {
-                .agent = &agent, .user_prompt = "fixture", .codex_host = &launch};
-            agent_result_t out = {0};
-            assert(codex_provider_cli_adapter.execute(&cfg, &out) == AGENT_RC_CAPTURE_FAILED);
-            assert(!strcmp(out.error, message));
-            agent_result_clear_response(&out);
+            server_control_scope_t *scope =
+                server_control_scope_open("readiness-session", "readiness-turn", "fixture");
+            assert(scope);
+            server_control_scope_t *previous = server_control_scope_bind(scope);
+            rc = codex_provider_cli_adapter.execute(&cfg, &out);
+            server_control_scope_bind(previous);
+            server_control_scope_close(scope);
          }
          else
-         {
-            cli_codex_chat_request_t request = {
-                .user_prompt = "fixture", .timeout_ms = 3000, .host_launch = &launch};
-            cli_codex_chat_result_t out = {0};
-            assert(cli_codex_chat_stream(&request, NULL, NULL, &out) == -1);
-            assert(!strcmp(out.error, message));
-         }
+            rc = owned_execute(&cfg, &out);
+         assert(rc == AGENT_RC_CAPTURE_FAILED);
+         assert(!strcmp(out.error, message));
+         agent_result_clear_response(&out);
          assert(diagnostic_ready_calls == !invalid);
          FILE *file = fopen(marker, "r");
          char methods[128] = {0};

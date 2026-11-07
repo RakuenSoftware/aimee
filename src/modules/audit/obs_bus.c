@@ -9,6 +9,7 @@
  * publishes and returns; the consumer writes asynchronously.
  */
 #define _GNU_SOURCE
+#include "obs_bus_call.h"
 #include <aimee/audit/obs_bus.h>
 
 #include <dirent.h>
@@ -1697,9 +1698,9 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    ouro_module_call_result_t result;
    pthread_cleanup_push(module_caller_cleanup, NULL);
    module_cancel_context_t state = {.external = cancelled, .context = cancel_context};
-   result = ouro_module_client_pool_call(
-       &g.module_pool, event_kind, stage_id, trace_id, deadline_ns, request_body, request_len,
-       response_body, response_capacity, response_len, module_call_cancelled, &state);
+   result = aimee_obs_module_pool_call(&g.module_pool, event_kind, stage_id, trace_id, deadline_ns,
+                                       request_body, request_len, response_body, response_capacity,
+                                       response_len, module_call_cancelled, &state);
    pthread_cleanup_pop(1);
    record_outcome(event_kind, result);
    if (result != OURO_MODULE_CALL_OK)

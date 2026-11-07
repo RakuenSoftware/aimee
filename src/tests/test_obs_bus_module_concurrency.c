@@ -401,7 +401,30 @@ static int durable_module_sink(const char *role, const char *principal, const ch
    return 0;
 }
 
-#include "module_command_cancellation_cases.inc"
+void module_command_cancellation_setup(const char *home);
+void module_command_cancellation_cases(void);
+void module_command_cancellation_shutdown(void);
+
+static _Thread_local int callback_thread_marker;
+static int callback_calls;
+static int original_thread_cancelled(void *context)
+{
+   assert(callback_thread_marker == 73 && pthread_equal(pthread_self(), *(pthread_t *)context));
+   callback_calls++;
+   return 0;
+}
+static void test_callback_keeps_original_tls(void)
+{
+   pthread_t caller = pthread_self();
+   callback_thread_marker = 73;
+   char response[16];
+   uint32_t length = 0;
+   assert(obs_bus_module_call(ABSENT_KIND, ABSENT_STAGE, 1, now_ns() + 1000000000ULL, "probe", 5,
+                              response, sizeof response, &length, original_thread_cancelled,
+                              &caller) == OURO_MODULE_CALL_CAPABILITY_ABSENT);
+   assert(callback_calls > 0);
+   callback_thread_marker = 0;
+}
 
 int main(void)
 {
@@ -425,6 +448,24 @@ int main(void)
    int capture_status = 0;
    assert(waitpid(capture_child, &capture_status, 0) == capture_child &&
           WIFEXITED(capture_status) && WEXITSTATUS(capture_status) == 0);
+   pid_t shutdown_child = fork();
+   assert(shutdown_child >= 0);
+   if (!shutdown_child)
+   {
+      alarm(10);
+      char shutdown_home[256];
+      snprintf(shutdown_home, sizeof shutdown_home, "%s/aimee-bus-stop-XXXXXX", platform_tmpdir());
+      assert(mkdtemp(shutdown_home));
+      setenv("AIMEE_HOME", shutdown_home, 1);
+      module_command_cancellation_setup(shutdown_home);
+      audit_log_open();
+      assert(obs_bus_start() == 0);
+      module_command_cancellation_shutdown();
+      _exit(0);
+   }
+   int shutdown_status = 0;
+   assert(waitpid(shutdown_child, &shutdown_status, 0) == shutdown_child &&
+          WIFEXITED(shutdown_status) && WEXITSTATUS(shutdown_status) == 0);
    printf("obs_bus_module_concurrency:\n");
    char home[256];
    snprintf(home, sizeof home, "%s/aimee-busconc-XXXXXX", platform_tmpdir());
@@ -434,7 +475,7 @@ int main(void)
       return 1;
    }
    setenv("AIMEE_HOME", home, 1);
-   direct_setup(home);
+   module_command_cancellation_setup(home);
    audit_log_open();
    assert(obs_bus_set_durable_sink(durable_module_sink, NULL) == 0);
    if (obs_bus_start() != 0)
@@ -447,7 +488,8 @@ int main(void)
    obs_bus_module_service_t *service = test_embedded_callback_service();
    test_calls_overlap();
    test_expired_deadline_does_not_block();
-   direct_cases();
+   test_callback_keeps_original_tls();
+   module_command_cancellation_cases();
 
    atomic_store(&durable_ready, 1);
    obs_bus_flush();

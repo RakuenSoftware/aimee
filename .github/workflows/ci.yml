@@ -1991,14 +1991,18 @@ jobs:
       - name: Configure optional encrypted storage
         if: matrix.storage == 'luks'
         run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
-      - name: Run the shipped deployment and regression gates
-        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --output /tmp/aimee-e2e-evidence
-      - name: Set up Go for private configured-test execution
-        if: matrix.topology == 'T3'
+      - name: Set up Go for external reference and configured tests
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
+      - name: Build the frozen external memory reference (test only)
+        run: |
+          git fetch --no-tags --depth=1 origin 0e29dd14f8c96de8f8366d763dfe56992aedc2b0
+          mkdir -p "$RUNNER_TEMP/reference-memory"
+          python3 scripts/build_reference_memory_fixture.py --output "$RUNNER_TEMP/reference-memory/aimee-module-memory"
+      - name: Run shipped deployment with explicitly selected external memory reference
+        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --reference-memory-owner "$RUNNER_TEMP/reference-memory/aimee-module-memory" --output /tmp/aimee-e2e-evidence
       - name: Private configured tests use actual Docker custody and joined cleanup
         if: matrix.topology == 'T3'
         working-directory: server-go

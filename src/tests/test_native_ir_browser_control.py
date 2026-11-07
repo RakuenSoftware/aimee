@@ -21,7 +21,9 @@ def assert_completed_parent(records):
     parent = starts[0]["turn_id"]
     statuses = [record["event"]["payload"]["status"] for record in records
                 if record["turn_id"] == parent and record["event"]["kind"] == "execution"]
-    assert statuses == ["running", "completed"], (parent, statuses)
+    assert statuses == ["running", "completed"], (parent, statuses,
+        [record["event"]["payload"] for record in records
+         if record["turn_id"] == parent and record["event"]["kind"] == "execution"])
 
 
 ROOT_HTTP = r'''

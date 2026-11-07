@@ -592,6 +592,16 @@ static int messages_buffered(const char *body, char *resp, int cap)
    driver = delegate_driver_get(ag->provider);
    /* Exact-parity passthrough only applies to the Anthropic-native path. */
    int parity = driver_is_anthropic(driver);
+   /* Reject malformed caller capability metadata at ingress, before the shared
+    * executor classifies endpoint/credential availability. Streaming uses the
+    * same existing header validator and the same client-error category. */
+   char parity_headers[2048] = "";
+   if (parity && build_anthropic_parity_headers(parity_headers, sizeof parity_headers, ag))
+   {
+      status = write_error(resp, cap, 400, "invalid_request_error",
+                           "invalid OAuth capability headers", 0);
+      goto cleanup;
+   }
    if (messages_prepare_request(body, ag, parity, &policy, policy_error, sizeof policy_error))
    {
       status = write_error(resp, cap, 400, "invalid_request_error",

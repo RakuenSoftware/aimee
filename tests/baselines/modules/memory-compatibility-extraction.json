@@ -259,8 +259,8 @@
     {
       "target": "unit-test-ir-module-plan",
       "source": "src/tests/test_ir_module_plan.c",
-      "sha256": "ee4f1fa6553f5fe1f29dcb54ef98db06be9e1b9c7eedef61dc55abed1611b430",
-      "assert_calls": 92,
+      "sha256": "4c246de2c9a0a131e9f4a0bfb83546cdf98d90f51cc1b1861c759163599dff7c",
+      "assert_calls": 98,
       "test_functions": [
         "test_ir_stage_appends_system_block",
         "test_ir_stage_prefers_supplied_query",
@@ -275,7 +275,8 @@
         "test_invalid_plans_have_no_effects",
         "test_required_plan_failure_is_request_scoped",
         "test_generic_bindings_full_text_and_epoch",
-        "test_real_go_namespace_policy"
+        "test_real_go_namespace_policy",
+        "test_optional_owner_and_selected_failure_are_distinct"
       ],
       "source_revisions": [
         {
@@ -301,13 +302,43 @@
             "test_generic_bindings_full_text_and_epoch",
             "test_real_go_namespace_policy"
           ]
+        },
+        {
+          "target": "unit-test-ir-module-plan",
+          "source": "src/tests/test_ir_module_plan.c",
+          "sha256": "ee4f1fa6553f5fe1f29dcb54ef98db06be9e1b9c7eedef61dc55abed1611b430",
+          "assert_calls": 92,
+          "test_functions": [
+            "test_ir_stage_appends_system_block",
+            "test_ir_stage_prefers_supplied_query",
+            "test_ir_stage_no_recall_midsession_noop",
+            "test_ir_stage_session_start_guidance_without_recall",
+            "test_first_turn_withholds_shell",
+            "test_shell_returns_after_first_turn",
+            "test_ir_stage_guidance_not_repeated_midsession",
+            "test_persona_prepends_first_user_message_once",
+            "test_tool_patch_validation",
+            "test_gate_reply_and_audit",
+            "test_invalid_plans_have_no_effects",
+            "test_required_plan_failure_is_request_scoped",
+            "test_generic_bindings_full_text_and_epoch",
+            "test_real_go_namespace_policy"
+          ],
+          "merge_review": "Upstream removes raw-system-prompt/text-phase APIs. Request-scoped refusal, empty-plan and opaque payload checks use the canonical context phase; previous text-phase assertion inventory remains below.",
+          "retired_test_functions_in_this_revision": [
+            "test_system_prompt_raw_env",
+            "test_disabled_noop"
+          ],
+          "pre_merge_reference": {
+            "commit": "01b6cd29b41d061bbf535c868ff07c47b8d4d0fd",
+            "path": "src/tests/test_ir_module_plan.c",
+            "sha256": "ca2c667810eca2d2aae6ee3e933770d51e767c8856be5493719c20e5c6b84ee2",
+            "meaning": "Exact pre-merge source is retained in Git; current fixture follows current canonical/ring interfaces and explicit retired API exclusions."
+          }
         }
       ],
-      "merge_review": "Upstream removes raw-system-prompt/text-phase APIs. Request-scoped refusal, empty-plan and opaque payload checks use the canonical context phase; previous text-phase assertion inventory remains below.",
-      "retired_test_functions_in_this_revision": [
-        "test_system_prompt_raw_env",
-        "test_disabled_noop"
-      ],
+      "merge_review": "PR #3091 native SDK repair adds six assertions covering absent optional owner, selected failure/disabled context, and the no-factory NULL-context transport check. All prior assertions and actual frozen Go policy execution are retained; prior hash/count/function inventory remains in source_revisions.",
+      "retired_test_functions_in_this_revision": [],
       "pre_merge_reference": {
         "commit": "01b6cd29b41d061bbf535c868ff07c47b8d4d0fd",
         "path": "src/tests/test_ir_module_plan.c",

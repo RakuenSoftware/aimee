@@ -621,8 +621,9 @@ void aimee_ir_run_transforms(aimee_request_t *ir, const aimee_ir_transform_t *st
  * backend_build. Modules are registered HERE (one place, in aimee_ir_serve.c so the
  * pure IR core stays free of module + config linkage) as they are ported onto the
  * IR. `memory_enabled` is the caller-resolved gw_stage_memory toggle (config-store
- * modules.memory -> env default), injected here exactly like the legacy stage
- * catalogs so the transform stays config-free. */
+ * modules.memory -> owner-parsed env default). -1 means no optional plan owner;
+ * 0 disables context while retaining the selected owner's tool-policy phase.
+ * Selected owner failures remain required plans and refuse assembly. */
 void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled);
 
 /* Detect unproductive tool-use loops from the protocol-neutral transcript and

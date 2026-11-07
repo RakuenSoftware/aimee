@@ -116,6 +116,8 @@ func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row 
 	d.executed = append(d.executed, sql)
 	d.args = append(d.args, args)
 	switch {
+	case sql == sessionIRHistoryLockSQL:
+		return sessRow{db: d, sql: sql, values: []any{args[0]}}
 	case sql == originalInputPresenceSQL || sql == originalInputMessageSQL:
 		return inputBoolRow(false)
 	case sql == primaryGetLatestSQL && d.primaryRow != nil:

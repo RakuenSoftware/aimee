@@ -459,56 +459,6 @@ static const char *default_exec_instructions =
     "- If you encounter an error, try to diagnose and fix it.\n"
     "- Do not ask for confirmation. Execute the task directly.\n";
 
-static int append_exec_context_text(aimee_message_t *context, const char *text,
-                                    aimee_context_origin_t origin,
-                                    aimee_context_authority_t authority)
-{
-   if (!text || !text[0])
-      return 0;
-   if (context->n_blocks >= AIMEE_IR_MAX_BLOCKS)
-      return -1;
-   aimee_block_t *blocks =
-       realloc(context->blocks, (size_t)(context->n_blocks + 1) * sizeof *blocks);
-   if (!blocks)
-      return -1;
-   context->blocks = blocks;
-   aimee_block_t *block = &blocks[context->n_blocks++];
-   *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup(text)};
-   if (!block->text)
-      return -1;
-   aimee_ir_block_set_context(block, origin, authority,
-                              authority == AIMEE_CTX_AUTH_POLICY ? AIMEE_CTX_TRUST_VERIFIED
-                                                                 : AIMEE_CTX_TRUST_UNVERIFIED,
-                              AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
-   return 0;
-}
-
-/* Read-only token/compaction view. It is never supplied to the model renderer. */
-static char *exec_context_text_view(const aimee_message_t *context)
-{
-   size_t size = 1;
-   for (int i = 0; i < context->n_blocks; ++i)
-      if (context->blocks[i].text)
-      {
-         size_t n = strlen(context->blocks[i].text);
-         if (n > SIZE_MAX - size)
-            return NULL;
-         size += n;
-      }
-   char *view = calloc(1, size);
-   if (!view)
-      return NULL;
-   size_t used = 0;
-   for (int i = 0; i < context->n_blocks; ++i)
-      if (context->blocks[i].text)
-      {
-         size_t n = strlen(context->blocks[i].text);
-         memcpy(view + used, context->blocks[i].text, n);
-         used += n;
-      }
-   return view;
-}
-
 static int build_owned_exec_context(const agent_t *agent, const agent_network_t *network,
                                     const char *role, const char *policy, int current_code_only,
                                     const char *task_evidence, aimee_message_t *out, char *error,
@@ -516,8 +466,8 @@ static int build_owned_exec_context(const agent_t *agent, const agent_network_t 
 {
    if (agent_build_exec_context_ir_checked(agent, network, role, policy, current_code_only, out,
                                            error, error_size) ||
-       append_exec_context_text(out, task_evidence, AIMEE_CTX_ORIGIN_MEMORY,
-                                AIMEE_CTX_AUTH_EVIDENCE))
+       agent_exec_context_append_text(out, task_evidence, AIMEE_CTX_ORIGIN_MEMORY,
+                                      AIMEE_CTX_AUTH_EVIDENCE))
       goto fail;
    if (!out->n_blocks)
    {
@@ -530,7 +480,8 @@ static int build_owned_exec_context(const agent_t *agent, const agent_network_t 
                 "tools.\n"
                 "- When you have completed the task, respond with a final summary.\n"
               : default_exec_instructions;
-      if (append_exec_context_text(out, fallback, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY))
+      if (agent_exec_context_append_text(out, fallback, AIMEE_CTX_ORIGIN_PLATFORM,
+                                         AIMEE_CTX_AUTH_POLICY))
          goto fail;
    }
    return 0;
@@ -923,7 +874,7 @@ native_provider_http:
    int context_ready = !build_owned_exec_context(
        agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, NULL,
        current_code_only, task_instructions, &assembled_context, out->error, sizeof out->error);
-   char *assembled_sys = context_ready ? exec_context_text_view(&assembled_context) : NULL;
+   char *assembled_sys = context_ready ? agent_exec_context_text_view(&assembled_context) : NULL;
    if (!assembled_sys)
    {
       aimee_message_free(&assembled_context);
@@ -1206,7 +1157,7 @@ native_provider_http:
                 agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, NULL,
                 current_code_only, task_instructions, &refreshed_context, out->error,
                 sizeof out->error);
-            char *refreshed = ready ? exec_context_text_view(&refreshed_context) : NULL;
+            char *refreshed = ready ? agent_exec_context_text_view(&refreshed_context) : NULL;
             if (!refreshed)
             {
                aimee_message_free(&refreshed_context);

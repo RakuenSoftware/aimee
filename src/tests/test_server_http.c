@@ -59,6 +59,45 @@ int server_native_runtime_forward_service_admitted(void)
 
 static int history_open_effects;
 
+static int owned_action_route_probe, owned_action_route_calls;
+int aimee_module_owned_user_action_v1(const char *headers, const char *body, size_t length,
+                                      char **result, size_t *result_length, size_t *capacity)
+{
+   (void)headers;
+   *result = NULL;
+   *result_length = *capacity = 0;
+   if (!owned_action_route_probe)
+      return 0;
+   assert(length == 2 && !memcmp(body, "{}", 2));
+   assert(server_http_identity_principal()[0]);
+   owned_action_route_calls++;
+   *result = strdup("{\"status\":\"ok\",\"route\":\"owned-source-callback\"}");
+   assert(*result);
+   *result_length = strlen(*result);
+   *capacity = *result_length + 1;
+   return 1;
+}
+static void test_owned_user_source_route_reaches_installed_callback(void)
+{
+   int pair[2];
+   assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+   const char *wire = "POST /v1/modules/user-source HTTP/1.1\r\nHost: localhost\r\n"
+                      "Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{}";
+   assert(write(pair[1], wire, strlen(wire)) == (ssize_t)strlen(wire));
+   owned_action_route_probe = 1;
+   int history_before = history_open_effects;
+   handle_conn_inline(pair[0], 0);
+   owned_action_route_probe = 0;
+   char response[2048];
+   ssize_t size = read(pair[1], response, sizeof response - 1);
+   assert(size > 0);
+   response[size] = 0;
+   assert(strstr(response, "200 OK") && strstr(response, "owned-source-callback"));
+   assert(owned_action_route_calls == 1 && history_open_effects == history_before);
+   close(pair[0]);
+   close(pair[1]);
+}
+
 /* This is a route-only fixture, without a source/Vault/workspace owner. Never
  * invent delegated execution authority merely to satisfy the link. Actual
  * issuer success and refusal paths are covered by native-source-issuers and
@@ -1550,6 +1589,7 @@ static void test_original_http_capture_failure_status(void)
 
 int main(void)
 {
+   test_owned_user_source_route_reaches_installed_callback();
    test_original_http_capture_failure_status();
    test_history_open_precedes_sse_headers();
    test_stream_handoff_retains_attested_owner();

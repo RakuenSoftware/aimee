@@ -46,7 +46,7 @@ func TestSessionIRRunningHistoryIncludesOnlyOwnedCommittedConversation(t *testin
 			t.Fatal("source content changed", exact, cells)
 		}
 	}
-	if db.executed[0] != sessionIRRunningHistorySQL || fmt.Sprint(db.args[0]) != "[s owner 0]" {
+	if len(db.executed) != 2 || db.executed[0] != sessionIRHistoryLockSQL || fmt.Sprint(db.args[0]) != "[s owner]" || db.executed[1] != sessionIRRunningHistorySQL || fmt.Sprint(db.args[1]) != "[s owner 0]" {
 		t.Fatal("owner query changed", db.executed, db.args)
 	}
 	// Completed-history callers retain their original contract: the open turn is

@@ -13,6 +13,7 @@
   "sources": [
     "src/modules/audit/audit_action.c",
     "src/modules/audit/obs_bus.c",
+    "src/modules/audit/obs_bus_call.c",
     "src/modules/audit/audit_ledger.c",
     "src/modules/audit/audit_replay.c",
     "src/modules/audit/audit_worm.c",
@@ -43,5 +44,8 @@
   ],
   "go_tests": [
     "server-go/modules/audit/action_test.go"
+  ],
+  "private_headers": [
+    "src/modules/audit/obs_bus_call.h"
   ]
 }

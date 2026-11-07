@@ -89,6 +89,9 @@ func sessionIRHistorySaveInputAuthorized(ctx context.Context, q store.Queryer, f
 // The reducer still checks every immutable source sequence without truncation.
 // Terminal means the last candidate was returned AND fewer than 256 candidates
 // existed. A byte-limited partial page never authorizes stopping the scan.
+// Acquire the owner lock in its own statement: a SELECT snapshot taken before
+// waiting for a checkpoint writer cannot see that writer's committed events.
+const sessionIRHistoryLockSQL = `SELECT id FROM server_sessions WHERE id=$1 AND principal=$2 FOR SHARE`
 const sessionIRHistoryPageSize = 256
 const sessionIRHistorySQL = `WITH owned AS MATERIALIZED (
  SELECT id FROM server_sessions WHERE id=$1 AND principal=$2 FOR SHARE
@@ -206,6 +209,16 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 	query := sessionIRHistorySQL
 	if running {
 		query = sessionIRRunningHistorySQL
+	}
+	var locked string
+	if err := q.QueryRow(ctx, sessionIRHistoryLockSQL, f[0], f[2]).Scan(&locked); err != nil {
+		if errors.Is(err, store.ErrNoRows) {
+			return store.StatusMissing, nil, nil
+		}
+		return 0, nil, err
+	}
+	if locked != f[0] {
+		return 0, nil, fmt.Errorf("canonical history owner lock mismatch")
 	}
 	first, err := q.Query(ctx, query, f[0], f[2], "0")
 	if err != nil {

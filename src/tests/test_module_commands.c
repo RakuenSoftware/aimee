@@ -121,7 +121,7 @@ obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t dead
          out[28] = 10;
          memcpy(out + 32, "memoryembed_textStatistics", 26);
          *result_len = 58;
-         return AIMEE_MODULE_CALL_OK;
+         return OURO_MODULE_CALL_OK;
       }
       put32(out, 0x524d4344u);
       put32(out + 4, version);
@@ -164,7 +164,7 @@ obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t dead
    }
    invoke_count++;
    if (invoke_fault >= 0)
-      return (aimee_module_call_result_t)invoke_fault;
+      return (ouro_module_call_result_t)invoke_fault;
    assert(get32(req) == 0x51504d43u && get32(req + 4) == (expect_context ? 2u : 1u));
    unsigned header = expect_context ? 20 : 16;
    assert(body_len >= header + 5 && memcmp(req + header, expect_verb, 5) == 0);
@@ -201,7 +201,7 @@ obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t dead
       put32(out, 0);
    if (frame_fault == 2)
       *result_len -= 1;
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 uint64_t aimee_module_call_deadline_ns(int timeout_ms)
 {
@@ -243,12 +243,11 @@ static void outcome_cases(void)
    assert(aimee_module_commands_dispatch_internal_raw_outcome_context_timeout_v1(
               "memory.embed_text", args, context, 0, &reply, &outcome) == -1);
    assert(outcome.stage == AIMEE_COMMAND_UNSENT && invoke_count == count);
-   const int failures[] = {
-       AIMEE_MODULE_CALL_TRANSPORT,         AIMEE_MODULE_CALL_CANCELLED,
-       AIMEE_MODULE_CALL_CAPABILITY_DENIED, AIMEE_MODULE_CALL_CAPABILITY_ABSENT,
-       AIMEE_MODULE_CALL_INVALID_REQUEST,   AIMEE_MODULE_CALL_DEADLINE_EXCEEDED,
-       AIMEE_MODULE_CALL_INTERNAL,          AIMEE_MODULE_CALL_PROTOCOL,
-       AIMEE_MODULE_CALL_INVALID_ARGUMENT,  AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE};
+   const int failures[] = {OURO_MODULE_CALL_TRANSPORT,         OURO_MODULE_CALL_CANCELLED,
+                           OURO_MODULE_CALL_CAPABILITY_DENIED, OURO_MODULE_CALL_CAPABILITY_ABSENT,
+                           OURO_MODULE_CALL_INVALID_REQUEST,   OURO_MODULE_CALL_DEADLINE_EXCEEDED,
+                           OURO_MODULE_CALL_INTERNAL,          OURO_MODULE_CALL_PROTOCOL,
+                           OURO_MODULE_CALL_INVALID_ARGUMENT,  OURO_MODULE_CALL_RESPONSE_TOO_LARGE};
    for (unsigned i = 0; i < sizeof failures / sizeof failures[0]; i++)
    {
       invoke_fault = failures[i];
@@ -264,14 +263,14 @@ static void outcome_cases(void)
       assert(aimee_module_commands_dispatch_internal_raw_outcome_context_timeout_v1(
                  "memory.embed_text", args, context, 731, &reply, &outcome) == -1);
       assert(!reply && outcome.stage == AIMEE_COMMAND_FRAME_INVALID &&
-             outcome.sdk_result == AIMEE_MODULE_CALL_OK);
+             outcome.sdk_result == OURO_MODULE_CALL_OK);
    }
    frame_fault = 0;
    invoke_json = "not-json";
    assert(aimee_module_commands_dispatch_internal_raw_outcome_context_timeout_v1(
               "memory.embed_text", args, context, 731, &reply, &outcome) == -1);
    assert(!reply && outcome.stage == AIMEE_COMMAND_BODY_INVALID &&
-          outcome.sdk_result == AIMEE_MODULE_CALL_OK);
+          outcome.sdk_result == OURO_MODULE_CALL_OK);
    invoke_json = "{\"status\":\"ok\"}";
    embedded_nul = 1;
    assert(aimee_module_commands_dispatch_internal_raw_outcome_context_timeout_v1(
@@ -285,7 +284,7 @@ static void outcome_cases(void)
       assert(aimee_module_commands_dispatch_internal_raw_outcome_context_timeout_v1(
                  "memory.embed_text", args, context, 731, &reply, &outcome) == 1);
       assert(reply && outcome.stage == AIMEE_COMMAND_BODY_READY &&
-             outcome.sdk_result == AIMEE_MODULE_CALL_OK);
+             outcome.sdk_result == OURO_MODULE_CALL_OK);
       char *text = cJSON_PrintUnformatted(reply);
       assert(text && !strcmp(text, valid[i]));
       free(text);

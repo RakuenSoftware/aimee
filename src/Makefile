@@ -76,11 +76,18 @@ ifneq ($(GIT_COMMIT_TIME),)
 VERSION_FLAGS += -DAIMEE_GIT_COMMIT_TIME=$(GIT_COMMIT_TIME)L
 endif
 
+# Dry-run/question probes inspect the graph; they must never invalidate another
+# build through parse-time shell side effects. Actual builds retain stale-object
+# cleanup after branch and version changes.
+AIMEE_MAKE_FLAG_WORD := $(filter-out -%,$(firstword $(MAKEFLAGS)))
+AIMEE_MAKE_READ_ONLY := $(findstring n,$(AIMEE_MAKE_FLAG_WORD))$(findstring q,$(AIMEE_MAKE_FLAG_WORD))
+
 # Branch tracking: auto-clean stale object files when the git branch changes.
 # Prevents linker errors from object files compiled on a different branch.
 BRANCH_FILE = $(OBJDIR)/branch.txt
 CURRENT_BRANCH = $(shell git rev-parse --abbrev-ref HEAD 2>$(NULLDEV) || echo unknown)
 PREVIOUS_BRANCH = $(shell cat $(BRANCH_FILE) 2>$(NULLDEV))
+ifeq ($(AIMEE_MAKE_READ_ONLY),)
 ifneq ($(CURRENT_BRANCH),$(PREVIOUS_BRANCH))
 ifneq ($(PREVIOUS_BRANCH),)
 $(shell $(RM) $(OBJDIR) 2>$(NULLDEV))
@@ -89,10 +96,13 @@ endif
 $(shell mkdir -p $(dir $(BRANCH_FILE)) && echo "$(CURRENT_BRANCH)" > $(BRANCH_FILE))
 endif
 
+endif # actual builds only
+
 # Version tracking: auto-clean stale object files when the git commit hash changes.
 # Prevents AIMEE_VERSION constant mismatches when HEAD changes (e.g. git commit --amend).
 VERSION_FILE = $(OBJDIR)/version.txt
 PREVIOUS_VERSION = $(shell cat $(VERSION_FILE) 2>$(NULLDEV))
+ifeq ($(AIMEE_MAKE_READ_ONLY),)
 ifneq ($(GIT_VERSION),$(PREVIOUS_VERSION))
 ifneq ($(PREVIOUS_VERSION),)
 $(shell $(RM) $(OBJDIR) 2>$(NULLDEV))
@@ -101,12 +111,16 @@ endif
 $(shell mkdir -p $(dir $(VERSION_FILE)) && echo "$(GIT_VERSION)" > $(VERSION_FILE))
 endif
 
+endif # actual builds only
+
 # Eagerly create platform subdirectories at variable-expansion time so parallel
 # builds (-j) don't race on directory creation.
 # NOTE: must come AFTER the branch-switch block above, which deletes $(OBJDIR) on
 # branch changes — if this ran before, the directories would be wiped and gcc
 # would fail trying to write .d dependency files into non-existent subdirectories.
+ifeq ($(AIMEE_MAKE_READ_ONLY),)
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/modules/kb/c)
+endif
 
 # GCC 15.2 IPA bit-CP proves a live int parameter constant zero across -Os
 # -flto (kb_insights_util.c group_array: n>0 arrives as 0, by_* come back
@@ -446,13 +460,13 @@ $(CORE_CONNECTION_LIB): $(CORE_CONNECTION_OBJS)
 	$(AR) rcs $@ $^
 
 endif
-OBS_BUS_RUNTIME_OBJ = $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/instance_identity.o
+OBS_BUS_RUNTIME_OBJ = $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/obs_bus_call.o $(OBJDIR)/modules/audit/instance_identity.o
 AUDIT_REPLAY_OBJ = $(OBJDIR)/modules/audit/audit_replay.o
 
 $(OBJDIR)/server/execution_policy_bus.o: C_FLAGS += -Imodules/execution-policy/include
 
 # --- Layer 2: Agent execution (agent loop, tools, HTTP, policy) ---
-AGENT_SRCS = server/host_original_text.c server/host_original_submission.c core/turn_integrity/turn_integrity.c agent_job_release.c delegate_exit_classify.c primary_session_release.c server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/execution_policy_bus.c modules/benchmarks/agent_eval.c modules/benchmarks/agent_eval_memory_support.c server/agent_coord.c \
+AGENT_SRCS = server/module_native_tools.c server/host_original_text.c server/host_original_submission.c core/turn_integrity/turn_integrity.c agent_job_release.c delegate_exit_classify.c primary_session_release.c server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/execution_policy_bus.c modules/benchmarks/agent_eval.c modules/benchmarks/agent_eval_memory_support.c server/agent_coord.c \
              server/agent_tasks.c server/agent_tools.c server/computer_use.c server/script_runner.c server/script_rpc.c server/script_tool_execution.c toolset.c server/tool_args_coerce.c server/tool_schema_sanitizer.c server/osv_check.c server/http_retry.c server/failover.c \
              server/web_search.c server/web_search_fuse.c server/web_search_breaker.c server/token_tracker.c server/token_tracker_registry.c server/token_tracker_db1.c server/middleware.c server/agent_pipeline.c \
              server/process_mgr.c server/liveness.c server/cli_session.c server/cli_session_pty.c server/cli_codex.c server/cli_codex_profile.c server/provider_cli_adapter.c server/cli_claude.c server/cli_claude_native.c server/claude_headless.c server/server_session_control.c server/server_session_capture.c server/server_session_question.c server/server_session_log.c server/agent_response_projection.c  server/cli_mistral.c server/session_compact.c server/rounds_to_resume.c \
@@ -489,7 +503,7 @@ CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o
 $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 
 # --- Server ---
-SERVER_SRCS = peer_client/peer_client.c db1_store_probe.c server/embedder_catalog.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c server/server_main.c server/vault_bootstrap_privilege.c server/server.c server/server_kb_heartbeat.c server/s2_native_gate_hook.c server_provider.c server_insights.c server_eval.c server/server_api_status.c server/server_error_kind.c server/server_bearer_auth.c server/server_seed_config.c server/server_http.c server/delegate_egress_adapter.c server/server_http_surfaces.c server/server_http_management.c server/server_http_routes.c server/server_http_op_runs.c server/server_compute_owner.c server/server_learning_outcome.c server/server_learning_recovery.c server/server_verification.c server/server_learning_application.c server/server_learning_approaches.c server/server_http_mgmt_read_routes.c server/server_http_routes_git.c server/server_http_routes_workspace.c server/server_dev_submit.c server/server_ci_route.c server/appliance_admin.c server/server_http_config_routes.c server/server_http_response.c server/server_http_sse.c server/server_http_conn_worker.c server/server_conn_io.c server/server_tls.c server/server_http_reqctx.c server/server_http_identity.c server/server_http_authz.c server/request_context.c server/response_dedup.c server/anthropic_ingress.c server/anthropic_http.c server/server_model_execution.c server/openai_shape.c server/openai_chat.c server/msg_session_key.c modules/economizer/gateway_mutate.c server/ingress_preinject.c server/retrieval_outcome_bridge.c server/code_span.c modules/ir/aimee_ir_module_plan.c server/ir_host_bindings.c pipeline/gw_response_registry.c modules/governance/gw_stage_governance.c modules/governance/gw_stage_completion.c pipeline/gw_orchestration_seam.c modules/delegates/gw_orch_delegates.c modules/workflows/gw_orch_workflows.c server/openai_runs_store.c server/server_api.c server/server_native_primitive.c server/server_ready.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_memory.c server/server_task_projection.c server/server_state_freshness.c server/server_memory_review.c server/server_facts.c server/server_audit_replay_routes.c server/server_runner_endpoints.c server/workspace_register_args.c server/server_state_audit.c server/server_css_query.c server/server_workspace_scan.c server/server_state_index.c server/server_active_project.c server/server_state_vectors.c server/server_memory_benchmark.c server/roundtable_review_bus.c modules/roundtable/roundtable_review_panel.c server/workflow_control_bus.c modules/workspace/workspace_provider_detached.c modules/workspace/workspace_provider_container.c modules/workspace/workspace_runner_queue.c modules/workspace/workspace_runner_registry.c modules/workspace/workspace_turn.c modules/workspace/workspace_scope.c modules/delegates/delegate_sandbox_image.c modules/sandbox/sandbox_learned.c modules/webuser/webuser_runtime.c \
+SERVER_SRCS = server/server_http_module_console.c server/server_http_owned_source.c peer_client/peer_client.c db1_store_probe.c server/embedder_catalog.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c server/server_main.c server/vault_bootstrap_privilege.c server/server.c server/server_kb_heartbeat.c server/s2_native_gate_hook.c server_provider.c server_insights.c server_eval.c server/server_api_status.c server/server_error_kind.c server/server_bearer_auth.c server/server_seed_config.c server/server_http.c server/delegate_egress_adapter.c server/server_http_surfaces.c server/server_http_management.c server/server_http_routes.c server/server_http_op_runs.c server/server_compute_owner.c server/server_learning_outcome.c server/server_learning_recovery.c server/server_verification.c server/server_learning_application.c server/server_learning_approaches.c server/server_http_mgmt_read_routes.c server/server_http_routes_git.c server/server_http_routes_workspace.c server/server_dev_submit.c server/server_ci_route.c server/appliance_admin.c server/server_http_config_routes.c server/server_http_response.c server/server_http_sse.c server/server_http_conn_worker.c server/server_conn_io.c server/server_tls.c server/server_http_reqctx.c server/server_http_identity.c server/server_http_authz.c server/request_context.c server/response_dedup.c server/anthropic_ingress.c server/anthropic_http.c server/server_model_execution.c server/openai_shape.c server/openai_chat.c server/msg_session_key.c modules/economizer/gateway_mutate.c server/ingress_preinject.c server/retrieval_outcome_bridge.c server/code_span.c modules/ir/aimee_ir_module_plan.c server/ir_host_bindings.c pipeline/gw_response_registry.c modules/governance/gw_stage_governance.c modules/governance/gw_stage_completion.c pipeline/gw_orchestration_seam.c modules/delegates/gw_orch_delegates.c modules/workflows/gw_orch_workflows.c server/openai_runs_store.c server/server_api.c server/server_native_primitive.c server/server_ready.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_memory.c server/server_task_projection.c server/server_state_freshness.c server/server_memory_review.c server/server_facts.c server/server_audit_replay_routes.c server/server_runner_endpoints.c server/workspace_register_args.c server/server_state_audit.c server/server_css_query.c server/server_workspace_scan.c server/server_state_index.c server/server_active_project.c server/server_state_vectors.c server/server_memory_benchmark.c server/roundtable_review_bus.c modules/roundtable/roundtable_review_panel.c server/workflow_control_bus.c modules/workspace/workspace_provider_detached.c modules/workspace/workspace_provider_container.c modules/workspace/workspace_runner_queue.c modules/workspace/workspace_runner_registry.c modules/workspace/workspace_turn.c modules/workspace/workspace_scope.c modules/delegates/delegate_sandbox_image.c modules/sandbox/sandbox_learned.c modules/webuser/webuser_runtime.c \
               server/server_delegate_monitor.c server/server_coord_dispatcher.c server/server_session_pools.c server/presence.c server/turn_registry.c modules/workflows/wfe_scheduler.c \
               server/server_agent.c server/server_cli_oauth.c server/server_compute.c server/server_delegate_input.c server/server_chat_ir.c server/server_compute_mailbox.c server_compute_episodes.c server/router_advise.c modules/ir/aimee_ir_session.c modules/ir/aimee_ir_metrics.c modules/translation/aimee_backend_bedrock.c server/aimee_ir_serve.c modules/translation/aimee_responses_frontend_stream.c server/server_responses_stream.c server/server_native_cache.c modules/translation/harness_ir.c modules/translation/history_ir.c modules/translation/codec_stdio.c modules/delegates/aimee_ir_rescue.c server/shadow_mirror.c server/server_delegate_ondemand.c server/server_skill_jobs.c server/server_delegate_status.c server/server_delegate_reservation.c server/server_compute_async.c server/server_jobs_aux.c server/server_skill.c server/server_mcp.c server/server_mcp_roundtable.c server/server_mcp_surface.c server/server_mcp_call_table.c server/server_mcp_memory_gate.c server/server_mcp_ast_grep.c server/server_mcp_tools.c server/server_mcp_delegate.c server/server_mcp_process.c server/server_mcp_skill.c server/server_mcp_learning.c server/server_mcp_ensemble.c server/server_mcp_gateway.c server/session_search_tool.c server/compute_pool.c $(CLIENT_TRANSPORT_SRCS) \
               modules/roundtable/roundtable_pipeline_eval.c modules/roundtable/roundtable_pipeline_capture.c modules/roundtable/roundtable_pipeline_chunk.c server/server_pipeline.c server/server_pipeline_merge.c \
@@ -500,7 +514,7 @@ SERVER_SRCS = peer_client/peer_client.c db1_store_probe.c server/embedder_catalo
               modules/workflows/wfe_engine.c modules/workflows/wfe_approval.c \
               modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
-SERVER_SRCS += server/agent_result_cache.c
+SERVER_SRCS += server/agent_result_cache.c server/server_compute_lifetime.c
 SERVER_SRCS += server/server_governed_action.c server/server_clean_retry.c
 SERVER_SRCS += server/server_code_index.c
 SERVER_SRCS += server/server_mcp_project.c
@@ -870,7 +884,7 @@ $(eval $(call ts_obj,powershell_scan,tree-sitter-powershell/src,scanner.c))
 endif
 
 # All source files for linting (excluding vendored cJSON)
-ALL_SRCS = $(sort $(CORE_CODEC_SRCS) $(POSTGRES_CLIENT_SRCS) $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(DB1_INPUT_PLAN_CLIENT_SRCS) $(KB_STORE_PG_SRCS) $(KB_STORE_SRCS) $(KB_STORE_HOST_ADAPTER_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/kb/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/kb/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/kb/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) \
+ALL_SRCS = $(sort $(patsubst $(OBJDIR)/%.o,%.c,$(OBS_BUS_RUNTIME_OBJ)) $(CORE_CODEC_SRCS) $(POSTGRES_CLIENT_SRCS) $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(DB1_INPUT_PLAN_CLIENT_SRCS) $(KB_STORE_PG_SRCS) $(KB_STORE_SRCS) $(KB_STORE_HOST_ADAPTER_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/kb/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/kb/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/kb/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) \
            $(CORE_CONNECTION_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
