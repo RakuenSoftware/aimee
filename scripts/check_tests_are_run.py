@@ -55,6 +55,7 @@ UNBUILT_SOURCES: set[str] = set()
 # names the script; the check below requires that the script names the test and
 # that a make target runs the script, so an entry cannot outlive either.
 SCRIPT_BUILT = {
+    "test_index_observer_postgres.c": "scripts/validation/code-index-observer-postgres.py",
     "test_kb_mgmt_token_authority_client_commit.c":
         "scripts/run-p5c2d-token-authority-regressions.sh",
     "test_kb_mgmt_token_authority_daemon_stop.c":

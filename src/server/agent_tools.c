@@ -1525,12 +1525,18 @@ agent_mcp_call_fn agent_tools_mcp_call_provider(void)
    return g_mcp_call_fn;
 }
 
+#include "module_native_tools.h"
 void agent_tools_register_mcp_tool(const char *name)
 {
    if (!name || !name[0])
       return;
    if (agent_tools_is_mcp_derived(name))
       return;
+   if (agent_tools_module_native_has(name))
+   {
+      agent_tools_module_native_collision(name);
+      return;
+   }
    if (g_mcp_tool_count >= (int)(sizeof(g_mcp_tools) / sizeof(g_mcp_tools[0])))
    {
       LOG_ERROR("agent_tools", "MCP tool registry full (%d); '%s' DROPPED and uncallable",
@@ -1680,6 +1686,18 @@ static int builtin_ir_definition(const builtin_tool_def_t *definition, aimee_too
    return 0;
 }
 
+extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
+
+int agent_tools_builtin_name_reserved(const char *name)
+{
+   if (!name)
+      return 0;
+   for (size_t i = 0; i < sizeof g_builtin_tools / sizeof *g_builtin_tools; ++i)
+      if (!strcmp(name, g_builtin_tools[i].name))
+         return 1;
+   return 0;
+}
+
 /* The immutable canonical schema cache owns borrowed lookup pointers until exit. */
 static aimee_request_t g_schema_cache;
 static int g_schema_cache_ready;
@@ -1748,7 +1766,8 @@ int agent_tools_catalog(aimee_wire_t exposure, aimee_request_t *out)
    for (size_t i = 0; i < sizeof g_builtin_tools / sizeof *g_builtin_tools; ++i)
    {
       const builtin_tool_def_t *definition = g_builtin_tools + i;
-      if (!(definition->surfaces & surface) ||
+      if ((aimee_module_tool_source_mode && aimee_module_tool_source_mode(definition->name) < 0) ||
+          !(definition->surfaces & surface) ||
           (agent_tools_is_git_write(definition->name) && !g_git_write_fn))
          continue;
       aimee_tool_t tool = {0};
@@ -1761,6 +1780,23 @@ int agent_tools_catalog(aimee_wire_t exposure, aimee_request_t *out)
       if (rc)
          goto failed;
    }
+   aimee_request_t module_catalog = {0};
+   if (agent_tools_module_native_snapshot(&module_catalog))
+      goto failed;
+   int invalid = 0;
+   for (int i = 0; !invalid && i < module_catalog.n_tools; ++i)
+   {
+      const aimee_tool_t *definition = module_catalog.tools + i;
+      if (aimee_module_tool_source_mode && aimee_module_tool_source_mode(definition->name) < 0)
+         continue;
+      if (catalog_contains(&catalog, definition->name) ||
+          catalog_append(&catalog, definition->name, definition->description,
+                         cJSON_Duplicate(definition->schema, 1)))
+         invalid = 1;
+   }
+   aimee_request_free(&module_catalog);
+   if (invalid)
+      goto failed;
    if (g_mcp_call_fn && g_mcp_advert_fn)
       for (int i = 0; i < g_mcp_tool_count; ++i)
       {
@@ -1819,6 +1855,10 @@ int agent_tools_execution_definition(const char *name, aimee_tool_t *out)
    if (!out || !name || !name[0])
       return -1;
    memset(out, 0, sizeof *out);
+   if (aimee_module_tool_source_mode && aimee_module_tool_source_mode(name) < 0)
+      return -1;
+   if (agent_tools_module_native_has(name))
+      return agent_tools_module_native_definition(name, out);
    for (size_t i = 0; i < sizeof g_builtin_tools / sizeof *g_builtin_tools; ++i)
       if (!strcmp(name, g_builtin_tools[i].name))
          return agent_tools_is_git_write(name) && !g_git_write_fn

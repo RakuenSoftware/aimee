@@ -73,9 +73,13 @@
   ],
   "tests": [
     "src/tests/test_vault_capability.c",
+    "src/tests/test_vault_create_once.c",
     "src/tests/test_vault_crypto.c",
+    "src/tests/test_vault_fenced_use.c",
+    "src/tests/test_vault_generation_retirement.c",
     "src/tests/test_vault_kek_cache.c",
     "src/tests/test_vault_kms.c",
+    "src/tests/test_vault_local_use.c",
     "src/tests/test_vault_master_rotate.c",
     "src/tests/test_vault_principal.c",
     "src/tests/test_vault_seam.c",

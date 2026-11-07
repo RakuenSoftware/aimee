@@ -8,12 +8,15 @@ import (
 )
 
 type config struct {
-	port       int
-	certFile   string
-	keyFile    string
-	socketPath string
-	dbPath     string
-	spaPath    string
+	requireOriginalInput bool
+	port                 int
+	certFile             string
+	keyFile              string
+	socketPath           string
+	wfeEngine            string
+	wfeSocket            string
+	dbPath               string
+	spaPath              string
 	// PAM service backing dashboard logins (/etc/pam.d/<name>). Overridable so a
 	// deployment can point at its own stack rather than the shipped default.
 	pamService string

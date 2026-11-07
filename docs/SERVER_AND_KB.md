@@ -1,3 +1,5 @@
+> Memory extraction: statements below describing the former Go memory owner are historical deployment context. Current public packaging supplies only an explicit unavailable adapter and generic SDK; select an independently installed external memory implementation through the existing role manifest. See [Memory boundary](MEMORY.md). No former Go memory functionality is implied by the public binary.
+
 # Server and KB
 
 **Server assists one human. KB serves a shared corpus.** Each is an independent instance with its
@@ -72,7 +74,7 @@ not authorize merging Server and KB installations or their volumes.
 Source contracts: [role identity](../server-go/modules/module-runtime/identity/),
 [Server composition](../server-go/modules/server/role.go),
 [KB composition](../server-go/modules/kb/role.go),
-[memory placement](../server-go/modules/memory/scope.go), and
+[selected memory ownership](modules/memory.md), and
 [Server store selection](../src/server/server_memory.c).
 
 ## Select memory deliberately

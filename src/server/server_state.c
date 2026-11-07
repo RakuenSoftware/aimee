@@ -28,6 +28,7 @@
 #include "compute_pool.h"
 #include "cJSON.h"
 #include "json_fluent.h"
+#include "json_int64.h"
 #include "dogfood.h"
 #include "commands.h"
 #include "platform_path.h"
@@ -102,8 +103,8 @@ int handle_graph_sync_code(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!resp)
       return server_send_error(conn, "out of memory", NULL);
    cJSON_AddStringToObject(resp, "project", res.project);
-   cJSON_AddNumberToObject(resp, "generation_id", (double)res.generation_id);
-   cJSON_AddNumberToObject(resp, "edge_count", (double)res.edge_count);
+   cJSON_AddItemToObject(resp, "generation_id", jo_i64_value_exact(res.generation_id));
+   cJSON_AddItemToObject(resp, "edge_count", jo_i64_value_exact(res.edge_count));
    return send_and_free(conn, resp);
 }
 

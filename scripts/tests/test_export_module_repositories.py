@@ -70,7 +70,7 @@ class ModuleExportTests(unittest.TestCase):
             self.assertEqual(build.returncode, 0, build.stderr)
 
     def test_shared_database_and_domain_contracts_follow_consumers(self) -> None:
-        for module in ("aimee", "memory", "postgres"):
+        for module in ("aimee", "postgres"):
             with self.subTest(module=module):
                 sources = exporter.go_process_shared_sources(module)
                 for filename in ("db.go", "store_client.go", "store_wire.go"):
@@ -82,14 +82,20 @@ class ModuleExportTests(unittest.TestCase):
                 sources = exporter.go_process_shared_sources(module)
                 self.assertIn("server-go/aimee/client.go", sources)
                 self.assertFalse(any(path.startswith("server-go/db1/") for path in sources))
-        for module in ("aimee", "memory", "economizer", "delegates", "governance"):
+        for module in ("aimee", "economizer", "delegates", "governance"):
             with self.subTest(ir_consumer=module):
                 sources = exporter.go_process_shared_sources(module)
                 self.assertIn("server-go/ir/session.go", sources)
                 self.assertIn("server-go/ir/request.go", sources)
                 self.assertNotIn("server-go/ir/contract_test.go", sources)
-        self.assertIn("server-go/modules/egress/egress.go", exporter.go_process_shared_sources("memory"))
-        self.assertIn("server-go/modules/audit/action.go", exporter.go_process_shared_sources("memory"))
+        memory = exporter.go_process_shared_sources("memory")
+        self.assertIn("server-go/memory/client.go", memory)
+        self.assertIn("server-go/memory/client_test.go", memory)
+        self.assertIn("server-go/cmd/aimee-memory-bus-probe/main.go", memory)
+        self.assertTrue(all((REPO_ROOT / path).is_file() for path in memory))
+        for retired in ("server-go/db/", "server-go/ir/", "server-go/modules/egress/",
+                        "server-go/modules/audit/", "server-go/modules/memory/"):
+            self.assertFalse(any(path.startswith(retired) for path in memory), retired)
 
     @unittest.skipUnless(shutil.which("go"), "go is not installed")
     def test_aimee_export_builds_with_its_embedded_schema_and_process(self) -> None:
@@ -160,7 +166,7 @@ class ModuleExportTests(unittest.TestCase):
                     [{**client, "publish": publish}], {11266}, {7})
 
     @unittest.skipUnless(shutil.which("go"), "go is not installed")
-    def test_memory_export_builds_with_all_owner_sources(self) -> None:
+    def test_memory_export_builds_unavailable_adapter_and_generic_sdk(self) -> None:
         contract = exporter.process_contracts.validate()["memory"]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -168,16 +174,35 @@ class ModuleExportTests(unittest.TestCase):
                                    exporter.source_timestamp(),
                                    exporter.CORE_VERSION_FILE.read_text().strip())
             module = root / "aimee-module-memory"
-            for source in (REPO_ROOT / "server-go/modules/memory").rglob("*.go"):
-                relative = source.relative_to(REPO_ROOT)
-                self.assertEqual((module / relative).read_bytes(), source.read_bytes())
-            build = subprocess.run(["go", "build", "-o", str(module / "memory"), "./runtime"],
+            adapter = Path("server-go/modules/memory/adapter/unavailable.go")
+            self.assertEqual((module / adapter).read_bytes(), (REPO_ROOT / adapter).read_bytes())
+            self.assertEqual(list((module / "server-go/modules/memory").rglob("*.go")),
+                             [module / adapter])
+            for source in (REPO_ROOT / "server-go/memory").glob("*.go"):
+                self.assertEqual((module / source.relative_to(REPO_ROOT)).read_bytes(), source.read_bytes())
+            binary = module / "memory"
+            build = subprocess.run(["go", "build", "-o", str(binary), "./runtime"],
                                    cwd=module, capture_output=True, text=True, timeout=180)
             self.assertEqual(build.returncode, 0, build.stderr)
-            tests = subprocess.run(["go", "test", "./server-go/modules/memory",
-                                    "-run", "TestLifecycleVersionValidation|TestObservedRankingTrace|TestEvidenceCoverage|TestEvidenceRequirements|TestEvidenceRecovery|TestEvidenceTemporal|TestEvidenceComparison|TestEvidenceProcedure|TestMR05FrozenCoverage|TestUtilityHorizon|TestRequestCopySharesCodeInitialization", "-count=1"],
+            for args in ([], [str(root / "absent.sock")]):
+                unavailable = subprocess.run([str(binary), *args], capture_output=True, text=True, timeout=10)
+                self.assertEqual(unavailable.returncode, 2)
+                self.assertIn("memory capability unavailable", unavailable.stderr)
+                self.assertIn("external implementation", unavailable.stderr)
+                self.assertEqual(unavailable.stdout, "")
+            tests = subprocess.run(["go", "test", "./server-go/memory", "-count=1"],
                                    cwd=module, capture_output=True, text=True, timeout=180)
             self.assertEqual(tests.returncode, 0, tests.stdout + tests.stderr)
+            probe = module / "memory-probe"
+            build = subprocess.run(["go", "build", "-o", str(probe),
+                                    "./server-go/cmd/aimee-memory-bus-probe"],
+                                   cwd=module, capture_output=True, text=True, timeout=180)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            usage = subprocess.run([str(probe)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(usage.returncode, 2)
+            self.assertIn("BUS_SOCKET JSON_REQUEST|--decisions", usage.stderr)
+            self.assertFalse((module / "server-go/db").exists())
+            self.assertFalse((module / "server-go/modules/egress").exists())
 
     @unittest.skipUnless(shutil.which("go"), "go is not installed")
     def test_governance_export_builds_with_canonical_identity_contract(self) -> None:

@@ -31,6 +31,13 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+/* Versioned public-host promise: retained tool-source custody is checked on
+ * ordinary provider construction, including source-required bare results.
+ * Keep a strong final-link symbol so owner-enabled packaging rejects old hosts.
+ * Runtime authority still comes from current owner verification, not this flag. */
+__attribute__((used, externally_visible, retain)) const unsigned aimee_source_custody_contract_v1 =
+    1;
+
 /* ================================================================
  * From: agent_protocol.c
  * ================================================================ */
@@ -383,6 +390,67 @@ fail:
    return -1;
 }
 
+/* The source owner validates only retained canonical tool results. This hook
+ * transports opaque custody; request shaping cannot turn a missing owner into
+ * permission to send a stored copy. Source-free builds need no owner hook. */
+extern int server_native_history_accept_message_tool_sources(const aimee_message_t *)
+    __attribute__((weak));
+extern int server_native_history_tool_sources_preserved(const aimee_request_t *,
+                                                        const aimee_request_t *)
+    __attribute__((weak));
+static int agent_accept_retained_tool_sources(const cJSON *messages,
+                                              const aimee_request_t *retained)
+{
+   int attached = 0, original_attached = 0;
+   const cJSON *raw, *block;
+   cJSON_ArrayForEach(raw, messages)
+       cJSON_ArrayForEach(block, cJSON_GetObjectItemCaseSensitive(raw, "blocks"))
+   {
+      attached |= cJSON_HasObjectItem(block, "tool_source");
+      original_attached |= cJSON_HasObjectItem(block, "input_attachment");
+   }
+   for (int i = 0; i < retained->n_messages; i++)
+      for (int j = 0; j < retained->messages[i].n_blocks; j++)
+      {
+         attached |= retained->messages[i].blocks[j].tool_source != NULL;
+         original_attached |= retained->messages[i].blocks[j].input_attachment != NULL;
+      }
+   /* Missing metadata is itself relevant for source-required historical tools.
+    * Run the host preservation/required-source gate even when no receipt is
+    * present. Only a source-free legacy build may lack that host gate. */
+   if (!server_native_history_tool_sources_preserved)
+      return attached || original_attached ? -1 : 0;
+   if (attached && !server_native_history_accept_message_tool_sources)
+      return -1;
+   aimee_request_t canonical = {0};
+   int count = cJSON_GetArraySize(messages), rc = -1;
+   if (count < 0 || count > AIMEE_IR_MAX_BLOCKS)
+      return -1;
+   canonical.messages = count ? calloc((size_t)count, sizeof *canonical.messages) : NULL;
+   if (count && !canonical.messages)
+      return -1;
+   for (int i = 0; i < count; i++)
+   {
+      canonical.n_messages = i + 1;
+      if (aimee_ir_message_parse(cJSON_GetArrayItem(messages, i), &canonical.messages[i]))
+         goto done;
+   }
+   if (server_native_history_tool_sources_preserved(&canonical, retained))
+      goto done;
+   for (int i = 0; i < retained->n_messages; i++)
+   {
+      int sourced = 0;
+      for (int j = 0; j < retained->messages[i].n_blocks; j++)
+         sourced |= retained->messages[i].blocks[j].tool_source != NULL;
+      if (sourced && server_native_history_accept_message_tool_sources(&retained->messages[i]))
+         goto done;
+   }
+   rc = 0;
+done:
+   aimee_request_free(&canonical);
+   return rc;
+}
+
 cJSON *agent_build_seeded_request_ir(const agent_t *agent, const aimee_request_t *seed,
                                      const cJSON *messages, const aimee_request_t *catalog,
                                      const aimee_message_t *host_context, int max_tokens,
@@ -393,6 +461,7 @@ cJSON *agent_build_seeded_request_ir(const agent_t *agent, const aimee_request_t
    cJSON *rendered = NULL;
    if (agent_prepare_seeded_request_ir(agent, seed, messages, catalog, host_context, max_tokens,
                                        temperature, wire, is_delegate, &ir) ||
+       agent_accept_retained_tool_sources(messages, &ir) ||
        aimee_ir_request_project_model(&ir, &projected) ||
        aimee_backend_preserve_host_extensions(&ir, &projected, wire))
       goto done;

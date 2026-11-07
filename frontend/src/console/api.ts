@@ -93,3 +93,14 @@ export async function login(payload: { id_token?: string; break_glass_bearer?: s
   setCsrf(s.csrf);
   return s;
 }
+
+// Preserve native JSON number tokens and the complete native response verbatim.
+export async function apiSendRaw(method: string, path: string, body: string): Promise<{ status: number; ok: boolean; text: string }> {
+  const response = await fetch(`/api${path}`, {
+    method,
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+    body,
+  });
+  return { status: response.status, ok: response.ok, text: await response.text() };
+}

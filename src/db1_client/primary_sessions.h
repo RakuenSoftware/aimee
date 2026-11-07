@@ -8,6 +8,7 @@
 #define DEC_DB1_PRIMARY_SESSIONS_H 1
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -29,6 +30,41 @@ extern "C"
       char *messages_json;
    } db1_primary_session_row_t;
 
+   /* Host0-only atomic original BEGIN+User. Unknown/refusal never authorizes
+    * execution. Replay retains original turn and never means new work. */
+   typedef enum
+   {
+      DB1_ORIGINAL_INPUT_UNKNOWN = 0,
+      DB1_ORIGINAL_INPUT_CREATED = 1,
+      DB1_ORIGINAL_INPUT_REPLAY = 2
+   } db1_original_input_outcome_t;
+   typedef struct
+   {
+      uint64_t begin_sequence, input_sequence;
+      char original_turn[1025];
+      unsigned contract_version;
+      db1_original_input_outcome_t outcome;
+   } db1_original_input_receipt_t;
+   /* 0 validated created, 1 exact replay, -1 unavailable/refused/unknown. */
+   int db1_session_original_input_begin(const char *session_id, const char *operation_uuid,
+                                        const char *proposed_turn, const char *actor,
+                                        const char *batch_json,
+                                        db1_original_input_receipt_t *receipt);
+   extern const unsigned aimee_original_input_delivery_client_contract_v1;
+   int db1_session_original_input_begin_delivery(const char *, const char *, const char *,
+                                                 const char *, const char *, const char *,
+                                                 db1_original_input_receipt_t *, uint64_t *);
+   int db1_session_original_input_delivery_get(const char *, const char *, const char *,
+                                               const char *, char **);
+   int db1_session_original_input_delivery_page(const char *, const char *, const char *,
+                                                const char *, const char *, char **);
+   int db1_session_original_input_delivery_ack(const char *, const char *, const char *,
+                                               const char *, const char *, const char *);
+   int db1_session_input_attachment_history_save(const char *session_id, const char *checkpoint,
+                                                 const char *scope, const char *actor,
+                                                 const char *active_turn,
+                                                 const char *messages_json);
+
    /* Complete bounded, actor-scoped canonical text search. Caller frees JSON. */
    char *db1_session_ir_search(const char *principal, const char *request_json);
    /* Host custody primitives; reconciliation requires independent qualified
@@ -42,6 +78,10 @@ extern "C"
                                              char out_sequence[32], char out_epoch[33]);
    int db1_session_native_history_load(const char *principal, const char *session_id,
                                        const char *mode, const char *active_turn, char **out_json);
+   /* Core0-only canonical tool-result plus opaque source receipt, one transaction. */
+   int db1_session_tool_source_append(const char *session_id, const char *event_id,
+                                      const char *turn, const char *actor, const char *payload,
+                                      char out_sequence[32]);
    int db1_session_native_source_append(const char *session_id, const char *event_id,
                                         const char *turn, const char *actor, const char *payload,
                                         char out_sequence[32]);
@@ -85,6 +125,9 @@ extern "C"
    int db1_session_ir_history_import_browse(const char *session_id, const char *actor,
                                             const char *source_agent, const char *source_sha256,
                                             const char *messages_json, const char *report_json);
+   int db1_session_tool_source_history_save(const char *session_id, const char *checkpoint,
+                                            const char *scope, const char *actor,
+                                            const char *active_turn, const char *messages_json);
    int db1_session_ir_history_save(const char *session_id, const char *checkpoint,
                                    const char *scope, const char *actor, const char *messages_json);
    int db1_session_ir_history_load(const char *session_id, const char *scope, const char *actor,

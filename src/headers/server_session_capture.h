@@ -45,6 +45,22 @@ int server_session_capture_observe_verification(server_session_capture_t *owner,
                                                 server_session_verification_prepare_fn prepare,
                                                 server_session_terminal_action_fn action,
                                                 void *resource);
+/* Generic documentary lifetime attached before the first model generation.
+ * No native payload is interpreted; setters clone an already retained handle.
+ * Only the actual bound active capture may be populated, once. */
+typedef struct host_original_documentary host_original_documentary;
+int server_session_capture_set_documentary(server_session_capture_t *,
+                                           const host_original_documentary *);
+/* Return independently owned capture+document references from the current bound
+ * capture only. No-current/no-document is successful NULL, not a session lookup.
+ * The caller releases both after unbinding/joining all borrowers. */
+int server_session_capture_documentary_current(server_session_capture_t **,
+                                               host_original_documentary **);
+/* Immutable execution identity; valid only under the caller's capture lease. */
+const char *server_session_capture_execution_session(const server_session_capture_t *);
+const char *server_session_capture_principal(const server_session_capture_t *);
+extern const unsigned aimee_original_documentary_capture_contract_v1;
+
 /* A missing current owner is a successful NULL lease. Bind only inside a creator
  * or retained lease; release after unbinding and joining its callbacks. */
 int server_session_capture_retain_current(const char *execution_session, const char *principal,

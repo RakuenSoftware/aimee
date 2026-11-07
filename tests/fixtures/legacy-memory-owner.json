@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "source_commit": "0e29dd14f8c96de8f8366d763dfe56992aedc2b0",
+  "source_tree": "2ed04ea2d796ba20c61b2d104582d6224942cb0d",
+  "source_path": "server-go",
+  "build_package": "./cmd/aimee-module",
+  "binary_basename": "aimee-module-memory",
+  "go_version": "go1.26.10",
+  "purpose": "external-reference-not-shipped"
+}

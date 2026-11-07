@@ -20,6 +20,11 @@ typedef struct
 int db1_request_frame_size(const char *const *fields, uint32_t count, size_t *need_out);
 void db1_request_encode(uint8_t *out, uint32_t op, const char *const *fields, uint32_t count);
 
+/* Validate a complete textual fields-v2 reply before exposing any C string.
+ * Reject NUL, overflow/truncation and trailing bytes, including zero-cell frames. */
+int db1_reply_frame_validate(const uint8_t *frame, size_t length, uint32_t *status,
+                             uint32_t *count);
+
 /* Writes return the module status. Fixed replies require exactly slots values;
  * lists pass filled_out for a variable count. Output buffers are caller-owned. */
 int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint32_t count,

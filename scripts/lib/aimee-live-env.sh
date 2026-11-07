@@ -569,8 +569,6 @@ live_env_prepare_modules() {
    }
    [ -x src/build/obj/aimee-module-postgres ] ||
       cp "$multicall" src/build/obj/aimee-module-postgres
-   [ -x src/build/obj/aimee-module-memory ] ||
-      cp "$multicall" src/build/obj/aimee-module-memory
    # Native bootstrap and operator tools invoke this fixed provider executable.
    # These rigs run as root on disposable hosts; refuse to replace an installed
    # provider from a different build.
@@ -623,6 +621,43 @@ live_env_arm_module() { # executable bus-socket log-file pid-variable [env assig
    eval "$pid_var=$!"
 }
 
+# Only rigs that explicitly select this frozen external owner require memory
+# actions. Generic config/PostgreSQL/auth fixtures retain the unavailable default.
+live_env_reference_memory_grants() { # placement destination; prints selected executable only
+   [ -n "${AIMEE_LIVE_REFERENCE_MEMORY_OWNER:-}" ] || return 0
+   python3 - "$PWD" "$AIMEE_LIVE_REFERENCE_MEMORY_OWNER" "$1" "$2" <<'PY'
+import hashlib, importlib.util, json, pathlib, sys
+root, owner, placement, destination = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3], pathlib.Path(sys.argv[4])
+if placement not in ('server', 'kb'):
+    raise SystemExit('unknown reference owner placement')
+spec = importlib.util.spec_from_file_location('reference_memory', root / 'scripts/build_reference_memory_fixture.py')
+builder = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(builder)
+receipt = builder.verify_reference_fixture(owner)
+owner = owner.resolve(strict=True)
+if '\n' in str(owner) or '\r' in str(owner):
+    raise SystemExit('reference executable cannot contain grant line separators')
+source = root / 'src/build/obj/module-bundle/grants' / placement
+rewritten = []
+for name in ('memory', 'memory-postgres', 'memory-egress'):
+    path = source / (name + '.grant')
+    text = path.read_text()
+    lines = text.splitlines(keepends=True)
+    rows = [i for i, line in enumerate(lines) if line.startswith('executable=')]
+    if len(rows) != 1 or pathlib.Path(lines[rows[0]].strip().split('=', 1)[1]).name != 'aimee-module-memory':
+        raise SystemExit('reference owner requires exact generated memory executable grants')
+    lines[rows[0]] = 'executable=' + str(owner) + '\n'
+    rewritten.append((path.name, ''.join(lines), hashlib.sha256(text.encode()).hexdigest()))
+destination.mkdir(parents=True, exist_ok=True)
+receipt = dict(receipt, placement=placement, grants={})
+for name, text, previous in rewritten:
+    (destination / name).write_text(text)
+    receipt['grants'][name] = dict(source_sha256=previous, selected_sha256=hashlib.sha256(text.encode()).hexdigest())
+(destination / 'reference-memory.json').write_text(json.dumps(receipt, indent=2) + '\n')
+print(owner)
+PY
+}
+
 live_env_start_kb_modules() {
    local AIMEE_STORE_URL="$LIVE_KB_STORE_URL"
    local AIMEE_STORE_MIGRATION_URL="$LIVE_KB_MIGRATION_URL"
@@ -638,7 +673,8 @@ live_env_start_kb_modules() {
       src/build/obj/module-bundle/grants/kb/config.grant >"$grants/config.grant"
    sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-postgres|" \
       src/build/obj/module-bundle/grants/kb/postgres.grant >"$grants/postgres.grant"
-   live_env_memory_grants kb "$grants"
+   local reference
+   reference=$(live_env_reference_memory_grants kb "$grants") || exit 2
    live_env_arm_module "$PWD/src/build/obj/aimee-module-config" "$bus" \
       "$AIMEE_HOME/kb-config-module.log" LIVE_KB_CONFIG_PID \
       "AIMEE_MODULE_POLICY_DIR=$grants"
@@ -646,19 +682,13 @@ live_env_start_kb_modules() {
       "$AIMEE_HOME/kb-postgres-module.log" LIVE_KB_POSTGRES_PID \
       "AIMEE_MODULE_POLICY_DIR=$grants" "AIMEE_STORE_URL=$AIMEE_STORE_URL" \
       "AIMEE_STORE_MIGRATION_URL=$AIMEE_STORE_MIGRATION_URL"
-   live_env_arm_module "$PWD/src/build/obj/aimee-module-memory" "$bus" \
-      "$AIMEE_HOME/kb-memory-module.log" LIVE_KB_MEMORY_PID \
-      "AIMEE_MODULE_POLICY_DIR=$grants" "AIMEE_MODULE_PLACEMENT=kb"
+   if [ -n "$reference" ]; then
+      live_env_arm_module "$reference" "$bus" "$AIMEE_HOME/kb-memory-module.log" \
+         LIVE_KB_MEMORY_PID "AIMEE_MODULE_POLICY_DIR=$grants" "AIMEE_MODULE_PLACEMENT=kb"
+   fi
 }
 
-live_env_memory_grants() {
-   local placement=$1 grants=$2 name
-   for name in memory memory-postgres memory-egress; do
-      sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-memory|" \
-         "src/build/obj/module-bundle/grants/$placement/$name.grant" \
-         >"$grants/$name.grant" || exit 2
-   done
-}
+# Explicit reference selection above is test-only and does not install an owner.
 
 live_env_stop_kb_modules() {
    local var pid
@@ -723,8 +753,9 @@ live_env_start_module() {
    sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-config|" \
       src/build/obj/module-bundle/grants/server/config.grant \
       >"$AIMEE_HOME/modules.d/server/config.grant"
+   local reference
+   reference=$(live_env_reference_memory_grants server "$AIMEE_HOME/modules.d/server") || exit 2
    local bus="$AIMEE_HOME/server-module-bus.sock"
-   live_env_memory_grants server "$AIMEE_HOME/modules.d/server"
    # Postgres first: the store checks for its backend as it comes up.
    live_env_arm_module "$PWD/$pgmodule" "$bus" "$AIMEE_HOME/pg-module.log" \
       LIVE_PG_MODULE_PID "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" \
@@ -737,9 +768,11 @@ live_env_start_module() {
    live_env_arm_module "$PWD/src/build/obj/aimee-module-config" "$bus" \
       "$AIMEE_HOME/server-config-module.log" LIVE_SERVER_CONFIG_PID \
       "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server"
-   live_env_arm_module "$PWD/src/build/obj/aimee-module-memory" "$bus" \
-      "$AIMEE_HOME/server-memory-module.log" LIVE_SERVER_MEMORY_PID \
-      "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" "AIMEE_MODULE_PLACEMENT=server"
+   if [ -n "$reference" ]; then
+      live_env_arm_module "$reference" "$bus" "$AIMEE_HOME/server-memory-module.log" \
+         LIVE_SERVER_MEMORY_PID "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" \
+         "AIMEE_MODULE_PLACEMENT=server"
+   fi
 }
 
 # Everything the store's own processes said, for a failure that cannot say why.

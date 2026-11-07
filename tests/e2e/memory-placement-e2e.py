@@ -999,7 +999,123 @@ class Gate:
         self.keyed_creation('user')
         return all(c['passed'] for c in self.checks)
 
+    def reference_owner_action(self, verb, values):
+        # Explicit test profile only. Credentials stay in process memory/stdin;
+        # the helper uses the actual enrolled certificate and verifies the KB CA.
+        import importlib.util
+        import os
+        bearer = os.environ.get('AIMEE_E2E_REFERENCE_BEARER')
+        service = os.environ.get('AIMEE_E2E_REFERENCE_SERVICE')
+        if not bearer or not service:
+            raise RuntimeError('public-reference profile requires explicit owner credentials')
+        spec = importlib.util.spec_from_file_location('reference_transport',
+            Path(__file__).with_name('deployment-matrix.py'))
+        transport = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(transport)
+        return transport.authenticated_reference_owner_action(self.args.server,
+            '/v1/actions/memory.' + verb, values, bearer, service)
+
+    def reference_owner_wait(self, values):
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            try:
+                observed = self.reference_owner_action('get', values)
+                if observed.get('status') == 'ok' and isinstance(observed.get('memory'), dict):
+                    return observed
+            except (RuntimeError, subprocess.SubprocessError):
+                pass
+            time.sleep(1)
+        raise RuntimeError('authenticated reference owner did not recover')
+
+    def server_reference_refusals(self, mid):
+        before = self.digest()
+        for op in ('store', 'get', 'list', 'search'):
+            code, body = self.call(op, dict(store='kb', id=mid, scope='all',
+                key=self.prefix+'-rejected', content='must never reach KB', query=self.prefix))
+            self.check('Server KB '+op+' has typed unavailable without owner client',
+                code == 503 and body.get('status') == 'error'
+                and body.get('kind') == 'unavailable'
+                and not any(k in body for k in ('memory', 'memories', 'results', 'recall', 'id')))
+        # Recall currently exposes the typed KB transport envelope directly;
+        # unlike CRUD it does not normalize status:unavailable to status:error.
+        code, body = self.call('recall', dict(store='kb', scope='all', query=self.prefix))
+        self.check('Server shared recall returns typed unavailable without data',
+            code == 200 and body.get('status') == 'unavailable'
+            and body.get('message') == 'memory bus service unavailable or unsupported'
+            and body.get('retryable') is True and body.get('dependency') == 'kb'
+            and 'recall' not in body)
+        result = self.mcp_document('Server MCP owner-client unavailable', 'mutate',
+            dict(verb='store', store='kb', key=self.prefix+'-rejected', content='must never reach KB'))
+        self.check('Server MCP preserves exact unavailable transport ABI',
+            result.get('status') == 'unavailable'
+            and result.get('message') == 'memory bus service unavailable or unsupported'
+            and result.get('retryable') is True and result.get('dependency') == 'kb'
+            and 'id' not in result and 'proposal' not in result)
+        self.check('unavailable Server paths cannot mutate selected KB owner', before == self.digest())
+
+    def run_public_reference(self):
+        """Owner transport qualification; deliberately does not certify Server forwarding."""
+        self.qualification = dict(profile='public-reference', server_forwarding_qualified=False,
+            owner_transport='authenticated-enrolled-kb-action',
+            capability_gap='Server shared forwarding requires compatible C owner client',
+            forwarding_profile='owner-client')
+        scope = self.prefix+'-owner'
+        def action(verb, **values):
+            return self.reference_owner_action(verb, dict(project=scope, scope_context=True, **values))
+        before = self.digest()
+        personal = self.good('reference profile personal store remains local', self.call('store',
+            dict(key=self.prefix, content='Personal fixture user@local.invalid')))
+        pid = personal['id']
+        self.check('personal store cannot reach KB reference owner', before == self.digest())
+        self.server_reference_refusals(pid)
+        shared = action('store', key=self.prefix, content='scoped shared owner fixture', authority='user',
+                        tier='L2', confidence=0.95)
+        self.check('authenticated operator writes actual selected owner', shared.get('status') == 'ok'
+                   and isinstance(shared.get('id'), int))
+        sid = shared['id']
+        got = action('get', id=sid, include_version=True)
+        memory = got.get('memory', {})
+        self.check('owner transport preserves exact scoped content and authority',
+            got.get('status') == 'ok' and memory.get('content') == 'scoped shared owner fixture'
+            and memory.get('confidence') == 0.95 and bool(memory.get('version')))
+        hidden = self.reference_owner_action('get', dict(id=sid, project=scope+'-hidden', scope_context=True))
+        self.check('owner transport cannot widen explicit project scope',
+            hidden.get('status') != 'ok' and 'memory' not in hidden)
+        listed = action('list', limit=64)
+        self.check('owner scoped listing contains exact fixture', listed.get('status') == 'ok'
+                   and any(row.get('id') == sid for row in listed.get('memories', [])))
+        self.check('default Server get stays personal after shared write',
+            self.good('reference profile default personal read', self.call('get', dict(id=pid)))
+                .get('memory', {}).get('content') == 'Personal fixture user@local.invalid')
+        self.assert_no_personal_canary()
+        self.docker('restart', self.args.kb)
+        restored = self.reference_owner_wait(dict(id=sid, project=scope, scope_context=True, include_version=True))
+        self.check('actual KB restart preserves owner content and exact version',
+            all(restored.get('memory', {}).get(k) == memory.get(k)
+                for k in ('content', 'confidence', 'version')))
+        self.server_reference_refusals(pid)
+        self.docker('stop', self.args.kb)
+        try:
+            failed = False
+            try:
+                action('get', id=sid)
+            except (RuntimeError, subprocess.SubprocessError):
+                failed = True
+            self.check('owner transport outage cannot return successful empty data', failed)
+            self.good('personal Server remains usable during KB outage', self.call('get', dict(id=pid)))
+        finally:
+            self.docker('start', self.args.kb)
+        self.reference_owner_wait(dict(id=sid, project=scope, scope_context=True))
+        retired = action('delete', id=sid, authority='user')
+        self.check('actual operator erases scoped shared fixture', retired.get('status') == 'ok')
+        missing = action('get', id=sid)
+        self.check('erased owner fixture no longer serves', missing.get('status') != 'ok' and 'memory' not in missing)
+        self.assert_no_personal_canary()
+        return all(c['passed'] for c in self.checks)
+
     def run(self):
+        if getattr(self.args, 'shared_profile', 'owner-client') == 'public-reference':
+            return self.run_public_reference()
         self.hygiene_preview()
         # Reserve above both sequences, including IDs retired by earlier gates.
         # The colliding rows must belong to this fixture: an arbitrary existing
@@ -1219,10 +1335,18 @@ if __name__ == '__main__':
     parser.add_argument('--kb-store-db', help='Standardized PostgreSQL container owned by KB')
     parser.add_argument('--kb', help='Shared container; omit to test a KB-free local composition')
     parser.add_argument('--upgrade-fixture')
+    parser.add_argument('--shared-profile', choices=('owner-client', 'public-reference'), default='owner-client',
+                        help='owner-client requires real Server forwarding; public-reference qualifies owner transport and Server unavailable boundary')
     args = parser.parse_args()
+    if args.shared_profile == 'public-reference' and not args.kb:
+        parser.error('public-reference requires an explicitly selected shared KB')
     gate = Gate(args)
+    passed = False
     try:
         passed = gate.run() if args.kb else gate.run_local()
     finally:
         Path(args.output).write_text(json.dumps(gate.checks, indent=2, ensure_ascii=False) + '\n')
+        qualification = getattr(gate, 'qualification', dict(profile='owner-client' if args.kb else 'personal',
+            server_forwarding_qualified=bool(args.kb and passed)))
+        Path(args.output).with_suffix('.qualification.json').write_text(json.dumps(qualification, indent=2) + '\n')
     raise SystemExit(0 if passed else 1)

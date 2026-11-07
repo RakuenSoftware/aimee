@@ -399,7 +399,7 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
          continue; /* tool_result-only message: nothing else to emit */
 
       cJSON *m = cJSON_CreateObject();
-      cJSON_AddStringToObject(m, "role", im->role ? im->role : "user");
+      cJSON_AddStringToObject(m, "role", aimee_ir_model_message_role(im));
       char *text = blocks_text(im->blocks, im->n_blocks);
       /* assistant tool_use blocks -> tool_calls[]; content may be empty */
       cJSON *tool_calls = NULL;

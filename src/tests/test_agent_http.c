@@ -13,6 +13,7 @@
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_protocol.h"
+#include "server_native_history.h"
 #include <aimee/gateway/gateway_policy.h>
 #include <aimee/delegates/delegate_driver.h>
 #include <aimee/delegates/delegate_xml_fallback.h>
@@ -20,6 +21,7 @@
 #include "model_sampling.h"
 #include "platform_test_util.h"
 #include "cJSON.h"
+#include "aimee_sha256.h"
 #include "support/ir_response_fixture.h"
 #include <aimee/ir/session_event.h>
 #include <aimee/translation/aimee_backend.h>
@@ -1267,7 +1269,8 @@ static void test_seeded_host_extensions(void)
    cJSON *source = cJSON_Duplicate(seed.raw, 1), *messages = cJSON_CreateArray();
    for (int i = 0; i < seed.n_messages; ++i)
       assert(cJSON_AddItemToArray(messages, aimee_ir_message_json(seed.messages + i)));
-   agent_t agent = {0};
+   /* This synthetic alias has no catalog row; pin a valid fixture output budget. */
+   agent_t agent = {.max_tokens = 128};
    snprintf(agent.provider, sizeof agent.provider, "openai");
    snprintf(agent.model, sizeof agent.model, "selected");
    assert(!agent_prepare_seeded_request_ir(&agent, &seed, messages, NULL, NULL, 0, -1,
@@ -1504,6 +1507,211 @@ static void test_missing_response_output(void)
                                        1, NULL) == -1);
 }
 
+/* Explicit source-owner peer: actual signing/current source admission is
+ * qualified through the private modules. This proves automatic builder use. */
+int server_native_history_load(const char *session, const char *actor, const char *active_turn,
+                               int include_running, cJSON **messages, cJSON **receipts)
+{
+   (void)session;
+   (void)actor;
+   (void)active_turn;
+   (void)include_running;
+   /* This network-free builder fixture has no installed history owner. */
+   *messages = NULL;
+   *receipts = NULL;
+   return -1;
+}
+
+static int tool_source_accept_calls, tool_source_accept_refused;
+static int tool_source_preservation_refused;
+int server_native_history_tool_sources_preserved(const aimee_request_t *canonical,
+                                                 const aimee_request_t *retained)
+{
+   assert(canonical && retained);
+   if (tool_source_preservation_refused)
+      return -1;
+   if (canonical->n_messages == 3 && canonical->messages[2].n_blocks == 1 &&
+       canonical->messages[2].blocks[0].tool_source)
+   {
+      assert(retained->n_messages == 3 && retained->messages[2].n_blocks == 1);
+      assert(cJSON_Compare(canonical->messages[2].blocks[0].tool_source,
+                           retained->messages[2].blocks[0].tool_source, 1));
+   }
+   return 0;
+}
+int server_native_history_accept_message_tool_sources(const aimee_message_t *message)
+{
+   assert(message && message->n_blocks == 1);
+   assert(message->blocks[0].type == AIMEE_BLK_TOOL_RESULT);
+   assert(message->blocks[0].tool_source);
+   assert(!strcmp(cJSON_GetStringValue(message->blocks[0].tool_result), "native source"));
+   tool_source_accept_calls++;
+   return tool_source_accept_refused ? -1 : 0;
+}
+static cJSON *test_seeded_builder(const agent_t *agent, const cJSON *history,
+                                  const aimee_request_t *catalog,
+                                  const aimee_output_format_t *format, aimee_wire_t wire,
+                                  aimee_request_t *dispatch)
+{
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "Find evidence"};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   aimee_request_t seed = {.messages = &message, .n_messages = 1};
+   if (format)
+      seed.output_format = *format;
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = "host"};
+   aimee_ir_block_set_context(&policy, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   aimee_message_t context = {.role = "system", .blocks = &policy, .n_blocks = 1};
+   return agent_build_seeded_request_ir(agent, &seed, history, catalog, &context, 128, 0, wire, 0,
+                                        1, dispatch);
+}
+static void test_retained_tool_source_requires_owner_before_provider_build(void)
+{
+   cJSON *history = cJSON_Parse(
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}]},"
+       "{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"source-call\","
+       "\"name\":\"memory_serve\",\"input\":{}}]},"
+       "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"source-call\","
+       "\"is_error\":false,\"content\":\"native source\"}]}]");
+   assert(history);
+   cJSON *block = cJSON_GetArrayItem(
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(history, 2), "blocks"), 0);
+   cJSON *source = cJSON_CreateObject();
+   char digest[65];
+   assert(!aimee_sha256_hex("native source", strlen("native source"), digest));
+   cJSON_AddNumberToObject(source, "schema_version", 1);
+   cJSON_AddStringToObject(source, "owner", "10000000-0000-4000-8000-000000000001");
+   cJSON_AddStringToObject(source, "visible_sha256", digest);
+   cJSON_AddStringToObject(source, "receipt", "{\"fixture\":\"opaque-owner-receipt-fixture\"}");
+   cJSON_AddItemToObject(block, "tool_source", source);
+   cJSON *before = cJSON_Duplicate(history, 1);
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC,
+                                 AIMEE_WIRE_RESPONSES};
+   agent_t agent = {0};
+   snprintf(agent.model, sizeof agent.model, "selected");
+   for (size_t i = 0; i < sizeof wires / sizeof *wires; i++)
+   {
+      tool_source_accept_calls = 0;
+      tool_source_accept_refused = 0;
+      cJSON *request = test_seeded_builder(&agent, history, NULL, NULL, wires[i], NULL);
+      if (!request || tool_source_accept_calls != 1)
+         fprintf(stderr, "tool-source wire=%d built=%d owner_calls=%d\n", (int)wires[i], !!request,
+                 tool_source_accept_calls);
+      assert(request && tool_source_accept_calls == 1);
+      char *encoded = cJSON_PrintUnformatted(request);
+      assert(encoded && strstr(encoded, "native source"));
+      assert(!strstr(encoded, "opaque-owner-receipt-fixture") && !strstr(encoded, "tool_source"));
+      free(encoded);
+      cJSON_Delete(request);
+      tool_source_accept_refused = 1;
+      request = test_seeded_builder(&agent, history, NULL, NULL, wires[i], NULL);
+      assert(!request && tool_source_accept_calls == 2);
+      tool_source_accept_refused = 0;
+      tool_source_preservation_refused = 1;
+      request = test_seeded_builder(&agent, history, NULL, NULL, wires[i], NULL);
+      assert(!request && tool_source_accept_calls == 2);
+      tool_source_preservation_refused = 0;
+      assert(cJSON_Compare(history, before, 1));
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(block, "tool_source");
+   tool_source_accept_calls = 0;
+   cJSON *request = test_seeded_builder(&agent, history, NULL, NULL, AIMEE_WIRE_OPENAI_CHAT, NULL);
+   assert(request && !tool_source_accept_calls);
+   cJSON_Delete(request);
+   // A missing sidecar must reach the deny gate; it cannot skip verification.
+   tool_source_preservation_refused = 1;
+   request = test_seeded_builder(&agent, history, NULL, NULL, AIMEE_WIRE_OPENAI_CHAT, NULL);
+   assert(!request && !tool_source_accept_calls);
+   tool_source_preservation_refused = 0;
+   cJSON_Delete(before);
+   cJSON_Delete(history);
+   tool_source_accept_refused = 0;
+   puts("retained tool source requires owner admission before all provider builds OK");
+}
+
+static void test_run_output_contract_survives_tools_and_final_requests(void)
+{
+   cJSON *schema = cJSON_Parse(
+       "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":[\"boolean\",\"null\"]},"
+       "\"sources\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/source\"}}},"
+       "\"required\":[\"answer\",\"sources\"],\"additionalProperties\":false,"
+       "\"$defs\":{\"source\":{\"type\":\"string\",\"minLength\":1}}}");
+   assert(schema);
+   cJSON *before = cJSON_Duplicate(schema, 1);
+   aimee_output_format_t format = {.kind = AIMEE_OUTPUT_JSON_SCHEMA,
+                                   .name = "caller_answer",
+                                   .description = "Explicit caller contract",
+                                   .schema = schema,
+                                   .strict = AIMEE_STRICT_TRUE};
+   cJSON *messages = cJSON_Parse(
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"Find evidence\"}]}]");
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC,
+                                 AIMEE_WIRE_RESPONSES};
+   for (size_t w = 0; w < sizeof wires / sizeof *wires; w++)
+      for (int final = 0; final < 2; final++)
+         for (int fallback = 0; fallback < 2; fallback++)
+         {
+            agent_t agent = {0};
+            snprintf(agent.model, sizeof agent.model, "%s", fallback ? "fallback" : "selected");
+            cJSON *tool_schema = cJSON_Parse("{\"type\":\"object\"}");
+            aimee_tool_t tool = {.name = "Read", .description = "read", .schema = tool_schema};
+            aimee_request_t catalog = {.tools = final ? NULL : &tool, .n_tools = !final};
+            aimee_request_t dispatch = {0};
+            cJSON *request =
+                test_seeded_builder(&agent, messages, &catalog, &format, wires[w], &dispatch);
+            assert(request);
+            const cJSON *output;
+            if (wires[w] == AIMEE_WIRE_OPENAI_CHAT)
+               output = cJSON_GetObjectItemCaseSensitive(
+                   cJSON_GetObjectItemCaseSensitive(request, "response_format"), "json_schema");
+            else
+               output = cJSON_GetObjectItemCaseSensitive(
+                   cJSON_GetObjectItemCaseSensitive(
+                       request, wires[w] == AIMEE_WIRE_ANTHROPIC ? "output_config" : "text"),
+                   "format");
+            assert(output);
+            const cJSON *embedded = cJSON_GetObjectItemCaseSensitive(output, "schema");
+            assert(embedded != schema && cJSON_Compare(embedded, schema, 1));
+            assert(dispatch.n_tools == !final && !dispatch.n_messages && !dispatch.messages);
+            assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "model")),
+                           fallback ? "fallback" : "selected"));
+            assert(cJSON_Compare(schema, before, 1));
+            aimee_request_free(&dispatch);
+            cJSON_Delete(request);
+            cJSON_Delete(tool_schema);
+         }
+   /* Existing translator refusal remains explicit, rather than silently losing
+    * an unsupported JSON-object contract on Anthropic. */
+   agent_t agent = {0};
+   snprintf(agent.model, sizeof agent.model, "selected");
+   format.kind = AIMEE_OUTPUT_JSON_OBJECT;
+   assert(!test_seeded_builder(&agent, messages, NULL, &format, AIMEE_WIRE_ANTHROPIC, NULL));
+   cJSON_Delete(messages);
+   cJSON_Delete(before);
+   cJSON_Delete(schema);
+   puts("explicit run output contract survives tools, final and fallback provider builds OK");
+}
+
+static void test_run_output_contract_admission(void)
+{
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "Find evidence"};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   aimee_request_t request = {.messages = &message, .n_messages = 1};
+   request.output_format.kind = AIMEE_OUTPUT_JSON_OBJECT;
+   assert(agent_request_with_tools_supported(&request));
+   request.output_format.kind = AIMEE_OUTPUT_JSON_SCHEMA;
+   assert(!agent_request_with_tools_supported(&request));
+   request.output_format.schema = cJSON_Parse("{\"type\":\"object\"}");
+   assert(agent_request_with_tools_supported(&request));
+   request.output_format.strict = (aimee_strict_mode_t)-1;
+   assert(!agent_request_with_tools_supported(&request));
+   request.output_format.strict = AIMEE_STRICT_TRUE;
+   request.prompt_cache_key = "retained canonical control";
+   assert(agent_request_with_tools_supported(&request));
+   cJSON_Delete(request.output_format.schema);
+   puts("explicit run output contracts use IR admission and retain admitted canonical controls OK");
+}
+
 static void test_canonical_catalog_only_projection(void)
 {
    cJSON *history =
@@ -1561,6 +1769,9 @@ int main(int argc, char **argv)
    if (argc > 1)
       return offline_model_request_diagnostic(argc, argv);
    test_canonical_catalog_only_projection();
+   test_run_output_contract_admission();
+   test_run_output_contract_survives_tools_and_final_requests();
+   test_retained_tool_source_requires_owner_before_provider_build();
    test_typed_anthropic_system_cache_parity();
    test_canonical_responses_profile();
    test_canonical_request_profiles();

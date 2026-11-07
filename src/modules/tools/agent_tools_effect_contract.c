@@ -7,6 +7,10 @@
 #include <aimee/tools/agent_tools.h>
 #include <aimee/tools/module_api.h>
 
+extern int agent_tools_module_native_metadata(const char *, aimee_tool_metadata_t *)
+    __attribute__((weak));
+extern int agent_tools_module_native_has(const char *) __attribute__((weak));
+extern int agent_tools_module_native_admitted(const aimee_tool_t *) __attribute__((weak));
 static agent_tool_metadata_fn g_tool_metadata;
 
 void agent_tools_register_metadata(agent_tool_metadata_fn provider)
@@ -20,6 +24,14 @@ int agent_tools_metadata(const char *name, aimee_tool_metadata_t *metadata)
       return -1;
    memset(metadata, 0, sizeof(*metadata));
    aimee_tool_metadata_t value = {0};
+   if (agent_tools_module_native_has && agent_tools_module_native_has(name))
+   {
+      if (!agent_tools_module_native_metadata || agent_tools_module_native_metadata(name, &value) ||
+          !aimee_tool_metadata_valid(&value))
+         return -1;
+      *metadata = value;
+      return 0;
+   }
    if (!name || !name[0] || !g_tool_metadata || g_tool_metadata(name, &value) != 0 ||
        !aimee_tool_metadata_valid(&value))
       return -1;
@@ -359,6 +371,12 @@ void agent_tools_register_classifier(agent_tool_classifier_fn classifier)
 
 int agent_tools_classification(const char *name)
 {
+   if (agent_tools_module_native_has && agent_tools_module_native_has(name))
+   {
+      aimee_tool_metadata_t metadata;
+      return agent_tools_metadata(name, &metadata) ? AIMEE_TOOL_CLASS_UNKNOWN
+                                                   : (int)metadata.classification;
+   }
    return agent_tools_effect_classification(name, g_tool_classifier);
 }
 
@@ -370,6 +388,8 @@ char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *admitted, const cJSON
    if (!admitted || admitted->kind != AIMEE_TOOL_FUNCTION || !admitted->name ||
        !admitted->name[0] || !cJSON_IsObject(admitted->schema))
       return safe_strdup("error: invalid admitted tool definition");
+   if (agent_tools_module_native_admitted && !agent_tools_module_native_admitted(admitted))
+      return safe_strdup("error: module tool definition changed");
    cJSON *args = cJSON_IsObject(arguments) ? cJSON_Duplicate(arguments, 1) : NULL;
    cJSON *canonical = cJSON_IsObject(args) ? tool_args_canonicalize(admitted->schema, args) : NULL;
    char *before = args ? cJSON_PrintUnformatted(args) : NULL;
@@ -384,4 +404,76 @@ char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *admitted, const cJSON
       return safe_strdup("error: admitted tool arguments are not canonical");
    }
    return agent_tools_dispatch_ir_owned(admitted->name, timeout_ms, is_error, args);
+}
+
+/* Domain-neutral, bounded per-loop module state. This is scheduling intent,
+ * never source authorization, a cached result, or a claim of answer sufficiency. */
+const unsigned aimee_module_read_final_contract_v1
+    __attribute__((used, externally_visible, retain)) = 1;
+static __thread agent_module_loop_scope_v1 *module_loop;
+static __thread agent_module_read_scope_v1 *module_read;
+static void module_read_clear(void *p, size_t n)
+{
+   volatile unsigned char *b = p;
+   while (n--)
+      *b++ = 0;
+}
+void agent_tools_module_loop_enter_v1(agent_module_loop_scope_v1 *scope)
+{
+   memset(scope, 0, sizeof *scope);
+   scope->previous = module_loop;
+   scope->previous_execution = module_read;
+   module_loop = scope;
+   module_read = NULL;
+}
+void agent_tools_module_loop_leave_v1(void *opaque)
+{
+   agent_module_loop_scope_v1 *scope = opaque;
+   module_loop = scope->previous;
+   module_read = scope->previous_execution;
+   module_read_clear(scope, sizeof *scope);
+}
+int agent_tools_module_loop_final_v1(void)
+{
+   return module_loop && module_loop->final_requested;
+}
+void agent_tools_module_read_enter_v1(agent_module_read_scope_v1 *scope, int trusted_read)
+{
+   memset(scope, 0, sizeof *scope);
+   scope->previous = module_read;
+   scope->loop = module_loop;
+   /* Synchronous nested module execution is not an additional trusted scope. */
+   scope->allowed = trusted_read && module_loop && !module_read;
+   if (scope->allowed)
+      memcpy(scope->state, module_loop->state, sizeof scope->state);
+   module_read = scope;
+}
+void *agent_tools_module_read_state_v1(size_t bytes)
+{
+   if (!module_read || !module_read->allowed || module_read->loop != module_loop || !bytes ||
+       bytes > sizeof module_read->state)
+      return NULL;
+   return module_read->state;
+}
+int agent_tools_module_request_final_v1(void)
+{
+   if (!agent_tools_module_read_state_v1(1))
+      return -1;
+   module_read->request_final = 1;
+   return 0;
+}
+void agent_tools_module_read_commit_v1(agent_module_read_scope_v1 *scope, int successful)
+{
+   if (successful && scope == module_read && scope->allowed && scope->loop == module_loop)
+   {
+      memcpy(module_loop->state, scope->state, sizeof scope->state);
+      if (scope->request_final)
+         module_loop->final_requested = 1;
+   }
+}
+void agent_tools_module_read_leave_v1(void *opaque)
+{
+   agent_module_read_scope_v1 *scope = opaque;
+   module_read = scope->previous;
+   module_read_clear(scope, sizeof *scope);
 }

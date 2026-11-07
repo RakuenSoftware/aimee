@@ -26,6 +26,14 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/memory_context_internal.h",
+    "src/modules/kb/c/memory_health.h",
+    "src/modules/kb/c/memory_promotion.h",
+    "src/modules/kb/c/memory_lifecycle.h",
+    "src/tests/test_memory_advanced.c",
+    "src/tests/test_workspace_memory.c",
+    "src/tests/test_memory_recall_pivot.c",
+    "src/tests/test_memory_embed_http_auth.c",
     "src/modules/kb/c/fidelity.c",
     "src/modules/kb/c/fidelity.h",
     "src/tests/test_fidelity.c",

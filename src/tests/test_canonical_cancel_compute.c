@@ -15,6 +15,23 @@ static inline int no_steering(const char *sid, cJSON **out)
 #define chat_steer_take no_steering
 #include "../server/server_compute_async.c"
 #undef chat_steer_take
+/* This fixture owns scheduling and has no source mirror or durable job. The
+ * real context destructor must still reject unexpected release identities. */
+__thread int g_aimee_compute_threads_override;
+void agent_set_durable_job(int job)
+{
+   assert(job == 0);
+}
+void server_compute_budget_release(server_ctx_t *server, int granted)
+{
+   (void)server;
+   (void)granted;
+   assert(!"cancel fixture unexpectedly held a compute budget");
+}
+void workspace_turn_mirror_release(workspace_turn_mirror_lease_t *lease)
+{
+   assert(!lease);
+}
 static int worker_called;
 int presence_session_owner(const char *sid, char *out, size_t cap)
 {

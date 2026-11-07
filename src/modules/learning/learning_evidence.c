@@ -2,6 +2,8 @@
  * See docs/proposals/done/cross-source-learning-substrate.md */
 
 #include "learning_evidence.h"
+#include "owned_feature.h"
+AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_promotion_legacy_guard_contract_v1);
 #include "module_commands.h"
 #include "aimee.h" /* memory_directive_t and friends, TIER_* */
 #include "modules/kb/c/artifacts.h"

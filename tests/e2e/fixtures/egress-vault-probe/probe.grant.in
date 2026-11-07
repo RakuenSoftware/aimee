@@ -1,0 +1,9 @@
+version=1
+principal_class=1
+principal_ref=712
+uid=self
+executable=@EXECUTABLE@
+publish=
+subscribe=
+request=12291,12292,12293,12294
+serve=

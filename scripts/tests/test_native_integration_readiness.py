@@ -50,7 +50,7 @@ class NativeIntegrationReadiness(unittest.TestCase):
         read = {"type":"function", "name":"read_file", "parameters":{"type":"object"}}
         bash = {"type":"function", "name":"bash", "parameters":{"type":"object"}}
         with tempfile.TemporaryDirectory() as directory:
-            observer = module.NativeCatalogObservations(directory)
+            observer = module.NativeCatalogObservations(directory, opening_shell_policy=True)
             observer.observe("codex", "chatgpt", "primary", [read], opening)
             observer.observe("codex", "chatgpt", "primary", [bash, read], established)
             observer.observe("codex", "chatgpt", "primary", [bash, read], established) # auth/resume is stable
@@ -64,12 +64,12 @@ class NativeIntegrationReadiness(unittest.TestCase):
             self.assertEqual(records[0]["history_phase"], "opening")
             self.assertEqual(records[1]["history_phase"], "established")
             self.assertEqual(records[1]["history_shape"]["items"][1]["type"], "function_call")
-            other = module.NativeCatalogObservations(directory)
+            other = module.NativeCatalogObservations(directory, opening_shell_policy=True)
             other.observe("codex", "chatgpt", "primary", [read], opening)
             with self.assertRaisesRegex(AssertionError, "beyond opening"):
                 other.observe("codex", "chatgpt", "primary", [bash, {**read,"description":"drift"}], established)
             with self.assertRaises(AssertionError):
-                module.NativeCatalogObservations().observe("codex", "chatgpt", "primary", [bash,read], opening)
+                module.NativeCatalogObservations(opening_shell_policy=True).observe("codex", "chatgpt", "primary", [bash,read], opening)
         # In-process HTTP children retain their role-scoped catalog from the
         # first call. They do not pass through the native ingress shell stage.
         child = module.NativeCatalogObservations()
@@ -80,7 +80,17 @@ class NativeIntegrationReadiness(unittest.TestCase):
         with self.assertRaises(AssertionError):
             child.observe("http-child", "openai", "diagnose", [read], child_open)
         with self.assertRaisesRegex(AssertionError, "opening catalog exposes native shell"):
-            module.NativeCatalogObservations().observe("claude", "anthropic", "primary", [bash,read], child_open)
+            module.NativeCatalogObservations(opening_shell_policy=True).observe("claude", "anthropic", "primary", [bash,read], child_open)
+        # With no selected policy, the complete native SDK catalog remains
+        # unchanged across the opening/established boundary; arbitrary drift
+        # still refuses and no shell-removal rule is manufactured by the host.
+        generic = module.NativeCatalogObservations()
+        generic.observe("codex", "chatgpt", "primary", [bash, read], opening)
+        generic.observe("codex", "chatgpt", "primary", [bash, read], established)
+        with self.assertRaisesRegex(AssertionError, "without a selected"):
+            changed = module.NativeCatalogObservations()
+            changed.observe("codex", "chatgpt", "primary", [bash, read], opening)
+            changed.observe("codex", "chatgpt", "primary", [read], established)
         phase = module.NativeCatalogObservations.history_phase
         self.assertEqual(phase("chatgpt", {"input":[{"type":"function_call_output", "output":"assistant"}]})[0], "opening")
         self.assertEqual(phase("chatgpt", {"input":[{"type":"reasoning", "summary":[]}]})[0], "established")

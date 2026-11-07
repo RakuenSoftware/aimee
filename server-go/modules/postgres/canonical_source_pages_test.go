@@ -23,9 +23,14 @@ import (
 // Use the actual SQL encoder/decoder and reject the same oversized body that
 // the real bus rejects. No process execution or test verdict is manufactured.
 type sourcePageCaller struct {
-	provider *sqlHandler
-	max      int
-	calls    int
+	provider        *sqlHandler
+	max             int
+	calls           int
+	blockSecondPage bool
+	blockKey        int64
+	sourcePages     int
+	blockedPages    int
+	secondPage      chan struct{}
 }
 
 func (c *sourcePageCaller) Call(ctx context.Context, kind, stage uint32, trace uint64, timeout time.Duration, request []byte) ([]byte, error) {
@@ -34,6 +39,16 @@ func (c *sourcePageCaller) Call(ctx context.Context, kind, stage uint32, trace u
 	}
 	if kind != db.EventPostgresSQL || stage != db.StagePostgresSQL {
 		return nil, fmt.Errorf("unexpected SQL route")
+	}
+	// This optional fixture barrier rewrites only the SECOND real source page,
+	// preserving its transaction handle and exact arguments. The first page has
+	// already passed through the actual provider and been consumed by Core.
+	if c.blockSecondPage {
+		var err error
+		request, err = c.blockedSourcePageRequest(request)
+		if err != nil {
+			return nil, err
+		}
 	}
 	body, status := c.provider.handleContext(ctx, ring.ModuleInvocation{StageID: stage}, request)
 	if status != ring.ModuleStatusOK {
@@ -48,6 +63,55 @@ func (c *sourcePageCaller) Call(ctx context.Context, kind, stage uint32, trace u
 		return nil, fmt.Errorf("SQL reply exceeds real module body limit: %d", len(body))
 	}
 	return body, err
+}
+
+// Test-only actual PostgreSQL barrier, not an artificial delay or error.
+// A separate transaction owns this advisory lock until the deadline path ends.
+func (c *sourcePageCaller) blockedSourcePageRequest(frame []byte) ([]byte, error) {
+	r := reader{buf: frame}
+	op, err := r.u32()
+	if err != nil {
+		return nil, err
+	}
+	if op != opQuery {
+		return frame, nil
+	}
+	statementID, err := r.str()
+	if err != nil {
+		return nil, err
+	}
+	handle, err := r.u64()
+	if err != nil {
+		return nil, err
+	}
+	sql, err := r.str()
+	if err != nil {
+		return nil, err
+	}
+	const sourceSQL = `SELECT sequence::text,event_id,actor,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND sequence>$3::bigint AND (payload::jsonb->>'kind'='message' OR (payload::jsonb->>'kind'='delta' AND payload::jsonb->'payload'->>'type'='TURN_START')) ORDER BY session_ir_events.sequence LIMIT 8`
+	const delegateSQL = `SELECT sequence::text,event_id,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND actor=$3 AND sequence<$4::bigint AND sequence>$5::bigint AND payload::jsonb->>'kind'='message' ORDER BY session_ir_events.sequence LIMIT $6`
+	if sql != sourceSQL && sql != delegateSQL {
+		return frame, nil
+	}
+	c.sourcePages++
+	if c.sourcePages != 2 {
+		return frame, nil
+	}
+	if handle == 0 || c.blockKey == 0 {
+		return nil, fmt.Errorf("fixture source barrier lacks transaction/key")
+	}
+	c.blockedPages++
+	if c.secondPage != nil {
+		close(c.secondPage)
+	}
+	blocked := fmt.Sprintf("WITH source_barrier AS MATERIALIZED (SELECT pg_advisory_xact_lock(%d)) ", c.blockKey) + strings.Replace(sql, "FROM session_ir_events WHERE", "FROM session_ir_events CROSS JOIN source_barrier WHERE", 1)
+	w := &writer{}
+	w.u32(op)
+	w.str(statementID)
+	w.u64(handle)
+	w.str(blocked)
+	w.buf = append(w.buf, frame[r.at:]...) // Preserve every actual source argument byte.
+	return w.buf, nil
 }
 func sourcePageStore(t *testing.T, pool *pgxpool.Pool) (db.Store, *sourcePageCaller) {
 	t.Helper()
@@ -133,9 +197,22 @@ func TestCanonicalNativeInterruptionSourcePagesSQLWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Exercise the real family dispatcher, including its owned transaction and
-	// deadline. A two-second ordinary operation budget cannot scan this valid
-	// near-capacity source; cancellation must leave no partial receipts.
+	// Exercise the real family dispatcher, its owned transaction and original
+	// deadline. After one real source page, a held PostgreSQL advisory lock
+	// blocks the second actual SQL page under that same context. Cancellation
+	// must leave no partial receipts, independently of machine/source scan cost.
+	blocker, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(context.Background())
+	key := time.Now().UnixNano()
+	if _, err = blocker.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, key); err != nil {
+		t.Fatal(err)
+	}
+	wire.blockSecondPage = true
+	wire.blockKey = key
+	wire.sourcePages, wire.blockedPages = 0, 0
 	ordinary := families.Sessions
 	ordinary.Ops = make(map[uint32]store.Op)
 	for id, spec := range families.Sessions.Ops {
@@ -145,8 +222,16 @@ func TestCanonicalNativeInterruptionSourcePagesSQLWire(t *testing.T) {
 	spec.Timeout = 2 * time.Second
 	ordinary.Ops[41] = spec
 	rejected, transport := ordinary.Handler(s)(ring.ModuleInvocation{StageID: ordinary.Stage}, frame)
-	if transport != ring.ModuleStatusInternal || len(rejected) != 0 {
-		t.Fatal("ordinary budget did not report storage timeout", transport)
+	wire.blockSecondPage = false // Positive continuation uses the exact original SQL.
+	if err = blocker.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if wire.sourcePages != 2 || wire.blockedPages != 1 {
+		t.Fatal("cancellation did not reach second actual source page")
+	}
+	failedStatus, failedCells, failedDecodeErr := wirefields.DecodeFields(rejected)
+	if transport != ring.ModuleStatusOK || failedDecodeErr != nil || failedStatus != store.StatusFailed || len(failedCells) != 0 {
+		t.Fatal("reachable store deadline must be an in-band failed request", transport, failedStatus, failedDecodeErr)
 	}
 	var partial int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM session_ir_events WHERE payload::jsonb->>'kind'='tool_interruption'`).Scan(&partial); err != nil || partial != 0 {
@@ -214,17 +299,87 @@ func TestCanonicalDelegateExperienceSourcePagesSQLWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The same actual-PG second-page barrier proves cancellation after a real
+	// delegate source page, independently of source parsing speed.
+	blocker, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(context.Background())
+	key := time.Now().UnixNano()
+	if _, err = blocker.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, key); err != nil {
+		t.Fatal(err)
+	}
+	wire.blockSecondPage = true
+	wire.blockKey = key
+	wire.sourcePages, wire.blockedPages = 0, 0
 	ordinary := families.Telemetry
 	ordinary.Ops = make(map[uint32]store.Op)
 	for id, spec := range families.Telemetry.Ops {
 		ordinary.Ops[id] = spec
 	}
 	spec := ordinary.Ops[63]
-	spec.Timeout = 2 * time.Second
+	// Keep the actual production operation budget. The oversized first page
+	// is intentionally expensive under -race; its parse speed is not the
+	// cancellation condition. Cancel the real operation context only once
+	// PostgreSQL proves the second source query is waiting on our lock.
+	type cancellableRun struct {
+		context.Context
+		cancel context.CancelFunc
+	}
+	startedRun := make(chan cancellableRun, 1)
+	cancellation := make(chan error, 1)
+	wire.secondPage = make(chan struct{})
+	run := spec.Run
+	spec.Run = func(ctx context.Context, q store.Queryer, fields []string) (uint32, []string, error) {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		startedRun <- cancellableRun{ctx, cancel}
+		return run(ctx, q, fields)
+	}
 	ordinary.Ops[63] = spec
+	go func() {
+		operation := <-startedRun
+		select {
+		case <-wire.secondPage:
+		case <-operation.Done():
+			cancellation <- fmt.Errorf("operation ended before second page: %w", operation.Err())
+			return
+		}
+		for {
+			var waiting bool
+			err := pool.QueryRow(operation, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted AND classid=$1::oid AND objid=$2::oid AND objsubid=1)`, int64(uint64(key)>>32), int64(uint64(key)&0xffffffff)).Scan(&waiting)
+			if err != nil {
+				cancellation <- fmt.Errorf("observe second-page lock: %w", err)
+				return
+			}
+			if waiting {
+				operation.cancel()
+				cancellation <- nil
+				return
+			}
+			select {
+			case <-operation.Done():
+				cancellation <- fmt.Errorf("second page never blocked: %w", operation.Err())
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}()
 	rejected, transport := ordinary.Handler(s)(ring.ModuleInvocation{StageID: ordinary.Stage}, frame)
-	if transport != ring.ModuleStatusInternal || len(rejected) != 0 {
-		t.Fatal("ordinary delegate budget did not report storage timeout", transport)
+	if err := <-cancellation; err != nil {
+		t.Fatal(err)
+	}
+	wire.blockSecondPage = false
+	if err = blocker.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if wire.sourcePages != 2 || wire.blockedPages != 1 {
+		t.Fatal("delegate cancellation did not reach second actual source page")
+	}
+	failedStatus, failedCells, failedDecodeErr := wirefields.DecodeFields(rejected)
+	if transport != ring.ModuleStatusOK || failedDecodeErr != nil || failedStatus != store.StatusFailed || len(failedCells) != 0 {
+		t.Fatal("cancelled delegate source request must be an in-band failed request", transport, failedStatus, failedDecodeErr)
 	}
 	var partial int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM interaction_events WHERE event_type='delegate_experience'`).Scan(&partial); err != nil || partial != 0 {

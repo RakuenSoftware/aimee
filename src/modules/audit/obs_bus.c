@@ -9,6 +9,7 @@
  * publishes and returns; the consumer writes asynchronously.
  */
 #define _GNU_SOURCE
+#include "obs_bus_call.h"
 #include <aimee/audit/obs_bus.h>
 
 #include <dirent.h>
@@ -1220,7 +1221,8 @@ static int start_locked(void)
     * Without the ring that guarantee does not hold, so neither does the bus. */
    if (ouro_host_telemetry_enable(&g.host, 0) != OURO_HOST_OK)
    {
-      aimee_log(LOG_ERROR, "obs_bus", "ring telemetry could not be created; the bus will not start");
+      aimee_log(LOG_ERROR, "obs_bus",
+                "ring telemetry could not be created; the bus will not start");
       ouro_host_destroy(&g.host);
       pthread_mutex_destroy(&g.host_lock);
       pthread_mutex_destroy(&g.pub_lock);
@@ -1670,6 +1672,11 @@ static void governance_tap(void *ctx, const ouro_frame_t *frame, const uint8_t *
 
 static void record_outcome(uint32_t event_kind, ouro_module_call_result_t result);
 
+static void module_caller_cleanup(void *unused)
+{
+   (void)unused;
+   atomic_fetch_sub(&g.module_callers, 1);
+}
 ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
@@ -1688,11 +1695,13 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
       obs_bus_log_module_call_failure(event_kind, stage_id, OURO_MODULE_CALL_TRANSPORT);
       return OURO_MODULE_CALL_TRANSPORT;
    }
+   ouro_module_call_result_t result;
+   pthread_cleanup_push(module_caller_cleanup, NULL);
    module_cancel_context_t state = {.external = cancelled, .context = cancel_context};
-   ouro_module_call_result_t result = ouro_module_client_pool_call(
-       &g.module_pool, event_kind, stage_id, trace_id, deadline_ns, request_body, request_len,
-       response_body, response_capacity, response_len, module_call_cancelled, &state);
-   atomic_fetch_sub(&g.module_callers, 1);
+   result = aimee_obs_module_pool_call(&g.module_pool, event_kind, stage_id, trace_id, deadline_ns,
+                                       request_body, request_len, response_body, response_capacity,
+                                       response_len, module_call_cancelled, &state);
+   pthread_cleanup_pop(1);
    record_outcome(event_kind, result);
    if (result != OURO_MODULE_CALL_OK)
       obs_bus_log_module_call_failure(event_kind, stage_id, result);
@@ -1734,13 +1743,11 @@ void obs_bus_module_outcome(uint32_t principal_ref, int64_t *last_ok_ns, int64_t
 {
    int known = principal_ref < AB_OUTCOME_REFS;
    if (last_ok_ns)
-      *last_ok_ns = known ? atomic_load_explicit(&outcome_ok_ns[principal_ref],
-                                                 memory_order_relaxed)
-                          : 0;
+      *last_ok_ns =
+          known ? atomic_load_explicit(&outcome_ok_ns[principal_ref], memory_order_relaxed) : 0;
    if (last_fail_ns)
-      *last_fail_ns = known ? atomic_load_explicit(&outcome_fail_ns[principal_ref],
-                                                   memory_order_relaxed)
-                            : 0;
+      *last_fail_ns =
+          known ? atomic_load_explicit(&outcome_fail_ns[principal_ref], memory_order_relaxed) : 0;
 }
 
 uint64_t obs_bus_slot_fingerprint(void)

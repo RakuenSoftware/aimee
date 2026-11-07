@@ -21,6 +21,7 @@
 #include "kb_client_pii.h"
 #include "db1_client/caches.h"
 #include "headers/module_commands.h"
+#include "headers/session_briefing_source.h"
 #include "db1_optional.h"
 #include "cJSON.h"
 #include "config.h"
@@ -200,6 +201,28 @@ void kb_client_memory_scope_context_clear(void)
    s_kbc_memory_project[0] = '\0';
 }
 
+void kb_client_memory_scope_context_snapshot(kb_client_memory_scope_context_state_t *out)
+{
+   if (!out)
+      return;
+   *out = (kb_client_memory_scope_context_state_t){0};
+   out->active = s_kbc_memory_scope_active;
+   out->include_all = s_kbc_memory_scope_all;
+   memcpy(out->workspace, s_kbc_memory_workspace, sizeof(out->workspace));
+   memcpy(out->project, s_kbc_memory_project, sizeof(out->project));
+}
+
+void kb_client_memory_scope_context_restore(const kb_client_memory_scope_context_state_t *saved)
+{
+   if (!saved || !saved->active || !memchr(saved->workspace, 0, sizeof(saved->workspace)) ||
+       !memchr(saved->project, 0, sizeof(saved->project)))
+   {
+      kb_client_memory_scope_context_clear();
+      return;
+   }
+   kb_client_memory_scope_context_set(saved->workspace, saved->project, saved->include_all);
+}
+
 void kb_client_memory_scope_context_apply(cJSON *req)
 {
    if (!req || !s_kbc_memory_scope_active)
@@ -224,7 +247,12 @@ static void kbc_memory_add_scope_context(cJSON *req)
 
 static char *kb_client_v1_session_briefing_section(const char *method, int limit)
 {
+   int provider_context = session_briefing_provider_context();
    cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return NULL;
+   if (!provider_context)
+      cJSON_AddBoolToObject(req, "native_source_mode", 0);
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
    char *json = kb_v1_action_request(method, req);
@@ -238,7 +266,8 @@ static char *kb_client_v1_session_briefing_section(const char *method, int limit
    cJSON *body = cJSON_GetObjectItemCaseSensitive(resp, "body");
    char *out = NULL;
    if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsString(body) &&
-       body->valuestring[0])
+       body->valuestring[0] &&
+       session_briefing_accept_source(resp, body->valuestring, provider_context) == 0)
       out = strdup(body->valuestring);
    cJSON_Delete(resp);
    return out;
@@ -376,17 +405,17 @@ static char *memory_recall_json(const char *task_hint, int limit_tokens, int ses
       cJSON_AddStringToObject(request, "shared_json", j);
       if (native_bytes)
          cJSON_AddNumberToObject(request, "native_context_bytes", (double)*native_bytes);
-      const char *health_enabled = getenv("AIMEE_MEMORY_HEALTH_ENABLED");
-      if (native_bytes && health_enabled && strcmp(health_enabled, "1") == 0 && task_hint &&
-          task_hint[0] && strlen(task_hint) <= 4096)
+      /* The same bounded task already went to shared recall. Preserve it for
+       * the local owner independently of optional health instrumentation. */
+      if (task_hint && task_hint[0] && strlen(task_hint) <= 4096)
          cJSON_AddStringToObject(request, "task_hint", task_hint);
       cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
       cJSON_AddBoolToObject(request, "session_start", session_start != 0);
       cJSON *reply = NULL;
       /* Match the private recall host's bound. The generic command default
        * is 125 seconds and is intended for long-running module operations. */
-      int rc =
-          aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 60000, &reply);
+      int rc = aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", request,
+                                                                      60000, &reply);
       cJSON_Delete(request);
       free(j);
       const char *body =

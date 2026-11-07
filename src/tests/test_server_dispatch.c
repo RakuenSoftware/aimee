@@ -35,6 +35,17 @@
 #include "modules/workspace/workspace_provider.h"
 #include "modules/workspace/workspace_turn.h"
 
+/* Module process discovery is outside this dispatcher fixture. Do not grant
+ * an OSV admission result or run an external executable to fill a link seam. */
+int mcp_osv_gate_blocks_argv(const char *name, int argc, const char *const argv[])
+{
+   (void)name;
+   (void)argc;
+   (void)argv;
+   assert(!"dispatch fixture unexpectedly entered module executable discovery");
+   return 1;
+}
+
 /* This dispatch fixture has no runner transport. Assert the real hook handler
  * binds and scopes its legacy command probes before entering guardrails. */
 static int g_hook_remote, g_hook_bound, g_hook_probe_calls, g_hook_guard_result;
@@ -799,6 +810,10 @@ int handle_trajectory_batch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return stub_handler(conn, "trajectory.batch");
 }
 /* Dispatch-only handlers; behavior is covered by the owner/transport suites. */
+int handle_memory_protected_intake(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.protected-intake");
+}
 int handle_memory_evidence(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.evidence");

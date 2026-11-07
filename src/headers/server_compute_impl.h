@@ -11,6 +11,7 @@
 #include "server_session_control.h"
 #include "server_session_capture.h"
 #include "request_context.h"
+#include "server/host_original_submission.h"
 #include <pthread.h>
 
 #define CLAUDE_LINE_MAX (256 * 1024)
@@ -47,7 +48,10 @@ typedef struct compute_ctx
    /* Owned directory capability captured from the producer's actual workspace,
     * never from request-body path claims. Released after worker callbacks join. */
    struct workspace_turn_mirror_lease *source_mirror;
-   cJSON *req;               /* owned by this context */
+   cJSON *req; /* owned by this context */
+   host_original_submission *original_submission;
+   host_original_submission_result original_result;
+   int original_admitted;
    aimee_message_t ir_input; /* Owned canonical user input for this admitted turn. */
    aimee_request_t
        delegate_request; /* Owned canonical source, including policy/history/controls. */
@@ -105,6 +109,8 @@ typedef struct compute_ctx
     * (e.g. internal/compact paths). Owned by the registry, not freed here. */
    struct turn_entry *turn_entry;
 } compute_ctx_t;
+void compute_ctx_update_background_job(compute_ctx_t *cctx, cJSON *resp);
+void compute_ctx_update_coord_task(compute_ctx_t *cctx, cJSON *resp);
 
 /* Defined in server_compute.c; used by platform implementations */
 int write_all(int fd, const char *data, size_t len);
@@ -124,6 +130,9 @@ int server_chat_ir_replace_steer(cJSON *request, const cJSON *message);
 int server_chat_ir_reject_steer(const char *session, const char *actor, const cJSON *message);
 int server_chat_ir_prepare_turn(compute_ctx_t *cctx);
 int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const aimee_message_t *message);
+int server_chat_ir_begin_original(compute_ctx_t *, const char *, const char *,
+                                  const struct cJSON *);
+void server_chat_ir_abort(compute_ctx_t *);
 int server_chat_ir_progress(compute_ctx_t *cctx);
 int server_chat_ir_finish(compute_ctx_t *cctx, const char *error);
 void server_chat_ir_close(compute_ctx_t *cctx);
@@ -131,6 +140,9 @@ void compute_error(compute_ctx_t *cctx, const char *message);
 void compute_ok(compute_ctx_t *cctx);
 void compute_ctx_release_budget(compute_ctx_t *cctx);
 void compute_ctx_free(compute_ctx_t *cctx);
+/* Worker-owned slot is cleared before context destruction, including cancellation. */
+compute_ctx_t **compute_ctx_lifetime_bind(compute_ctx_t **slot);
+int server_chat_original_submission_prepare(compute_ctx_t *);
 /* Worker-only owner binding. Copies are owned by cctx; clear after the worker
  * returns, even when it already freed cctx. */
 void compute_ctx_capture_request_context(compute_ctx_t *cctx, const server_conn_t *conn);

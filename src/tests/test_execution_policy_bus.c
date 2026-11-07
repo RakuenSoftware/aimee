@@ -189,8 +189,8 @@ char *kb_client_index_generation_check(const char *project, const char *generati
    return test_freshness ? strdup("{\"status\":\"ok\",\"project\":\"project\"}") : NULL;
 }
 
-int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
-                                                    int timeout_ms, cJSON **response)
+int aimee_module_commands_dispatch_internal_caller_timeout(const char *method, const cJSON *request,
+                                                           int timeout_ms, cJSON **response)
 {
    assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 500);
    const char *operation =

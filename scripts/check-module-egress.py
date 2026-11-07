@@ -106,6 +106,13 @@ def runtime_guard_failures() -> list[str]:
     return failures
 
 
+def retired_client_failures(modules: Path) -> list[str]:
+    # A concrete memory owner was extracted, not replaced by a new exception.
+    return [
+        "retired concrete memory egress client restored: memory/embed.go"
+    ] if (modules / "memory/embed.go").exists() else []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--plant-test", action="store_true")
@@ -134,9 +141,12 @@ def main() -> int:
     expected = {
         "git/forge_request.go",
         "mcp/sse.go",
-        "memory/embed.go",
         "roundtable/panel/artifact.go",
     }
+    # This former governed client belonged to the extracted concrete owner.
+    # Keep its retirement explicit: restoring it is not a permitted inventory
+    # update, and every remaining/new module still passes the socket scan above.
+    failures.extend(retired_client_failures(MODULES))
     missing = expected - governed
     if missing:
         failures.append("governed outbound inventory disappeared: " + ", ".join(sorted(missing)))

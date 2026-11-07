@@ -172,8 +172,12 @@ const (
 	// authority row. WORM/audit tables are deliberately absent: retention never
 	// rewrites evidence. Data-modifying CTEs make a crash all-or-nothing.
 	serverSessionDeleteExpiredSQL = `WITH expired AS MATERIALIZED (
-	                                    SELECT id FROM server_sessions
-	                                     WHERE created_at <= now() - make_interval(secs => $1)
+	                                    SELECT s.id FROM server_sessions s
+                                      WHERE s.created_at <= now() - make_interval(secs => $1)
+                                        AND NOT EXISTS (SELECT 1 FROM session_input_plans p WHERE p.session_id=s.id AND p.state='reserved')
+                                        AND NOT EXISTS (SELECT 1 FROM session_input_deliveries d
+                                                        WHERE d.session_id=s.id AND d.outcome='pending')
+                                      FOR UPDATE OF s SKIP LOCKED
 	                                  ), expired_delegations AS MATERIALIZED (
 	                                    SELECT delegation_id FROM delegation_spawns
 	                                     WHERE session_id IN (SELECT id FROM expired)
@@ -437,6 +441,9 @@ func serverSessionDelete(ctx context.Context, q store.Queryer, f []string) (uint
 		return store.StatusInvalid, nil, nil
 	}
 	if _, err := q.Exec(ctx, serverSessionDeleteSQL, f[0]); err != nil {
+		if originalInputDeliveryConflict(err) {
+			return store.StatusConflict, nil, nil
+		}
 		return 0, nil, err
 	}
 	return store.StatusOK, nil, nil
@@ -564,6 +571,9 @@ func serverSessionEraseSubject(ctx context.Context, q store.Queryer, f []string)
 	}
 	tag, err := q.Exec(ctx, serverSessionEraseSubjectSQL, principal)
 	if err != nil {
+		if originalInputDeliveryConflict(err) {
+			return store.StatusConflict, nil, nil
+		}
 		return 0, nil, err
 	}
 	deleted := tag.RowsAffected()
@@ -775,6 +785,18 @@ var Sessions = store.Family{
 		opServerSessionListBySubject:        {Name: "server_session_list_by_subject", Cells: 1, Args: 2, Run: serverSessionListBySubject},
 		opServerSessionEraseSubject:         {Name: "server_session_erase_subject", Args: 2, Tx: true, Run: serverSessionEraseSubject},
 		opServerSessionErasureReceipt:       {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
+		opSessionToolSourceHistorySave:      {Name: "session_tool_source_history_save", Timeout: store.CanonicalHistoryTimeout, Args: 6, Tx: true, HostOnly: true, Run: sessionToolSourceHistorySave},
+		opSessionInputAttachmentAppend:      {Name: "session_original_input_begin", Timeout: store.CanonicalHistoryTimeout, Args: 5, Cells: 5, Tx: true, HostOnly: true, Run: sessionInputAttachmentAppend},
+		opSessionInputDeliveryBegin:         {Name: "session_original_input_begin_delivery", Timeout: store.CanonicalHistoryTimeout, Args: 6, Cells: 6, Tx: true, HostOnly: true, Run: sessionInputDeliveryBegin},
+		opSessionInputDeliveryGet:           {Name: "session_original_input_delivery_get", Timeout: store.CanonicalHistoryTimeout, Args: 4, Cells: 1, Tx: true, HostOnly: true, Run: sessionInputDeliveryGet},
+		opSessionInputDeliveryPage:          {Name: "session_original_input_delivery_page", Timeout: store.CanonicalHistoryTimeout, Args: 5, Cells: 1, Tx: true, HostOnly: true, Run: sessionInputDeliveryPage},
+		opSessionInputDeliveryAck:           {Name: "session_original_input_delivery_ack", Timeout: store.CanonicalHistoryTimeout, Args: 6, Cells: 1, Tx: true, HostOnly: true, Run: sessionInputDeliveryAck},
+		opSessionInputProbe:                 {Name: "session_original_input_probe", Timeout: store.CanonicalHistoryTimeout, Args: 3, Cells: 1, Tx: true, HostOnly: true, Run: sessionInputProbe},
+		opSessionInputPlanReserve:           {Name: "session_original_input_plan_reserve", Timeout: store.CanonicalHistoryTimeout, Args: 7, Cells: 1, Tx: true, HostOnly: true, Run: sessionInputPlanReserve},
+		opSessionInputPlannedBegin:          {Name: "session_original_input_begin_planned_delivery", Timeout: store.CanonicalHistoryTimeout, Args: 8, Cells: 6, Tx: true, HostOnly: true, Run: sessionInputPlannedBegin},
+		opSessionInputPlanTerminal:          {Name: "session_original_input_plan_terminal", Timeout: store.CanonicalHistoryTimeout, Args: 7, Cells: 1, Tx: true, HostOnly: true, Run: sessionInputPlanTerminal},
+		opSessionInputAttachmentHistorySave: {Name: "session_input_attachment_history_save", Timeout: store.CanonicalHistoryTimeout, Args: 6, Cells: 1, Tx: true, HostOnly: true, Run: sessionInputAttachmentHistorySave},
+		opSessionToolSourceAppend:           {Name: "session_tool_source_append", Timeout: store.CanonicalHistoryTimeout, Args: 5, Cells: 1, Tx: true, HostOnly: true, Run: sessionToolSourceAppend},
 		opSessionIRAppend:                   {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
 		opSessionIRAppendVerified:           {Name: "session_ir_append_verified", Args: 5, Tx: true, HostOnly: true, Run: sessionIRAppendVerified},
 		opSessionIRCancel:                   {Name: "session_ir_cancel", Timeout: store.CanonicalHistoryTimeout, Args: 3, Cells: 1, Tx: true, HostOnly: true, Run: sessionIRCancel},
@@ -882,35 +904,49 @@ func sessionIRAppendAuthorized(ctx context.Context, q store.Queryer, f []string,
 	return sessionIRAppendImportAuthorized(ctx, q, f, allowProof, allowInterruption, allowNativeOwner, false)
 }
 func sessionIRAppendImportAuthorized(ctx context.Context, q store.Queryer, f []string, allowProof, allowInterruption, allowNativeOwner, allowImport bool) (uint32, []string, error) {
+	return sessionIRAppendSourceAuthorized(ctx, q, f, allowProof, allowInterruption, allowNativeOwner, allowImport, false)
+}
+func sessionIRAppendSourceAuthorized(ctx context.Context, q store.Queryer, f []string, allowProof, allowInterruption, allowNativeOwner, allowImport, allowToolSource bool) (uint32, []string, error) {
+	return sessionIRAppendInputAuthorized(ctx, q, f, allowProof, allowInterruption, allowNativeOwner, allowImport, allowToolSource, false)
+}
+
+// Shared admission checks are identical for individual and checkpoint appends.
+func sessionIRAppendInputValid(f []string, allowProof, allowInterruption, allowNativeOwner, allowImport, allowToolSource, allowInput bool) (string, bool) {
 	if len(f) != 5 {
-		return store.StatusInvalid, nil, nil
+		return "", false
 	}
 	for _, identity := range f[:4] {
 		if identity == "" || len(identity) > 1024 {
-			return store.StatusInvalid, nil, nil
+			return "", false
 		}
 	}
 	if (strings.HasPrefix(f[1], operatorCancelPrefix) || strings.HasPrefix(f[1], "operator-interruption:")) || !validSessionIREvent([]byte(f[4])) || !sessionIRProofBindings([]byte(f[4]), f[0], f[2], f[3], allowProof) {
-		return store.StatusInvalid, nil, nil
+		return "", false
+	}
+	if canonical.EventHasInputAttachments([]byte(f[4])) && !allowInput {
+		return "", false
+	}
+	if canonical.EventHasToolSources([]byte(f[4])) && !allowToolSource {
+		return "", false
 	}
 	var eventKind struct {
 		Kind string `json:"kind"`
 	}
 	if json.Unmarshal([]byte(f[4]), &eventKind) != nil {
-		return store.StatusInvalid, nil, nil
+		return "", false
 	}
 	var top map[string]json.RawMessage
 	if json.Unmarshal([]byte(f[4]), &top) != nil {
-		return store.StatusInvalid, nil, nil
+		return "", false
 	}
 	if _, present := top["native_owner"]; present && !allowNativeOwner {
-		return store.StatusInvalid, nil, nil
+		return "", false
 	}
 	if _, present := top["partial"]; present && !allowNativeOwner {
-		return store.StatusInvalid, nil, nil
+		return "", false
 	}
 	if eventKind.Kind == "tool_interruption" && !allowInterruption {
-		return store.StatusInvalid, nil, nil
+		return "", false
 	}
 	if eventKind.Kind == "history" && !allowImport {
 		var e struct {
@@ -918,12 +954,21 @@ func sessionIRAppendImportAuthorized(ctx context.Context, q store.Queryer, f []s
 			Payload canonical.HistoryEvent `json:"payload"`
 		}
 		if json.Unmarshal([]byte(f[4]), &e) != nil {
-			return store.StatusInvalid, nil, nil
+			return "", false
 		}
 		if e.Payload.Phase == "import_report" || e.Payload.Phase == "archive" || e.Payload.Phase == "message_fragment" {
-			return store.StatusInvalid, nil, nil
+			return "", false
 		}
 	}
+	return eventKind.Kind, true
+}
+
+func sessionIRAppendInputAuthorized(ctx context.Context, q store.Queryer, f []string, allowProof, allowInterruption, allowNativeOwner, allowImport, allowToolSource, allowInput bool) (uint32, []string, error) {
+	kind, valid := sessionIRAppendInputValid(f, allowProof, allowInterruption, allowNativeOwner, allowImport, allowToolSource, allowInput)
+	if !valid {
+		return store.StatusInvalid, nil, nil
+	}
+
 	var locked string
 	if err := q.QueryRow(ctx, sessionIRLockSQL, f[0]).Scan(&locked); err != nil {
 		if store.IsNoRows(err) {
@@ -934,6 +979,7 @@ func sessionIRAppendImportAuthorized(ctx context.Context, q store.Queryer, f []s
 	if locked != f[3] {
 		return store.StatusInvalid, nil, nil
 	}
+
 	var sequence int64
 	var turn, actor, payload string
 	err := q.QueryRow(ctx, sessionIRExistingSQL, f[0], f[1]).Scan(&sequence, &turn, &actor, &payload)
@@ -945,6 +991,39 @@ func sessionIRAppendImportAuthorized(ctx context.Context, q store.Queryer, f []s
 	}
 	if !store.IsNoRows(err) {
 		return 0, nil, err
+	}
+	if kind == "history" && !allowInput {
+		var event struct {
+			Kind    string                 `json:"kind"`
+			Payload canonical.HistoryEvent `json:"payload"`
+		}
+		if !canonical.Decode([]byte(f[4]), &event) {
+			return store.StatusInvalid, nil, nil
+		}
+		if event.Payload.Phase == "message" || event.Payload.Phase == "message_fragment" || event.Payload.Phase == "commit" {
+			allowed, err := ordinaryInputHistoryAllowed(ctx, q, f[0], event.Payload.Scope)
+			if err != nil {
+				return 0, nil, err
+			}
+			if !allowed {
+				return store.StatusInvalid, nil, nil
+			}
+		}
+	}
+	if kind == "message" && !allowInput {
+		var event struct {
+			MessageID string `json:"message_id"`
+		}
+		if json.Unmarshal([]byte(f[4]), &event) != nil {
+			return store.StatusInvalid, nil, nil
+		}
+		var attached bool
+		if err := q.QueryRow(ctx, originalInputMessageSQL, f[0], f[2], event.MessageID).Scan(&attached); err != nil {
+			return 0, nil, err
+		}
+		if attached {
+			return store.StatusInvalid, nil, nil
+		}
 	}
 	fenced, fenceErr := nativeRecoveryFenced(ctx, q, f[0], f[2])
 	if fenceErr != nil {

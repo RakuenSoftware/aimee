@@ -16,6 +16,8 @@
 
 #include "aimee.h"
 #include "commands.h"
+#include "owned_feature.h"
+AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_management_legacy_guard_contract_v1);
 #include "cmd_review.h"
 #include "db1_client/db1.h"
 #include "working_profile.h"
@@ -67,6 +69,8 @@ cJSON *identity_charter_json(void)
 
 cJSON *identity_working_profile_json(void)
 {
+   if (aimee_owned_feature_status("working_profile"))
+      return aimee_owned_feature_management_json("working_profile", "read", NULL);
    cJSON *out = cJSON_CreateObject();
    if (!out)
       return NULL;
@@ -190,6 +194,8 @@ static double obj_num(const cJSON *obj, const char *key)
  * Exposed so tests can exercise the classification logic directly. */
 cJSON *identity_diff_report(cJSON *snap_a, cJSON *snap_b, double flip_threshold)
 {
+   if (aimee_owned_feature_status("working_profile"))
+      return aimee_owned_feature_outcome("unsupported");
    cJSON *idx_a = working_profile_entries_by_field(snap_a);
    cJSON *idx_b = working_profile_entries_by_field(snap_b);
 

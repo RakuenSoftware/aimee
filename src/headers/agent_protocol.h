@@ -35,7 +35,8 @@ int agent_request_max_tokens(const agent_t *agent, int requested);
  * tool dispatch and history append finish. No text/tool projection occurs here.
  * rescue_mode < 0 skips rescue, 0 admits dialect calls, 1 also admits bare JSON;
  * n_rescued receives the admitted recovered-call count when provided. */
-#define AGENT_IR_CAPTURE_FAILED (-2)
+#define AGENT_IR_CAPTURE_FAILED         (-2)
+#define AGENT_IR_INPUT_ADMISSION_FAILED (-3)
 struct aimee_anthropic_replay;
 int agent_ir_decode_json_response_bound(const struct cJSON *root, int anthropic, int rescue_mode,
                                         int *n_rescued,

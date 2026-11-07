@@ -939,20 +939,43 @@ static void route_curiosity_build_question(const curiosity_item_t *it, char *out
 {
    const char *target = it->target_topic[0] ? it->target_topic : it->target_entity;
    const char *evidence = it->evidence[0] ? it->evidence : "";
+   const char *prefix;
+   int include_evidence = 0;
    if (strcmp(it->gap_type, CURIOSITY_GAP_CONTRADICTION) == 0)
-      snprintf(out, cap, "Resolve contradiction about %s%s%s", target, evidence[0] ? ": " : "",
-               evidence);
+   {
+      prefix = "Resolve contradiction about ";
+      include_evidence = 1;
+   }
    else if (strcmp(it->gap_type, CURIOSITY_GAP_MISSING_FACT) == 0)
-      snprintf(out, cap, "Find a fact to answer: %s", target);
+      prefix = "Find a fact to answer: ";
    else if (strcmp(it->gap_type, CURIOSITY_GAP_STALE_FACT) == 0)
-      snprintf(out, cap, "Re-verify a stale fact about %s", target);
+      prefix = "Re-verify a stale fact about ";
    else if (strcmp(it->gap_type, CURIOSITY_GAP_WEAK_COVERAGE) == 0)
-      snprintf(out, cap, "Expand coverage of %s", target);
+      prefix = "Expand coverage of ";
    else if (strcmp(it->gap_type, CURIOSITY_GAP_UNVERIFIED_ASSUMPTION) == 0)
-      snprintf(out, cap, "Verify assumption about %s%s%s", target, evidence[0] ? ": " : "",
-               evidence);
+   {
+      prefix = "Verify assumption about ";
+      include_evidence = 1;
+   }
    else
-      snprintf(out, cap, "Investigate %s", target);
+      prefix = "Investigate ";
+   if (!cap)
+      return;
+   /* Keep the established byte-limited question, including its truncation
+    * order. The full evidence is forwarded separately to the memory owner. */
+   const char *parts[] = {prefix, target, include_evidence && evidence[0] ? ": " : "",
+                          include_evidence ? evidence : ""};
+   size_t used = 0;
+   for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); ++i)
+   {
+      size_t length = strlen(parts[i]);
+      size_t available = cap - 1 - used;
+      if (length > available)
+         length = available;
+      memcpy(out + used, parts[i], length);
+      used += length;
+   }
+   out[used] = '\0';
 }
 
 cJSON *kb_store_kb_service_curiosity_route_top_json(int limit, const char *source_session)

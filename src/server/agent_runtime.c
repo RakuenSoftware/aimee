@@ -1,3 +1,5 @@
+#include "host_original_text.h"
+#include "host_input_attachment.h"
 #include <aimee/translation/aimee_backend.h>
 #include "aimee.h"
 #include "wire_fence.h"
@@ -151,7 +153,8 @@ static void admission_ensure_configured(void)
          config_concurrency_entry_t e;
          if (config_concurrency_per_model_at(i, &e) != 0)
             continue;
-         snprintf(overrides[n].model, sizeof(overrides[n].model), "%s", e.key);
+         snprintf(overrides[n].model, sizeof(overrides[n].model), "%.*s",
+                  (int)sizeof(overrides[n].model) - 1, e.key);
          overrides[n].limit = e.limit;
          n++;
       }
@@ -219,7 +222,8 @@ static int host_request_supported(const aimee_request_t *request, int use_tools)
 static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t *net,
                                        const char *role, const aimee_request_t *request,
                                        int use_tools, agent_result_t *out,
-                                       aimee_response_t *response, int host_text_profile)
+                                       aimee_response_t *response, int host_text_profile,
+                                       const cJSON *input_attachment)
 {
    if (!ag || !out)
       return -1;
@@ -286,6 +290,44 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
    int durable_job_id = agent_get_durable_job_id();
    if (durable_job_id > 0)
       db1_agent_job_set_agent(durable_job_id, ag->name);
+   host_text_owned normalized_prompt = {0};
+   aimee_request_t normalized_request = {0};
+   const char *canonical_prompt = NULL;
+   host_text_status normalization = HOST_TEXT_PASSTHROUGH;
+   int plain_user =
+       request->n_messages == 1 && request->messages[0].role &&
+       !strcmp(request->messages[0].role, "user") && request->messages[0].n_blocks == 1 &&
+       request->messages[0].blocks[0].type == AIMEE_BLK_TEXT && request->messages[0].blocks[0].text;
+   if (plain_user)
+      canonical_prompt = request->messages[0].blocks[0].text;
+   if (!input_attachment && !role && plain_user)
+      normalization = host_text_apply(HOST_TEXT_PLAIN_PROMPT, canonical_prompt,
+                                      strlen(canonical_prompt), &normalized_prompt);
+   else if (!input_attachment && host_text_required())
+      normalization = HOST_TEXT_UNSUPPORTED;
+   if (normalization < 0 || normalized_prompt.sidecars_len ||
+       (normalization == HOST_TEXT_OK && aimee_ir_request_clone(request, &normalized_request)))
+   {
+      host_text_destroy(&normalized_prompt);
+      agent_admission_release(admit_slot);
+      snprintf(out->error, sizeof out->error, "original text admission unavailable");
+      return AGENT_RC_CAPTURE_FAILED;
+   }
+   if (normalization == HOST_TEXT_OK)
+   {
+      char *owned = strdup(normalized_prompt.text);
+      if (!owned)
+      {
+         aimee_request_free(&normalized_request);
+         host_text_destroy(&normalized_prompt);
+         agent_admission_release(admit_slot);
+         return AGENT_RC_CAPTURE_FAILED;
+      }
+      free(normalized_request.messages[0].blocks[0].text);
+      normalized_request.messages[0].blocks[0].text = owned;
+      request = &normalized_request;
+      canonical_prompt = owned;
+   }
    server_session_log_t *log_scope = NULL;
    /* Only an admitted chat owner can grant replies to a private child capture.
     * Headless internal attempts retain the default-denied owner snapshot. */
@@ -299,9 +341,15 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
    }
    else
    {
-      capture = server_session_log_begin_selected(
-          role, host_text_profile ? &request->messages[0] : NULL, ag->name, ag->provider, ag->model,
-          owner && owner->control_reply_capability, &log_scope);
+      capture =
+          input_attachment
+              ? (!role && plain_user ? server_session_log_begin_original(
+                                           canonical_prompt, input_attachment, ag->name,
+                                           ag->provider, ag->model, &log_scope)
+                                     : -1)
+              : server_session_log_begin_selected(
+                    role, host_text_profile ? &request->messages[0] : NULL, ag->name, ag->provider,
+                    ag->model, owner && owner->control_reply_capability, &log_scope);
       if (capture < 0)
       {
          rc = AGENT_RC_CAPTURE_FAILED;
@@ -369,13 +417,38 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
                 out->stop_reason[0] ? out->stop_reason : "-",
                 out->error[0] ? out->error : "(no error text)");
    }
+   aimee_request_free(&normalized_request);
+   host_text_destroy(&normalized_prompt);
    return rc;
+}
+
+/* Trusted C original-input adapter only; no command/JSON registration. */
+__attribute__((used, externally_visible, retain)) int
+agent_dispatch_original_input(const agent_t *agent, const agent_network_t *network,
+                              const char *system, const char *safe_prompt, const cJSON *attachment,
+                              int max_tokens, double temperature, int use_tools,
+                              agent_result_t *out)
+{
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)safe_prompt};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = (char *)system};
+   aimee_request_t request = {.model = (char *)agent->model,
+                              .messages = &message,
+                              .n_messages = 1,
+                              .system = system && system[0] ? &policy : NULL,
+                              .n_system = system && system[0] ? 1 : 0,
+                              .max_tokens = max_tokens,
+                              .has_max_tokens = 1,
+                              .temperature = temperature,
+                              .has_temperature = 1};
+   return agent_dispatch_one_internal(agent, network, NULL, &request, use_tools, out, NULL, 1,
+                                      attachment);
 }
 
 int agent_dispatch_one(const agent_t *agent, const agent_network_t *network, const char *role,
                        const aimee_request_t *request, int use_tools, agent_result_t *out)
 {
-   return agent_dispatch_one_internal(agent, network, role, request, use_tools, out, NULL, 1);
+   return agent_dispatch_one_internal(agent, network, role, request, use_tools, out, NULL, 1, NULL);
 }
 
 /* Per-thread tool-mode override for agent_run; see agent_run_force_no_tools. */
@@ -594,7 +667,8 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_requ
     * only return text: it cannot run a tool, read/write files, or touch a repo.
     * The non-CLI filter above is secondary. (agent_dispatch_one also enforces the
     * drafter's max_parallel + records its health, like every other turn.) */
-   int rc = agent_dispatch_one_internal(&local, &cfg->network, NULL, request, 0, out, NULL, 1);
+   int rc =
+       agent_dispatch_one_internal(&local, &cfg->network, NULL, request, 0, out, NULL, 1, NULL);
    /* Stamp the drafter name for the caller even on the early-guard paths that
     * return before the executor sets it (idempotent when it was already set). */
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", local.name);
@@ -634,7 +708,7 @@ int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request, 
       snprintf(out->error, sizeof out->error, "selected model cannot honor generation controls");
       return AGENT_RC_CONTEXT_REFUSED;
    }
-   return agent_dispatch_one_internal(&local, &cfg->network, NULL, request, 0, out, NULL, 0);
+   return agent_dispatch_one_internal(&local, &cfg->network, NULL, request, 0, out, NULL, 0, NULL);
 }
 
 /* Run one fan-out task on a specifically named configured agent (resolved like
@@ -821,7 +895,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    const aimee_request_t *original = request;
    int rc = agent_dispatch_one_internal(ag, &cfg->network, role,
                                         enhanced.n_messages ? &enhanced : request, 1, out, response,
-                                        host_text_profile);
+                                        host_text_profile, NULL);
    aimee_request_free(&enhanced);
 
    if (!route_pinned && agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
@@ -938,8 +1012,9 @@ static void parse_response(const char *body, const agent_t *agent,
    {
       out->usage_unobserved = 1;
       snprintf(out->error, sizeof out->error, "%s",
-               rc == AGENT_IR_CAPTURE_FAILED ? "canonical response persistence failed"
-                                             : "provider response could not be admitted as IR");
+               rc == AGENT_IR_INPUT_ADMISSION_FAILED ? "module tool input admission refused"
+               : rc == AGENT_IR_CAPTURE_FAILED       ? "canonical response persistence failed"
+                                               : "provider response could not be admitted as IR");
       if (rc == AGENT_IR_CAPTURE_FAILED || aimee_ir_session_capture_failed())
          snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
       return;
@@ -1887,7 +1962,15 @@ int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_networ
                /* Tunnel-routed host: show SSH command with key */
                char ssh_cmd[768];
                if (network->ssh_key[0])
-                  snprintf(ssh_cmd, sizeof(ssh_cmd), "%s -i %s", host_entry, network->ssh_key);
+               {
+                  int prefix = snprintf(ssh_cmd, sizeof(ssh_cmd), "%s -i ", host_entry);
+                  size_t used = prefix < 0 ? 0 : (size_t)prefix;
+                  if (used >= sizeof(ssh_cmd))
+                     used = sizeof(ssh_cmd) - 1;
+                  size_t key_n = strnlen(network->ssh_key, sizeof(ssh_cmd) - used - 1);
+                  memcpy(ssh_cmd + used, network->ssh_key, key_n);
+                  ssh_cmd[used + key_n] = '\0';
+               }
                else
                   snprintf(ssh_cmd, sizeof(ssh_cmd), "%s", host_entry);
                ctx_appendf(&context, cap, &pos, "  %-16s %s %s@  %s\n", h->name, ssh_cmd,
@@ -2110,7 +2193,7 @@ int agent_get_stats(const char *name, agent_stats_t *out, int max)
    {
       agent_stats_t *s = &out[i];
       memset(s, 0, sizeof(*s));
-      snprintf(s->name, MAX_AGENT_NAME, "%s", rows[i].agent_name);
+      snprintf(s->name, MAX_AGENT_NAME, "%.*s", MAX_AGENT_NAME - 1, rows[i].agent_name);
       s->total_calls = rows[i].total_calls;
       s->total_prompt_tokens = rows[i].total_prompt_tokens;
       s->total_completion_tokens = rows[i].total_completion_tokens;

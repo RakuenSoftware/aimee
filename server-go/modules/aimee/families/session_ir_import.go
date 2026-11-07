@@ -10,7 +10,6 @@ import (
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	"reflect"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -81,7 +80,7 @@ func sessionIRHistoryImport(ctx context.Context, q store.Queryer, f []string) (u
 		return store.StatusInvalid, nil, nil
 	}
 	for _, message := range messages {
-		if !canonical.ValidMessage(message) {
+		if !canonical.ValidMessage(message) || canonical.MessageHasInputAttachments(message) || canonical.MessageHasToolSources(message) {
 			return store.StatusInvalid, nil, nil
 		}
 	}
@@ -109,6 +108,15 @@ func sessionIRHistoryImport(ctx context.Context, q store.Queryer, f []string) (u
 	}
 	if !owned[f[0]] || !owned[f[3]] {
 		return store.StatusInvalid, nil, nil
+	}
+	if report.Outcome == "exact" || report.Outcome == "normalized" {
+		allowed, presenceErr := ordinaryInputHistoryAllowed(ctx, q, f[0], f[1])
+		if presenceErr != nil {
+			return 0, nil, presenceErr
+		}
+		if !allowed {
+			return store.StatusInvalid, nil, nil
+		}
 	}
 	provider := report.SourceProvider
 	raw, err := legacyPrimaryText(ctx, q, f[3], f[4], provider)
@@ -182,7 +190,11 @@ func sessionIRHistoryImport(ctx context.Context, q store.Queryer, f []string) (u
 			return store.StatusInvalid, nil, nil
 		}
 	}
+	events := make([]string, 0, len(messages)+2)
 	appendHistory := func(index int, h canonical.HistoryEvent) (uint32, error) {
+		if index != len(events) {
+			return store.StatusInvalid, nil
+		}
 		var body any = h
 		if h.Phase == "archive" {
 			body = struct {
@@ -202,8 +214,8 @@ func sessionIRHistoryImport(ctx context.Context, q store.Queryer, f []string) (u
 		if !canonical.ValidSessionEvent(event) {
 			return store.StatusInvalid, nil
 		}
-		status, _, err := sessionIRAppendImportAuthorized(ctx, q, []string{f[0], checkpoint + ":" + strconv.Itoa(index), checkpoint, f[2], string(event)}, false, false, false, true)
-		return status, err
+		events = append(events, string(event))
+		return store.StatusOK, nil
 	}
 
 	at := 0
@@ -230,8 +242,15 @@ func sessionIRHistoryImport(ctx context.Context, q store.Queryer, f []string) (u
 		return status, nil, err
 	}
 	at++
+	flush := func() (uint32, []string, error) {
+		status, _, err := sessionIRHistoryAppendBatch(ctx, q, []string{f[0], checkpoint, scope, f[2]}, events, true, false, false)
+		if err == nil && status == store.StatusOK {
+			return status, []string{"imported"}, nil
+		}
+		return status, nil, err
+	}
 	if report.Outcome == "refused" || report.Outcome == "archived" {
-		return store.StatusOK, []string{"imported"}, nil
+		return flush()
 	}
 	// The original source remains untouched even after acknowledged migration.
 	for i, message := range messages {
@@ -266,7 +285,7 @@ func sessionIRHistoryImport(ctx context.Context, q store.Queryer, f []string) (u
 		return 0, nil, fmt.Errorf("history import commit: %w", err)
 	}
 	if status == store.StatusOK {
-		return status, []string{"imported"}, nil
+		return flush()
 	}
 	return status, nil, nil
 }

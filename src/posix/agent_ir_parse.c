@@ -27,10 +27,12 @@ static int ir_admit_decoded_response(int decode_status, aimee_response_t *out, i
    if (n_rescued)
       *n_rescued = rescued;
    ir_observe_reasoning(out);
-   if (aimee_ir_session_emit_buffered_response(out, NULL) != 0)
+   aimee_ir_capture_cause_t cause = AIMEE_IR_CAPTURE_CAUSE_NONE;
+   if (aimee_ir_session_emit_buffered_response_checked(out, NULL, &cause) != 0)
    {
       aimee_response_free(out);
-      return AGENT_IR_CAPTURE_FAILED;
+      return cause == AIMEE_IR_CAPTURE_CAUSE_INPUT_ADMISSION ? AGENT_IR_INPUT_ADMISSION_FAILED
+                                                             : AGENT_IR_CAPTURE_FAILED;
    }
    return 0;
 fail:

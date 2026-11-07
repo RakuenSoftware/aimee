@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"os"
 	"strings"
 	"sync"
@@ -14,8 +15,6 @@ import (
 	wire "github.com/JBailes/aimee/server-go/aimee"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
-	memory "github.com/JBailes/aimee/server-go/modules/memory"
-	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -269,41 +268,18 @@ func TestDelegateExperiencePostgresNextRunReplayAndSourceFences(t *testing.T) {
 			t.Fatal("foreign experience", foreign)
 		}
 	}
-	// Exercise the real prepare/check path with the complete projected receipt.
-	handler := memory.NewHandler(nil, memory.WithDataStore(memory.PlacementServer, nil))
-	runtime := func(args map[string]any) map[string]any {
-		t.Helper()
-		body, _ := json.Marshal(args)
-		frame, _ := ring.EncodeCommand("runtime", body)
-		response, status := handler(ring.ModuleInvocation{StageID: memory.StageCommand}, frame)
-		body, err := ring.DecodeCommandResult(response)
-		var out map[string]any
-		if status != ring.ModuleStatusOK || err != nil || json.Unmarshal(body, &out) != nil {
-			t.Fatal(status, err, string(response))
-		}
-		return out
+	// Old Go memory assembler/provider assertions preserved in private sidecar.
+	var selected map[string]any
+	if err := json.Unmarshal([]byte(raw), &selected); err != nil {
+		t.Fatal(err)
 	}
-	assembled := runtime(map[string]any{"operation": "ingress-assemble", "project": "project-a", "budget": 20000, "execution_test_grades": json.RawMessage(raw), "prepare_source_release": true, "request_id": "later", "principal": "operator"})
-	if !strings.Contains(fmt.Sprint(assembled["envelope"]), "git_verify") || !strings.Contains(fmt.Sprint(assembled["envelope"]), "configured_tests_only") {
-		t.Fatal("next-run context", assembled)
-	}
-	planArgs := map[string]any{"operation": "source-release-plan", "request_id": "later", "principal": "operator", "project": "project-a", "source_release_ticket": assembled["source_release_ticket"]}
-	plan := runtime(planArgs)
-	wanted := mustJSON(plan["execution_grade_request"])
+	selected["check_id"] = strings.Repeat("b", 32)
+	wanted := mustJSON(selected)
 	// Parent ownership changes after preparation must revoke the joined experience.
 	exec(`UPDATE server_sessions SET principal='foreign' WHERE id='parent'`)
 	changed := recall("operator", "project-a", wanted)
 	if strings.Contains(changed, `"delegate_experience"`) || !strings.Contains(changed, grade.VerificationID) {
 		t.Fatal("parent revocation must retain independently valid grade only", changed)
-	}
-	answer := map[string]any{}
-	for k, v := range planArgs {
-		answer[k] = v
-	}
-	answer["operation"] = "source-release-result"
-	answer["execution_grade_response"] = json.RawMessage(changed)
-	if admitted := runtime(answer); admitted["status"] != "error" || admitted["kind"] != "stale_context" {
-		t.Fatal("provider admitted revoked experience", admitted)
 	}
 	exec(`UPDATE server_sessions SET principal='operator' WHERE id='parent'`)
 	for _, check := range []struct{ name, erase, restore string }{

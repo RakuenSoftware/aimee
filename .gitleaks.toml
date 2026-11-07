@@ -1,0 +1,15 @@
+# Keep every default rule and the complete history scan. The ownership checker
+# verifies these source-content hashes; file names containing "key" or "api"
+# must not turn a SHA-256 digest into a credential finding.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Source SHA-256 fields in the reviewed current ownership manifest"
+condition = "AND"
+paths = ['''(^|/)tests/baselines/modules/memory-ownership-current\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"(?:src/gen_openapi_server\.py|api/openapi-server-v1\.yaml|src/server/openapi_server_data\.h|src/tests/test_kb_vault_protected_secret\.c|src/modules/vault/vault_server_key\.[ch])": "[a-f0-9]{64}",?\s*$''']

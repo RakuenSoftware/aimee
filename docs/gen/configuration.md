@@ -281,7 +281,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 285 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 264 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -295,7 +295,6 @@ The binaries read 285 `AIMEE_*` environment variables (scanned from native acces
 | `AIMEE_HOME` | Root of the per-user config and runtime-asset store (`aimee.yaml`, workflows, keys). DB1 is PostgreSQL and lives outside this directory. |
 | `AIMEE_MODELS_DEV_SNAPSHOT` | Path to an offline models.dev catalog snapshot. |
 | `AIMEE_OAUTH_RUNTIME_DIR` | Private directory for transient OAuth callback/session state; it must not be used for durable credentials. |
-| `AIMEE_PACK_DIR` | Directory of memory profile packs. |
 | `AIMEE_RUNTIME_DIR` | Private runtime directory for sockets, temporary credentials, and process state. |
 | `AIMEE_WORKSPACES_DIR` | Root directory for mirrored/registered workspaces. |
 
@@ -336,7 +335,6 @@ The binaries read 285 `AIMEE_*` environment variables (scanned from native acces
 | `AIMEE_MGMT_STATUS_KEY_ID` | Identifier of the management-status verification key. |
 | `AIMEE_MGMT_STATUS_PUBLIC_KEY` | Hex-encoded Ed25519 key used to verify management-status staples. |
 | `AIMEE_MODULE_EVENT_BASE` | Installed module event base used by the module runtime. |
-| `AIMEE_MODULE_PLACEMENT` | Supervisor-provided module placement (`server` or `kb`), validated against the installed identity. |
 | `AIMEE_MODULE_PRINCIPAL_REF` | Supervisor-provided admitted module principal reference; not a caller-selected authority. |
 | `AIMEE_MODULE_RUNTIME_WEB` | Explicit runtime-web process intent. `1`, `true`, `on`, or `yes` enables it; `0`, `false`, `off`, or `no` disables it. When valid, this takes precedence over `AIMEE_RUNTIME_WEB_ENABLED`; unset or malformed preserves the shipped module default. |
 | `AIMEE_PEER_DIRECTORY` | Peer directory selection. The compatibility value `db1` selects the runtime session directory. |
@@ -450,29 +448,11 @@ The binaries read 285 `AIMEE_*` environment variables (scanned from native acces
 
 | Variable | Description |
 |----------|-------------|
-| `AIMEE_COGNEE_URL` | Cognee API base URL; fallback when `AIMEE_MEMORY_BACKEND_URL` is unset. |
 | `AIMEE_CONTEXT_NO_KB` | Skip KB lookups during context assembly. |
-| `AIMEE_GRAPH_FUSION` | Native memory graph-fusion switch; accepted on/off values are validated by the Go owner. |
-| `AIMEE_HILLOCK_URL` | Hillock HDC sidecar base URL; fallback when `AIMEE_MEMORY_BACKEND_URL` is unset and Hillock is selected. |
-| `AIMEE_MEMORY_BACKEND` | Select the generic memory engine: `native` (default), `aimee-native`, `cognee`, or `hillock`. Unknown selections fail startup. See the memory module contract. |
-| `AIMEE_MEMORY_BACKEND_AUTH` | Alternative memory authentication mode: `bearer` by default, `api-key` for Cognee service keys, or explicit `none` for an isolated development endpoint. |
-| `AIMEE_MEMORY_BACKEND_DIR` | Optional durable compatibility catalog root for Cognee/Hillock. Defaults to `$AIMEE_HOME/memory-backends`; each engine and placement has a separate private catalog. |
-| `AIMEE_MEMORY_BACKEND_TOKEN` | First-boot credential transport for the alternative memory service; sealed into Vault and removed from the environment before runtime. |
-| `AIMEE_MEMORY_BACKEND_URL` | Selected alternative memory API base URL. Requests use the existing egress owner. |
-| `AIMEE_MEMORY_CITATIONS_MODE` | Citation rendering mode for memory recall. |
-| `AIMEE_MEMORY_CITATIONS_STRIP_UNVERIFIED` | Strip unverified citations from recall output. |
+| `AIMEE_MEMORY_BACKEND` | Current in-process owner accepts `native` (default) or `aimee-native`. Retired/unknown engines fail startup. Independent memory modules use process composition. |
+| `AIMEE_MEMORY_BACKEND_TOKEN` | Legacy bootstrap secret name. Existing Vault entries are retained for operator-controlled migration; the retired memory-backend egress route cannot resolve them. |
 | `AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED` | Enable the async cognify pipeline. |
-| `AIMEE_MEMORY_COREF_MODE` | Coreference-resolution mode. |
-| `AIMEE_MEMORY_COREF_WINDOW` | Coreference context window; default 5, clamped to 1–12. |
 | `AIMEE_MEMORY_HEALTH_ENABLED` | Set to 1 to opt into bounded receipt health collection and optional serving metadata. Default off; disabling it preserves required provider receipts. |
-| `AIMEE_MEMORY_HEALTH_SAMPLE_PPM` | Bounded retrieval-health sampling rate in parts per million; used only when health collection is enabled. |
-| `AIMEE_MEMORY_PAGERANK_ENABLED` | Opt into the native shared-memory PageRank ranking arm. Integer override clamped to 0 or 1; personal recall has no shared graph. |
-| `AIMEE_MEMORY_PAGERANK_ITERATIONS` | Native shared-memory PageRank iterations; default 6, integer override clamped to 1–16. |
-| `AIMEE_MEMORY_PAGERANK_RELATIONS` | Relation types included in memory PageRank. |
-| `AIMEE_MEMORY_PAGERANK_WEIGHT` | Validated weight for the optional native PageRank ranking arm; default 0.35. |
-| `AIMEE_MEMORY_RECALL_GATE` | Recall acknowledgement gate: observe by default, `enforce` to suppress eligible acknowledgement queries, or `off` to disable. |
-| `AIMEE_MEMORY_SELECTION_POLICY` | Opt-in versioned typed-selection reporting policy. Only the owner's supported policy version activates it; default off. |
-| `AIMEE_MEMORY_UTILITY_HORIZON_POLICY` | Operator JSON utility-horizon artifact, bounded to 64 KiB, with `shadow` or `enforce` mode. Unset disables it; invalid artifacts fail validation. |
 | `AIMEE_NO_CACHE` | Disable the memory-assembly cache. |
 
 ### Delegates & backends
@@ -540,7 +520,6 @@ The binaries read 285 `AIMEE_*` environment variables (scanned from native acces
 
 | Variable | Description |
 |----------|-------------|
-| `AIMEE_EMBED_HTTP_TIMEOUT_MS` | Embedding request timeout in milliseconds for the Go embedding owner. |
 | `AIMEE_MODEL_CAPABILITY_OVERRIDES` | Override model capability flags (reasoning/tools/vision/…). |
 
 ### TLS & networking
@@ -585,7 +564,7 @@ The binaries read 285 `AIMEE_*` environment variables (scanned from native acces
 
 > These are read by the code but have no description yet: the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_ARTIFACT_APPROVAL_MANIFEST`, `AIMEE_ARTIFACT_APPROVAL_PUBLIC_KEY`, `AIMEE_ARTIFACT_TRUST_MODE`, `AIMEE_AUDIT_RECOVERY_EPOCH`, `AIMEE_AUDIT_WORM_EMERGENCY_DISABLE`, `AIMEE_AUTONOMY_KILL_SWITCH`, `AIMEE_BENCHMARK_HARDWARE_PROFILE`, `AIMEE_CAPTURE_MAX_BYTES`, `AIMEE_CLI_PATH`, `AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY`, `AIMEE_DELEGATE_EGRESS_BIN`, `AIMEE_EFFECT_CONTRACT_MODE`, `AIMEE_ENVIRONMENT`, `AIMEE_EVAL_SCHEMA`, `AIMEE_EXPLORATION_ENFORCE`, `AIMEE_EXPLORATION_EXPERIMENT`, `AIMEE_FORGE_SERVICE_SOCKET`, `AIMEE_FORGE_SERVICE_URL`, `AIMEE_GIT_AUTHOR_EMAIL`, `AIMEE_GIT_AUTHOR_NAME`, `AIMEE_HOOK_IDENTITY_MODE`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_KB_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_KB_OBSERVABILITY_LISTEN`, `AIMEE_KB_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_KB_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_KB_OBSERVABILITY_TLS_KEY`, `AIMEE_MCP_PLUGIN_ARGV`, `AIMEE_MCP_PLUGIN_CWD`, `AIMEE_MCP_PLUGIN_PERMISSION`, `AIMEE_MCP_TOOLS_WATCH_SECONDS`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MEMORY_RECEIPT_RETENTION`, `AIMEE_MODEL_SERVICES_ENABLED`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_MODULE_RUNTIME_BIN`, `AIMEE_NATIVE_CLI`, `AIMEE_OAUTH_REDIRECT_BASE`, `AIMEE_OBSERVABILITY_ALLOW_INSECURE_OTLP`, `AIMEE_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_OBSERVABILITY_LISTEN`, `AIMEE_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_OBSERVABILITY_TLS_KEY`, `AIMEE_PROXY_TOKEN`, `AIMEE_SESSION_WORKTREE_BASE`, `AIMEE_SKILL_APPROVAL_MANIFEST`, `AIMEE_SKILL_APPROVAL_PUBLIC_KEY`, `AIMEE_TEST_MEMORY_PLACEMENT`, `AIMEE_TEST_MODULE_BIN`, `AIMEE_TEST_STORE_REQUIRED`, `AIMEE_UNVERIFIED_PROJECT_SKILLS`, `AIMEE_VECTOR_MAX_RETRY`, `AIMEE_VERSION`, `AIMEE_WEBCHAT_PAM_SERVICE`, `AIMEE_WFE_RUNNER_SOCKET`, `AIMEE_WFE_RUNNER_URL`, `AIMEE_WIZARD_APPLIANCE`, `AIMEE_WORM_PATH`, `AIMEE_WORM_POSTGRES_URL`
+`AIMEE_ARTIFACT_APPROVAL_MANIFEST`, `AIMEE_ARTIFACT_APPROVAL_PUBLIC_KEY`, `AIMEE_ARTIFACT_TRUST_MODE`, `AIMEE_AUDIT_RECOVERY_EPOCH`, `AIMEE_AUDIT_WORM_EMERGENCY_DISABLE`, `AIMEE_AUTONOMY_KILL_SWITCH`, `AIMEE_BENCHMARK_HARDWARE_PROFILE`, `AIMEE_CAPTURE_MAX_BYTES`, `AIMEE_CLI_PATH`, `AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY`, `AIMEE_DELEGATE_EGRESS_BIN`, `AIMEE_EFFECT_CONTRACT_MODE`, `AIMEE_ENVIRONMENT`, `AIMEE_EXPLORATION_ENFORCE`, `AIMEE_EXPLORATION_EXPERIMENT`, `AIMEE_FORGE_SERVICE_SOCKET`, `AIMEE_FORGE_SERVICE_URL`, `AIMEE_GIT_AUTHOR_EMAIL`, `AIMEE_GIT_AUTHOR_NAME`, `AIMEE_HOOK_IDENTITY_MODE`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_IR_CAPTURE_PHASE_DIAGNOSTIC`, `AIMEE_KB_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_KB_OBSERVABILITY_LISTEN`, `AIMEE_KB_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_KB_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_KB_OBSERVABILITY_TLS_KEY`, `AIMEE_MCP_PLUGIN_ARGV`, `AIMEE_MCP_PLUGIN_CWD`, `AIMEE_MCP_PLUGIN_PERMISSION`, `AIMEE_MCP_TOOLS_WATCH_SECONDS`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MEMORY_RECEIPT_RETENTION`, `AIMEE_MODEL_SERVICES_ENABLED`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_MODULE_RUNTIME_BIN`, `AIMEE_NATIVE_CLI`, `AIMEE_OAUTH_REDIRECT_BASE`, `AIMEE_OBSERVABILITY_ALLOW_INSECURE_OTLP`, `AIMEE_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_OBSERVABILITY_LISTEN`, `AIMEE_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_OBSERVABILITY_TLS_KEY`, `AIMEE_PROXY_TOKEN`, `AIMEE_SESSION_HISTORY_TIMINGS`, `AIMEE_SESSION_WORKTREE_BASE`, `AIMEE_SKILL_APPROVAL_MANIFEST`, `AIMEE_SKILL_APPROVAL_PUBLIC_KEY`, `AIMEE_TEST_MEMORY_PLACEMENT`, `AIMEE_TEST_MODULE_BIN`, `AIMEE_TEST_STORE_REQUIRED`, `AIMEE_UNVERIFIED_PROJECT_SKILLS`, `AIMEE_VERSION`, `AIMEE_WEBCHAT_PAM_SERVICE`, `AIMEE_WFE_RUNNER_SOCKET`, `AIMEE_WFE_RUNNER_URL`, `AIMEE_WIZARD_APPLIANCE`, `AIMEE_WORM_PATH`, `AIMEE_WORM_POSTGRES_URL`
 
 ## External & provider environment
 

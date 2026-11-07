@@ -34,7 +34,23 @@ def strings(value):
             yield from strings(child)
 
 
-def inside(output):
+def shared_lane_enabled(profile, remote, api, check):
+    if profile not in ('owner-client', 'public-reference'):
+        raise ValueError('unknown shared memory qualification profile')
+    if profile == 'owner-client':
+        return remote
+    # This declared profile has no Server shared-memory owner client. A failed
+    # owner-client request never switches profiles or turns into a passing skip.
+    status, reply = api('/v1/memory/recall', dict(store='kb', query='native-profile-boundary', scope='all'))
+    check('public-reference Server shared recall is explicitly unavailable without data',
+          status == 200 and reply.get('status') == 'unavailable'
+          and reply.get('message') == 'memory bus service unavailable or unsupported'
+          and reply.get('retryable') is True and reply.get('dependency') == 'kb'
+          and not any(key in reply for key in ('recall', 'memory', 'memories', 'results')))
+    return False
+
+
+def inside(output, shared_profile='owner-client'):
     if os.environ.get('AIMEE_NATIVE_ASYNC_FIXTURE') != '1':
         raise RuntimeError('requires the disposable-container launcher')
     checks, captures, runs, provider_errors, request_sizes = [], [], [], [], []
@@ -53,6 +69,8 @@ def inside(output):
     provider_failure = 'native fixture "quoted"; line\nbreak; path \\ evidence 界'
     scenario, scenario_start = 'single', 0
     previous_recall = None
+    previous_kb_mode = None
+    shared_remote_refusal_qualified = False
     exploration_session = None
     fixture_files = tempfile.TemporaryDirectory(prefix=prefix + '-')
     fixture_read_root = Path(fixture_files.name)
@@ -326,7 +344,8 @@ def inside(output):
 
     try:
         # Exercise configured automatic recall without changing product defaults.
-        has_shared = config('get', 'kb_mode')['value'] == 'remote'
+        shared_remote = config('get', 'kb_mode')['value'] == 'remote'
+        has_shared = shared_lane_enabled(shared_profile, shared_remote, api, check)
         previous_recall = config('get', 'memory_recall_enabled')['value']
         config('set', 'memory_recall_enabled', '1')
         check('native fixture explicitly enables automatic recall',
@@ -348,6 +367,21 @@ def inside(output):
         version_status, versioned = api('/v1/memory/get', dict(id=str(memory_id), include_version=True))
         observed_version = versioned.get('memory', {}).get('version')
         check('native fixture reads its private source version', version_status == 200 and isinstance(observed_version, dict))
+        if shared_profile == 'public-reference' and shared_remote:
+            before = len(captures)
+            result, events = run('unavailable shared native context')
+            check('public-reference remote native context refuses the missing shared owner client',
+                  result.get('status') == 'failed' and
+                  any('unavailable' in text for text in strings(events)))
+            check('public-reference shared context refusal sends zero provider requests', len(captures) == before)
+            shared_remote_refusal_qualified = True
+            # This declared profile qualifies the real private owner separately;
+            # a remote configuration correctly requires the absent shared client.
+            # Use the existing explicit private-only mode, not a failed-read fallback.
+            previous_kb_mode = config('get', 'kb_mode')['value']
+            config('set', 'kb_mode', 'none')
+            check('public-reference explicitly selects private-only native context',
+                  config('get', 'kb_mode')['value'] == 'none')
         before = len(captures)
         result, _ = run('healthy native run')
         check('healthy native run completes', result.get('status') == 'completed' and 'NATIVE_MEMORY_OK' in list(strings(result)))
@@ -600,6 +634,10 @@ def inside(output):
                 status, retired = api('/v1/memory/delete', dict(id=str(memory_id)))
                 check('native fixture retires its private identity', status == 200 and retired.get('status') == 'ok')
         finally:
+            if previous_kb_mode is not None:
+                config('set', 'kb_mode', previous_kb_mode)
+                check('native fixture restores its original KB mode',
+                      config('get', 'kb_mode')['value'] == previous_kb_mode)
             if previous_recall is not None:
                 config('set', 'memory_recall_enabled', json.dumps(previous_recall))
             if previous is None:
@@ -610,6 +648,8 @@ def inside(output):
             provider.server_close()
             fixture_files.cleanup()
             Path(output).write_text(json.dumps(dict(checks=checks, runs=runs,
+                shared_profile=shared_profile, shared_server_scenarios_qualified=has_shared,
+                shared_remote_refusal_qualified=shared_remote_refusal_qualified,
                 provider_intervention_errors=provider_errors, provider_intervention_retries=mutation_retries,
                 exploration_session=exploration_session,
                 source_contracts=[entry['binding'].get('sources', []) for entry, _ in receipt_captures if entry is not None],
@@ -624,9 +664,10 @@ def main():
     parser.add_argument('--server')
     parser.add_argument('--output', required=True)
     parser.add_argument('--inside', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--shared-profile', choices=('owner-client', 'public-reference'), default='owner-client')
     args = parser.parse_args()
     if args.inside:
-        return inside(args.output)
+        return inside(args.output, args.shared_profile)
     if not args.server or not args.server.startswith('aimee-e2e-server-') or not args.server.endswith('-aimee-server-1'):
         parser.error('requires a disposable deployment-matrix Server')
     inspected = json.loads(subprocess.check_output(['docker', 'inspect', args.server], text=True))[0]
@@ -645,7 +686,8 @@ def main():
     try:
         subprocess.run(['docker', 'cp', str(Path(__file__).resolve()), args.server + ':' + remote], check=True)
         run_result = subprocess.run(['docker', 'exec', '-u', '1000', '-e', 'AIMEE_NATIVE_ASYNC_FIXTURE=1',
-            args.server, 'python3', remote, '--inside', '--output', result], timeout=600)
+            args.server, 'python3', remote, '--inside', '--shared-profile', args.shared_profile,
+            '--output', result], timeout=600)
         subprocess.run(['docker', 'cp', args.server + ':' + result, args.output], check=True)
         if run_result.returncode:
             return run_result.returncode

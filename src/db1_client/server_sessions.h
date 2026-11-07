@@ -90,7 +90,9 @@ extern "C"
     * so a later request retries. Returns 0 on success. */
    int db1_server_session_persona_delivery_finish(const char *id, int delivered);
 
-   /* DELETE by id. Returns 0 on success. */
+/* DELETE by id. Returns 0 on success. */
+/* Generic wire conflict (for example unresolved canonical delivery). */
+#define DB1_SESSION_DELETE_CONFLICT (-2)
    int db1_server_session_delete(const char *id);
 
    /* SELECT COUNT(*), optionally filtered by created_at >= since. */
@@ -100,7 +102,8 @@ extern "C"
    int db1_server_session_list_expired(int threshold_seconds, char (*out_ids)[DB1_SS_ID_LEN],
                                        int max);
 
-   /* Delete all sessions older than `threshold_seconds`. Returns rows deleted. */
+   /* Delete eligible expired sessions, skipping pending original-input delivery
+    * obligations and currently locked sessions. Returns only rows deleted. */
    int db1_server_session_delete_expired(int threshold_seconds);
 
    /* List/erase the complete mutable DB1 content graph owned by one verified

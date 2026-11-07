@@ -77,6 +77,11 @@ void aimee_pg_close(void *pg_conn)
    assert(pg_conn == &g_fake_conn || pg_conn == &g_worker_conn);
 }
 
+void aimee_pg_discard(void *pg_conn)
+{
+   aimee_pg_close(pg_conn);
+}
+
 int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
 {
    g_schema_calls++;

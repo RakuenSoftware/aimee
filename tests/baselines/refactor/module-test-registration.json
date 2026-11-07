@@ -489,7 +489,22 @@
     {
       "make": true,
       "module": "vault",
+      "test": "src/tests/test_vault_create_once.c"
+    },
+    {
+      "make": true,
+      "module": "vault",
       "test": "src/tests/test_vault_crypto.c"
+    },
+    {
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_fenced_use.c"
+    },
+    {
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_generation_retirement.c"
     },
     {
       "make": true,
@@ -500,6 +515,11 @@
       "make": true,
       "module": "vault",
       "test": "src/tests/test_vault_kms.c"
+    },
+    {
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_local_use.c"
     },
     {
       "make": true,

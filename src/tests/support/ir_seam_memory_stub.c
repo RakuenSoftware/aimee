@@ -18,7 +18,7 @@ static char g_test_session[80];
 static char g_test_persona[1024];
 static int g_test_delivery_state;
 static int g_test_claim_error_once;
-static int g_test_memory_enabled;
+static int g_test_memory_enabled = -1;
 static int g_test_native_preinject;
 static int g_test_context_calls;
 static int g_test_tools_calls;
@@ -41,9 +41,15 @@ __attribute__((weak)) int ir_seam_test_guidance_provided(void)
 
 __attribute__((weak)) void ir_seam_test_memory(int enabled)
 {
-   g_test_memory_enabled = enabled;
+   g_test_memory_enabled = enabled ? 1 : -1;
    g_test_context_calls = g_test_tools_calls = 0;
    g_test_query[0] = '\0';
+}
+
+void ir_seam_test_plan_selection(int selection)
+{
+   g_test_memory_enabled = selection;
+   g_test_context_calls = g_test_tools_calls = 0;
 }
 
 __attribute__((weak)) int ir_seam_test_plan_calls(const char *phase)
@@ -172,8 +178,10 @@ __attribute__((weak)) int config_module_enabled(int config_tristate, int env_def
 
 /* The IR stage runner now records per-turn session observations; this test
  * links the runner without the request-context object, so absorb the call. */
-__attribute__((weak)) void request_context_note_aimee_session(int tool_calls, int redundant_tool_calls,
-                                        const char *intervention, const char *tool_transport)
+__attribute__((weak)) void request_context_note_aimee_session(int tool_calls,
+                                                              int redundant_tool_calls,
+                                                              const char *intervention,
+                                                              const char *tool_transport)
 {
    (void)tool_calls;
    (void)redundant_tool_calls;

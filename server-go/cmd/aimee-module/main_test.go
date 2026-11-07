@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
@@ -18,7 +19,6 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		principal uint32
 		events    []uint32
 	}{
-		{"memory", 7, []uint32{5889, 5890, 5891, 5892, 5893, 5894, 5895, 5896, 6143}},
 		{"learning", 8, []uint32{6145, 6146, 6147}},
 		{"routing", 9, []uint32{6401, 6402}},
 		{"providers", 33, []uint32{12545, 12546, 12547}},
@@ -257,11 +257,27 @@ func TestMemoryBackendSetupPersistsAcrossConfigOwnerRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 		settings, err := memorycontract.ResolveBackendSettings(snapshot, func(string) string { return "" })
-		if err != nil || settings.Engine != engine || settings.Endpoint != endpoint {
-			t.Fatal(settings, err)
+		if engine == "native" {
+			if err != nil || settings.Engine != engine || settings.Endpoint != endpoint {
+				t.Fatal(settings, err)
+			}
+		} else if err == nil {
+			t.Fatal("retired persisted backend silently accepted", engine)
 		}
+
 		if _, leaked := snapshot["memory_backend_token"]; leaked {
 			t.Fatal("credential in public configuration")
 		}
+	}
+}
+
+func TestBundledMemoryIsUnavailableBeforeBusAttachment(t *testing.T) {
+	config, ok := moduleConfigRuntime(context.Background(), "aimee-module-memory", "/nonexistent/memory-retirement-test.sock")
+	if ok || config.ModuleName != "memory" || config.Handler != nil || len(config.Stages) != 0 {
+		t.Fatalf("bundled memory falsely advertises readiness: %#v %v", config, ok)
+	}
+	err := run(context.Background(), []string{"aimee-module-memory", "/nonexistent/memory-retirement-test.sock"})
+	if err == nil || !strings.Contains(err.Error(), "memory capability unavailable") {
+		t.Fatalf("missing explicit unavailable diagnostic: %v", err)
 	}
 }

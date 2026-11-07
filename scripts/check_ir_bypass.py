@@ -262,6 +262,13 @@ CANONICAL_FILES = DISCORD_MODEL_FILES | {
     "src/server/server_native_execution.c", "src/server/session_search_tool.c",
     "server-go/modules/aimee/families/session_ir_search.go",
 }
+CANONICAL_HOOK_FILES = {"src/cmd_hooks.c", "src/server/server_hooks.c"}
+# These call sites consume the tool/receipt owner's semantic outcome. The other
+# native output/compatibility boundaries are not declared globally migrated.
+CLASSIFIED_DISPATCH_FILES = {
+    "src/posix/agent_runtime.c", "src/server/script_rpc.c",
+    "src/server/server_compute_async.c", "src/server/script_tool_execution.c",
+}
 # Business JSON is allowed after canonical terminal admission. These model
 # consumers cannot obtain model results from arbitrary command stdout.
 CANONICAL_MODEL_FILES = DISCORD_MODEL_FILES | {
@@ -276,7 +283,7 @@ CANONICAL_MODEL_FILES = DISCORD_MODEL_FILES | {
 CANONICAL_HOOK_FILES = {"src/cmd_hooks.c", "src/server/server_hooks.c"}
 CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/",
                    "server-go/modules/aimee/peer/", "server-go/modules/roundtable/panel/",
-                   "server-go/internal/engine/", "server-go/delegate/")
+                   "server-go/internal/engine/", "server-go/delegate/", "server-go/memory/")
 # String-only tool entries are retired throughout production C.
 CANONICAL_PROFILE_FUNCTIONS = {
     "prepare_host_profile", "agent_prepare_seeded_request_ir", "agent_build_seeded_request_ir",

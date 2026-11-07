@@ -1,10 +1,15 @@
 # Retrieval stack
 
+This page records the retired bundled Go owner at its final source revision. The public memory
+adapter now reports unavailable; an independently selected implementation needs its own retrieval
+qualification. See [current memory ownership](modules/memory.md). Historical source links below are
+pinned and do not describe an installed memory engine in the current public build.
+
 Retrieval runs in the instance that owns the selected data. Server serves personal memory and private
 code; KB serves its shared corpus. They use the same Go memory implementation with different tables,
 scopes, and capabilities. See [Server and KB](SERVER_AND_KB.md).
 
-## Current memory path
+## Historical memory path
 
 ```text
 selected store + verified caller + scope
@@ -25,7 +30,7 @@ paths; a memory ranking guarantee should not be generalized to every search endp
 The current shared-memory predicate, `current-validity-v18`, checks active lifecycle, suppression,
 world-valid time, configured utility horizon, and derived-input currency. It uses the transaction's
 clock. Scope, row security, embedding fingerprints, and source-evidence visibility add further gates.
-See [eligibility.go](../server-go/modules/memory/eligibility.go).
+See [eligibility.go](https://github.com/RakuenSoftware/aimee/blob/3e828ce51d55fb9730e3aee272b56ca89c095c11/server-go/modules/memory/eligibility.go).
 
 Current reads exclude inactive and expired rows regardless of legacy lifecycle flags. Exact-ID
 history inspection uses a separate contract. Assertion search supports world-valid and belief-time
@@ -58,7 +63,7 @@ embedding is reused across the qualifying shared semantic channels.
 Memory's generation columns are unconstrained `vector` columns with dimensions tracked per version.
 A KB fixed-width dimension reset does not own or drop these generations. Rebuild and cutover stay
 with Go memory. See [memory module](modules/memory.md) and
-[shared semantic retrieval](../server-go/modules/memory/shared_recall.go).
+[shared semantic retrieval](https://github.com/RakuenSoftware/aimee/blob/3e828ce51d55fb9730e3aee272b56ca89c095c11/server-go/modules/memory/shared_recall.go).
 
 ### KB document and code vectors
 
@@ -80,7 +85,7 @@ Repeated IDs within one arm get one vote; agreement across distinct arms can con
 
 Shared scope ordering favors project, then workspace, then global evidence. Personal retrieval
 remains user-scoped. The owner deduplicates and bounds the result. Exact constants and channel
-behavior live in [fusion.go](../server-go/modules/memory/fusion.go) and the
+behavior live in [fusion.go](https://github.com/RakuenSoftware/aimee/blob/3e828ce51d55fb9730e3aee272b56ca89c095c11/server-go/modules/memory/fusion.go) and the
 [module contract](modules/memory.md), which also describes semantic unit floors and PageRank.
 
 ## Sub-query fusion

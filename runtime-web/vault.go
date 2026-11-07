@@ -39,21 +39,27 @@ func (s *server) v1RequestWebuserT(ctx context.Context, username, method, path s
 }
 
 func (s *server) v1RequestWebuserTCapability(ctx context.Context, username, method, path string, body []byte, timeout time.Duration, workflowOperator bool) (int, []byte, error) {
+	status, data, _, err := s.v1RequestWebuserTCapabilityHeaders(ctx, username, method, path, body, timeout, workflowOperator)
+	return status, data, err
+}
+
+func (s *server) v1RequestWebuserTCapabilityHeaders(ctx context.Context, username, method, path string, body []byte, timeout time.Duration, workflowOperator bool) (int, []byte, http.Header, error) {
 	if username == "" {
-		return http.StatusUnauthorized, nil, errNoVaultTrust
+		return http.StatusUnauthorized, nil, nil, errNoVaultTrust
 	}
 	sock := s.aimeeHTTPSockPathFor(path)
 	client := &http.Client{
 		Timeout:   timeout,
 		Transport: &thinclient.Transport{Endpoint: "unix:" + sock},
 	}
+	defer client.CloseIdleConnections()
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, "http://aimee"+path, rdr)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -64,11 +70,11 @@ func (s *server) v1RequestWebuserTCapability(ctx context.Context, username, meth
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
-	return resp.StatusCode, data, err
+	return resp.StatusCode, data, resp.Header.Clone(), err
 }
 
 var errNoVaultTrust = &vaultErr{"vault trust unavailable (webchat session missing)"}

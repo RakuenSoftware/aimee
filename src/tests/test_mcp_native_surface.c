@@ -23,6 +23,13 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <aimee/ir/aimee_ir.h>
+#ifndef _WIN32
+#include <pthread.h>
+#include <sys/wait.h>
+#include <unistd.h>
+void module_surface_cases(void);
+#endif
 
 /* Only external catalogue owners are substituted; canonical construction/filtering
  * and all admission are the actual production implementation below. */
@@ -304,6 +311,9 @@ static void test_canonical_owner_precedence_and_direct_mcp(void)
 int main(void)
 {
    printf("test_mcp_native_surface:\n");
+#ifndef _WIN32
+   module_surface_cases();
+#endif
    /* Order matters: the unregistered case must run before anything registers,
     * since the registry is process-global (the server registers once at startup). */
    test_catalog_oom_and_typed_schema_rewrite();

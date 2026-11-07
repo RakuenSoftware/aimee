@@ -100,7 +100,7 @@ afterEach(() => {
 });
 
 describe('canonical browser chat', () => {
-  it('still auto-titles the first explicit message in an empty conversation', async () => {
+  it('auto-titles from the first committed User, never the optimistic input', async () => {
     const session = context.sessions[0];
     const originalMessages = session.messages;
     session.messages = [];
@@ -114,8 +114,12 @@ describe('canonical browser chat', () => {
       fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
       await act(async () => {});
       expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(1);
+      expect(context.patchSession.mock.calls.filter(([, patch]) => Object.hasOwn(patch, 'name'))).toEqual([]);
+      await tick(400);
+      expect(JSON.stringify(Object.entries(localStorage))).not.toContain('First explicit question');
+      await ir({ kind: 'message', message_id: 'committed-user', payload: { role: 'user', blocks: [{ type: 'text', text: 'Committed first question' }] } });
       expect(context.patchSession.mock.calls.filter(([, patch]) => Object.hasOwn(patch, 'name')))
-        .toEqual([['one', { name: 'First explicit question' }]]);
+        .toEqual([['one', { name: 'Committed first question' }]]);
       await close();
     } finally { session.messages = originalMessages; }
   });
@@ -893,7 +897,7 @@ describe('flat history is an archive, never authority', () => {
   it('sends only the new user input after canonical empty replay, without cached transcript data', async () => {
     await start();
     const request = fetchMock.mock.calls.find(([url]) => url === '/api/chat/send')!;
-    expect(JSON.parse(String(request[1]?.body))).toEqual({ message: { role: 'user', blocks: [{ type: 'text', text: 'Please investigate' }] }, aimee_session_id: 'web-one', attach_id: 'attach-1', cwd: '' });
+    expect(JSON.parse(String(request[1]?.body))).toEqual({ message: { role: 'user', blocks: [{ type: 'text', text: 'Please investigate' }] }, aimee_session_id: 'web-one', attach_id: 'attach-1', cwd: '', original_input_operation_uuid: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i) });
     expect(context.patchSession.mock.calls.some(([, patch]) => Object.hasOwn(patch, 'messages'))).toBe(false);
     await close();
   });

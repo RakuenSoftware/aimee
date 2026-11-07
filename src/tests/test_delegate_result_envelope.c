@@ -152,14 +152,14 @@ static void require_consumers(cJSON *out, const char *background, int done, cons
    compute_ctx_t ctx = {.background_job_id = 7, .coord_task_id = 8};
    snprintf(ctx.coord_claim_owner, sizeof ctx.coord_claim_owner, "claim-owner");
    coord_done = coord_failed = coord_notified = 0;
-   compute_update_background_job(&ctx, out);
+   compute_ctx_update_background_job(&ctx, out);
    assert(!strcmp(recorded_status, background));
    assert(!strstr(recorded_result, "POISONED"));
    if (contains)
       assert(strstr(recorded_result, contains));
    assert(recorded_cursor == cJSON_GetObjectItemCaseSensitive(out, "turns")->valueint &&
           recorded_has_cost && recorded_cost == 0.25);
-   compute_update_coord_task(&ctx, out);
+   compute_ctx_update_coord_task(&ctx, out);
    assert(coord_done == done && coord_failed == !done && coord_notified == 1);
    assert(!strstr(recorded_result, "POISONED"));
    if (contains)
@@ -251,19 +251,19 @@ static void test_terminal_consumers(void)
    cJSON *cursor = terminal_envelope(NULL, "error", "before model");
    cJSON_DeleteItemFromObjectCaseSensitive(cursor, "turns");
    compute_ctx_t ctx = {.background_job_id = 7};
-   compute_update_background_job(&ctx, cursor);
+   compute_ctx_update_background_job(&ctx, cursor);
    assert(recorded_cursor == 17);
    cJSON_Delete(cursor);
    cJSON *unknown_cost = terminal_envelope(NULL, "error", "before model");
    cJSON_ReplaceItemInObjectCaseSensitive(unknown_cost, "cost_known", cJSON_CreateBool(0));
-   compute_update_background_job(&ctx, unknown_cost);
+   compute_ctx_update_background_job(&ctx, unknown_cost);
    assert(!recorded_has_cost && recorded_cost == 0);
    cJSON_Delete(unknown_cost);
    cJSON *preempt = terminal_envelope(NULL, "preempted", NULL);
    ctx.coord_task_id = 8;
    snprintf(ctx.coord_claim_owner, sizeof ctx.coord_claim_owner, "claim-owner");
    coord_done = coord_failed = coord_notified = 0;
-   compute_update_coord_task(&ctx, preempt);
+   compute_ctx_update_coord_task(&ctx, preempt);
    assert(!coord_done && !coord_failed && coord_notified == 1);
    cJSON_Delete(preempt);
 }

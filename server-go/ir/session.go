@@ -12,25 +12,27 @@ import (
 
 // Block retains typed structure and treats tool input/result JSON as opaque values.
 type Block struct {
-	Type             string          `json:"type"`
-	Text             *string         `json:"text,omitempty"`
-	Signature        *string         `json:"signature,omitempty"`
-	ThinkingBinding  *string         `json:"thinking_binding,omitempty"`
-	RedactedContent  *string         `json:"redacted_content,omitempty"`
-	ThinkingID       *string         `json:"thinking_id,omitempty"`
-	EncryptedContent *string         `json:"encrypted_content,omitempty"`
-	CacheControl     *string         `json:"cache_control,omitempty"`
-	CacheTTL         *string         `json:"cache_ttl,omitempty"`
-	MessageGroup     *int            `json:"message_group,omitempty"`
-	ToolID           string          `json:"tool_id,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	Namespace        string          `json:"namespace,omitempty"`
-	Input            json.RawMessage `json:"input,omitempty"`
-	Content          json.RawMessage `json:"content,omitempty"`
-	IsError          *bool           `json:"is_error,omitempty"`
-	MediaType        string          `json:"media_type,omitempty"`
-	MediaRef         string          `json:"media_ref,omitempty"`
-	Context          *Context        `json:"context,omitempty"`
+	InputAttachment  *InputAttachment `json:"input_attachment,omitempty"`
+	ToolSource       *ToolSource      `json:"tool_source,omitempty"`
+	Type             string           `json:"type"`
+	Text             *string          `json:"text,omitempty"`
+	Signature        *string          `json:"signature,omitempty"`
+	ThinkingBinding  *string          `json:"thinking_binding,omitempty"`
+	RedactedContent  *string          `json:"redacted_content,omitempty"`
+	ThinkingID       *string          `json:"thinking_id,omitempty"`
+	EncryptedContent *string          `json:"encrypted_content,omitempty"`
+	CacheControl     *string          `json:"cache_control,omitempty"`
+	CacheTTL         *string          `json:"cache_ttl,omitempty"`
+	MessageGroup     *int             `json:"message_group,omitempty"`
+	ToolID           string           `json:"tool_id,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	Namespace        string           `json:"namespace,omitempty"`
+	Input            json.RawMessage  `json:"input,omitempty"`
+	Content          json.RawMessage  `json:"content,omitempty"`
+	IsError          *bool            `json:"is_error,omitempty"`
+	MediaType        string           `json:"media_type,omitempty"`
+	MediaRef         string           `json:"media_ref,omitempty"`
+	Context          *Context         `json:"context,omitempty"`
 }
 type Context struct {
 	Origin         int    `json:"origin,omitempty"`
@@ -361,7 +363,7 @@ func ValidBlock(encoded []byte) bool {
 		return false
 	}
 	allowed := map[string]bool{"type": true, "cache_control": true, "cache_ttl": true, "message_group": true, "context": true}
-	specific := map[string][]string{"text": {"text"}, "thinking": {"text", "signature", "thinking_binding", "redacted_content", "thinking_id", "encrypted_content"}, "tool_use": {"tool_id", "name", "namespace", "input"}, "tool_result": {"tool_id", "content", "is_error"}, "image": {"media_type", "media_ref"}, "document": {"media_type", "media_ref"}}
+	specific := map[string][]string{"text": {"text", "input_attachment"}, "thinking": {"text", "signature", "thinking_binding", "redacted_content", "thinking_id", "encrypted_content"}, "tool_use": {"tool_id", "name", "namespace", "input"}, "tool_result": {"tool_id", "content", "is_error", "tool_source"}, "image": {"media_type", "media_ref"}, "document": {"media_type", "media_ref"}}
 	for _, key := range specific[b.Type] {
 		allowed[key] = true
 	}
@@ -394,6 +396,16 @@ func ValidBlock(encoded []byte) bool {
 		}
 	}
 
+	if raw, present := fields["input_attachment"]; present {
+		if b.InputAttachment == nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || b.Type != "text" || b.Text == nil || !ValidInputAttachment(raw, *b.Text) {
+			return false
+		}
+	}
+	if raw, present := fields["tool_source"]; present {
+		if b.ToolSource == nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || b.Type != "tool_result" || !ValidToolSource(raw, b.Content) {
+			return false
+		}
+	}
 	if b.ThinkingBinding != nil {
 		value := *b.ThinkingBinding
 		if b.Type != "thinking" || len(value) != 198 || value[:4] != "ap1:" || (value[68] != ':' || value[133] != ':') {
@@ -510,6 +522,10 @@ func ValidMessage(raw json.RawMessage) bool {
 		return false
 	}
 	for _, block := range message.Blocks {
+		var b Block
+		if !Decode(block, &b) || b.InputAttachment != nil && message.Role != "user" {
+			return false
+		}
 		if !ValidBlock(block) {
 			return false
 		}

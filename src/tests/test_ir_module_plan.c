@@ -8,6 +8,7 @@
 #include <aimee/ir/module_plan.h>
 #include "server/ir_host_bindings.h"
 #include "ingress_preinject.h"
+#include "module_commands.h"
 #include "cJSON.h"
 #include "config.h"
 #include "request_context.h"
@@ -54,6 +55,15 @@ static int fixture_real_policy;
 static const char *fixture_gate;
 static int fixture_audits;
 static const char *const *fixture_provided_resources;
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method,
+                                                            const cJSON *request,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result)
+{
+   /* This plan fixture installs no verified-context factory. */
+   assert(context == NULL);
+   return aimee_module_commands_dispatch_internal_timeout(method, request, timeout_ms, result);
+}
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
                                                     int timeout_ms, cJSON **result)
 {
@@ -62,6 +72,11 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    const char *operation =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
    assert(operation);
+   if (!strcmp(operation, "gateway-enabled"))
+   {
+      *result = fixture_gate ? cJSON_Parse(fixture_gate) : NULL;
+      return fixture_transport_result;
+   }
    if (fixture_real_policy || strncmp(operation, "ingress-", 8) == 0)
       return module_runtime_fixture_call(request, result);
    *result = cJSON_CreateObject();
@@ -807,8 +822,25 @@ static void test_real_go_namespace_policy(void)
         "search retained");
 }
 
+static void test_optional_owner_and_selected_failure_are_distinct(void)
+{
+   fixture_transport_result = 0;
+   fixture_gate = NULL;
+   assert(server_ir_plan_enabled("memory.runtime", "gateway-enabled", NULL) == -1);
+   fixture_transport_result = -1;
+   assert(server_ir_plan_enabled("memory.runtime", "gateway-enabled", NULL) == 1);
+   fixture_transport_result = 1;
+   assert(server_ir_plan_enabled("memory.runtime", "gateway-enabled", NULL) == 1);
+   fixture_gate = "{\"status\":\"ok\",\"enabled\":false}";
+   assert(server_ir_plan_enabled("memory.runtime", "gateway-enabled", NULL) == 0);
+   fixture_gate = "{\"status\":\"error\",\"enabled\":false}";
+   assert(server_ir_plan_enabled("memory.runtime", "gateway-enabled", NULL) == 1);
+   fixture_gate = NULL;
+}
+
 int main(void)
 {
+   test_optional_owner_and_selected_failure_are_distinct();
    printf("test_ir_module_plan:\n");
    test_gate_reply_and_audit();
    test_required_plan_failure_is_request_scoped();

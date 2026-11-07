@@ -1,3 +1,5 @@
+#include "host_input_attachment.h"
+#include "server_native_history.h"
 #include "server_session_log.h"
 #include "server_session_capture.h"
 #include "server_session_control.h"
@@ -8,6 +10,7 @@
 #include "modules/workspace/workspace_turn.h"
 #include "util.h"
 #include <unistd.h>
+#include <pthread.h>
 
 int server_learning_project_from_cwd(const char *cwd, char *out, size_t capacity);
 #include "aimee_sha256.h"
@@ -23,7 +26,7 @@ struct server_session_log
 {
    char session[128], turn[33], principal[VAULT_PRINCIPAL_MAX];
    char parent[128], role[128];
-   int announced;
+   int announced, original_input;
    cJSON *learning_binding;
    char learning_sequence[32];
    server_session_capture_t *capture, *previous_capture;
@@ -152,9 +155,60 @@ static cJSON *delegate_binding(const char *role, const char *agent, const char *
    }
    return binding;
 }
+static int log_begin_internal(const char *, const aimee_message_t *, const char *, const char *,
+                              const char *, int, const cJSON *, server_session_log_t **);
 int server_session_log_begin_selected(const char *role, const aimee_message_t *message,
                                       const char *agent, const char *provider, const char *model,
                                       int control_replies, server_session_log_t **out)
+{
+   return log_begin_internal(role, message, agent, provider, model, control_replies, NULL, out);
+}
+/* Abort only the RAM scope: BEGIN/User may already be durable. A callback
+ * refusal or cancellation must never invent a terminal for that input. */
+static void original_scope_abort(void *context)
+{
+   server_session_log_t **out = context;
+   server_session_log_t *scope = *out;
+   if (!scope)
+      return;
+   *out = NULL;
+   current = scope->previous;
+   server_control_scope_close(scope->controls);
+   server_control_scope_bind(scope->previous_controls);
+   server_session_capture_bind(scope->previous_capture);
+   server_session_capture_close(scope->capture);
+   aimee_ir_session_restore_sink(scope->previous_sink, scope->previous_context, 0);
+   cJSON_Delete(scope->learning_binding);
+   free(scope);
+}
+__attribute__((used, externally_visible, retain)) int
+server_session_log_begin_original(const char *prompt, const cJSON *attachment, const char *agent,
+                                  const char *provider, const char *model,
+                                  server_session_log_t **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   int previous_cancel_state;
+   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel_state))
+      return -1;
+   int result;
+   pthread_cleanup_push(original_scope_abort, out);
+   aimee_block_t block = {
+       .type = AIMEE_BLK_TEXT, .text = (char *)prompt, .input_attachment = (cJSON *)attachment};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   result = log_begin_internal(NULL, &message, agent, provider, model, 0, attachment, out);
+   /* Capture has already cleared the active cap, phase and extra reference.
+    * Deliver any pending deferred cancellation with the RAM abort installed. */
+   pthread_setcancelstate(previous_cancel_state, NULL);
+   if (previous_cancel_state == PTHREAD_CANCEL_ENABLE)
+      pthread_testcancel();
+   pthread_cleanup_pop(0);
+   return result;
+}
+static int log_begin_internal(const char *role, const aimee_message_t *message, const char *agent,
+                              const char *provider, const char *model, int control_replies,
+                              const cJSON *attachment, server_session_log_t **out)
 {
    if (!out)
       return -1;
@@ -169,8 +223,10 @@ int server_session_log_begin_selected(const char *role, const aimee_message_t *m
       return -1;
    void *previous_context;
    aimee_ir_session_sink_fn previous_sink = aimee_ir_session_get_sink(&previous_context);
+   if (attachment && server_session_capture_current())
+      return -1;
    if (!role && previous_sink)
-      return 1;
+      return attachment ? -1 : 1;
    server_session_log_t *scope = calloc(1, sizeof *scope);
    if (!scope)
       return -1;
@@ -227,6 +283,19 @@ int server_session_log_begin_selected(const char *role, const aimee_message_t *m
    aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
    aimee_session_event_t user = {
        .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = message};
+   if (attachment)
+   {
+      int admitted = server_session_capture_original_input_begin(scope->capture, message);
+      if (admitted == 0)
+      {
+         scope->original_input = 1;
+         return 0;
+      }
+      /* Replay/unknown: discard only this unstarted RAM owner. Never append a
+       * terminal or new BEGIN/User row, and never authorize another executor. */
+      original_scope_abort(out);
+      return admitted == -4 ? -4 : admitted > 0 ? -2 : -3; /* Existing/needs reconciliation. */
+   }
    if (aimee_ir_session_emit(&started) || publish_child(scope, "running"))
       return -1;
    scope->announced = scope->parent[0] != 0;
@@ -242,16 +311,53 @@ int server_session_log_active(void)
 {
    return current != NULL;
 }
+extern int db1_session_input_attachment_history_save(const char *, const char *, const char *,
+                                                     const char *, const char *, const char *)
+    __attribute__((weak));
+extern int db1_session_tool_source_history_save(const char *, const char *, const char *,
+                                                const char *, const char *, const char *)
+    __attribute__((weak));
+static int history_has_tool_source(const cJSON *messages)
+{
+   const cJSON *message = NULL, *block = NULL;
+   cJSON_ArrayForEach(message, messages)
+   {
+      const cJSON *blocks = cJSON_GetObjectItemCaseSensitive(message, "blocks");
+      cJSON_ArrayForEach(
+          block, blocks) if (cJSON_GetObjectItemCaseSensitive(block, "tool_source")) return 1;
+   }
+   return 0;
+}
+static int history_has_input_attachment(const cJSON *messages)
+{
+   const cJSON *m, *b;
+   cJSON_ArrayForEach(m, messages) cJSON_ArrayForEach(
+       b, cJSON_GetObjectItemCaseSensitive(
+              m, "blocks")) if (cJSON_HasObjectItem(b, "input_attachment")) return 1;
+   return 0;
+}
 int server_session_log_history_save(const cJSON *messages)
 {
    if (!current)
       return 0;
    char checkpoint[33];
    char *json = cJSON_IsArray(messages) ? cJSON_PrintUnformatted(messages) : NULL;
-   int rc = json && !random_id(checkpoint)
-                ? db1_session_ir_history_save(current->session, checkpoint, "primary",
-                                              current->principal, json)
-                : -1;
+   int rc = -1;
+   if (json && !random_id(checkpoint))
+   {
+      if (current->original_input || history_has_input_attachment(messages))
+      {
+         if (db1_session_input_attachment_history_save)
+            rc = db1_session_input_attachment_history_save(current->session, checkpoint, "primary",
+                                                           current->principal, current->turn, json);
+      }
+      else if (db1_session_tool_source_history_save)
+         rc = db1_session_tool_source_history_save(current->session, checkpoint, "primary",
+                                                   current->principal, current->turn, json);
+      else if (!history_has_tool_source(messages))
+         rc = db1_session_ir_history_save(current->session, checkpoint, "primary",
+                                          current->principal, json);
+   }
    free(json);
    if (rc)
    {

@@ -94,6 +94,7 @@ __attribute__((weak)) int server_agent_management_set_enabled(const char *name, 
 #include "json_fluent.h"  /* jo_cstr — parse the CI-event webhook body */
 #include <openssl/hmac.h> /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
 #include <openssl/evp.h>
+#include <openssl/crypto.h>
 #include <openssl/sha.h>
 #include <openssl/rand.h>
 #include "router_advise.h"        /* S4: router_autonomous_pick/_audit for dev-submit parity */
@@ -1284,6 +1285,56 @@ int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
    return rc;
 }
 
+static void protected_http_wipe_strings(cJSON *value)
+{
+   for (cJSON *item = value; item; item = item->next)
+   {
+      if (item->child)
+         protected_http_wipe_strings(item->child);
+      if (item->valuestring)
+         OPENSSL_cleanse(item->valuestring, strlen(item->valuestring));
+      if (item->string)
+         OPENSSL_cleanse(item->string, strlen(item->string));
+   }
+}
+
+/* Strict outer transport shape prevents malformed/nested caller method names
+ * reaching the generic dispatch size/error path. No raw input leaves this
+ * process; the private intake client sends only its safe publication frames. */
+static int rh_protected_intake(const route_req_t *rq, char *resp, int cap)
+{
+   cJSON *body = rq->body && rq->body_len > 0
+                     ? aimee_ir_json_parse_frame(rq->body, (size_t)rq->body_len)
+                     : NULL;
+   const cJSON *operation = cJSON_GetObjectItemCaseSensitive(body, "operation_uuid");
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(body, "value");
+   int valid = cJSON_IsObject(body) && cJSON_GetArraySize(body) == 2 && cJSON_IsString(operation) &&
+               strlen(operation->valuestring) == 36 && cJSON_IsString(value) &&
+               strlen(value->valuestring) <= 64 * 1024;
+   enum
+   {
+      LINE_CAPACITY = 6 * 64 * 1024 + 1024
+   };
+   char *line = valid ? calloc(1, LINE_CAPACITY) : NULL;
+   int printed = line && cJSON_AddStringToObject(body, "method", "memory.protected-intake") &&
+                 cJSON_PrintPreallocated(body, line, LINE_CAPACITY, 0);
+   protected_http_wipe_strings(body);
+   cJSON_Delete(body);
+   if (!printed)
+   {
+      if (line)
+         OPENSSL_cleanse(line, LINE_CAPACITY);
+      free(line);
+      return err_json(resp, cap, valid ? 503 : 400,
+                      valid ? "protected intake unavailable" : "invalid protected intake envelope");
+   }
+   size_t length = strlen(line);
+   int result = loopback_rpc(line, (int)length, resp, cap, g_rpc_conn_caps);
+   OPENSSL_cleanse(line, LINE_CAPACITY);
+   free(line);
+   return result;
+}
+
 /* Async dispatch-backed operation lifetime lives in server_http_op_runs.c. */
 
 /* ── workspace resource plane (workspace-resource-plane §1) ───────────────────
@@ -1620,7 +1671,12 @@ const http_route_t g_v1_routes[] = {
      * their ops are listed in g_v1_write_ops, so the TCP listener denies them at
      * remote_writes=off and allows them only at remote_writes=data/full after
      * capability checks. caps still derive from the op. */
+    {"POST", "/v1/console/memory", NULL, RM_EXACT, NULL, CAP_MEMORY_ADMIN, rh_module_console_admin},
+    {"POST", "/v1/console/memory/", NULL, RM_EXACT, NULL, CAP_MEMORY_ADMIN,
+     rh_module_console_admin},
     {"POST", "/v1/memory/store", NULL, RM_EXACT, "memory.store", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/protected-intake", NULL, RM_EXACT, "memory.protected-intake", 0,
+     rh_protected_intake},
     {"POST", "/v1/wm/set", NULL, RM_EXACT, "wm.set", 0, rh_dispatch_op},
     {"POST", "/v1/attempts/record", NULL, RM_EXACT, "attempt.record", 0, rh_dispatch_op},
     {"POST", "/v1/rules/delete", NULL, RM_EXACT, "rules.delete", 0, rh_dispatch_op},
@@ -2007,6 +2063,7 @@ const http_route_t g_v1_routes[] = {
     /* Streaming chat over HTTP: dispatched by handle_conn; row exists for the
      * capability gate + conformance scan. */
     {"POST", "/v1/chat/stream", NULL, RM_EXACT, "chat.send_stream", 0, NULL},
+    {"POST", "/v1/modules/user-source", NULL, RM_EXACT, "chat.send_stream", 0, NULL},
     /* Steering: stop the in-flight turn + queue a follow-up the server
      * auto-continues (streamed to the session's /events). */
     {"POST", "/v1/chat/graceful_cancel", NULL, RM_EXACT, "chat.graceful_cancel", 0,
@@ -2290,6 +2347,7 @@ uint32_t v1_route_caps_lookup(const char *method, const char *path)
  * `aimee workspace add` does registration (exempt) plus ingest, so the ingest half
  * now needs a `data` grant while registration keeps working with none. */
 static const char *const g_v1_write_ops[] = {"memory.store",
+                                             "memory.protected-intake",
                                              "memory.reject",
                                              "memory.restore",
                                              "index.ingest",
@@ -2320,6 +2378,8 @@ int v1_route_is_local_only(const char *method, const char *path)
    if (!method || !path)
       return 0;
    const http_route_t *e = route_match(method, path, NULL, 0);
+   if (e && e->handler == rh_module_console_admin)
+      return 1;
    if (!e || !e->op)
       return 0;
    for (int i = 0; g_v1_write_ops[i]; i++)

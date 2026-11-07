@@ -8,9 +8,80 @@
 #include <math.h>
 #include <string.h>
 
+/* Optional generic module provider: business input policy stays outside IR.
+ * Buffered snapshots are checked before any block is sent to the sink. Streaming
+ * checked tools must use the owned buffered transport; unexpected incremental
+ * starts fail before argument chunks reach either sink or native frontend. */
+extern int agent_tools_module_native_input_selected_v1(const char *) __attribute__((weak));
+extern int agent_tools_module_native_input_admit_v1(const char *, const cJSON *)
+    __attribute__((weak));
+/* Retain the capability marker using the native object-format mechanism.
+ * ELF retain is not valid on PE, and Apple Clang has no externally_visible. */
+#if defined(_WIN32)
+__declspec(dllexport)
+#elif defined(__ELF__) && __has_attribute(retain)
+__attribute__((retain))
+#endif
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((externally_visible))
+#endif
+__attribute__((used)) const unsigned aimee_ir_module_input_admission_contract_v1 = 1;
+static int module_input_event_admit(const aimee_session_event_t *event)
+{
+   if (!event)
+      return -1;
+   if (!agent_tools_module_native_input_selected_v1 ||
+       agent_tools_module_native_input_selected_v1(NULL) == 0)
+      return 0;
+   if (event->kind == AIMEE_SESSION_DELTA && event->delta &&
+       event->delta->type == AIMEE_DELTA_BLOCK_START && event->delta->kind == AIMEE_BLK_TOOL_USE &&
+       (!event->delta->tool_namespace || !event->delta->tool_namespace[0]))
+      return agent_tools_module_native_input_selected_v1(event->delta->tool_name) == 0 ? 0 : -1;
+   if (event->kind != AIMEE_SESSION_MESSAGE)
+      return 0;
+   if (!event->message || event->message->n_blocks < 0 ||
+       event->message->n_blocks > AIMEE_IR_MAX_BLOCKS ||
+       (event->message->n_blocks && !event->message->blocks))
+      return -1;
+   for (int i = 0; i < event->message->n_blocks; i++)
+   {
+      const aimee_block_t *b = event->message->blocks + i;
+      if (b->type != AIMEE_BLK_TOOL_USE || (b->tool_namespace && b->tool_namespace[0]))
+         continue;
+      int selected = agent_tools_module_native_input_selected_v1(b->tool_name);
+      if (selected < 0 ||
+          (selected && (!agent_tools_module_native_input_admit_v1 ||
+                        agent_tools_module_native_input_admit_v1(b->tool_name, b->tool_input))))
+         return -1;
+   }
+   return 0;
+}
 static _Thread_local aimee_ir_session_sink_fn session_sink;
 static _Thread_local void *session_context;
 static _Thread_local int session_capture_failed;
+
+/* Failure-stage metadata only. Never pass caller text, tool names/arguments,
+ * source references, authority, or sink error strings to this diagnostic. */
+static void capture_failure_note(const char *phase, int event_kind, int result)
+{
+   const char *enabled = getenv("AIMEE_IR_CAPTURE_PHASE_DIAGNOSTIC");
+   if (!enabled || strcmp(enabled, "1"))
+      return;
+   static _Atomic unsigned rows;
+   unsigned row = atomic_load_explicit(&rows, memory_order_relaxed);
+   do
+   {
+      if (row >= 64)
+         return;
+   } while (!atomic_compare_exchange_weak_explicit(&rows, &row, row + 1, memory_order_relaxed,
+                                                   memory_order_relaxed));
+   int saved_errno = errno;
+   fprintf(stderr,
+           "AIMEE_IR_CAPTURE_PHASE {\"schema_version\":1,\"sequence\":%u,"
+           "\"phase\":\"%s\",\"event_kind\":%d,\"result\":%d}\n",
+           row, phase, event_kind, result);
+   errno = saved_errno;
+}
 
 static const char *block_kind(aimee_block_type_t type)
 {
@@ -65,7 +136,8 @@ cJSON *aimee_ir_block_json(const aimee_block_t *block)
    {
    case AIMEE_BLK_TEXT:
    case AIMEE_BLK_THINKING:
-      ok = ok && add_string(out, "text", block->text ? block->text : "");
+      ok = ok && add_string(out, "text", block->text ? block->text : "") &&
+           add_copy(out, "input_attachment", block->input_attachment);
       if (block->type == AIMEE_BLK_THINKING)
          ok = ok && add_string(out, "signature", block->thinking_signature) &&
               add_string(out, "thinking_binding", block->thinking_binding) &&
@@ -82,6 +154,7 @@ cJSON *aimee_ir_block_json(const aimee_block_t *block)
    case AIMEE_BLK_TOOL_RESULT:
       ok = ok && add_string(out, "tool_id", block->tool_id) &&
            add_copy(out, "content", block->tool_result) &&
+           add_copy(out, "tool_source", block->tool_source) &&
            cJSON_AddBoolToObject(out, "is_error", block->tool_is_error) != NULL;
       break;
    case AIMEE_BLK_IMAGE:
@@ -117,6 +190,8 @@ cJSON *aimee_ir_message_json(const aimee_message_t *message)
       goto fail;
    for (int i = 0; i < message->n_blocks; i++)
    {
+      if (message->blocks[i].input_attachment && strcmp(message->role, "user"))
+         goto fail;
       cJSON *block = aimee_ir_block_json(&message->blocks[i]);
       if (!block)
          goto fail;
@@ -218,6 +293,17 @@ static int parse_block(const cJSON *json, aimee_block_t *out)
        read_string(json, "cache_control", &out->cache_control, 0) ||
        read_string(json, "cache_ttl", &out->cache_ttl, 0))
       return -1;
+   const cJSON *attachment = cJSON_GetObjectItemCaseSensitive(json, "input_attachment");
+   if (attachment &&
+       (out->type != AIMEE_BLK_TEXT || !aimee_ir_input_attachment_shape_valid(attachment)))
+      return -1;
+   if (attachment && !(out->input_attachment = cJSON_Duplicate(attachment, 1)))
+      return -1;
+   const cJSON *source = cJSON_GetObjectItemCaseSensitive(json, "tool_source");
+   if (source && (out->type != AIMEE_BLK_TOOL_RESULT || !aimee_ir_tool_source_shape_valid(source)))
+      return -1;
+   if (source && !(out->tool_source = cJSON_Duplicate(source, 1)))
+      return -1;
    const cJSON *value;
    switch (out->type)
    {
@@ -250,7 +336,7 @@ static int parse_block(const cJSON *json, aimee_block_t *out)
       out->tool_is_error = cJSON_IsTrue(value);
       value = cJSON_GetObjectItemCaseSensitive(json, "content");
       out->tool_result = value ? cJSON_Duplicate(value, 1) : NULL;
-      return value && !out->tool_result ? -1 : 0;
+      return (source && !cJSON_IsString(value)) || (value && !out->tool_result) ? -1 : 0;
    case AIMEE_BLK_IMAGE:
    case AIMEE_BLK_DOCUMENT:
       return read_string(json, "media_type", &out->media_type, 0) ||
@@ -292,6 +378,8 @@ int aimee_ir_message_parse(const cJSON *json, aimee_message_t *out)
    {
       out->n_blocks++;
       if (parse_block(cJSON_GetArrayItem(blocks, i), &out->blocks[i]))
+         goto fail;
+      if (out->blocks[i].input_attachment && strcmp(out->role, "user"))
          goto fail;
    }
    return 0;
@@ -1239,12 +1327,43 @@ aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context)
    return session_sink;
 }
 
-int aimee_ir_session_emit(const aimee_session_event_t *event)
+static int session_emit_checked(const aimee_session_event_t *event, aimee_ir_capture_cause_t *cause)
 {
-   int rc = session_sink ? session_sink(event, session_context) : 0;
+   if (cause)
+      *cause = AIMEE_IR_CAPTURE_CAUSE_NONE;
+   /* A producer that ignores an admission error still cannot emit subsequent
+    * argument chunks. Host lifecycle/failed terminals retain their old path. */
+   int refused_data = session_capture_failed && agent_tools_module_native_input_selected_v1 &&
+                      agent_tools_module_native_input_selected_v1(NULL) != 0 && event &&
+                      (event->kind == AIMEE_SESSION_DELTA || event->kind == AIMEE_SESSION_MESSAGE);
+   int rc = refused_data ? -1 : module_input_event_admit(event);
+   if (rc)
+   {
+      if (cause)
+         *cause = refused_data ? AIMEE_IR_CAPTURE_CAUSE_PREVIOUS_FAILURE
+                               : AIMEE_IR_CAPTURE_CAUSE_INPUT_ADMISSION;
+      capture_failure_note(refused_data ? "capture_already_failed" : "event_tool_admission",
+                           event ? (int)event->kind : -1, rc);
+   }
+   if (!rc)
+   {
+      rc = session_sink ? session_sink(event, session_context) : 0;
+      if (rc)
+      {
+         if (cause)
+            *cause = AIMEE_IR_CAPTURE_CAUSE_SINK;
+         capture_failure_note("session_sink", event ? (int)event->kind : -1, rc);
+      }
+   }
    if (rc)
       session_capture_failed = 1;
+   else if (cause)
+      *cause = AIMEE_IR_CAPTURE_CAUSE_NONE;
    return rc;
+}
+int aimee_ir_session_emit(const aimee_session_event_t *event)
+{
+   return session_emit_checked(event, NULL);
 }
 
 void aimee_ir_session_fail_capture(void)
@@ -1258,7 +1377,8 @@ int aimee_ir_session_capture_failed(void)
    return session_capture_failed;
 }
 
-int aimee_ir_session_emit_response(const aimee_response_t *response, const char *message_id)
+static int session_emit_response_checked(const aimee_response_t *response, const char *message_id,
+                                         aimee_ir_capture_cause_t *cause)
 {
    if (!response)
       return -1;
@@ -1274,12 +1394,19 @@ int aimee_ir_session_emit_response(const aimee_response_t *response, const char 
                               .n_blocks = response->n_content};
    aimee_session_event_t event = {
        .kind = AIMEE_SESSION_MESSAGE, .message = &message, .message_id = message_id};
-   return aimee_ir_session_emit(&event);
+   return session_emit_checked(&event, cause);
+}
+int aimee_ir_session_emit_response(const aimee_response_t *response, const char *message_id)
+{
+   return session_emit_response_checked(response, message_id, NULL);
 }
 
-int aimee_ir_session_emit_buffered_response(const aimee_response_t *response,
-                                            const char *message_id)
+int aimee_ir_session_emit_buffered_response_checked(const aimee_response_t *response,
+                                                    const char *message_id,
+                                                    aimee_ir_capture_cause_t *cause)
 {
+   if (cause)
+      *cause = AIMEE_IR_CAPTURE_CAUSE_NONE;
    if (!response)
       return -1;
    static _Thread_local unsigned long long counter;
@@ -1289,23 +1416,44 @@ int aimee_ir_session_emit_buffered_response(const aimee_response_t *response,
       snprintf(generated, sizeof generated, "buffered-%llu", ++counter);
       message_id = generated;
    }
+   /* Refuse a complete checked response before even its start event is durable. */
+   aimee_message_t pending = {.role = response->role ? response->role : "assistant",
+                              .blocks = response->content,
+                              .n_blocks = response->n_content};
+   aimee_session_event_t pending_event = {.kind = AIMEE_SESSION_MESSAGE, .message = &pending};
+   if (module_input_event_admit(&pending_event))
+   {
+      if (cause)
+         *cause = AIMEE_IR_CAPTURE_CAUSE_INPUT_ADMISSION;
+      capture_failure_note("buffered_tool_admission", AIMEE_SESSION_MESSAGE, -1);
+      session_capture_failed = 1;
+      return -1;
+   }
    aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_START};
    aimee_session_event_t event = {.kind = AIMEE_SESSION_DELTA,
                                   .role = response->role ? response->role : "assistant",
                                   .message_id = message_id,
                                   .delta = &delta};
-   int rc = aimee_ir_session_emit(&event);
+   int rc = session_emit_checked(&event, cause);
    if (rc)
+   {
+      capture_failure_note("buffered_start", event.kind, rc);
       return rc;
+   }
    if (response->error_message)
    {
       delta = (aimee_delta_t){.type = AIMEE_DELTA_ERROR, .error_message = response->error_message};
-      rc = aimee_ir_session_emit(&event);
+      rc = session_emit_checked(&event, cause);
    }
    else
-      rc = aimee_ir_session_emit_response(response, message_id);
+      rc = session_emit_response_checked(response, message_id, cause);
    if (rc)
+   {
+      capture_failure_note("buffered_message",
+                           response->error_message ? AIMEE_SESSION_DELTA : AIMEE_SESSION_MESSAGE,
+                           rc);
       return rc;
+   }
    delta = (aimee_delta_t){.type = AIMEE_DELTA_TURN_STOP,
                            .stop_reason = response->stop_reason,
                            .raw_stop_reason = response->raw_stop_reason,
@@ -1316,10 +1464,23 @@ int aimee_ir_session_emit_buffered_response(const aimee_response_t *response,
                            .usage_cache_write = response->usage_cache_write,
                            .usage_reasoning = response->usage_reasoning};
    delta.usage_unobserved = response->usage_unobserved;
-   return aimee_ir_session_emit(&event);
+   rc = session_emit_checked(&event, cause);
+   if (rc)
+      capture_failure_note("buffered_stop", event.kind, rc);
+   return rc;
+}
+int aimee_ir_session_emit_buffered_response(const aimee_response_t *response,
+                                            const char *message_id)
+{
+   return aimee_ir_session_emit_buffered_response_checked(response, message_id, NULL);
 }
 
 int aimee_ir_session_emit_tool_result(const char *tool_id, const char *result, int is_error)
+{
+   return aimee_ir_session_emit_tool_result_with_source(tool_id, result, is_error, NULL);
+}
+int aimee_ir_session_emit_tool_result_with_source(const char *tool_id, const char *result,
+                                                  int is_error, const cJSON *source)
 {
    static _Thread_local unsigned long long counter;
    char id[64];
@@ -1330,6 +1491,7 @@ int aimee_ir_session_emit_tool_result(const char *tool_id, const char *result, i
    aimee_block_t block = {.type = AIMEE_BLK_TOOL_RESULT,
                           .tool_id = (char *)tool_id,
                           .tool_result = content,
+                          .tool_source = (cJSON *)source,
                           .tool_is_error = is_error};
    aimee_message_t message = {.role = "tool", .blocks = &block, .n_blocks = 1};
    aimee_session_event_t event = {

@@ -2,6 +2,11 @@
 #include <assert.h>
 #include "../modules/tools/agent_tools_dispatch.c"
 static const char *owner_reply;
+static int selected_native, owner_calls;
+int aimee_module_tool_source_mode(const char *tool)
+{
+   return selected_native && !strcmp(tool, "search_memory") ? -1 : 0;
+}
 static kb_client_result_status_t transport_status = KB_CLIENT_RESULT_OK;
 void kb_client_memory_scope_context_apply(cJSON *request)
 {
@@ -10,6 +15,7 @@ void kb_client_memory_scope_context_apply(cJSON *request)
 }
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
+   owner_calls++;
    assert(!strcmp(method, "memory.find_facts"));
    assert(!strcmp(jo_cstr(request, "query"), "deployment"));
    assert(!strcmp(jo_cstr(request, "format"), "tool"));
@@ -57,6 +63,11 @@ int main(void)
    owner_reply = NULL;
    out = td_search_memory(args, "search_memory", "", "", 1000);
    assert(strstr(out, "memory retrieval unauthorized"));
+   free(out);
+   selected_native = 1;
+   int before = owner_calls;
+   out = td_search_memory(args, "search_memory", "", "", 1000);
+   assert(strstr(out, "source custody is unavailable") && owner_calls == before);
    free(out);
    cJSON_Delete(args);
    return 0;

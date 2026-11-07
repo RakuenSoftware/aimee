@@ -3315,9 +3315,14 @@ static void test_git_push_delete_skips_merged_pr_gate(void)
 
    const char *old_path = getenv("PATH");
    char *saved_path = old_path ? strdup(old_path) : NULL;
-   char new_path[1024];
-   snprintf(new_path, sizeof(new_path), "%s:%s", fake_bin, old_path ? old_path : "");
-   setenv("PATH", new_path, 1);
+   /* Toolchain-rich runners can already have PATH longer than 1 KiB. Keep
+    * the actual git executable reachable while adding only our gh fixture. */
+   size_t path_size = strlen(fake_bin) + 1 + (old_path ? strlen(old_path) : 0) + 1;
+   char *new_path = malloc(path_size);
+   assert(new_path);
+   snprintf(new_path, path_size, "%s:%s", fake_bin, old_path ? old_path : "");
+   assert(setenv("PATH", new_path, 1) == 0);
+   free(new_path);
 
    guardrails_open_test_sqlite();
    session_state_t state;
@@ -3328,6 +3333,8 @@ static void test_git_push_delete_skips_merged_pr_gate(void)
    char msg[512] = {0};
    int rc = pre_tool_check("Bash", "{\"command\":\"git push origin --delete merged-branch\"}",
                            &state, MODE_APPROVE, wtdir, msg, sizeof(msg));
+   if (rc == 2)
+      fprintf(stderr, "delete-only push unexpectedly refused: %s\n", msg);
    assert(rc != 2);
    assert(strstr(msg, "branch has a merged PR") == NULL);
    assert(strstr(msg, "push blocked") == NULL);

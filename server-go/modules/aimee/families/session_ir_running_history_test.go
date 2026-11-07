@@ -46,7 +46,7 @@ func TestSessionIRRunningHistoryIncludesOnlyOwnedCommittedConversation(t *testin
 			t.Fatal("source content changed", exact, cells)
 		}
 	}
-	if db.executed[0] != sessionIRRunningHistorySQL || fmt.Sprint(db.args[0]) != "[s owner 0]" {
+	if len(db.executed) != 2 || db.executed[0] != sessionIRHistoryLockSQL || fmt.Sprint(db.args[0]) != "[s owner]" || db.executed[1] != sessionIRRunningHistorySQL || fmt.Sprint(db.args[1]) != "[s owner 0]" {
 		t.Fatal("owner query changed", db.executed, db.args)
 	}
 	// Completed-history callers retain their original contract: the open turn is
@@ -316,7 +316,7 @@ func TestSessionIRLiveRunningHistoryOwnerSnapshotAndCheckpoint(t *testing.T) {
 }
 
 func TestCanonicalHistoryBudgetsAreOperationSpecific(t *testing.T) {
-	history := map[uint32]bool{11: true, 15: true, 33: true, 35: true, 37: true, 41: true, 44: true, 45: true, 50: true, 53: true}
+	history := map[uint32]bool{11: true, 15: true, 33: true, 35: true, 37: true, 41: true, 44: true, 45: true, 50: true, 53: true, 54: true, 55: true, 56: true, 57: true, 58: true, 59: true, 60: true, 61: true, 62: true, 63: true, 64: true, 65: true}
 	for id, op := range Sessions.Ops {
 		if history[id] {
 			if op.Timeout != store.CanonicalHistoryTimeout {

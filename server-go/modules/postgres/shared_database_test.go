@@ -4,9 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
-	"errors"
 	"fmt"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"os"
 	"strings"
 	"sync"
@@ -15,8 +14,6 @@ import (
 
 	"github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
-	"github.com/JBailes/aimee/server-go/modules/memory"
-	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -216,36 +213,7 @@ func TestSharedDatabaseBothDomainSchemas(t *testing.T) {
 			if dimension != 3 {
 				t.Fatalf("knowledge vector schema was not applied: dimension %d", dimension)
 			}
-			scope := memory.Scope{Type: "global", Value: "_global"}
-			dataStores := make([]memory.DataStore, 0, 2)
-			records := make([]memory.Record, 0, 2)
-			for _, placement := range []memory.Placement{memory.PlacementKB, memory.PlacementServer} {
-				data, err := memory.NewPostgresDataStore(store, placement)
-				if err != nil {
-					t.Fatal(err)
-				}
-				// Use the actual owner entry point: canonical KB mutations require
-				// its scoped transaction, including provenance and admission writes.
-				handler := memory.NewHandler(nil, memory.WithDataStore(placement, data))
-				confidence := 0.8
-				writeScope := scope
-				if placement == memory.PlacementServer {
-					writeScope = memory.Scope{Type: memory.ScopeUser}
-				}
-				request, err := json.Marshal(memory.DataRequest{Operation: "store", Scope: writeScope,
-					Tier: "L0", Kind: "fact", Key: "shared-memory-probe",
-					Content: string(placement) + " retained content", Confidence: &confidence})
-				if err != nil {
-					t.Fatal(err)
-				}
-				raw, status := handler(ring.ModuleInvocation{StageID: memory.StageData}, request)
-				var reply memory.DataResponse
-				if status != ring.ModuleStatusOK || json.Unmarshal(raw, &reply) != nil || len(reply.Records) != 1 {
-					t.Fatalf("memory owner mutation failed: %s %d %s", placement, status, raw)
-				}
-				dataStores = append(dataStores, data)
-				records = append(records, reply.Records[0])
-			}
+			// Concrete owner CRUD assertions preserved privately in consumer sidecar.
 			// Exercise both domains through the same shared database client, then
 			// replay both bootstraps and prove the existing rows survive.
 			for _, sql := range []string{
@@ -272,23 +240,7 @@ func TestSharedDatabaseBothDomainSchemas(t *testing.T) {
 			if runtime != "runtime-value" || knowledge != "knowledge-value" {
 				t.Fatal("bootstrap changed existing domain data")
 			}
-			for i, data := range dataStores {
-				scope := records[i].Scope
-				got, err := data.Get(ctx, scope, records[i].ID)
-				if err != nil || got.Content != records[i].Content {
-					t.Fatalf("placement data changed across bootstrap: %+v: %v", got, err)
-				}
-				found, err := data.Search(ctx, scope, "shared-memory-probe", "", "", 10)
-				if err != nil || len(found) != 1 || found[0].Content != records[i].Content {
-					t.Fatalf("placement search crossed domains: %+v: %v", found, err)
-				}
-				if deleted, err := data.Delete(ctx, scope, got.ID); err != nil || !deleted {
-					t.Fatalf("delete did not persist: %t: %v", deleted, err)
-				}
-				if _, err := data.Get(ctx, scope, got.ID); !errors.Is(err, memory.ErrMemoryNotFound) {
-					t.Fatalf("deleted memory remained visible: %v", err)
-				}
-			}
+
 		})
 	}
 }

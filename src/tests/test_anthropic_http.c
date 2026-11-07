@@ -51,6 +51,16 @@ static int g_proof_gated = 0;
 static int g_mutation_mode, g_post_count, g_reject_first, g_policy_calls, g_router_calls;
 static char *g_first_body;
 static int g_receipt_refuse, g_receipt_calls;
+static int g_header_refuse;
+int agent_claude_oauth_headers(const agent_t *agent, char *headers, size_t capacity)
+{
+   if (g_header_refuse)
+   {
+      snprintf(headers, capacity, "Authorization: synthetic_header_refusal_canary");
+      return -1;
+   }
+   return agent && !strcmp(agent->auth_type, "claude-oauth") ? -1 : 0;
+}
 static int g_audit_calls;
 static char g_audit_kind[24];
 int ingress_preinject_revalidate_sources(void)
@@ -1907,6 +1917,35 @@ static void test_native_provenance_is_rechecked_at_actual_egress(void)
    aimee_frontend_bind_state_guard(previous.guard, previous.context);
 }
 
+static void test_parity_header_refusal(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic"};
+   const char *body = "{\"model\":\"ignored\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\","
+                      "\"content\":\"hi\"}]}";
+   char response[4096] = {0};
+   reset_capture();
+   g_driver = &anthropic;
+   g_header_refuse = 1;
+   assert(messages_buffered(body, response, sizeof response) == 400);
+   cJSON *error = parse(response);
+   assert(!strcmp(obj(error, "type")->valuestring, "error") &&
+          !strcmp(obj(obj(error, "error"), "type")->valuestring, "invalid_request_error") &&
+          !strcmp(obj(obj(error, "error"), "message")->valuestring,
+                  "invalid OAuth capability headers"));
+   cJSON_Delete(error);
+   assert(!g_post_count && !g_last_body && !strstr(response, "synthetic_header_refusal_canary"));
+   PASS("buffered header refusal emits static400,0upstream,no header echo");
+   reset_capture();
+   emit_capture_t cap = {0};
+   assert(!messages_stream(body, cap_emit, &cap));
+   assert(cap.count == 1 && !strcmp(cap.events[0], "error") &&
+          strstr(cap.data[0], "invalid OAuth capability headers") &&
+          !strstr(cap.data[0], "synthetic_header_refusal_canary"));
+   assert(!g_post_count && !g_last_body);
+   PASS("streamed header refusal emits exactly1staticerror,0upstream,no header echo");
+   g_header_refuse = 0;
+   reset_capture();
+}
 static int empty_projection_count, reject_empty_projection;
 static int capture_empty_projection(const aimee_session_event_t *event, void *context)
 {
@@ -1994,6 +2033,7 @@ static void test_native_empty_assistant_projection_requires_capture(void)
 
 int main(void)
 {
+   test_parity_header_refusal();
    test_native_empty_assistant_projection_requires_capture();
    test_native_provenance_is_rechecked_at_actual_egress();
    test_canonical_economizer_restore_resends_once();

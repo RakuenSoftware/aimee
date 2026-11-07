@@ -5,6 +5,7 @@
 
 #include "kb_client.h"
 #include "cJSON.h"
+#include "json_int64.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -38,10 +39,16 @@ int kb_client_graph_sync_code(const char *project, kb_client_graph_sync_result_t
       cJSON *g = cJSON_GetObjectItemCaseSensitive(resp, "generation_id");
       cJSON *e = cJSON_GetObjectItemCaseSensitive(resp, "edge_count");
       cJSON *p = cJSON_GetObjectItemCaseSensitive(resp, "project");
-      if (cJSON_IsNumber(g))
-         out->generation_id = (int64_t)g->valuedouble;
-      if (cJSON_IsNumber(e))
-         out->edge_count = (int64_t)e->valuedouble;
+      int64_t generation, edges;
+      if (!jo_read_i64_token_exact(g, &generation) || generation <= 0 ||
+          !jo_read_i64_token_exact(e, &edges) || edges < 0)
+      {
+         cJSON_Delete(resp);
+         memset(out, 0, sizeof(*out));
+         return -1;
+      }
+      out->generation_id = generation;
+      out->edge_count = edges;
       if (cJSON_IsString(p))
          snprintf(out->project, sizeof(out->project), "%s", p->valuestring);
    }

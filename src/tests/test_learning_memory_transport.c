@@ -9,7 +9,8 @@ const char *session_id(void)
 {
    return "learning-transport-session";
 }
-int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+int aimee_module_commands_dispatch_internal_caller(const char *method, const cJSON *args,
+                                                   cJSON **result)
 {
    assert(strcmp(method, "memory.runtime") == 0);
    cJSON_Delete(last_request);
@@ -82,6 +83,18 @@ int main(void)
    input.target_memory_id = 77;
    learning_fill_target_key(&input);
    assert(strcmp(input.target_key, "learning-target-key") == 0);
+   input.target_key[0] = 0;
+   input.target_memory_id = INT64_C(9007199254740993);
+   learning_fill_target_key(&input);
+   int64_t exact_id = 0;
+   assert(jo_read_i64_exact(cJSON_GetObjectItemCaseSensitive(last_request, "id"), &exact_id));
+   assert(exact_id == input.target_memory_id);
+   assert(strcmp(input.target_key, "learning-target-key") == 0);
+   input.target_key[0] = 0;
+   reply_status = "error";
+   learning_fill_target_key(&input);
+   assert(input.target_key[0] == 0);
+   reply_status = "ok";
    input.target_key[0] = 0;
    available = 0;
    learning_fill_target_key(&input);

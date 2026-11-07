@@ -9,9 +9,9 @@ import (
 
 // Command declaration for a plugin module.
 //
-// This is the SAME wire contract the memory module answers (see
-// server-go/modules/memory/commands.go) and the same registry it lands in
-// (src/headers/command_registry.h). Reusing it is the point: the registry's
+// This is the wire contract decoded by src/module_commands.c and the same
+// registry it lands in (src/headers/command_registry.h). Optional external
+// owners declare capabilities through this contract. The registry's
 // whole purpose is that a command is registered once and every surface -- CLI,
 // v1 RPC, MCP, ACP -- routes from that one declaration. A second format for
 // plugin commands would rebuild exactly the divergence the registry removed.

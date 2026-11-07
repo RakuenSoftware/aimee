@@ -1,9 +1,11 @@
 /* test_agent_runtime_messages.c: unit tests for agent runtime message helpers. */
 #include "agent_runtime_messages.h"
+#include <aimee/ir/session_event.h>
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 static const char *last_content(cJSON *messages)
 {
@@ -12,6 +14,32 @@ static const char *last_content(cJSON *messages)
    cJSON *content =
        cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(msg, "blocks"), 0), "text");
    return cJSON_IsString(content) ? content->valuestring : "";
+}
+
+static void test_advisory_classes(void)
+{
+   for (int kind = 1; kind <= 2; kind++)
+   {
+      cJSON *json = kind == 1 ? agent_session_control_message("exact \"advisory\" \n bytes")
+                              : agent_session_tool_evidence_message("exact \"advisory\" \n bytes");
+      aimee_message_t message = {0};
+      assert(json && !aimee_ir_message_parse(json, &message));
+      assert(!strcmp(message.role, "assistant") &&
+             aimee_ir_message_runtime_advisory(&message) == kind &&
+             !strcmp(aimee_ir_model_message_role(&message), "user"));
+      assert(!message.blocks[0].input_attachment && !message.blocks[0].tool_source);
+      free(message.role);
+      message.role = strdup("user");
+      assert(!aimee_ir_message_runtime_advisory(&message));
+      free(message.role);
+      message.role = strdup("assistant");
+      message.blocks[0].context.origin = AIMEE_CTX_ORIGIN_MODEL;
+      assert(!aimee_ir_message_runtime_advisory(&message) &&
+             !strcmp(aimee_ir_model_message_role(&message), "assistant"));
+      aimee_message_free(&message);
+      cJSON_Delete(json);
+   }
+   assert(!agent_session_control_message(NULL) && !agent_session_tool_evidence_message(NULL));
 }
 
 static void test_final_instruction(void)
@@ -214,6 +242,7 @@ static void test_null_safe(void)
 
 int main(void)
 {
+   test_advisory_classes();
    test_final_instruction();
    test_final_retry_instruction();
    test_final_tool_violation_retry_budget();

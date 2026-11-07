@@ -28,6 +28,15 @@ type irHistoryEvent = canonical.HistoryEvent
 func validIRHistoryEvent(raw json.RawMessage) bool { return canonical.ValidHistoryEvent(raw) }
 
 func sessionIRHistorySave(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	return sessionIRHistorySaveAuthorized(ctx, q, f, false)
+}
+
+func sessionIRHistorySaveAuthorized(ctx context.Context, q store.Queryer, f []string, allowToolSource bool) (uint32, []string, error) {
+	return sessionIRHistorySaveInputAuthorized(ctx, q, f, allowToolSource, false)
+}
+func sessionIRHistorySaveInputAuthorized(ctx context.Context, q store.Queryer, f []string, allowToolSource, allowInput bool) (uint32, []string, error) {
+	ctx, finishTiming := startHistoryTiming(ctx, historyTimingEncode, -1)
+	defer finishTiming()
 	// session, checkpoint, scope, authenticated actor, canonical history
 	if f[1] == "" || len(f[1]) > 128 || f[2] == "" || len(f[2]) > 128 {
 		return store.StatusInvalid, nil, nil
@@ -39,7 +48,7 @@ func sessionIRHistorySave(ctx context.Context, q store.Queryer, f []string) (uin
 	// Validate the entire replacement before appending any part of it.
 	events := make([]string, 0, len(messages)+1)
 	for i, message := range messages {
-		if !validIRHistoryMessage(message) {
+		if (canonical.MessageHasInputAttachments(message) && !allowInput) || !validIRHistoryMessage(message) || (canonical.MessageHasToolSources(message) && !allowToolSource) {
 			return store.StatusInvalid, nil, nil
 		}
 		payload, err := encodeSessionIR(struct {
@@ -62,8 +71,12 @@ func sessionIRHistorySave(ctx context.Context, q store.Queryer, f []string) (uin
 		return 0, nil, err
 	}
 	events = append(events, string(commit))
+	finishTiming() // encoding/validation ends before the separately timed append
+	if allowInput {
+		return sessionIRHistoryAppendBatchAuthorized(ctx, q, f, events, allowToolSource, allowInput)
+	}
 	for i, event := range events {
-		status, _, err := sessionIRAppend(ctx, q, []string{f[0], f[1] + ":" + strconv.Itoa(i), f[1], f[3], event})
+		status, _, err := sessionIRAppendInputAuthorized(ctx, q, []string{f[0], f[1] + ":" + strconv.Itoa(i), f[1], f[3], event}, false, false, false, false, allowToolSource, allowInput)
 		if err != nil || status != store.StatusOK {
 			return status, nil, err
 		}
@@ -74,6 +87,11 @@ func sessionIRHistorySave(ctx context.Context, q store.Queryer, f []string) (uin
 // Every page holds the same owner row lock until the enclosing transaction ends.
 // Bound both row count and encoded text bytes below the SQL store reply limits.
 // The reducer still checks every immutable source sequence without truncation.
+// Terminal means the last candidate was returned AND fewer than 256 candidates
+// existed. A byte-limited partial page never authorizes stopping the scan.
+// Acquire the owner lock in its own statement: a SELECT snapshot taken before
+// waiting for a checkpoint writer cannot see that writer's committed events.
+const sessionIRHistoryLockSQL = `SELECT id FROM server_sessions WHERE id=$1 AND principal=$2 FOR SHARE`
 const sessionIRHistoryPageSize = 256
 const sessionIRHistorySQL = `WITH owned AS MATERIALIZED (
  SELECT id FROM server_sessions WHERE id=$1 AND principal=$2 FOR SHARE
@@ -83,8 +101,10 @@ const sessionIRHistorySQL = `WITH owned AS MATERIALIZED (
  ORDER BY session_ir_events.sequence LIMIT 256
 ), budgeted AS (
  SELECT *,sum(octet_length(turn_id)+octet_length(actor)+octet_length(event_id)+octet_length(payload)+64)
- OVER (ORDER BY candidates.sequence) AS wire_bytes FROM candidates
-) SELECT sequence::text,turn_id,actor,event_id,payload FROM budgeted
+ OVER (ORDER BY candidates.sequence) AS wire_bytes,
+ count(*) OVER () AS candidate_count, max(sequence) OVER () AS candidate_last FROM candidates
+) SELECT sequence::text,turn_id,actor,event_id,payload,
+ (candidate_count<256 AND sequence=candidate_last) AS terminal_page FROM budgeted
  WHERE wire_bytes<=8388608 ORDER BY budgeted.sequence`
 const sessionIRRunningHistorySQL = sessionIRHistorySQL
 
@@ -94,6 +114,7 @@ type sessionIRHistoryRows struct {
 	session, actor, after string
 	rows                  store.Rows
 	count                 int
+	terminal              bool
 	err                   error
 	closed                bool
 }
@@ -103,12 +124,18 @@ func (r *sessionIRHistoryRows) Next() bool {
 		return false
 	}
 	if r.rows.Next() {
+		if r.terminal || r.count >= sessionIRHistoryPageSize {
+			r.err = fmt.Errorf("invalid canonical history terminal marker or page size")
+			r.rows.Close()
+			r.closed = true
+			return false
+		}
 		r.count++
 		return true
 	}
 	r.err = r.rows.Err()
 	r.rows.Close()
-	if r.err != nil || r.count == 0 {
+	if r.err != nil || r.count == 0 || r.terminal {
 		r.closed = true
 		return false
 	}
@@ -119,20 +146,37 @@ func (r *sessionIRHistoryRows) Next() bool {
 	}
 	return r.Next()
 }
+func (r *sessionIRHistoryRows) scanFailure(err error) error {
+	r.err = err
+	r.rows.Close()
+	r.closed = true
+	return err
+}
 func (r *sessionIRHistoryRows) Scan(dest ...any) error {
-	if err := r.rows.Scan(dest...); err != nil {
-		return err
+	if len(dest) != 5 || r.count == 0 || r.closed {
+		return r.scanFailure(fmt.Errorf("invalid canonical history scan shape"))
 	}
 	sequence, ok := dest[0].(*string)
-	if !ok {
-		return fmt.Errorf("invalid canonical page cursor")
+	if !ok || sequence == nil {
+		return r.scanFailure(fmt.Errorf("invalid canonical page cursor"))
+	}
+	// The SQL-derived bit is nullable here so a missing/NULL marker cannot
+	// silently become false. The store transport also refuses non-boolean data.
+	var terminal *bool
+	columns := append(append([]any(nil), dest...), &terminal)
+	if err := r.rows.Scan(columns...); err != nil {
+		return r.scanFailure(err)
+	}
+	if terminal == nil || (*terminal && r.count >= sessionIRHistoryPageSize) {
+		return r.scanFailure(fmt.Errorf("invalid canonical history terminal marker"))
 	}
 	n, e := strconv.ParseUint(*sequence, 10, 64)
 	previous, _ := strconv.ParseUint(r.after, 10, 64)
 	if e != nil || n <= previous {
-		return fmt.Errorf("canonical history page did not advance")
+		return r.scanFailure(fmt.Errorf("canonical history page did not advance"))
 	}
 	r.after = *sequence
+	r.terminal = *terminal
 	return nil
 }
 func (r *sessionIRHistoryRows) Err() error { return r.err }
@@ -157,12 +201,24 @@ func sessionIRRunningHistoryLoad(ctx context.Context, q store.Queryer, f []strin
 }
 
 func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, running bool) (uint32, []string, error) {
+	ctx, finishTiming := startHistoryTiming(ctx, historyTimingLoad, -1)
+	defer finishTiming()
 	if f[0] == "" || f[1] == "" || f[2] == "" {
 		return store.StatusInvalid, nil, nil
 	}
 	query := sessionIRHistorySQL
 	if running {
 		query = sessionIRRunningHistorySQL
+	}
+	var locked string
+	if err := q.QueryRow(ctx, sessionIRHistoryLockSQL, f[0], f[2]).Scan(&locked); err != nil {
+		if errors.Is(err, store.ErrNoRows) {
+			return store.StatusMissing, nil, nil
+		}
+		return 0, nil, err
+	}
+	if locked != f[0] {
+		return 0, nil, fmt.Errorf("canonical history owner lock mismatch")
 	}
 	first, err := q.Query(ctx, query, f[0], f[2], "0")
 	if err != nil {
@@ -171,6 +227,9 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 	rows := &sessionIRHistoryRows{ctx: ctx, q: q, session: f[0], actor: f[2], after: "0", rows: first}
 	defer rows.Close()
 	history := make([]json.RawMessage, 0)
+	admittedInputs := make([]canonical.Message, 0)
+	admittedInputTurns := make([]string, 0)
+	checkpointInputCount := 0
 	checkpoints := map[string][]json.RawMessage{}
 	imports := map[string]bool{}
 	type fragmentState struct {
@@ -242,6 +301,14 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 		if err = json.Unmarshal([]byte(payload), &event); err != nil {
 			return 0, nil, err
 		}
+		if f[1] == "primary" && event.Kind == "message" && canonical.MessageHasInputAttachments(event.Payload) {
+			var m canonical.Message
+			if !canonical.Decode(event.Payload, &m) {
+				return store.StatusInvalid, nil, nil
+			}
+			admittedInputs = append(admittedInputs, m)
+			admittedInputTurns = append(admittedInputTurns, turn)
+		}
 		switch event.Kind {
 		case "replay_proof", "native_checkpoint", "native_compaction":
 			// Host-native provenance advances the source log, never model history.
@@ -303,6 +370,12 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 				if h.Count != len(checkpoints[turn]) {
 					return 0, nil, fmt.Errorf("incomplete canonical history checkpoint")
 				}
+				var candidate []canonical.Message
+				encoded, _ := json.Marshal(checkpoints[turn])
+				if (len(checkpoints[turn]) > 0 && !canonical.Decode(encoded, &candidate)) || (f[1] == "primary" && !canonical.InputAttachmentsPreserved(admittedInputs, candidate)) {
+					return 0, nil, fmt.Errorf("canonical checkpoint lost original input attachment")
+				}
+				checkpointInputCount = len(admittedInputs)
 				history = append(history[:0], checkpoints[turn]...)
 				checkpoints = map[string][]json.RawMessage{}
 				fragmentBytes = 0
@@ -506,6 +579,25 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 	}
 	if !found {
 		return store.StatusMissing, nil, nil
+	}
+	if f[1] == "primary" {
+		expectedInputs := admittedInputs
+		if !running && open[f[3]] {
+			// Completed history deliberately excludes the caller's still-pending
+			// live turn. Inputs already included by an accepted checkpoint stay
+			// mandatory; checkpoint-time custody above always checks the full prefix.
+			expectedInputs = make([]canonical.Message, 0, len(admittedInputs))
+			for i, input := range admittedInputs {
+				if i < checkpointInputCount || admittedInputTurns[i] != f[3] {
+					expectedInputs = append(expectedInputs, input)
+				}
+			}
+		}
+		var visible []canonical.Message
+		raw, _ := json.Marshal(history)
+		if !canonical.Decode(raw, &visible) || !canonical.InputAttachmentsPreserved(expectedInputs, visible) {
+			return 0, nil, fmt.Errorf("canonical original input attachment replaced")
+		}
 	}
 	encoded, err := encodeSessionIR(history)
 	if err != nil {

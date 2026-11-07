@@ -384,55 +384,20 @@ jobs:
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
-      - name: Contract, native bridge, external adapters and egress race tests
+      - name: Memory wire contract and host egress race tests
         working-directory: server-go
-        # ./modules/memory is not listed: postgres-knowledge-replay runs that whole
-        # package with -race AND a real database, which this lane does not have,
-        # so running it here again only repeated the database-free subset.
-        run: go test -race ./memory ./modules/memory/backendstore ./modules/memory/cognee ./modules/memory/hillock ./modules/egress
+        # Full owner+real-PG qualification remains in postgres-knowledge-replay.
+        run: go test -race ./memory ./modules/egress
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
-      - name: Portable transfer build and syntax
-        run: |
-          (cd server-go && go build -o "$RUNNER_TEMP/aimee-memory-transfer" ./modules/memory/cmd/aimee-memory-transfer)
-          (cd server-go && go run ../scripts/validation/memory/qualify-external.go -sizes 100,1000 -output "$RUNNER_TEMP/catalog-scale.json")
-          python3 -m py_compile scripts/validation/memory/*.py scripts/validation/memory/lxc/*.py integrations/cognee/service.py integrations/discord/*.py
+      - name: Memory maintenance and Discord syntax
+        run: python3 -m py_compile scripts/validation/memory/*.py integrations/discord/*.py
       - name: Backend-neutral Discord episode, source and delivery tests
         run: |
           python3 -m venv "$RUNNER_TEMP/discord-venv"
           "$RUNNER_TEMP/discord-venv/bin/pip" install -r integrations/discord/requirements.txt
           (cd integrations/discord && "$RUNNER_TEMP/discord-venv/bin/python" -m unittest discover)
-      - name: Install pinned real Cognee API
-        run: |
-          python3 -m venv "$RUNNER_TEMP/cognee-venv"
-          "$RUNNER_TEMP/cognee-venv/bin/pip" install 'cognee[api]==1.6.2'
-      - name: Real Cognee storage, retrieval and erasure contract (required, no skip)
-        run: |
-          python3 scripts/validation/memory/run-cognee-contract.py \
-            --python "$RUNNER_TEMP/cognee-venv/bin/python" \
-            --artifacts "$RUNNER_TEMP/cognee-contract"
-      - name: Real pinned Hillock HDC contract (required, no skip)
-        run: |
-          python3 -m venv "$RUNNER_TEMP/hillock-venv"
-          "$RUNNER_TEMP/hillock-venv/bin/pip" install -r integrations/hillock/requirements.txt
-          "$RUNNER_TEMP/hillock-venv/bin/python" scripts/validation/memory/run-hillock-contract.py \
-            --artifacts "$RUNNER_TEMP/hillock-contract"
-      - name: Retain external memory diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: external-memory-contract
-          path: |
-            ${{ runner.temp }}/cognee-contract/contract.log
-            ${{ runner.temp }}/cognee-contract/server.log
-            ${{ runner.temp }}/cognee-contract/summary.json
-            ${{ runner.temp }}/hillock-contract/contract.log
-            ${{ runner.temp }}/hillock-contract/server.log
-            ${{ runner.temp }}/hillock-contract/summary.json
-            ${{ runner.temp }}/catalog-scale.json
-          if-no-files-found: warn
-          retention-days: 7
 
   go-unit-tests:
     needs: change-scope
@@ -480,8 +445,8 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           go build -o "$RUNNER_TEMP/aimee-module-memory" ./cmd/aimee-module
-          go build -o "$RUNNER_TEMP/aimee-memory-bus-probe" ./modules/memory/cmd/aimee-memory-bus-probe
-          test -z "$(go list -deps -f '{{if .CgoFiles}}{{.ImportPath}}{{end}}' ./cmd/aimee-module ./modules/memory/cmd/aimee-memory-bus-probe)"
+          go build -o "$RUNNER_TEMP/aimee-memory-bus-probe" ./cmd/aimee-memory-bus-probe
+          test -z "$(go list -deps -f '{{if .CgoFiles}}{{.ImportPath}}{{end}}' ./cmd/aimee-module ./cmd/aimee-memory-bus-probe)"
       - name: Routing live-gate contract
         run: python3 -I scripts/tests/test_live_routing.py
       - name: Install govulncheck
@@ -1034,20 +999,9 @@ jobs:
       - name: Replay memory ownership and PostgreSQL sessions
         if: matrix.part == 'native'
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 postgres-knowledge-replay
-      - name: Replay Go memory ownership and isolated evaluator contracts
-        if: matrix.part == 'go'
-        run: |
-          make -C src GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-            MEMORY_OWNER_REPLAY_JSON="$RUNNER_TEMP/memory-owner-replay.json" \
-            memory-owner-replay-check
-      # The frozen MR-18 reliability invariants. They used to run in a separate
-      # memory-retrieval-eval job that re-ran 144 of the cases the step above
-      # just executed (./modules/memory, aimee-memory-eval and aimee-module,
-      # all with -race and REQUIRED=1), plus a hand-picked subset of
-      # ./modules/memory a third time. The checker now verifies those packages
-      # from the recorded run and executes only the packages that run nowhere
-      # else with a database: execution-policy and aimee/families.
-      - name: Frozen memory reliability invariants (no skipped cases)
+      # Concrete memory-owner assertions and immutable historical certification
+      # are private baseline work. Public CI tests generic adapter/source owners.
+      - name: Adapter and canonical producer contracts (required live PostgreSQL)
         if: matrix.part == 'go'
         env:
           PGPASSWORD: aimee
@@ -1057,9 +1011,7 @@ jobs:
         run: |
           createdb -h 127.0.0.1 -U aimee memory_db1
           python3 -m unittest benchmarks.tests.test_answerability benchmarks.tests.test_reliability_experiment
-          python3 scripts/check_memory_reliability_release.py \
-            --go-events "$RUNNER_TEMP/memory-owner-replay.json" \
-            --output "$RUNNER_TEMP/memory-reliability-release.json"
+          python3 scripts/check_memory_adapter_contracts.py --output "$RUNNER_TEMP/memory-adapter-canonical-contracts.json"
   # This is part of the protected unit-test aggregate below. The fake LSP peer
   # proves framing; these pinned providers prove what the shipping client can
   # and cannot do with real protocol implementations before a PR reaches main.
@@ -1385,6 +1337,11 @@ jobs:
           for db in aimee_pam_ci aimee_resid_ci; do
             docker exec aimee-live-pg createdb -U aimee "$db"
           done
+      - name: Set up pinned Go for the auth reference fixture
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: server-go/go.sum
       - name: Build the stack and the rig drivers
         id: build
         # aimee-kb FORKS aimee-kb-resolver from beside its own executable, so `all`
@@ -1414,8 +1371,16 @@ jobs:
       # Root for the trust bundle (a root-owned 0600 single-link file); -E so the
       # build's environment survives sudo. The rig provisions its own throwaway
       # database, so the connecting role is the image's superuser.
+      - name: Build the external memory reference for the tier action fixture
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          git fetch --no-tags --depth=1 origin 0e29dd14f8c96de8f8366d763dfe56992aedc2b0
+          mkdir -p "$RUNNER_TEMP/live-auth-memory-reference"
+          python3 scripts/build_reference_memory_fixture.py --output "$RUNNER_TEMP/live-auth-memory-reference/aimee-module-memory"
       - name: The tier gate, end to end
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          AIMEE_LIVE_REFERENCE_MEMORY_OWNER: ${{ runner.temp }}/live-auth-memory-reference/aimee-module-memory
         run: sudo -E bash scripts/run-write-tier-enforce-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_enforce_ci
 
       # The PAM half of acceptance §11, against a real PAM stack.
@@ -1697,7 +1662,14 @@ jobs:
           # Exercise the real root-UDS browser operator boundary, without changing server authorization.
           sudo -n true
           echo 'AIMEE_TEST_NATIVE_BROWSER_OPERATOR=1' >> "$GITHUB_ENV"
+      - name: Build the external reference policy for the actual grading journey
+        run: |
+          git fetch --no-tags --depth=1 origin 0e29dd14f8c96de8f8366d763dfe56992aedc2b0
+          mkdir -p "$RUNNER_TEMP/execution-grade-memory-reference"
+          python3 scripts/build_reference_memory_fixture.py --output "$RUNNER_TEMP/execution-grade-memory-reference/aimee-module-memory"
       - name: Client/server integration harness with actual native SDKs
+        env:
+          AIMEE_TEST_EXECUTION_GRADE_MEMORY_OWNER: ${{ runner.temp }}/execution-grade-memory-reference/aimee-module-memory
         run: cd src && make -j$(nproc) integration-tests
 
   init-migrate-service-test:
@@ -2039,14 +2011,18 @@ jobs:
       - name: Configure optional encrypted storage
         if: matrix.storage == 'luks'
         run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
-      - name: Run the shipped deployment and regression gates
-        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --output /tmp/aimee-e2e-evidence
-      - name: Set up Go for private configured-test execution
-        if: matrix.topology == 'T3'
+      - name: Set up Go for external reference and configured tests
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
+      - name: Build the frozen external memory reference (test only)
+        run: |
+          git fetch --no-tags --depth=1 origin 0e29dd14f8c96de8f8366d763dfe56992aedc2b0
+          mkdir -p "$RUNNER_TEMP/reference-memory"
+          python3 scripts/build_reference_memory_fixture.py --output "$RUNNER_TEMP/reference-memory/aimee-module-memory"
+      - name: Run shipped deployment with explicitly selected external memory reference
+        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --reference-memory-owner "$RUNNER_TEMP/reference-memory/aimee-module-memory" --output /tmp/aimee-e2e-evidence
       - name: Private configured tests use actual Docker custody and joined cleanup
         if: matrix.topology == 'T3'
         working-directory: server-go
@@ -2063,7 +2039,7 @@ jobs:
           go test -race -count=1 -v ./modules/delegates -run '^TestPrivateVerifierRealDocker$'
       - name: Installed Vault helper under hardened egress (both roles)
         if: matrix.topology == 'T3'
-        run: python3 tests/e2e/egress-vault-e2e.py --output /tmp/aimee-e2e-evidence
+        run: python3 tests/e2e/egress-vault-e2e.py --reference-memory-owner "$RUNNER_TEMP/reference-memory/aimee-module-memory" --output /tmp/aimee-e2e-evidence
       - name: Ordinary PostgreSQL persistence and storage mode boundaries
         if: matrix.topology == 'T3'
         run: |
@@ -2083,7 +2059,7 @@ jobs:
         if: matrix.topology == 'T1' || matrix.storage == 'luks'
         run: |
           sudo --preserve-env=AIMEE_APPLICATION_IMAGE,AIMEE_POSTGRES_IMAGE,AIMEE_EMBEDDER_IMAGE \
-            python3 tests/e2e/kb-upgrade-e2e.py --storage ${{ matrix.storage }} --output /tmp/aimee-e2e-evidence
+            python3 tests/e2e/kb-upgrade-e2e.py --storage ${{ matrix.storage }} --reference-memory-owner "$RUNNER_TEMP/reference-memory/aimee-module-memory" --output /tmp/aimee-e2e-evidence
       - name: Upload regression verdicts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

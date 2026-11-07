@@ -21,6 +21,7 @@
 #include "support/module_runtime_fixture.h"
 
 static int g_runtime_failure;
+static int g_grade_plan_case, g_grade_plan_assembly_calls;
 static int g_grade_history_mode, g_grade_history_checks, g_grade_history_reads;
 static int g_scope_resolve_failure;
 char *db1_execution_test_grade_recall(const char *principal, const char *project,
@@ -104,6 +105,32 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 500);
    const char *operation =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
+   if (g_grade_plan_case && operation && !strcmp(operation, "ingress-begin"))
+   {
+      *result = cJSON_Parse("{\"status\":\"ok\",\"active\":true,\"mode\":\"on\",\"legacy_preview\":"
+                            "false,\"facts\":false,\"temporal\":false,\"task\":false,\"assembly\":{"
+                            "\"operation\":\"ingress-assemble\"}}");
+      assert(*result);
+      if (g_grade_plan_case == 2 || g_grade_plan_case == 3)
+         cJSON_AddBoolToObject(*result, "execution_grades", g_grade_plan_case == 2);
+      else if (g_grade_plan_case == 4)
+         cJSON_AddStringToObject(*result, "execution_grades", "false");
+      else if (g_grade_plan_case == 5)
+         cJSON_AddNullToObject(*result, "execution_grades");
+      return 1;
+   }
+   if (g_grade_plan_case && operation && !strcmp(operation, "ingress-assemble"))
+   {
+      g_grade_plan_assembly_calls++;
+      if (g_grade_plan_case == 3)
+         assert(!cJSON_GetObjectItemCaseSensitive(request, "execution_test_grades"));
+      else
+         assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(request, "execution_test_grades")));
+      *result = cJSON_Parse("{\"status\":\"ok\",\"envelope\":\"Selected native "
+                            "context.\",\"source_release_ticket\":\"fixture-grade-plan-ticket\"}");
+      assert(*result);
+      return 1;
+   }
    if (g_guard_cleanup_mode && operation && !strcmp(operation, "personal-source-revalidate"))
    {
       const cJSON *r = cJSON_GetObjectItemCaseSensitive(request, "revalidation");
@@ -158,6 +185,17 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
       return g_runtime_failure == 1 ? -1 : 1;
    }
    return module_runtime_fixture_call(request, result);
+}
+
+/* No private context factory is linked into the historical owner fixture.
+ * Preserve its original null-context calls while exercising the generic API. */
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method,
+                                                            const cJSON *request,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result)
+{
+   assert(context == NULL);
+   return aimee_module_commands_dispatch_internal_timeout(method, request, timeout_ms, result);
 }
 
 static cJSON *fixture_runtime(const char *operation)
@@ -1874,6 +1912,45 @@ static void test_ingress_host_session_binding(void)
    assert(!ingress_preinject_session_id()[0]);
 }
 
+/* Controlled request-context scheduling test, not an authentication/SDK proof. */
+static void test_execution_grade_plan_scheduling(void)
+{
+   request_context_t context = {0};
+   strcpy(context.request_id, "grade-plan-request");
+   strcpy(context.principal, "grade-caller");
+   strcpy(context.vault_principal, "grade-actor");
+   context.vault_transport = ATTEST_UDS_PEERCRED;
+   ingress_preinject_set_session_id("grade-plan-session");
+   g_grade_history_mode = 1;
+   const int cases[] = {3, 1, 2, 4, 5};
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      g_grade_plan_case = cases[i];
+      request_context_set(&context);
+      assert(request_context_get() && request_context_get()->vault_principal[0]);
+      int before = g_grade_history_reads;
+      g_grade_plan_assembly_calls = 0;
+      char *out = ingress_preinject_build("Rin Juniper", 0);
+      if (g_grade_plan_case >= 4)
+      {
+         assert(!out && request_context_get()->context_refused);
+         assert(g_grade_history_reads == before && g_grade_plan_assembly_calls == 0);
+      }
+      else
+      {
+         assert(out && !strcmp(out, "Selected native context."));
+         assert(g_grade_history_reads == before + (g_grade_plan_case == 3 ? 0 : 1));
+         assert(g_grade_plan_assembly_calls == 1 && !request_context_get()->context_refused);
+      }
+      free(out);
+      request_context_clear();
+   }
+   g_grade_plan_case = 0;
+   g_grade_history_mode = 0;
+   ingress_preinject_set_session_id("");
+   puts("execution-grade plan: controlled context false0/true1/absent1/invalid0 passed");
+}
+
 int main(void)
 {
    test_ingress_host_session_binding();
@@ -1885,6 +1962,7 @@ int main(void)
    test_configured_test_history_at_provider_fence();
    test_native_source_request_handoff();
    test_default_primary_grade_only_context();
+   test_execution_grade_plan_scheduling();
    test_source_revalidation_at_provider_fence();
    test_preview_sources_at_provider_fence();
    test_required_assembly_refusal_reaches_dispatch();

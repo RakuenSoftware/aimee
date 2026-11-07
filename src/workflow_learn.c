@@ -1,6 +1,5 @@
-/* Host connections for Go-owned workflow learning. The host captures cwd and
- * configured roots, transports the owner's write request to the authenticated
- * KB, and notifies the learning owner only after Go accepts the write receipt. */
+/* Host connections for module-owned workflow learning. Capture trusted caller
+ * inputs and forward accepted opaque evidence to the learning router. */
 #include "aimee.h"
 #include "cJSON.h"
 #include "json_fluent.h"
@@ -9,6 +8,17 @@
 #include "modules/learning/learning_implicit.h"
 #include "log.h"
 #include <unistd.h>
+#pragma weak learning_implicit_record_workflow_evidence
+extern cJSON *aimee_module_host_command_context(void) __attribute__((weak));
+#pragma weak aimee_module_commands_capture_caller_context
+#pragma weak aimee_module_commands_dispatch_internal_context_timeout
+
+static int workflow_dispatch(const cJSON *args, const cJSON *context, cJSON **result)
+{
+   return context ? aimee_module_commands_dispatch_internal_context_timeout("memory.runtime", args,
+                                                                            context, 60000, result)
+                  : aimee_module_commands_dispatch_internal("memory.runtime", args, result);
+}
 
 cJSON *workflow_execute(const cJSON *input)
 {
@@ -32,16 +42,33 @@ cJSON *workflow_execute(const cJSON *input)
    }
    for (int i = 0; i < config_workspace_count(); i++)
       cJSON_AddItemToArray(roots, cJSON_CreateString(config_workspaces(i)));
-   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &plan);
+   /* Capture the original verifier-owned context once. A selected factory's
+    * failure cannot fall back to a broader default service identity. */
+   cJSON *context = NULL;
+   int captured_context = aimee_module_commands_capture_caller_context
+                              ? aimee_module_commands_capture_caller_context(&context)
+                              : (aimee_module_host_command_context ? -1 : 0);
+   if (captured_context < 0 ||
+       (context && !aimee_module_commands_dispatch_internal_context_timeout))
+   {
+      cJSON_Delete(context);
+      cJSON_Delete(args);
+      return NULL;
+   }
+   int rc = workflow_dispatch(args, context, &plan);
    cJSON_Delete(args);
    if (rc <= 0)
    {
       cJSON_Delete(plan);
+      cJSON_Delete(context);
       return NULL;
    }
    const cJSON *request = cJSON_GetObjectItemCaseSensitive(plan, "request");
    if (!cJSON_IsObject(request))
+   {
+      cJSON_Delete(context);
       return plan;
+   }
    cJSON *write_args = cJSON_Duplicate(request, 1);
    cJSON *result_args = cJSON_CreateObject();
    if (!write_args || !result_args)
@@ -49,6 +76,7 @@ cJSON *workflow_execute(const cJSON *input)
       cJSON_Delete(write_args);
       cJSON_Delete(result_args);
       cJSON_Delete(plan);
+      cJSON_Delete(context);
       return NULL;
    }
    cJSON_AddStringToObject(result_args, "operation", "workflow-result");
@@ -58,7 +86,8 @@ cJSON *workflow_execute(const cJSON *input)
    free(receipt);
    cJSON_Delete(plan);
    cJSON *result = NULL;
-   rc = aimee_module_commands_dispatch_internal("memory.runtime", result_args, &result);
+   rc = workflow_dispatch(result_args, context, &result);
+   cJSON_Delete(context);
    cJSON_Delete(result_args);
    if (rc <= 0)
    {
@@ -82,7 +111,19 @@ void workflow_observe_bash(const char *command)
       const char *workspace = jo_cstr(result, "workspace");
       const char *signal = jo_cstr(result, "signal_type");
       LOG_INFO("workflow_learn", "learned workflow rule: workflow:%s:%s", workspace, signal);
-      learning_implicit_record_workflow(workspace, signal, jo_cstr(result, "rule"));
+      const cJSON *refs = cJSON_GetObjectItemCaseSensitive(result, "learning_evidence_refs");
+      if (!refs)
+         learning_implicit_record_workflow(workspace, signal, jo_cstr(result, "rule"));
+      else if (cJSON_IsArray(refs) && learning_implicit_record_workflow_evidence)
+      {
+         char *wire_refs = cJSON_PrintUnformatted(refs);
+         if (wire_refs)
+            learning_implicit_record_workflow_evidence(workspace, signal, jo_cstr(result, "rule"),
+                                                       wire_refs);
+         free(wire_refs);
+      }
+      else
+         LOG_WARN("workflow_learn", "accepted workflow evidence cannot be forwarded");
    }
    cJSON_Delete(result);
 }
