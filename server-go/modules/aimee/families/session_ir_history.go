@@ -108,6 +108,45 @@ const sessionIRHistorySQL = `WITH owned AS MATERIALIZED (
  WHERE wire_bytes<=8388608 ORDER BY budgeted.sequence`
 const sessionIRRunningHistorySQL = sessionIRHistorySQL
 
+// Terminals may arrive after a later turn has already stopped. Preserve each
+// turn's message/tool order while placing observation groups in their original
+// input order. An accepted checkpoint/import remains an immutable prefix.
+func orderSessionIRObservationTurns(history []json.RawMessage, groups []uint64, prefix int, refs map[string]nativeHistorySource) ([]json.RawMessage, error) {
+	if len(history) != len(groups) || prefix < 0 || prefix > len(history) {
+		return nil, fmt.Errorf("invalid canonical observation ordering shape")
+	}
+	for _, ref := range refs {
+		if ref.Index >= len(history) {
+			return nil, fmt.Errorf("invalid canonical observation source index")
+		}
+	}
+	indices := make([]int, len(history)-prefix)
+	for i := range indices {
+		indices[i] = prefix + i
+		if groups[indices[i]] == 0 {
+			return nil, fmt.Errorf("missing canonical observation group order")
+		}
+	}
+	sort.SliceStable(indices, func(i, j int) bool { return groups[indices[i]] < groups[indices[j]] })
+	ordered := make([]json.RawMessage, len(history))
+	copy(ordered, history)
+	remap := make([]int, len(history))
+	for i := range remap {
+		remap[i] = i
+	}
+	for i, old := range indices {
+		ordered[prefix+i] = history[old]
+		remap[old] = prefix + i
+	}
+	for sequence, ref := range refs {
+		if ref.Index >= 0 {
+			ref.Index = remap[ref.Index]
+			refs[sequence] = ref
+		}
+	}
+	return ordered, nil
+}
+
 type sessionIRHistoryRows struct {
 	ctx                   context.Context
 	q                     store.Queryer
@@ -227,6 +266,8 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 	rows := &sessionIRHistoryRows{ctx: ctx, q: q, session: f[0], actor: f[2], after: "0", rows: first}
 	defer rows.Close()
 	history := make([]json.RawMessage, 0)
+	historyGroupOrder := make([]uint64, 0)
+	historyPrefix := 0
 	admittedInputs := make([]canonical.Message, 0)
 	admittedInputTurns := make([]string, 0)
 	checkpointInputCount := 0
@@ -262,6 +303,10 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 			indices[i] = i
 		}
 		sort.SliceStable(indices, func(i, j int) bool { return pendingOrder[turn][indices[i]] < pendingOrder[turn][indices[j]] })
+		var groupOrder uint64
+		if len(indices) > 0 {
+			groupOrder = pendingOrder[turn][indices[0]]
+		}
 		for _, index := range indices {
 			ref := pendingRefs[turn][index]
 			mapped := historyRefs[ref.Sequence]
@@ -273,6 +318,7 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 				historyRefs[sequence] = ownedRef
 			}
 			history = append(history, pending[turn][index])
+			historyGroupOrder = append(historyGroupOrder, groupOrder)
 		}
 	}
 	found := false
@@ -377,6 +423,8 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 				}
 				checkpointInputCount = len(admittedInputs)
 				history = append(history[:0], checkpoints[turn]...)
+				historyPrefix = len(history)
+				historyGroupOrder = make([]uint64, historyPrefix)
 				checkpoints = map[string][]json.RawMessage{}
 				fragmentBytes = 0
 				// All prior observations are incorporated by this host projection. A later
@@ -566,6 +614,10 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 		}
 		appendPending(f[3])
 		found = true
+	}
+	history, err = orderSessionIRObservationTurns(history, historyGroupOrder, historyPrefix, historyRefs)
+	if err != nil {
+		return 0, nil, err
 	}
 	if len(interruptions) > 0 {
 		var err error

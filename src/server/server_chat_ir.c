@@ -361,6 +361,8 @@ int server_chat_ir_prepare_turn(compute_ctx_t *c)
    return 0;
 }
 
+static void original_chat_failure_close(compute_ctx_t *, int);
+
 static int chat_ir_begin_internal(compute_ctx_t *c, const char *session,
                                   const aimee_message_t *message, const cJSON *attachment)
 {
@@ -420,7 +422,7 @@ static int chat_ir_begin_internal(compute_ctx_t *c, const char *session,
       if (!result && server_session_capture_original_input_before(c->ir_capture, c->ir_sequence))
          result = -1;
       if (result != 0)
-         server_chat_ir_abort(c);
+         original_chat_failure_close(c, 0);
       return result;
    }
    aimee_session_event_t lifecycle = {.kind = AIMEE_SESSION_EXECUTION,
@@ -438,9 +440,39 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const aimee_mess
 {
    return chat_ir_begin_internal(c, session, message, NULL);
 }
+/* Original admission owns no Model execution. Close only a known committed
+ * BEGIN/User pair through its same retained writer; failed storage remains
+ * unavailable, never a fabricated terminal or permission to replay effects. */
+static void original_chat_failure_close(compute_ctx_t *c, int cancelled)
+{
+   int previous_cancel;
+   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel))
+      return;
+   server_session_capture_counts_t counts = {0};
+   if (c && c->ir_enabled && c->ir_capture && !c->ir_completed &&
+       !server_session_capture_counts(c->ir_capture, &counts) && counts.counter >= 2 &&
+       !counts.model_events)
+   {
+      if (cancelled)
+      {
+         c->ir_completed = 1;
+         aimee_session_event_t terminal = {.kind = AIMEE_SESSION_EXECUTION,
+                                           .execution_status = "cancelled",
+                                           .execution_error = "original input admission cancelled"};
+         (void)aimee_ir_session_emit(&terminal);
+      }
+      else
+         (void)server_chat_ir_finish(c, "original input admission failed");
+   }
+   server_chat_ir_abort(c);
+   pthread_setcancelstate(previous_cancel, NULL);
+}
 static void original_chat_cancelled(void *context)
 {
-   server_chat_ir_abort(context);
+   /* The thread is already unwinding. Keep cancellation masked until its
+    * terminal append and retained capture/control cleanup have both finished. */
+   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+   original_chat_failure_close(context, 1);
 }
 __attribute__((used, externally_visible, retain))
 const unsigned aimee_chat_original_input_contract_v1 = 1;
@@ -468,11 +500,12 @@ server_chat_ir_begin_original(compute_ctx_t *c, const char *session, const char 
       pthread_testcancel();
    /* Deliver the committed BEGIN/User pair through the existing canonical gap
     * reader. The callback has returned and its fresh capability is revoked.
-    * Delivery remains cancellable; failure/cancellation aborts without execution.
+    * Delivery remains cancellable; failure/cancellation closes a known committed
+    * input with a failure terminal, without execution.
     * Never infer original-input authority from a replayed event envelope. */
    if (!result && server_chat_ir_progress(c))
    {
-      server_chat_ir_abort(c);
+      original_chat_failure_close(c, 0);
       result = -1;
    }
    pthread_cleanup_pop(0);

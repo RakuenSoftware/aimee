@@ -129,8 +129,17 @@ void ingress_preinject_release_send_guard(void *state)
       guard_released++;
    }
 }
-int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
-                                                    int timeout, cJSON **reply)
+int ingress_preinject_complete_send_guard(void **state)
+{
+   if (!state || !*state)
+      return 0;
+   void *guard = *state;
+   *state = NULL;
+   ingress_preinject_release_send_guard(guard);
+   return 1;
+}
+int aimee_module_commands_dispatch_internal_caller_timeout(const char *method, const cJSON *args,
+                                                           int timeout, cJSON **reply)
 {
    (void)timeout;
    assert(!strcmp(method, "memory.runtime") && !strcmp(text(args, "operation"), "action-evidence"));
@@ -141,6 +150,15 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
                                 "receipt\":\"receipt\",\"revocation_generation\":\"revision\","
                                 "\"memory_guard\":\"guard\",\"memory_required\":true}");
    return 1;
+}
+/* An unbound internal call cannot supply the retained ticket's verified host.
+ * Keep this separate from the caller-bound positive stub above. */
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
+                                                    int timeout, cJSON **reply)
+{
+   (void)method; (void)args; (void)timeout;
+   *reply = NULL;
+   return -1;
 }
 cJSON *aimee_module_command_call_context(uint32_t event, uint32_t stage, const char *verb,
                                          const cJSON *args, const cJSON *caller)

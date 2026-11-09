@@ -246,7 +246,9 @@ describe('chat transcript ownership', () => {
     send('Draft title'); await tick();
     await act(async () => {
       prompt = 'Committed tagged title';
-      emit('turn_start', { input_attachment: { operation_uuid: matching ? operation : '22345678-1234-4234-8234-123456789abc' } });
+      emit('turn_start', { input_attachment: { schema_version: 1, kind: 'host.original-input.v1',
+        operation_uuid: matching ? operation : '22345678-1234-4234-8234-123456789abc',
+        text_sha256: 'a'.repeat(64), opaque: 'synthetic source reference' } });
     });
     await tick();
     expect(context.patchSession.mock.calls.filter(([, patch]) => patch.name)).toEqual(

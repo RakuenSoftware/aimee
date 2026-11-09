@@ -27,6 +27,13 @@ extern "C"
 
    /* --- Context cache --- */
 
+   /* Generic session-scoped opaque state. Revision zero means absent.
+    * Return 0 on success, 1 on missing/CAS conflict, -1 on failure. */
+   int db1_session_cache_get(const char *session, const char *key, char *out, size_t cap, int64_t *revision);
+   int db1_session_cache_cas(const char *session, const char *key, int64_t expected, const char *nonce, const char *value, int64_t *revision);
+   int db1_session_cache_delete(const char *session);
+   int db1_session_cache_receipt(const char *session,const char *key,const char *nonce,char *out,size_t cap,int64_t *revision);
+
    /* --- Context snapshots --- */
 
    /* Record an injection against the turn it happened on. The turn-less form

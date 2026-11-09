@@ -256,7 +256,22 @@ static void outcome_cases(void)
       assert(!reply && outcome.schema_version == 1 && outcome.stage == AIMEE_COMMAND_SDK_RESULT &&
              outcome.sdk_result == failures[i]);
    }
+   for (unsigned i = 0; i < sizeof failures / sizeof failures[0]; i++)
+   {
+      invoke_fault = failures[i];
+      assert(aimee_module_commands_dispatch_internal_outcome_context_timeout_v1(
+                 "memory.embed_text", args, context, 731, &reply, &outcome) == -1);
+      assert(!reply && outcome.schema_version == 1 && outcome.stage == AIMEE_COMMAND_SDK_RESULT &&
+             outcome.sdk_result == failures[i]);
+   }
    invoke_fault = -1;
+   invoke_json = "{\"status\":\"ok\",\"value\":42}";
+   assert(aimee_module_commands_dispatch_internal_outcome_context_timeout_v1(
+              "memory.embed_text", args, context, 731, &reply, &outcome) == 1);
+   assert(cJSON_IsObject(reply) && cJSON_GetObjectItem(reply, "value")->valueint == 42 &&
+          outcome.stage == AIMEE_COMMAND_BODY_READY && outcome.sdk_result == OURO_MODULE_CALL_OK);
+   cJSON_Delete(reply);
+   reply = NULL;
    for (int i = 1; i <= 2; i++)
    {
       frame_fault = i;

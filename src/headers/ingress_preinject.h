@@ -30,6 +30,9 @@ int ingress_preinject_revalidate_sources(void);
 int ingress_preinject_fork_sources(const request_context_t *parent);
 int ingress_preinject_acquire_send_guard(void **state);
 void ingress_preinject_release_send_guard(void *state);
+/* Consume the opaque guard. Return 1 only after every owner completion ACK.
+ * Incomplete transport stays owned by existing recovery and returns 0. */
+int ingress_preinject_complete_send_guard(void **state);
 int ingress_preinject_accept_native_projection(const cJSON *projection);
 void ingress_preinject_finish_sources(void);
 /* Bind one final provider attempt through Go and synchronously accept its

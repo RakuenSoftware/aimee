@@ -29868,6 +29868,203 @@
         ],
         "max_bytes": 8388620
       }
+    },
+    {
+      "family": "runtime",
+      "id": 63,
+      "name": "session_cache_get",
+      "c_name": "db1_session_cache_get",
+      "c_params": [
+        "session_id",
+        "key"
+      ],
+      "c_returns": "rc",
+      "wire_format": "db1-fields-v2",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "key",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "output",
+            "type": "text"
+          },
+          {
+            "name": "revision",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 66000
+      }
+    },
+    {
+      "family": "runtime",
+      "id": 64,
+      "name": "session_cache_cas",
+      "c_name": "db1_session_cache_cas",
+      "c_params": [
+        "session_id",
+        "key",
+        "expected_revision",
+        "nonce",
+        "output"
+      ],
+      "c_returns": "rc",
+      "wire_format": "db1-fields-v2",
+      "scope": "session",
+      "transaction": "single",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "key",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "expected_revision",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "nonce",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "output",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "revision",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 64
+      }
+    },
+    {
+      "family": "runtime",
+      "id": 65,
+      "name": "session_cache_delete",
+      "c_name": "db1_session_cache_delete",
+      "c_params": [
+        "session_id"
+      ],
+      "c_returns": "rc",
+      "wire_format": "db1-fields-v2",
+      "scope": "session",
+      "transaction": "single",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 64
+      }
+    },
+    {
+      "family": "runtime",
+      "id": 66,
+      "name": "session_cache_receipt",
+      "c_name": "db1_session_cache_receipt",
+      "c_params": [
+        "session_id",
+        "key",
+        "nonce"
+      ],
+      "c_returns": "rc",
+      "wire_format": "db1-fields-v2",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "key",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "nonce",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "output",
+            "type": "text"
+          },
+          {
+            "name": "revision",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 66000
+      }
     }
   ]
 }

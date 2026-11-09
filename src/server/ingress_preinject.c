@@ -121,24 +121,66 @@ static __thread char g_task_requirements[16385] = "";
  * identity from empty worker TLS or request arguments. */
 extern cJSON *aimee_module_host_command_context(void) __attribute__((weak));
 static _Thread_local const cJSON *ingress_completion_command_context;
+/* A receipt refresh borrows the FIRST receipt RPC's absolute budget. */
+static _Thread_local uint64_t ingress_receipt_deadline_ns;
+static uint64_t ingress_monotonic_ns(void)
+{
+   struct timespec now;
+   if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      return 0;
+   return (uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec;
+}
+static int ingress_remaining_ms(void)
+{
+   if (!ingress_receipt_deadline_ns)
+      return 500;
+   uint64_t now = ingress_monotonic_ns();
+   if (!now || now >= ingress_receipt_deadline_ns)
+      return 0;
+   uint64_t remaining = (ingress_receipt_deadline_ns - now) / UINT64_C(1000000);
+   return remaining > 500 ? 500 : (int)remaining;
+}
+
 /* Host transport only. The supplied request is consumed; source policy belongs
  * to the selected memory module. */
-static cJSON *ingress_command(cJSON *request, int required_context)
+struct ingress_command_scope
 {
-   cJSON *response = NULL;
+   cJSON *request, *context, *response;
+};
+static void ingress_command_cleanup(void *opaque)
+{
+   struct ingress_command_scope *scope = opaque;
+   cJSON_Delete(scope->request);
+   cJSON_Delete(scope->context);
+   cJSON_Delete(scope->response);
+}
+static cJSON *ingress_command_response(cJSON *request, int *handled)
+{
+   struct ingress_command_scope scope = {.request = request};
+   cJSON *volatile result = NULL;
+   *handled = 0;
+   pthread_cleanup_push(ingress_command_cleanup, &scope);
    int selected_context = ingress_completion_command_context || aimee_module_host_command_context;
-   cJSON *command_context =
-       ingress_completion_command_context  ? cJSON_Duplicate(ingress_completion_command_context, 1)
-       : aimee_module_host_command_context ? aimee_module_host_command_context()
-                                           : NULL;
-   int rc = selected_context && !command_context
+   scope.context = ingress_completion_command_context
+                       ? cJSON_Duplicate(ingress_completion_command_context, 1)
+                   : aimee_module_host_command_context ? aimee_module_host_command_context()
+                                                       : NULL;
+   int remaining = ingress_remaining_ms();
+   int rc = (selected_context && !scope.context) || remaining <= 0
                 ? -1
                 : aimee_module_commands_dispatch_internal_context_timeout(
-                      "memory.runtime", request, command_context, 500, &response);
-   cJSON_Delete(command_context);
-   cJSON_Delete(request);
+                      "memory.runtime", scope.request, scope.context, remaining, &scope.response);
+   *handled = rc == 1;
+   result = scope.response;
+   scope.response = NULL;
+   pthread_cleanup_pop(1);
+   return result;
+}
+
+static cJSON *ingress_command_result(cJSON *response, int handled, int required_context)
+{
    const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
-   if (rc != 1 || !status || strcmp(status, "ok") != 0)
+   if (!handled || !status || strcmp(status, "ok") != 0)
    {
       if (required_context)
       {
@@ -150,6 +192,13 @@ static cJSON *ingress_command(cJSON *request, int required_context)
       return NULL;
    }
    return response;
+}
+
+static cJSON *ingress_command(cJSON *request, int required_context)
+{
+   int handled = 0;
+   cJSON *response = ingress_command_response(request, &handled);
+   return ingress_command_result(response, handled, required_context);
 }
 
 static void ingress_release_context(cJSON *request, const request_context_t *context)
@@ -372,11 +421,30 @@ int ingress_preinject_accept_native_projection(const cJSON *projection)
    return rc;
 }
 
+struct ingress_source_answer_scope
+{
+   cJSON *plan;
+   cJSON *request;
+   cJSON *local_command;
+   char *grade_expected;
+};
+
+static void ingress_source_answer_cleanup(void *opaque)
+{
+   struct ingress_source_answer_scope *scope = opaque;
+   free(scope->grade_expected);
+   cJSON_Delete(scope->local_command);
+   cJSON_Delete(scope->request);
+   cJSON_Delete(scope->plan);
+}
+
 /* Source owners retain policy and validate their own answers. Both an ordinary
  * wire fence and a native request handoff use this identical transport. */
 static cJSON *ingress_source_answers(const cJSON *plan, const request_context_t *context,
-                                     const char *operation)
+                                     const char *operation, int caller_owns_plan)
 {
+   if (ingress_remaining_ms() <= 0)
+      return NULL;
    const cJSON *owner_request = cJSON_GetObjectItemCaseSensitive(plan, "request");
    const cJSON *local_request = cJSON_GetObjectItemCaseSensitive(plan, "local_request");
    const cJSON *grade_request = cJSON_GetObjectItemCaseSensitive(plan, "execution_grade_request");
@@ -386,11 +454,11 @@ static cJSON *ingress_source_answers(const cJSON *plan, const request_context_t 
        (local_request && !cJSON_IsObject(local_request)) ||
        (grade_request && !cJSON_IsObject(grade_request)))
       return NULL;
-   cJSON *local_response =
-       local_request ? ingress_command(cJSON_Duplicate(local_request, 1), 1) : NULL;
-   char *raw = owner_request ? kb_v1_action_request("memory.revalidate_sources",
-                                                    cJSON_Duplicate(owner_request, 1))
-                             : NULL;
+   cJSON *volatile result = NULL;
+   struct ingress_source_answer_scope scope = {.plan = caller_owns_plan ? NULL : (cJSON *)plan};
+   /* Standalone callers retain the plan normally and release it on cancellation.
+    * The bounded refresh caller supplies its own outer completion owner. */
+   pthread_cleanup_push(ingress_source_answer_cleanup, &scope);
    cJSON *grade_response = NULL;
    if (grade_request && context->vault_transport != ATTEST_NONE)
    {
@@ -400,26 +468,64 @@ static cJSON *ingress_source_answers(const cJSON *plan, const request_context_t 
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(grade_request, "scope_id"));
       if (actor && project && !strcmp(actor, context->vault_principal))
       {
-         char *expected = cJSON_PrintUnformatted(grade_request);
-         char *current =
-             expected ? db1_execution_test_grade_recall(actor, project, expected) : NULL;
+         scope.grade_expected = cJSON_PrintUnformatted(grade_request);
+         char *current = scope.grade_expected
+                             ? db1_execution_test_grade_recall(actor, project, scope.grade_expected)
+                             : NULL;
          grade_response = current ? cJSON_Parse(current) : NULL;
          free(current);
-         free(expected);
+         free(scope.grade_expected);
+         scope.grade_expected = NULL;
       }
    }
+   scope.request = cJSON_CreateObject();
+   cJSON_AddStringToObject(scope.request, "operation", operation);
+   ingress_release_context(scope.request, context);
+   cJSON_AddItemToObject(scope.request, "execution_grade_response",
+                         grade_response ? grade_response : cJSON_CreateNull());
+   int remaining = ingress_remaining_ms();
+   char *raw = owner_request && remaining > 0
+                   ? (ingress_receipt_deadline_ns
+                          ? kb_v1_action_request_with_timeout("memory.revalidate_sources",
+                                cJSON_Duplicate(owner_request, 1), remaining)
+                          : kb_v1_action_request("memory.revalidate_sources",
+                                cJSON_Duplicate(owner_request, 1)))
+                   : NULL;
    cJSON *owner_response = raw ? cJSON_Parse(raw) : NULL;
    free(raw);
-   cJSON *request = cJSON_CreateObject();
-   cJSON_AddStringToObject(request, "operation", operation);
-   ingress_release_context(request, context);
-   cJSON_AddItemToObject(request, "owner_response",
+   cJSON_AddItemToObject(scope.request, "owner_response",
                          owner_response ? owner_response : cJSON_CreateNull());
-   cJSON_AddItemToObject(request, "local_response",
+   /* Local source verification has a short freshness window. Complete blocking
+    * owner/grade work and envelope preparation before starting that window. */
+   scope.local_command = local_request ? cJSON_Duplicate(local_request, 1) : NULL;
+   cJSON *local_command = scope.local_command;
+   scope.local_command = NULL; /* command transport owns it, including cancellation */
+   cJSON *local_response = local_command ? ingress_command(local_command, 1) : NULL;
+   cJSON_AddItemToObject(scope.request, "local_response",
                          local_response ? local_response : cJSON_CreateNull());
-   cJSON_AddItemToObject(request, "execution_grade_response",
-                         grade_response ? grade_response : cJSON_CreateNull());
-   return request;
+   result = scope.request;
+   pthread_cleanup_pop(0);
+   return result;
+}
+
+struct ingress_refresh_scope
+{
+   cJSON *plan;
+   void **guard_state;
+};
+static void ingress_refresh_cancel(void *opaque)
+{
+   struct ingress_refresh_scope *scope = opaque;
+   int previous_cancel_state;
+   (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel_state);
+   if (scope->guard_state)
+      *scope->guard_state = NULL;
+   cJSON *plan = scope->plan;
+   scope->plan = NULL;
+   /* This is still pre-send. Preserve every exact completion descriptor until
+    * the existing owner completion protocol acknowledges it. */
+   ingress_preinject_release_send_guard(plan);
+   (void)pthread_setcancelstate(previous_cancel_state, NULL);
 }
 
 static int ingress_revalidate_sources(void **guard_state)
@@ -435,14 +541,39 @@ static int ingress_revalidate_sources(void **guard_state)
       cJSON_AddBoolToObject(request, "send_guard", 1);
    ingress_release_context(request, context);
    cJSON *plan = ingress_command(request, 1);
-   request = ingress_source_answers(plan, context, "source-release-result");
-   if (guard_state && request)
+   /* Only the installed owner adapter interprets a retry directive. The host
+    * transports the same opaque plan, with a fixed bound and no provider send. */
+   extern int aimee_module_ingress_retry_requested(const cJSON *) __attribute__((weak));
+   volatile int admitted = 0;
+   struct ingress_refresh_scope scope = {.plan = plan, .guard_state = guard_state};
+   pthread_cleanup_push(ingress_refresh_cancel, &scope);
+   for (int round = 0; round < 3; ++round)
+   {
+      request = ingress_source_answers(plan, context, "source-release-result", 1);
+      int handled = 0;
+      cJSON *response = request ? ingress_command_response(request, &handled) : NULL;
+      const char *status =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+      admitted = handled && status && !strcmp(status, "ok") &&
+                 cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "admitted"));
+      int retry = !admitted && handled && round < 2 && aimee_module_ingress_retry_requested &&
+                  aimee_module_ingress_retry_requested(response) == 1;
+      if (!admitted && !retry)
+      {
+         const char *kind =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "kind"));
+         (void)request_context_refuse_assembly(kind);
+      }
+      cJSON_Delete(response);
+      if (!retry)
+         break;
+   }
+   if (guard_state)
       *guard_state = plan;
    else
       cJSON_Delete(plan);
-   cJSON *response = request ? ingress_command(request, 1) : NULL;
-   int admitted = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "admitted"));
-   cJSON_Delete(response);
+   scope.plan = NULL;
+   pthread_cleanup_pop(0);
    if (!admitted)
       (void)request_context_refuse_assembly("unavailable");
    return admitted ? 0 : -1;
@@ -472,7 +603,7 @@ int ingress_preinject_fork_sources(const request_context_t *parent)
    const char *new_id =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "new_request_id"));
    request = challenge && strlen(challenge) == 32 && new_id && !strcmp(new_id, current->request_id)
-                 ? ingress_source_answers(plan, parent, "source-release-fork-result")
+                 ? ingress_source_answers(plan, parent, "source-release-fork-result", 0)
                  : NULL;
    if (request)
    {
@@ -624,11 +755,10 @@ static void *ingress_retry_send_completion(void *opaque)
    return NULL;
 }
 
-void ingress_preinject_release_send_guard(void *state)
+static int ingress_release_send_guard(cJSON *plan)
 {
-   cJSON *plan = state;
    if (!plan)
-      return;
+      return 1;
    const cJSON *prior_context = ingress_completion_command_context;
    int selected_context = prior_context || aimee_module_host_command_context;
    cJSON *command_context = prior_context ? cJSON_Duplicate(prior_context, 1)
@@ -646,7 +776,7 @@ void ingress_preinject_release_send_guard(void *state)
       aimee_log(LOG_ERROR, "memory",
                 "verified completion transport unavailable; storage guard remains active pending "
                 "sending-host recovery");
-      return;
+      return 0;
    }
    /* Snapshot before the first transport attempt, so neither synchronous
     * retries nor the new worker can reconstruct changed/wider verifier state. */
@@ -657,7 +787,7 @@ void ingress_preinject_release_send_guard(void *state)
    {
       cJSON_Delete(command_context);
       cJSON_Delete(plan);
-      return;
+      return 1;
    }
    /* Drop source observations; recovery needs only token-only completions. */
    cJSON_DeleteItemFromObjectCaseSensitive(plan, "request");
@@ -683,7 +813,7 @@ void ingress_preinject_release_send_guard(void *state)
       if (available && pthread_create(&thread, NULL, ingress_retry_send_completion, pending) == 0)
       {
          pthread_detach(thread);
-         return;
+         return 0;
       }
       if (available)
       {
@@ -700,6 +830,26 @@ void ingress_preinject_release_send_guard(void *state)
              "send completion retry unavailable; storage guard remains active pending sending-host "
              "recovery");
    cJSON_Delete(plan);
+   return 0;
+}
+
+
+void ingress_preinject_release_send_guard(void *state)
+{
+   (void)ingress_release_send_guard(state);
+}
+
+int ingress_preinject_complete_send_guard(void **state)
+{
+   if (!state || !*state)
+      return 0;
+   int previous_cancel_state;
+   (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel_state);
+   cJSON *plan = *state;
+   *state = NULL; /* completion/recovery owns it before any cancellation point */
+   int completed = ingress_release_send_guard(plan);
+   (void)pthread_setcancelstate(previous_cancel_state, NULL);
+   return completed;
 }
 
 /* The Go owner supplies canonical metadata. This adapter cannot interpret or
@@ -733,6 +883,60 @@ static void ingress_finish_health_turn(void)
    g_health_turn_handle[0] = '\0';
 }
 
+struct ingress_receipt_refresh_scope
+{
+   cJSON *request, *response;
+   uint64_t previous_deadline;
+};
+static void ingress_receipt_refresh_cleanup(void *opaque)
+{
+   struct ingress_receipt_refresh_scope *scope = opaque;
+   ingress_receipt_deadline_ns = scope->previous_deadline;
+   cJSON_Delete(scope->request);
+   cJSON_Delete(scope->response);
+}
+static cJSON *ingress_receipt_plan(cJSON *request)
+{
+   struct ingress_receipt_refresh_scope scope = {
+       .request = request, .previous_deadline = ingress_receipt_deadline_ns};
+   cJSON *volatile result = NULL;
+   pthread_cleanup_push(ingress_receipt_refresh_cleanup, &scope);
+   uint64_t now = ingress_monotonic_ns();
+   if (now)
+   {
+      uint64_t deadline = now + UINT64_C(500000000);
+      if (!ingress_receipt_deadline_ns || deadline < ingress_receipt_deadline_ns)
+         ingress_receipt_deadline_ns = deadline;
+      extern int aimee_module_ingress_receipt_retry_requested(const cJSON *) __attribute__((weak));
+      for (int round = 0; round < 2 && ingress_remaining_ms() > 0; ++round)
+      {
+         /* Every attempt receives an exact deep copy; transport consumes it. */
+         int handled = 0;
+         scope.response = ingress_command_response(cJSON_Duplicate(scope.request, 1), &handled);
+         if (ingress_remaining_ms() <= 0)
+            handled = 0;
+         if (!handled || round || !aimee_module_ingress_receipt_retry_requested ||
+             !aimee_module_ingress_receipt_retry_requested(scope.response))
+         {
+            scope.response = ingress_command_result(scope.response, handled, 1);
+            break;
+         }
+         cJSON_Delete(scope.response);
+         scope.response = NULL;
+         if (ingress_remaining_ms() <= 0 || ingress_preinject_revalidate_sources() != 0 ||
+             ingress_remaining_ms() <= 0)
+         {
+            (void)request_context_refuse_assembly(NULL);
+            break;
+         }
+      }
+      result = scope.response;
+      scope.response = NULL;
+   }
+   pthread_cleanup_pop(1);
+   return result;
+}
+
 int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const char *route,
                                       const char *provider, const char *model, char attempt[33])
 {
@@ -746,7 +950,7 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
       return -1;
    if (!context->memory_source_release[0] && !context->memory_receipt_required)
       return 0;
-   if ((!body && body_len) || ingress_preinject_revalidate_sources() != 0)
+   if (!body && body_len)
       return -1;
    char digest[65], count[32], owner[33];
    if (audit_worm_dispatch_owner(owner) != 0)
@@ -790,7 +994,15 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
    }
    cJSON_AddStringToObject(request, "caller_limits_sha256", caller_digest);
    cJSON_AddStringToObject(request, "operator_limits_sha256", operator_digest);
-   cJSON *plan = ingress_command(request, 1);
+   /* Audit-owner serialization, payload hashing and request allocation can block.
+    * Finish them before issuing the owner's short-lived source admission, then
+    * consume that admission immediately without widening its freshness bound. */
+   if (ingress_preinject_revalidate_sources() != 0)
+   {
+      cJSON_Delete(request);
+      return -1;
+   }
+   cJSON *plan = ingress_receipt_plan(request);
    const char *health_turn_handle =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "health_turn_handle"));
    if (g_health_turn_id[0] && health_turn_handle && strlen(health_turn_handle) == 32)
