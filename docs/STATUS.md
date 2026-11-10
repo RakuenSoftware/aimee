@@ -67,7 +67,7 @@ See the [current handoff](IR_MIGRATION_HANDOFF.md).
 
 | Feature | State | Boundary |
 | --- | --- | --- |
-| Shared memory writes on a KB | Not working | The shipped implementation refuses `memory.store` sent to a KB's API (`unsupported_mode`); list and search are served. 1.0.x shared memories cannot be imported yet. |
+| Shared memory on a KB | Done | Global plus the projects and workspaces declared in `AIMEE_MEMORY_SHARED_SCOPES`; facts stored as written, no extraction pipeline. |
 | Memory boundary | Done | Generic memory SDK and module transport; implementation vendored as a binary bundle (`linux/amd64`), provisioned per deployment by `aimee-memory-init` and re-prepared on image update with stored memory kept. An instance without a provisioned installation reports `missing_module: memory` and is not ready. |
 | Persistent typed memory | Installed implementation | Facts, rules, decisions, episodes, provenance, contradiction, and staleness are the installed implementation's contract. |
 | Server/KB placement | Done | Independent stores and immutable roles. Server owns private code and the personal placement; KB owns the shared corpus and the shared placement. Both use the Go PostgreSQL module and select their own memory implementation. |

@@ -16,6 +16,9 @@ installation that belongs to this deployment:
            stored memory, then switch the configuration over. Refused while the
            application is running.
 
+A KB serves an exact list of shared scopes, AIMEE_MEMORY_SHARED_SCOPES: `global`
+always, plus each `project:NAME` and `workspace:NAME` named there.
+
 The embedding provider is pinned by identity. The startup helpers read it from
 the embedder image and pass it on standard input; without input the recorded
 provider is kept, and a first provisioning without one has no vector retrieval.
@@ -67,7 +70,8 @@ def accounts(role: str, value: str | None) -> list[str]:
     """The accounts whose memory this installation serves.
 
     A Server serves each named account's personal memory; a KB has one shared
-    owner account. The list is fixed when the installation is first created.
+    owner account. Grants name accounts exactly, so the list is re-evaluated at
+    every start and an added or removed account re-prepares the installation.
     """
     names = [name.strip() for name in (value or RUNTIME_USER).split(',') if name.strip()]
     if role == 'kb':
@@ -79,6 +83,66 @@ def accounts(role: str, value: str | None) -> list[str]:
     for name in names:
         if len(name) > 128 or any(ord(char) < 33 or ord(char) > 126 for char in name):
             raise Refused(f'AIMEE_MEMORY_ACCOUNTS has an invalid account name: {name!r}')
+    return names
+
+
+def browser_logins(home: Path) -> list[str]:
+    """Browser accounts that can sign in, from the record runtime-web keeps in the home volume.
+
+    Each line is `<user>:<shadow verifier>`; a locked or empty verifier is not a
+    usable login. Only names are read. The first-boot login is included while
+    it has not been replaced.
+    """
+    names = []
+    record = home / 'webchat' / 'identities'
+    if record.is_file():
+        for line in record.read_text(errors='replace').splitlines():
+            name, _, verifier = line.partition(':')
+            if name and verifier and verifier[0] not in '!*':
+                names.append(name)
+    bootstrap, replaced = home / 'webchat' / 'bootstrap-user', home / 'webchat' / 'bootstrap-replaced'
+    if bootstrap.is_file() and not replaced.exists():
+        # One line, `<origin>:<name>` (origin `generated` or `explicit`).
+        names.append(bootstrap.read_text(errors='replace').strip().partition(':')[2])
+    valid = [name for name in names if name and len(name) <= 128 and all(32 < ord(char) < 127 for char in name)]
+    return sorted(set(valid))
+
+
+def served_accounts(role: str, value: str | None, home: Path) -> str:
+    """The configured account list plus every browser login, as one list for `accounts`."""
+    names = [name.strip() for name in (value or RUNTIME_USER).split(',') if name.strip()]
+    if role == 'server':
+        for name in browser_logins(home):
+            if name not in names:
+                names.append(name)
+        if RUNTIME_USER not in names:
+            names.insert(0, RUNTIME_USER)
+        if len(names) > 32:
+            log(f'{len(names)} accounts would be served but memory serves at most 32; '
+                f'not served: {", ".join(names[32:])}. Name the ones to serve first in AIMEE_MEMORY_ACCOUNTS')
+            names = names[:32]
+    return ','.join(names)
+
+
+def shared_scopes(role: str, value: str | None) -> list[str]:
+    """The exact shared scopes a KB serves: global, project:NAME, workspace:NAME.
+
+    Memory grants name scopes exactly; there is no wildcard. A project or
+    workspace that is not listed cannot be written or read.
+    """
+    if role != 'kb':
+        return []
+    names = [name.strip() for name in (value or 'global').split(',') if name.strip()]
+    if 'global' not in names:
+        names.insert(0, 'global')
+    if len(names) > 96 or len(set(names)) != len(names):
+        raise Refused('AIMEE_MEMORY_SHARED_SCOPES must name at most 96 distinct scopes')
+    for name in names:
+        kind, _, scope = name.partition(':')
+        if name != 'global' and (kind not in ('project', 'workspace') or not scope or len(scope) > 128
+                                 or scope.startswith('_') or any(ord(char) < 33 or ord(char) > 126 for char in scope)):
+            raise Refused(f'AIMEE_MEMORY_SHARED_SCOPES has an invalid scope: {name!r} '
+                          '(use global, project:NAME or workspace:NAME)')
     return names
 
 
@@ -186,23 +250,30 @@ def recorded_policy(inputs: Path) -> dict | None:
     return json.loads(report.read_text())
 
 
-def desired_policy(role: str, recorded: dict | None, requested_accounts: str | None, health: dict | None) -> dict:
-    """Accounts and embedding provider this run asks for; unspecified parts keep the recorded value."""
+def desired_policy(role: str, recorded: dict | None, requested_accounts: str | None, health: dict | None,
+                   requested_scopes: str | None = None) -> dict:
+    """Accounts, shared scopes and embedding provider this run asks for; unspecified parts keep the recorded value."""
     if requested_accounts is None and recorded is not None:
         names = list(recorded['accounts'])
     else:
         names = accounts(role, requested_accounts)
+    if requested_scopes is None and recorded is not None:
+        scopes = list(recorded.get('shared_scopes', []))
+    else:
+        scopes = shared_scopes(role, requested_scopes)
     if health is not None:
         digest = health['embedding_identity_digest']
     else:
         digest = recorded.get('embedding_provider_identity_digest') if recorded else None
-    return {'accounts': names, 'embedding_provider_identity_digest': digest}
+    return {'accounts': names, 'shared_scopes': scopes, 'embedding_provider_identity_digest': digest}
 
 
 def policy_changes(recorded: dict, desired: dict) -> list[str]:
     changes = []
     if list(recorded['accounts']) != desired['accounts']:
         changes.append('accounts')
+    if list(recorded.get('shared_scopes', [])) != desired['shared_scopes']:
+        changes.append('shared scopes')
     if recorded.get('embedding_provider_identity_digest') != desired['embedding_provider_identity_digest']:
         changes.append('embedding provider')
     return changes
@@ -214,6 +285,8 @@ def write_inputs(role: str, inputs: Path, desired: dict, health: dict | None, no
             '--output', str(inputs)]
     for name in desired['accounts']:
         argv += ['--account', name]
+    for scope in desired['shared_scopes']:
+        argv += ['--shared-scope', scope]
     if node is not None:
         argv += ['--node', node]
     handed = None
@@ -302,7 +375,8 @@ def provision(role: str, health: dict | None = None) -> str:
         raise Refused('this image carries no memory bundle for its platform, so memory cannot be provisioned; '
                       'set AIMEE_MEMORY_PROVISION=off to run this instance without memory')
     recorded = recorded_policy(inputs)
-    desired = desired_policy(role, recorded, os.environ.get('AIMEE_MEMORY_ACCOUNTS') or None, health)
+    desired = desired_policy(role, recorded, served_accounts(role, os.environ.get('AIMEE_MEMORY_ACCOUNTS'), HOME),
+                             health, os.environ.get('AIMEE_MEMORY_SHARED_SCOPES') or None)
     if not (installed / 'installation.json').is_file():
         # Nothing is stored yet, so the memory identity may be created or recreated freely.
         remove_placeholder(installed)
@@ -310,7 +384,9 @@ def provision(role: str, health: dict | None = None) -> str:
             if stale.exists():
                 shutil.rmtree(stale)
         write_inputs(role, inputs, desired, health, None)
-        log(f'memory identity created for {role}; accounts: {", ".join(desired["accounts"])}; vector retrieval: '
+        log(f'memory identity created for {role}; accounts: {", ".join(desired["accounts"])}; '
+            + (f'shared scopes: {", ".join(desired["shared_scopes"])}; ' if desired['shared_scopes'] else '')
+            + 'vector retrieval: '
             + ('on' if desired['embedding_provider_identity_digest'] else 'off (no embedder identity supplied)'))
         prepare(role, prefix, inputs, None)
         install_home(prefix)

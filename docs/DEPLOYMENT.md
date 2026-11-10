@@ -223,7 +223,7 @@ service that runs `aimee-memory-provision` before the application starts:
 | --- | --- |
 | First start | Generates the instance's memory identity, grants and owner key; prepares the installation in the `aimee-memory` volume; creates `private-memory/<role>` in the home volume. |
 | Later starts | Verifies the installation and changes nothing. |
-| After an image update, or a changed `AIMEE_MEMORY_ACCOUNTS` or embedder | Prepares the installation again under the same identity; the owner key and stored memory are kept. Refused while the application is running: stop the stack, then start it again. |
+| After an image update, or a change in the served accounts, shared scopes or embedder | Prepares the installation again under the same identity; the owner key and stored memory are kept. Refused while the application is running: stop the stack, then start it again. |
 
 Start and restart the stack through `scripts/compose-local.sh` (or `scripts/compose-vault-init.py`
 followed by `docker compose up`). The helper reads the embedder image's identity, which memory pins
@@ -237,8 +237,16 @@ Storage and recovery:
 - Memory records, configuration and the owner key live under `private-memory/` in the home volume
   (`aimee-server-home`). Back that volume up and restore it together with the Vault and the
   PostgreSQL store. Without `private-memory/inputs-<role>` an installation cannot be re-prepared.
-- `AIMEE_MEMORY_ACCOUNTS` (default `aimee`, comma-separated, at most 32) names the accounts a
-  Server serves personal memory for. A KB has a single shared owner.
+- A Server serves personal memory for the runtime account `aimee`, every browser login, and any
+  further account named in `AIMEE_MEMORY_ACCOUNTS` (comma-separated), at most 32 in all. The
+  list is re-evaluated at each start; a browser login created while the stack runs gets personal
+  memory after the next restart, and until then its memory commands are refused.
+- A KB serves an exact list of shared scopes, `AIMEE_MEMORY_SHARED_SCOPES` (default `global`,
+  comma-separated `global`, `project:NAME` and `workspace:NAME`). `global` is always included. A
+  project or workspace that is not listed cannot be written; a store into one is refused with a
+  message naming this setting, and reads there return only global memory. Add it and restart
+  the KB.
+  Shared facts are stored as written, with no extraction pipeline.
 - `AIMEE_MEMORY_PROVISION=off` skips provisioning and creates only the mount points. An instance
   with no installation then runs without memory (`missing_module: memory`, not ready); an existing
   installation is left untouched and stays active.
@@ -250,8 +258,6 @@ Requirements and limits:
   provisioning service fails with a message saying so, unless provisioning is switched off.
 - An instance without a provisioned installation is not ready (`/v1/ready` returns `503`) and
   answers memory commands with `503`.
-- On a KB the shipped implementation serves shared memory list and search but refuses
-  `memory.store` sent to the KB's API (`unsupported_mode`).
 - A composition without a local `aimee-embedder` service is provisioned without vector retrieval.
 
 See [Memory boundary](MEMORY.md) and the [memory module](modules/memory.md).

@@ -2,8 +2,10 @@
 """Tests for scripts/upgrade/migrate-memory.py with a fake psql and fake Server/KB endpoints."""
 from __future__ import annotations
 
+import contextlib
 import http.server
 import importlib.util
+import io
 import json
 import os
 import socketserver
@@ -169,6 +171,19 @@ class MigrateMemoryTests(unittest.TestCase):
         self.assertEqual(stores[2][1]['workspace'], '/srv/ws')
         self.assertTrue(all('store' not in body for _, body, _ in stores))
         self.assertEqual(stores[1][1]['idempotency_key'], 'upgrade-1.0-kb-2-2')
+
+    def test_scopes_names_what_a_kb_must_serve_before_import(self):
+        path = self.snapshot([row(1, 'kb'), row(2, 'kb', scope_type='project', scope_value='zephyr'),
+                              row(3, 'kb', scope_type='project', scope_value='apollo'),
+                              row(4, 'kb', scope_type='project', scope_value='apollo'),
+                              row(5, 'kb', scope_type='workspace', scope_value='/srv/ws'),
+                              row(6, 'kb', scope_type='session', scope_value='s-1')], 'kb')
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(self.run_tool('scopes', '--file', str(path)), 0)
+        self.assertEqual(out.getvalue().strip(), 'global,project:apollo,project:zephyr,workspace:/srv/ws')
+        server = self.snapshot([row(7)], name='personal.jsonl')
+        with self.assertRaises(SystemExit):
+            self.run_tool('scopes', '--file', str(server))
 
     def test_import_refuses_the_wrong_placement_an_unready_instance_and_reports_failures(self):
         path = self.snapshot([row(1), row(2)])

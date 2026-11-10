@@ -225,6 +225,22 @@ def import_(args: argparse.Namespace) -> int:
     return 1 if failed or unplaced else 0
 
 
+def shared_scopes(records: list[dict]) -> list[str]:
+    """AIMEE_MEMORY_SHARED_SCOPES entries a KB needs to accept every placeable record of a snapshot."""
+    scopes = []
+    for record in records:
+        if record['scope_type'] in ('project', 'workspace') and record['scope_value']:
+            entry = f'{record["scope_type"]}:{record["scope_value"]}'
+            if entry not in scopes:
+                scopes.append(entry)
+    return ['global'] + sorted(scopes)
+
+
+def scopes(args: argparse.Namespace) -> int:
+    print(','.join(shared_scopes(load(Path(args.file), 'kb'))))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -236,6 +252,9 @@ def main() -> int:
                           '"docker compose exec -T aimee-store-db psql -U postgres -d aimee_store". '
                           'The default uses the normal PG* environment.')
     out.set_defaults(run=export)
+    need = commands.add_parser('scopes', help='print the AIMEE_MEMORY_SHARED_SCOPES value a KB snapshot needs')
+    need.add_argument('--file', required=True, help='KB snapshot written by export')
+    need.set_defaults(run=scopes)
     into = commands.add_parser('import', help='store an exported snapshot through the running instance')
     into.add_argument('--placement', choices=('server', 'kb'), required=True)
     into.add_argument('--file', required=True, help='snapshot written by export')

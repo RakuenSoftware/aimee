@@ -23,20 +23,19 @@ because the memory owner built into 1.0.x is replaced by a new, separate impleme
 
 Limits of this release:
 
-- **A KB does not accept shared memory writes.** The shipped implementation serves shared memory
-  list and search on a KB, but answers every `memory.store` sent to the KB's API with
-  `unsupported_mode`. New shared memories cannot be stored there and 1.0.x shared memories cannot
-  be imported; they stay in the retained `memories` table. Personal memory on a Server is not
-  affected. A KB that depends on shared memory writes should stay on 1.0.2.
+- A KB serves an exact list of shared scopes: `global` and each `project:NAME` and
+  `workspace:NAME` named in `AIMEE_MEMORY_SHARED_SCOPES`. 1.0.x accepted any project a caller
+  named; an undeclared one is now refused. Shared facts are stored as written; no extraction
+  pipeline runs on them.
 - The memory bundle exists for `linux/amd64` only. An image for another platform carries no
   memory: its provisioning service fails with a message, and an instance without a provisioned
   installation reports `missing_module: memory` and is not ready.
 - The Compose files need Docker Engine 26 or later and Compose 2.26 or later (volume subpath
   mounts). Start the stack through `scripts/compose-local.sh`, which reads the embedder image's
   identity for memory and runs provisioning.
-- A Server serves personal memory for the accounts named in `AIMEE_MEMORY_ACCOUNTS` (default
-  `aimee`, at most 32). An account created later is added by changing that list and restarting
-  the stack.
+- A Server serves personal memory for the runtime account, every browser login and any account
+  named in `AIMEE_MEMORY_ACCOUNTS`, at most 32 in all. The list is re-evaluated at each start, so a
+  browser login created while the stack runs gets personal memory at the next restart.
 - A change to any public file the bundle was compiled against needs a rebuilt bundle; lint and
   the image build refuse a stale one.
 
@@ -70,9 +69,9 @@ Read [Upgrading from 1.0.2](../../UPGRADING.md#upgrade-from-102) first. In short
   `scripts/compose-local.sh`. Memory is provisioned on the first start and is ready but empty.
 - Existing memories are retained in the 1.0.x tables (`user_memories` on a Server, `memories` on a
   KB) but are not read by the new implementation. `scripts/upgrade/migrate-memory.py` exports the
-  active records read-only and, on a Server, imports them through the public store command,
-  idempotently. Record ids, revision history and embeddings are not carried over. On a KB the
-  export works and the import is refused; see the limits above.
+  active records read-only and imports them through the public store command, idempotently. On
+  a KB, `migrate-memory.py scopes` prints the shared scopes to declare first. Record ids,
+  revision history and embeddings are not carried over.
 - Records held by a Cognee or Hillock backend selected in 1.0.2 are not in those tables and are
   not moved by that tool.
 

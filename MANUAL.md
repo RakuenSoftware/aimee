@@ -136,8 +136,9 @@ the one-shot `aimee-memory-init` service, which creates the instance's memory in
 start, verifies it on later starts, and prepares it again after an image update while keeping the
 stored memory. Provisioning does not change the personal/shared selector, caller authentication or
 the host's provider-send checks. The instance reports `missing_module: memory` in `/v1/ready` when
-no installation is attached. A Server serves personal memory for the accounts named in
-`AIMEE_MEMORY_ACCOUNTS` (default `aimee`); change the list while the stack is stopped. See
+no installation is attached. A Server serves personal memory for `aimee` and every browser login (plus
+any account in `AIMEE_MEMORY_ACCOUNTS`), re-evaluated at each start; a KB serves the shared scopes
+in `AIMEE_MEMORY_SHARED_SCOPES`. See
 [Deployment](docs/DEPLOYMENT.md#memory) for storage and backup, and
 [Upgrading](docs/UPGRADING.md#upgrade-from-102) to carry memories forward from a 1.0.x deployment.
 The [native attention plugin](docs/NATIVE_MEMORY_PLUGIN.md) separately consumes selected records
