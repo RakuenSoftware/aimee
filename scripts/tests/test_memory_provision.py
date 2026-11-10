@@ -84,7 +84,8 @@ class Policy(unittest.TestCase):
 
     def test_kb_serves_global_and_each_declared_scope(self):
         self.assertEqual(module.shared_scopes('server', 'project:apollo'), [])
-        self.assertEqual(module.shared_scopes('kb', None), ['global'])
+        self.assertEqual(module.shared_scopes('kb', None), ['global', 'project:*', 'workspace:*'])
+        self.assertEqual(module.shared_scopes('kb', 'project:*'), ['global', 'project:*'])
         self.assertEqual(module.shared_scopes('kb', 'project:apollo, workspace:w1'),
                          ['global', 'project:apollo', 'workspace:w1'])
         self.assertEqual(module.shared_scopes('kb', 'project:apollo,global'), ['project:apollo', 'global'])

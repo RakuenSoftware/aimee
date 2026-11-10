@@ -16,8 +16,9 @@ installation that belongs to this deployment:
            stored memory, then switch the configuration over. Refused while the
            application is running.
 
-A KB serves an exact list of shared scopes, AIMEE_MEMORY_SHARED_SCOPES: `global`
-always, plus each `project:NAME` and `workspace:NAME` named there.
+A KB serves the shared scopes in AIMEE_MEMORY_SHARED_SCOPES: `global` always, and
+by default every project and workspace (`project:*`, `workspace:*`); listing
+`project:NAME` / `workspace:NAME` instead limits it to those.
 
 The embedding provider is pinned by identity. The startup helpers read it from
 the embedder image and pass it on standard input; without input the recorded
@@ -124,25 +125,31 @@ def served_accounts(role: str, value: str | None, home: Path) -> str:
     return ','.join(names)
 
 
-def shared_scopes(role: str, value: str | None) -> list[str]:
-    """The exact shared scopes a KB serves: global, project:NAME, workspace:NAME.
+OPEN_SHARED_SCOPES = 'global,project:*,workspace:*'
 
-    Memory grants name scopes exactly; there is no wildcard. A project or
-    workspace that is not listed cannot be written or read.
+
+def shared_scopes(role: str, value: str | None) -> list[str]:
+    """The shared scopes a KB serves.
+
+    `global` is always served. `project:*` and `workspace:*` serve every project
+    or workspace a caller names (the default); `project:NAME` and
+    `workspace:NAME` serve one each, for a KB limited to a fixed list.
     """
     if role != 'kb':
         return []
-    names = [name.strip() for name in (value or 'global').split(',') if name.strip()]
+    names = [name.strip() for name in (value or OPEN_SHARED_SCOPES).split(',') if name.strip()]
     if 'global' not in names:
         names.insert(0, 'global')
     if len(names) > 96 or len(set(names)) != len(names):
         raise Refused('AIMEE_MEMORY_SHARED_SCOPES must name at most 96 distinct scopes')
     for name in names:
         kind, _, scope = name.partition(':')
+        if name in ('project:*', 'workspace:*'):
+            continue
         if name != 'global' and (kind not in ('project', 'workspace') or not scope or len(scope) > 128
                                  or scope.startswith('_') or any(ord(char) < 33 or ord(char) > 126 for char in scope)):
             raise Refused(f'AIMEE_MEMORY_SHARED_SCOPES has an invalid scope: {name!r} '
-                          '(use global, project:NAME or workspace:NAME)')
+                          '(use global, project:*, workspace:*, project:NAME or workspace:NAME)')
     return names
 
 

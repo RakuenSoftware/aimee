@@ -41,9 +41,9 @@ services:
     environment:
       AIMEE_INSTANCE_ROLE: server
       AIMEE_MEMORY_ACCOUNTS: ${AIMEE_MEMORY_ACCOUNTS:-aimee}
-      # KB only: the exact shared scopes it serves. `global` is always served;
-      # add each project:NAME and workspace:NAME that holds shared memory.
-      AIMEE_MEMORY_SHARED_SCOPES: ${AIMEE_MEMORY_SHARED_SCOPES:-global}
+      # KB only: the shared scopes it serves. `global` always; by default every
+      # project and workspace. List project:NAME / workspace:NAME to restrict it.
+      AIMEE_MEMORY_SHARED_SCOPES: ${AIMEE_MEMORY_SHARED_SCOPES:-global,project:*,workspace:*}
       # `off` creates only the mount points; the instance then runs without
       # memory and reports missing_module: memory.
       AIMEE_MEMORY_PROVISION: ${AIMEE_MEMORY_PROVISION:-on}
