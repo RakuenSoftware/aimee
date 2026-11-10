@@ -4,6 +4,8 @@
 #include "server.h"
 #include "integrity.h"
 #include "request_context.h"
+#include "module_commands.h"
+#include <ouroboros/module_client.h>
 
 #include <assert.h>
 #include <stdio.h>
@@ -938,6 +940,48 @@ int aimee_module_commands_dispatch_internal_context_timeout(const char *method, 
    return *result ? 1 : -1;
 }
 
+static int private_sdk_fault = -1;
+int aimee_module_commands_dispatch_internal_outcome_context_timeout_v1(
+    const char *method, const cJSON *args, const cJSON *context, int timeout_ms, cJSON **result,
+    aimee_module_command_outcome_v1 *outcome)
+{
+   *outcome = (aimee_module_command_outcome_v1){1, AIMEE_COMMAND_SDK_RESULT, private_sdk_fault};
+   if (private_sdk_fault >= 0)
+   {
+      *result = NULL;
+      return -1;
+   }
+   int rc = aimee_module_commands_dispatch_internal_context_timeout(method, args, context,
+                                                                    timeout_ms, result);
+   outcome->stage = rc > 0 ? AIMEE_COMMAND_BODY_READY : AIMEE_COMMAND_UNSENT;
+   outcome->sdk_result = rc > 0 ? OURO_MODULE_CALL_OK : -1;
+   return rc;
+}
+
+static void test_private_invalid_request_is_not_backend_unavailable(void)
+{
+   cJSON *request = cJSON_Parse(
+       "{\"store\":\"user\",\"key\":\"safe\",\"content\":\"password=owned-synthetic-noecho\"}");
+   const int faults[] = {OURO_MODULE_CALL_INVALID_REQUEST,   OURO_MODULE_CALL_TRANSPORT,
+                         OURO_MODULE_CALL_CAPABILITY_ABSENT, OURO_MODULE_CALL_CAPABILITY_DENIED,
+                         OURO_MODULE_CALL_DEADLINE_EXCEEDED, OURO_MODULE_CALL_PROTOCOL};
+   for (unsigned i = 0; i < sizeof faults / sizeof faults[0]; ++i)
+   {
+      private_sdk_fault = faults[i];
+      cJSON *reply = memory_store_command(request, MEMORY_AUTHORITY_USER);
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItem(reply, "kind"));
+      assert(kind && !strcmp(kind, faults[i] == OURO_MODULE_CALL_INVALID_REQUEST
+                                       ? SERVER_ERR_INVALID_ARGUMENT
+                                       : SERVER_ERR_UNAVAILABLE));
+      char *wire = cJSON_PrintUnformatted(reply);
+      assert(wire && !strstr(wire, "owned-synthetic-noecho") && !strstr(wire, "password="));
+      free(wire);
+      cJSON_Delete(reply);
+   }
+   private_sdk_fault = -1;
+   cJSON_Delete(request);
+}
+
 static void test_private_verified_context(void)
 {
    cJSON *request = cJSON_Parse("{\"key\":\"actor\",\"content\":\"content\",\"authority\":\"user\","
@@ -1286,6 +1330,7 @@ int main(void)
    test_personal_recall_owner_envelope();
    test_private_command_envelopes();
    test_shared_supersede_authority();
+   test_private_invalid_request_is_not_backend_unavailable();
    test_private_verified_context();
    test_private_correction_review_transport();
    test_served_view_transport();

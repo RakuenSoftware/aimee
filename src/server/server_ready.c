@@ -85,7 +85,8 @@ typedef struct
    long long retry_after_ms;
    long long last_success_query_ms;
    char last_ingest_at[64];
-   long sampled_at; /* epoch seconds; 0 = never sampled */
+   long sampled_at;           /* epoch seconds; 0 = never sampled */
+   uint64_t slot_fingerprint; /* registry identity sampled with these dependencies */
 } ready_snapshot_t;
 
 static pthread_mutex_t g_ready_mtx = PTHREAD_MUTEX_INITIALIZER;
@@ -220,6 +221,7 @@ void server_ready_sample_now(void)
 {
    ready_snapshot_t s;
    memset(&s, 0, sizeof(s));
+   s.slot_fingerprint = obs_bus_slot_fingerprint();
 
    s.db1 = db1_store_probe() ? DEP_OK : DEP_FAIL;
 
@@ -307,7 +309,8 @@ void server_ready_sample_now(void)
       if (s.audit_capacity_failed)
          snprintf(s.failed_boundary, sizeof(s.failed_boundary), "audit_capacity");
    }
-   s.sampled_at = (long)time(NULL);
+   /* Dependency probes must all describe one registry generation. */
+   s.sampled_at = s.slot_fingerprint == obs_bus_slot_fingerprint() ? (long)time(NULL) : 0;
 
    pthread_mutex_lock(&g_ready_mtx);
    g_snap = s;
@@ -333,10 +336,12 @@ static void *ready_sampler_main(void *arg)
 
 /* g_ready_mtx held. Ask for a new sample when the snapshot is older than the
  * interval; when it is too old to answer from at all, wait (bounded) for it. */
-static void sample_if_due_locked(void)
+static void sample_if_due_locked(uint64_t fingerprint)
 {
    long now = (long)time(NULL);
-   long age = g_snap.sampled_at > 0 ? now - g_snap.sampled_at : -1;
+   long age = g_snap.sampled_at > 0 && g_snap.slot_fingerprint == fingerprint
+                  ? now - g_snap.sampled_at
+                  : -1;
    if (age >= 0 && age < ready_interval_secs())
       return;
    if (!g_ready_thread_started)
@@ -444,10 +449,14 @@ int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t 
  * and wait a bounded time for it, then a locked copy and a pure render. */
 static int ready_provider(char *resp, int cap)
 {
+   uint64_t fingerprint = obs_bus_slot_fingerprint();
    pthread_mutex_lock(&g_ready_mtx);
-   sample_if_due_locked();
+   sample_if_due_locked(fingerprint);
    ready_snapshot_t s = g_snap;
    pthread_mutex_unlock(&g_ready_mtx);
+   /* Also catch replacement during the bounded sampler wait or copy. */
+   if (s.slot_fingerprint != obs_bus_slot_fingerprint())
+      s.sampled_at = 0;
 
    int db1_ok = (s.db1 == DEP_UNKNOWN) ? -1 : (s.db1 == DEP_OK);
    int kb_ok = (s.kb == DEP_UNKNOWN) ? -1 : (s.kb == DEP_OK);

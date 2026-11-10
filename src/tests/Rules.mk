@@ -360,6 +360,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-gateway-mutate-wire \
                $(TESTPREFIX)/unit-test-tool-output-cap \
                $(TESTPREFIX)/unit-test-ingress-preinject \
+               $(TESTPREFIX)/unit-test-ingress-receipt-order \
                $(TESTPREFIX)/unit-test-code-span \
                $(TESTPREFIX)/unit-test-code-match \
                $(TESTPREFIX)/unit-test-ir-module-plan \
@@ -1794,16 +1795,32 @@ $(TESTPREFIX)/unit-test-css-render-cmd: $(OBJDIR)/tests/test_css_render_cmd.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
+# Keep the audit-owner call interposable in this timing regression under LTO.
+$(OBJDIR)/tests/ingress_preinject_receipt_order.o: server/ingress_preinject.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(C_FLAGS) -fno-lto -o $@ $<
+
 $(TESTPREFIX)/unit-test-ingress-preinject: $(OBJDIR)/tests/test_ingress_preinject.o $(filter %/platform_path.o,$(PLATFORM_BASIC_OBJS)) \
                      $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                      $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o $(OBJDIR)/modules/vault/vault_server_key.o \
                      $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o \
                      $(OBJDIR)/aimee_sha256.o $(OBJDIR)/aimee_home.o \
-                     $(OBJDIR)/server/ingress_preinject.o $(OBJDIR)/server/request_context.o $(OBJDIR)/wire_fence.o \
+                     $(OBJDIR)/tests/ingress_preinject_receipt_order.o $(OBJDIR)/server/request_context.o $(OBJDIR)/wire_fence.o \
                      $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o \
                      $(OBJDIR)/log.o $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o \
                      $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ -Wl,--wrap=audit_worm_dispatch_owner $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-ingress-receipt-order: $(OBJDIR)/tests/test_ingress_receipt_order.o $(filter %/platform_path.o,$(PLATFORM_BASIC_OBJS)) \
+                     $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
+                     $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o $(OBJDIR)/modules/vault/vault_server_key.o \
+                     $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o \
+                     $(OBJDIR)/aimee_sha256.o $(OBJDIR)/aimee_home.o \
+                     $(OBJDIR)/tests/ingress_preinject_receipt_order.o $(OBJDIR)/server/request_context.o $(OBJDIR)/wire_fence.o \
+                     $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o \
+                     $(OBJDIR)/log.o $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o \
+                     $(OBJDIR)/tests/support/module_runtime_fixture.o
+	$(TESTLINK) -o $@ $^ -Wl,--wrap=audit_worm_dispatch_owner $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-code-span: $(OBJDIR)/tests/test_code_span.o \
                      $(OBJDIR)/server/code_span.o $(OBJDIR)/kb/kb_doc_hash.o \
@@ -6827,6 +6844,7 @@ $(TESTPREFIX)/unit-test-host-original-submission: $(OBJDIR)/tests/test_host_orig
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-server-chat-original-input: $(OBJDIR)/tests/test_server_chat_original_input.o \
+    $(OBJDIR)/server/request_context.o $(OBJDIR)/server/host_original_submission.o \
     $(OBJDIR)/server/server_chat_ir.o $(OBJDIR)/server/server_session_capture.o \
     $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_learning_outcome.o \
     $(OBJDIR)/tests/support/learning_outcome_stub.o $(OBJDIR)/tests/support/log_stub.o \

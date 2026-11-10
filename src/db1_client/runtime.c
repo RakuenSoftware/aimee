@@ -26,6 +26,7 @@ AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_store_legacy_guard_contract_v1);
 #include "log.h"
 #include "module_json_call.h"
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -479,3 +480,87 @@ int db1_mcp_osv_audit(const char *client_name, const char *ecosystem, const char
 }
 
 /* clang-format on */
+
+int db1_session_cache_get(const char *session, const char *key, char *out, size_t cap,
+                          int64_t *revision)
+{
+   if (!session || !session[0] || !key || !key[0] || !out || cap < 1 || cap > 65537 || !revision)
+      return -1;
+   out[0] = 0;
+   *revision = 0;
+   char version[32] = {0};
+   const char *args[] = {session, key};
+   char *values[] = {out, version};
+   size_t caps[] = {cap, sizeof version};
+   int status = db1_call(&family, AIMEE_DB1_OP_SESSION_CACHE_GET, args, 2, values, caps, 2, NULL);
+   if (status == (int)AIMEE_DB1_STATUS_MISSING)
+      return 1;
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   char *end = NULL;
+   errno = 0;
+   long long v = strtoll(version, &end, 10);
+   if (errno || !end || *end || v <= 0)
+      return -1;
+   *revision = v;
+   return 0;
+}
+int db1_session_cache_cas(const char *session, const char *key, int64_t expected, const char *nonce,
+                          const char *value, int64_t *revision)
+{
+   if (!session || !session[0] || !key || !key[0] || expected < 0 || !nonce || !nonce[0] ||
+       !value || strlen(value) > 65536 || !revision)
+      return -1;
+   char prior[32], version[32] = {0};
+   snprintf(prior, sizeof prior, "%lld", (long long)expected);
+   const char *args[] = {session, key, prior, nonce, value};
+   char *values[] = {version};
+   size_t caps[] = {sizeof version};
+   int status = db1_call(&family, AIMEE_DB1_OP_SESSION_CACHE_CAS, args, 5, values, caps, 1, NULL);
+   if (status == (int)AIMEE_DB1_STATUS_MISSING)
+      return 1;
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   char *end = NULL;
+   errno = 0;
+   long long v = strtoll(version, &end, 10);
+   if (errno || !end || *end || v <= 0)
+      return -1;
+   *revision = v;
+   return 0;
+}
+int db1_session_cache_delete(const char *session)
+{
+   if (!session || !session[0])
+      return -1;
+   const char *args[] = {session};
+   return write_result(
+       db1_call(&family, AIMEE_DB1_OP_SESSION_CACHE_DELETE, args, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_session_cache_receipt(const char *session, const char *key, const char *nonce, char *out,
+                              size_t cap, int64_t *revision)
+{
+   if (!session || !session[0] || !key || !key[0] || !nonce || !nonce[0] || !out || cap < 1 ||
+       cap > 65537 || !revision)
+      return -1;
+   out[0] = 0;
+   *revision = 0;
+   char version[32] = {0};
+   const char *args[] = {session, key, nonce};
+   char *values[] = {out, version};
+   size_t caps[] = {cap, sizeof version};
+   int status =
+       db1_call(&family, AIMEE_DB1_OP_SESSION_CACHE_RECEIPT, args, 3, values, caps, 2, NULL);
+   if (status == (int)AIMEE_DB1_STATUS_MISSING)
+      return 1;
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   char *end = NULL;
+   errno = 0;
+   long long v = strtoll(version, &end, 10);
+   if (errno || !end || *end || v <= 0)
+      return -1;
+   *revision = v;
+   return 0;
+}

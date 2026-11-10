@@ -49,6 +49,7 @@
     "server-go/modules/aimee/families/roundtable.go",
     "server-go/modules/aimee/families/runtime.go",
     "server-go/modules/aimee/families/runtime_caches.go",
+    "server-go/modules/aimee/families/runtime_session_cache.go",
     "server-go/modules/aimee/families/runtime_fsnap.go",
     "server-go/modules/aimee/families/runtime_state.go",
     "server-go/modules/aimee/families/schema.go",
@@ -145,6 +146,7 @@
     "server-go/modules/aimee/families/process_contract_test.go",
     "server-go/modules/aimee/families/roundtable_test.go",
     "server-go/modules/aimee/families/runtime_caches_test.go",
+    "server-go/modules/aimee/families/runtime_session_cache_test.go",
     "server-go/modules/aimee/families/runtime_caches_utf8_test.go",
     "server-go/modules/aimee/families/session_exploration_live_test.go",
     "server-go/modules/aimee/families/session_ir_declined_tool_history_test.go",
@@ -153,6 +155,7 @@
     "server-go/modules/aimee/families/session_ir_rejected_admission_test.go",
     "server-go/modules/aimee/families/session_ir_live_test.go",
     "server-go/modules/aimee/families/session_ir_test.go",
+    "server-go/modules/aimee/families/session_ir_delayed_terminal_order_test.go",
     "server-go/modules/aimee/families/sessions_test.go",
     "server-go/modules/aimee/families/session_legacy_text_test.go",
     "server-go/modules/aimee/families/status_separation_test.go",
@@ -265,6 +268,7 @@
     "server-go/modules/aimee/families/schema_native_cache_reservations.sql",
     "server-go/modules/aimee/families/schema_legacy_primary_text.sql",
     "server-go/modules/aimee/families/schema_original_input_deliveries.sql",
-    "server-go/modules/aimee/families/schema_original_input_plans.sql"
+    "server-go/modules/aimee/families/schema_original_input_plans.sql",
+    "server-go/modules/aimee/families/schema_session_cache.sql"
   ]
 }

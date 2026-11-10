@@ -15,6 +15,10 @@ func (s *server) memoryProxyHandler(path string) http.HandlerFunc {
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		if !sameOriginRequest(r) {
+			writeJSONError(w, http.StatusForbidden, "cross-origin memory request refused")
+			return
+		}
 		body, ok := readBoundedBody(w, r, 1<<20)
 		if !ok {
 			return

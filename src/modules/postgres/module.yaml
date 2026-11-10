@@ -39,6 +39,7 @@
     "server-go/modules/postgres/shared_legacy_history_test.go",
     "server-go/modules/postgres/shared_cleanup_test.go",
     "server-go/modules/postgres/shared_migrations_test.go",
+    "server-go/modules/postgres/shared_session_cache_upgrade_test.go",
     "server-go/modules/postgres/shared_workflow_test.go",
     "server-go/modules/postgres/sql_security_test.go",
     "server-go/modules/postgres/transaction_handles_test.go",

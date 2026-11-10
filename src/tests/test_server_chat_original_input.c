@@ -11,6 +11,7 @@ const unsigned aimee_original_input_attachment_contract_v1 = 1;
 static int mode, batches, callbacks, model_runs;
 static cJSON *minted;
 static int cookie;
+static const char *expected_operation = "12345678-1234-4234-8234-123456789abc";
 static int admit(const char *session, const char *turn, const char *principal,
                  const aimee_message_t *m, const void **out, void *state)
 {
@@ -40,14 +41,16 @@ static int created(const server_input_created_cap_t *cap, void *state)
       assert(server_session_capture_append(server_session_capture_current(), &event, NULL, NULL) ==
              -1);
    }
-   return mode == 6 ? -1 : 0;
+   if (mode == 15)
+      fail_store = 1; /* BEGIN/User committed; terminal storage becomes unavailable. */
+   return mode == 6 || mode == 15 ? -1 : 0;
 }
 int db1_session_original_input_begin(const char *session, const char *operation, const char *turn,
                                      const char *actor, const char *wire,
                                      db1_original_input_receipt_t *receipt)
 {
    batches++;
-   assert(!strcmp(operation, "12345678-1234-4234-8234-123456789abc"));
+   assert(!strcmp(operation, expected_operation));
    if (mode == 3)
       return 1;
    if (mode == 5)
@@ -85,7 +88,7 @@ static cJSON *attachment(void)
    assert(a && !aimee_sha256_hex("safe input", 10, digest));
    cJSON_AddNumberToObject(a, "schema_version", 1);
    cJSON_AddStringToObject(a, "kind", "host.original-input.v1");
-   cJSON_AddStringToObject(a, "operation_uuid", "12345678-1234-4234-8234-123456789abc");
+   cJSON_AddStringToObject(a, "operation_uuid", expected_operation);
    cJSON_AddStringToObject(
        a, "text_sha256",
        mode == 10 ? "0000000000000000000000000000000000000000000000000000000000000000" : digest);
@@ -128,7 +131,13 @@ static void run(int selected)
       assert(!pthread_create(&t, NULL, worker, &c) && !pthread_join(t, &result) &&
              result == PTHREAD_CANCELED);
       assert(!c.ir_enabled && !c.ir_capture && !c.ir_controls && callbacks == 1 && !model_runs &&
-             cJSON_GetArraySize(log_entries) == 2);
+             cJSON_GetArraySize(log_entries) == 3);
+      const cJSON *terminal = cJSON_GetArrayItem(log_entries, 2);
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(terminal, "kind")),
+                     "execution"));
+      const cJSON *payload = cJSON_GetObjectItemCaseSensitive(terminal, "payload");
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "status")),
+                     "cancelled"));
    }
    else
    {
@@ -158,11 +167,23 @@ static void run(int selected)
       {
          assert(result != 0 && !model_runs && !c.ir_enabled && !c.ir_capture && !c.ir_controls);
          int expected = (mode == 3 || mode == 4 || mode == 6 || mode == 8 || mode == 9 ||
-                         mode == 12 || mode == 14)
+                         mode == 12 || mode == 14 || mode == 15)
                             ? 2
                             : 0;
+         if (mode == 6 || mode == 12 || mode == 14)
+            expected = 3;
          assert(cJSON_GetArraySize(log_entries) == expected);
-         assert(callbacks == ((mode == 6 || mode == 12 || mode == 14) ? 1 : 0));
+         if (expected == 3)
+         {
+            const cJSON *terminal = cJSON_GetArrayItem(log_entries, 2);
+            const cJSON *payload = cJSON_GetObjectItemCaseSensitive(terminal, "payload");
+            assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(terminal, "kind")),
+                           "execution"));
+            assert(
+                !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "status")),
+                        "failed"));
+         }
+         assert(callbacks == ((mode == 6 || mode == 12 || mode == 14 || mode == 15) ? 1 : 0));
       }
    }
    assert(!server_session_capture_current());
@@ -170,12 +191,50 @@ static void run(int selected)
    cJSON_Delete(log_entries);
    printf("PASS atomic original chat case %d\n", mode);
 }
+/* Original operation replay compares immutable batch bytes. Distinct turns keep
+ * their canonical attachment identity while the legacy outer ID stays stable;
+ * consumers must scope that legacy Original ID to its envelope turn. */
+static void original_input_multiturn_wire_identity(void)
+{
+   mode = 1;
+   log_entries = cJSON_CreateArray();
+   assert(log_entries && !server_input_attachment_install_owner(admit, created, NULL));
+   char turns[2][192] = {{0}};
+   for (int i = 0; i < 2; ++i)
+   {
+      expected_operation =
+          i ? "22345678-1234-4234-8234-123456789abc" : "12345678-1234-4234-8234-123456789abc";
+      minted = attachment();
+      compute_ctx_t c = context();
+      assert(!(long)worker(&c));
+      assert(cJSON_GetArraySize(log_entries) == (i + 1) * 2);
+      const cJSON *event = cJSON_GetArrayItem(log_entries, i * 2 + 1);
+      const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "message_id"));
+      assert(id && !strcmp(id, "user"));
+      snprintf(turns[i], sizeof turns[i], "%s", c.ir_turn);
+      aimee_message_t decoded = {0};
+      assert(!aimee_ir_message_parse(cJSON_GetObjectItemCaseSensitive(event, "payload"), &decoded));
+      assert(decoded.role && !strcmp(decoded.role, "user") && decoded.n_blocks == 1 &&
+             !strcmp(decoded.blocks[0].text, "safe input") &&
+             cJSON_Compare(decoded.blocks[0].input_attachment, minted, 1));
+      aimee_message_free(&decoded);
+      server_chat_ir_abort(&c);
+      assert(!server_session_capture_current());
+      cJSON_Delete(minted);
+      minted = NULL;
+   }
+   assert(strcmp(turns[0], turns[1]) && callbacks == 2 && model_runs == 2 && batches == 2);
+   assert(writes == 4 && delivered_sequence == 4);
+   cJSON_Delete(log_entries);
+   puts("PASS atomic Original multi-turn immutable wire identities and canonical payloads");
+}
+
 #ifndef AIMEE_CHAT_ORIGINAL_TEST_MAIN
 #define AIMEE_CHAT_ORIGINAL_TEST_MAIN main
 #endif
 int AIMEE_CHAT_ORIGINAL_TEST_MAIN(void)
 {
-   for (int i = 0; i < 15; i++)
+   for (int i = 0; i < 16; i++)
    {
       pid_t p = fork();
       assert(p >= 0);
@@ -183,6 +242,18 @@ int AIMEE_CHAT_ORIGINAL_TEST_MAIN(void)
       {
          alarm(5);
          run(i);
+         exit(0);
+      }
+      int status;
+      assert(waitpid(p, &status, 0) == p && WIFEXITED(status) && !WEXITSTATUS(status));
+   }
+   {
+      pid_t p = fork();
+      assert(p >= 0);
+      if (!p)
+      {
+         alarm(5);
+         original_input_multiturn_wire_identity();
          exit(0);
       }
       int status;
@@ -197,6 +268,6 @@ int AIMEE_CHAT_ORIGINAL_TEST_MAIN(void)
    }
    int status;
    assert(waitpid(p, &status, 0) == p && WIFEXITED(status) && !WEXITSTATUS(status));
-   puts("PASS atomic chat original input (15 cases) and unchanged legacy fixture");
+   puts("PASS atomic chat original input (16 cases) and unchanged legacy fixture");
    return 0;
 }

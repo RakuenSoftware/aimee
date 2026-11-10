@@ -1120,6 +1120,16 @@ aimee_module_commands_dispatch_internal_raw_outcome_context_timeout_v1(
                                                              result, 1, 0, outcome);
 }
 
+int aimee_module_commands_dispatch_internal_outcome_context_timeout_v1(
+    const char *method, const cJSON *args, const cJSON *context, int timeout_ms, cJSON **result,
+    aimee_module_command_outcome_v1 *outcome)
+{
+   if (!outcome)
+      return -1;
+   return commands_dispatch_internal_context_timeout_outcome(method, args, context, timeout_ms,
+                                                             result, 0, 0, outcome);
+}
+
 int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
                                                             const cJSON *context, int timeout_ms,
                                                             cJSON **result)

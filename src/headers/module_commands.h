@@ -39,6 +39,12 @@ extern const unsigned aimee_module_command_outcome_contract_v1;
 int aimee_module_commands_dispatch_internal_raw_outcome_context_timeout_v1(
     const char *, const cJSON *, const cJSON *, int, cJSON **, aimee_module_command_outcome_v1 *);
 
+/* Parsed sibling of the same internal fixed route. The outcome preserves a
+ * transport's explicit INVALID_REQUEST without treating unavailable IO as a
+ * client error. Routing, context and owner validation are unchanged. */
+int aimee_module_commands_dispatch_internal_outcome_context_timeout_v1(
+    const char *, const cJSON *, const cJSON *, int, cJSON **, aimee_module_command_outcome_v1 *);
+
 /* Principal refs reserved for plugin instances. MUST match
  * PluginRefFirst/PluginRefLimit in server-go/modules/mcp/mcp.go, and the
  * reservation recorded in tests/baselines/modules/canonical-inventory.yaml. */

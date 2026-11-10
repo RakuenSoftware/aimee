@@ -24,6 +24,9 @@ export type Block = {
   media_type?: string;
   media_ref?: string;
   context?: Record<string, unknown>;
+  input_attachment?: {
+    schema_version: number; kind: string; operation_uuid: string; text_sha256: string; opaque: string;
+  };
 };
 export type Message = { role: string; blocks: Block[]; content_scalar?: boolean };
 /** Provider diagnostics only; grants no permission or retry authority. */
@@ -79,6 +82,8 @@ export type Envelope = {
   turn_id: string; actor: string; event: SessionEvent;
 };
 export type ProjectedMessage = Message & {
+  /** Display identity only; canonical Original input bytes remain unchanged. */
+  originalInput?: boolean;
   id: string; turn: string; complete: boolean;
   argumentFragments: Record<number, string>;
   stoppedBlocks: number[];
@@ -120,6 +125,15 @@ function sequence(value: string): bigint {
 const kinds = new Set(['text', 'thinking', 'tool_use', 'tool_result', 'image', 'document']);
 function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+function validInputAttachment(value: unknown): value is NonNullable<Block['input_attachment']> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const a = value as Record<string, unknown>;
+  return Object.keys(a).length === 5 && a.schema_version === 1 && a.kind === 'host.original-input.v1' &&
+    typeof a.operation_uuid === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(a.operation_uuid) &&
+    a.operation_uuid !== '00000000-0000-0000-0000-000000000000' &&
+    typeof a.text_sha256 === 'string' && /^[0-9a-f]{64}$/.test(a.text_sha256) &&
+    nonempty(a.opaque) && new TextEncoder().encode(a.opaque).length <= 262144;
 }
 function validRefusalDetails(value: unknown): value is RefusalDetails {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -171,6 +185,8 @@ function validateBlock(block: Block): void {
   if (block?.message_group !== undefined && (!Number.isInteger(block.message_group) || block.message_group < 1 || block.message_group > 4096))
     throw new Error('Invalid message group');
   if (!block || !kinds.has(block.type)) throw new Error('Unsupported canonical block');
+  if (block.input_attachment !== undefined && (block.type !== 'text' || !validInputAttachment(block.input_attachment)))
+    throw new Error('Invalid original input attachment');
   if ((block.type === 'text' || block.type === 'thinking') && typeof block.text !== 'string')
     throw new Error('Text block requires text');
   if (block.thinking_binding !== undefined && (block.type !== 'thinking' || typeof block.thinking_binding !== 'string' ||
@@ -379,11 +395,27 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         throw new Error('Invalid canonical message');
       if (event.payload.content_scalar !== undefined && typeof event.payload.content_scalar !== 'boolean') throw new Error('Invalid content form');
       event.payload.blocks.forEach(validateBlock);
+      // Atomic Original input batches deliberately retain the local name
+      // "user" for immutable operation replay. Scope only this legacy display
+      // identity by its canonical turn; never alter the event or source bytes.
+      const originalInput = event.message_id === 'user' && event.payload.role === 'user' &&
+        event.payload.blocks.length === 1 && event.payload.blocks[0].type === 'text' &&
+        validInputAttachment(event.payload.blocks[0].input_attachment);
+      const messageId = originalInput ? `${envelope.turn_id}:user` : event.message_id;
+      if (event.message_id === 'user' && state.messages.some(m => originalInput ? m.id === 'user' : m.originalInput))
+        throw new Error('Message identity changed');
+      if (originalInput && state.messages.some(m => m.originalInput && m.turn !== envelope.turn_id &&
+          m.blocks[0].input_attachment?.operation_uuid === event.payload.blocks[0].input_attachment?.operation_uuid))
+        throw new Error('Original input identity changed');
       if (Object.prototype.hasOwnProperty.call(event, 'native_owner') && !validNativeOwner(event.native_owner) ||
           Object.prototype.hasOwnProperty.call(event, 'partial') && (event.partial !== true || !event.native_owner))
         throw new Error('Invalid native snapshot owner');
       const owner = event.native_owner;
-      const previous = state.messages.find(message => message.id === event.message_id);
+      const previous = state.messages.find(message => message.id === messageId);
+      if (previous && (originalInput || previous.originalInput) &&
+          (!originalInput || !previous.originalInput || !sameJSON(previous.blocks, event.payload.blocks) ||
+            previous.content_scalar !== event.payload.content_scalar))
+        throw new Error('Original input identity changed');
       if (previous?.nativeOwner && (!owner || !sameJSON(owner, previous.nativeOwner)))
         throw new Error('Native snapshot owner changed');
       if (owner) {
@@ -423,10 +455,11 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
           };
         });
       }
-      const message: ProjectedMessage = { ...event.payload, id: event.message_id,
+      const message: ProjectedMessage = { ...event.payload, id: messageId,
+        ...(originalInput ? { originalInput: true } : {}),
         turn: envelope.turn_id, complete: !event.partial, awaitingStop: false, argumentFragments: {}, stoppedBlocks: event.payload.blocks.map((_, index) => index),
         ...(owner ? { nativeOwner: { ...owner }, ownedBlockCount: event.payload.blocks.length, partial: !!event.partial } : {}) };
-      const index = state.messages.findIndex(m => m.id === event.message_id);
+      const index = state.messages.findIndex(m => m.id === messageId);
       if (index >= 0) {
         if (state.messages[index].role !== message.role || state.messages[index].turn !== message.turn)
           throw new Error('Message identity changed');
@@ -452,6 +485,8 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       return next;
     }
     case 'delta': {
+      if (event.message_id === 'user' && state.messages.some(m => m.originalInput))
+        throw new Error('Message identity changed');
       if (!nonempty(event.message_id) || !nonempty(event.role)) throw new Error('Delta requires message identity');
       const d = event.payload;
       if (d.refusal !== undefined && (d.type !== 'TURN_STOP' || (d.refusal !== null &&

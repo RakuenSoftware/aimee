@@ -253,6 +253,51 @@ static void test_context_refusal_blocks_every_route(void)
    assert(wire_fence_select(0, WIRE_FENCE_OPENAI_CHAT, "abc", 3, &snapshot, &selected) == 0);
    assert(selected.len == 3);
 }
+/* An owner may refuse an oversized input before the fence; the deployment
+ * budget still classifies a definite overflow, and nothing else changes. */
+static void test_context_refusal_reports_budget_overflow(void)
+{
+   const econ_request_budget_result_t results[] = {
+       ECON_REQUEST_BUDGET_OVERFLOW, ECON_REQUEST_BUDGET_ADMITTED, ECON_REQUEST_BUDGET_UNAVAILABLE,
+       ECON_REQUEST_BUDGET_INVALID};
+   for (int with_policy = 0; with_policy <= 1; with_policy++)
+      for (size_t i = 0; i < sizeof(results) / sizeof(results[0]); i++)
+      {
+         memset(&context, 0, sizeof(context));
+         have_context = 1;
+         context.context_refused = 1;
+         strcpy(context.context_refusal_kind, "source_release_refused");
+         if (with_policy)
+            operator_policy("opaque operator policy");
+         else
+         {
+            context.request_budget_present = 1;
+            strcpy(context.request_budget_limits, "limits");
+         }
+         admission = results[i];
+         int before = admission_calls;
+         wire_fence_t *snapshot = NULL;
+         wire_fence_bytes_t selected = {0};
+         int rc = wire_fence_select(0, WIRE_FENCE_OPENAI_CHAT, "abc", 3, &snapshot, &selected);
+         assert(admission_calls == before + 1);
+         assert(!snapshot && !selected.data && !selected.len);
+         if (results[i] == ECON_REQUEST_BUDGET_OVERFLOW)
+         {
+            assert(rc == -1);
+            assert(strcmp(wire_fence_last_error(), "request_budget_exceeded") == 0);
+            assert(wire_fence_error_http_status(wire_fence_last_error()) == 413);
+         }
+         else
+         {
+            assert(rc == WIRE_FENCE_CONTEXT_REFUSED);
+            assert(strcmp(wire_fence_last_error(), "source_release_refused") == 0);
+         }
+         operator_policy(NULL);
+      }
+   admission = ECON_REQUEST_BUDGET_ADMITTED;
+   memset(&context, 0, sizeof(context));
+}
+
 static void test_source_handle_requires_host_transport(void)
 {
    memset(&context, 0, sizeof(context));
@@ -511,6 +556,7 @@ int main(void)
    test_invalid_inputs_fail_without_snapshot();
    test_off_bypasses_snapshot();
    test_proof_gated_empty_registry_is_byte_identical_on_every_route();
+   test_context_refusal_reports_budget_overflow();
    puts("economizer_wire_snapshot: ALL PASS");
    return 0;
 }

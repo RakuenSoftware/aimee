@@ -127,6 +127,7 @@ var schemaHistory = []struct {
 	{53, "schema_cron_output_ir.sql"},
 	{54, "schema_original_input_deliveries.sql"},
 	{55, "schema_original_input_plans.sql"},
+	{56, "schema_session_cache.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

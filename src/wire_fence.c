@@ -144,17 +144,38 @@ int wire_fence_select(int proof_gated, wire_fence_route_t route, const void *pri
    selected->data = NULL;
    selected->len = 0;
    const request_context_t *context = request_context_get ? request_context_get() : NULL;
-   if (context && context->context_refused)
-   {
-      last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
-      return WIRE_FENCE_CONTEXT_REFUSED;
-   }
    /* Deployment-owned metadata is forwarded unchanged. Go owns validation and
     * intersection with the caller's limit. Empty/unset means no operator cap;
     * literal zero is expressed in the versioned JSON object. */
    const char *policy = getenv("AIMEE_PROVIDER_CONTEXT_LIMITS");
    if (policy && !*policy)
       policy = NULL;
+   if (context && context->context_refused)
+   {
+      /* A memory owner may refuse an oversized input before this fence runs
+       * (its own request bounds are owner-specific and undisclosed). When a
+       * deployment budget applies and the caller's request already overflows
+       * it, report the budget so every owner classifies the same input the
+       * same way. Nothing is sent either way; any other outcome keeps the
+       * owner's refusal. */
+      if ((policy || context->request_budget_present > 0) &&
+          (policy ? econ_module_request_budget_with_policy &&
+                        econ_module_request_budget_with_policy(
+                            (unsigned)route, pristine, pristine_len,
+                            context->request_budget_present > 0 ? context->request_budget_limits
+                                                                : NULL,
+                            policy) == ECON_REQUEST_BUDGET_OVERFLOW
+                  : econ_module_request_budget &&
+                        econ_module_request_budget((unsigned)route, pristine, pristine_len,
+                                                   context->request_budget_limits) ==
+                            ECON_REQUEST_BUDGET_OVERFLOW))
+      {
+         last_error = "request_budget_exceeded";
+         return -1;
+      }
+      last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
+      return WIRE_FENCE_CONTEXT_REFUSED;
+   }
    if (policy || (context && context->request_budget_present))
    {
       const char *limits =

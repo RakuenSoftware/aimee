@@ -8,6 +8,7 @@
 #include "request_context.h"
 #include "server_session_capture.h"
 #include "util.h"
+#include <pthread.h>
 #include <aimee/tools/module_api.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -117,28 +118,69 @@ int policy_action_inherit(const char *session)
    return accepted ? 0 : -1;
 }
 
+struct action_evidence_scope
+{
+   void **guard;
+   cJSON *request;
+   cJSON *result;
+};
+
+static void action_evidence_cancel(void *opaque)
+{
+   struct action_evidence_scope *scope = opaque;
+   int previous_cancel_state;
+   (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel_state);
+   cJSON_Delete(scope->request);
+   cJSON_Delete(scope->result);
+   void *guard = *scope->guard;
+   *scope->guard = NULL;
+   ingress_preinject_release_send_guard(guard);
+   (void)pthread_setcancelstate(previous_cancel_state, NULL);
+}
+
+static cJSON *action_evidence_retained(const request_context_t *ctx, void **guard)
+{
+   extern int aimee_module_ingress_action_retry_requested(const cJSON *) __attribute__((weak));
+   struct action_evidence_scope scope = {.guard = guard};
+   cJSON *volatile accepted = NULL;
+   /* The trusted adapter decides whether a closed owner reply permits retry.
+    * No intent or effect exists yet; the same host arguments are sent again. */
+   pthread_cleanup_push(action_evidence_cancel, &scope);
+   scope.request = cJSON_CreateObject();
+   cJSON_AddStringToObject(scope.request, "operation", "action-evidence");
+   cJSON_AddStringToObject(scope.request, "source_release_ticket", ctx->memory_source_release);
+   cJSON_AddStringToObject(scope.request, "request_id", ctx->request_id);
+   cJSON_AddStringToObject(scope.request, "principal", ctx->principal);
+   cJSON_AddStringToObject(scope.request, "caller_subject", ctx->caller_subject);
+   for (int attempt = 0; attempt < 2; ++attempt)
+   {
+      if (ingress_preinject_acquire_send_guard(guard) != 0)
+         break;
+      int rc = aimee_module_commands_dispatch_internal_caller_timeout(
+          "memory.runtime", scope.request, 500, &scope.result);
+      if (rc == 1 && !strcmp(action_text(scope.result, "status"), "ok"))
+      {
+         accepted = scope.result;
+         scope.result = NULL;
+         break;
+      }
+      int retry = rc == 1 && !attempt && aimee_module_ingress_action_retry_requested &&
+                  aimee_module_ingress_action_retry_requested(scope.result) == 1;
+      cJSON_Delete(scope.result);
+      scope.result = NULL;
+      if (!retry || !ingress_preinject_complete_send_guard(guard))
+         break;
+   }
+   cJSON_Delete(scope.request);
+   scope.request = NULL;
+   pthread_cleanup_pop(0);
+   return accepted;
+}
+
 static cJSON *action_evidence(const request_context_t *ctx, void **guard)
 {
    if (ctx->memory_source_release[0])
-   {
-      if (ingress_preinject_acquire_send_guard(guard) != 0)
-         return NULL;
-      cJSON *request = cJSON_CreateObject(), *result = NULL;
-      cJSON_AddStringToObject(request, "operation", "action-evidence");
-      cJSON_AddStringToObject(request, "source_release_ticket", ctx->memory_source_release);
-      cJSON_AddStringToObject(request, "request_id", ctx->request_id);
-      cJSON_AddStringToObject(request, "principal", ctx->principal);
-      cJSON_AddStringToObject(request, "caller_subject", ctx->caller_subject);
-      int rc =
-          aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 500, &result);
-      cJSON_Delete(request);
-      if (rc != 1 || strcmp(action_text(result, "status"), "ok") != 0)
-      {
-         cJSON_Delete(result);
-         return NULL;
-      }
-      return result;
-   }
+      return action_evidence_retained(ctx, guard);
    if (ctx->memory_receipt_required || ctx->context_refused)
       return NULL;
    /* Explicit absence of a retained memory handle is not a verified receipt. */

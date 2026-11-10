@@ -18,6 +18,7 @@
 #pragma weak aimee_module_protected_intake_raw
 #pragma weak request_context_get
 #include <ouroboros/module_protocol.h>
+#include <ouroboros/module_client.h>
 
 /* --- Memory handlers --- */
 
@@ -275,18 +276,23 @@ static cJSON *user_memory_owner_command_as(const char *operation, const cJSON *r
    cJSON *request = req ? cJSON_Duplicate(req, 1) : cJSON_CreateObject();
    cJSON *transport = NULL;
    int dispatched = -1;
+   aimee_module_command_outcome_v1 outcome = {0};
    if (cJSON_IsObject(request))
    {
       cJSON_DeleteItemFromObjectCaseSensitive(request, "operation");
       if (cJSON_AddStringToObject(request, "operation", operation))
-         dispatched = aimee_module_commands_dispatch_internal_context_timeout(
-             "memory.runtime", request, context, 60000, &transport);
+         dispatched = aimee_module_commands_dispatch_internal_outcome_context_timeout_v1(
+             "memory.runtime", request, context, 60000, &transport, &outcome);
    }
    cJSON_Delete(request);
    cJSON_Delete(context);
    if (dispatched <= 0)
    {
       cJSON_Delete(transport);
+      if (outcome.stage == AIMEE_COMMAND_SDK_RESULT &&
+          outcome.sdk_result == OURO_MODULE_CALL_INVALID_REQUEST)
+         return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT, "user memory request refused",
+                                       NULL);
       return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "user memory module unavailable", NULL);
    }
    if (transport && !strcmp(jo_cstr(transport, "status"), "error"))
