@@ -1811,10 +1811,6 @@ $(TESTPREFIX)/unit-test-ingress-preinject: $(OBJDIR)/tests/test_ingress_preinjec
                      $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
 	$(TESTLINK) -o $@ $^ -Wl,--wrap=audit_worm_dispatch_owner $(TEST_L_FLAGS)
 
-$(OBJDIR)/tests/test_ingress_receipt_order.o: tests/test_ingress_preinject.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -DAIMEE_RECEIPT_ORDER_ONLY -o $@ $<
-
 $(TESTPREFIX)/unit-test-ingress-receipt-order: $(OBJDIR)/tests/test_ingress_receipt_order.o $(filter %/platform_path.o,$(PLATFORM_BASIC_OBJS)) \
                      $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                      $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o $(OBJDIR)/modules/vault/vault_server_key.o \

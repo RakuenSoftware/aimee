@@ -945,15 +945,14 @@ int aimee_module_commands_dispatch_internal_outcome_context_timeout_v1(
     const char *method, const cJSON *args, const cJSON *context, int timeout_ms, cJSON **result,
     aimee_module_command_outcome_v1 *outcome)
 {
-   *outcome = (aimee_module_command_outcome_v1){1, AIMEE_COMMAND_SDK_RESULT,
-                                               private_sdk_fault};
+   *outcome = (aimee_module_command_outcome_v1){1, AIMEE_COMMAND_SDK_RESULT, private_sdk_fault};
    if (private_sdk_fault >= 0)
    {
       *result = NULL;
       return -1;
    }
    int rc = aimee_module_commands_dispatch_internal_context_timeout(method, args, context,
-                                                                     timeout_ms, result);
+                                                                    timeout_ms, result);
    outcome->stage = rc > 0 ? AIMEE_COMMAND_BODY_READY : AIMEE_COMMAND_UNSENT;
    outcome->sdk_result = rc > 0 ? OURO_MODULE_CALL_OK : -1;
    return rc;
@@ -961,8 +960,9 @@ int aimee_module_commands_dispatch_internal_outcome_context_timeout_v1(
 
 static void test_private_invalid_request_is_not_backend_unavailable(void)
 {
-   cJSON *request = cJSON_Parse("{\"store\":\"user\",\"key\":\"safe\",\"content\":\"password=owned-synthetic-noecho\"}");
-   const int faults[] = {OURO_MODULE_CALL_INVALID_REQUEST, OURO_MODULE_CALL_TRANSPORT,
+   cJSON *request = cJSON_Parse(
+       "{\"store\":\"user\",\"key\":\"safe\",\"content\":\"password=owned-synthetic-noecho\"}");
+   const int faults[] = {OURO_MODULE_CALL_INVALID_REQUEST,   OURO_MODULE_CALL_TRANSPORT,
                          OURO_MODULE_CALL_CAPABILITY_ABSENT, OURO_MODULE_CALL_CAPABILITY_DENIED,
                          OURO_MODULE_CALL_DEADLINE_EXCEEDED, OURO_MODULE_CALL_PROTOCOL};
    for (unsigned i = 0; i < sizeof faults / sizeof faults[0]; ++i)
@@ -971,7 +971,8 @@ static void test_private_invalid_request_is_not_backend_unavailable(void)
       cJSON *reply = memory_store_command(request, MEMORY_AUTHORITY_USER);
       const char *kind = cJSON_GetStringValue(cJSON_GetObjectItem(reply, "kind"));
       assert(kind && !strcmp(kind, faults[i] == OURO_MODULE_CALL_INVALID_REQUEST
-                                     ? SERVER_ERR_INVALID_ARGUMENT : SERVER_ERR_UNAVAILABLE));
+                                       ? SERVER_ERR_INVALID_ARGUMENT
+                                       : SERVER_ERR_UNAVAILABLE));
       char *wire = cJSON_PrintUnformatted(reply);
       assert(wire && !strstr(wire, "owned-synthetic-noecho") && !strstr(wire, "password="));
       free(wire);

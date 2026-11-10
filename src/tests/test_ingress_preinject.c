@@ -170,7 +170,8 @@ static const char *guard_completion_reply(int call, int failures)
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
                                                     int timeout_ms, cJSON **result)
 {
-   assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 500);
+   /* Owner calls are bounded by the remaining receipt deadline, never above 500ms. */
+   assert(strcmp(method, "memory.runtime") == 0 && timeout_ms > 0 && timeout_ms <= 500);
    const char *operation =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
    if (g_refresh_fork_active && operation)
@@ -679,6 +680,12 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    }
    return strdup("{\"status\":\"ok\",\"facts\":\"- global preference: never substitute for project "
                  "evidence\\n\"}");
+}
+/* Deadline-bounded owner calls use the same fixtures; the caller owns the bound. */
+char *kb_v1_action_request_with_timeout(const char *action, cJSON *req, int timeout_ms)
+{
+   assert(timeout_ms > 0);
+   return kb_v1_action_request(action, req);
 }
 static const char *g_expected_task_requirements;
 char *kb_client_memory_assemble_typed_context_requirements_json(
@@ -2506,6 +2513,7 @@ int main(int argc, char **argv)
       return 0;
    }
    test_owner_directed_same_plan_refresh();
+   test_refresh_preserves_fork_ownership();
    test_local_verification_follows_blocking_source_owners();
    test_receipt_admission_follows_blocking_owner();
    test_ingress_host_session_binding();

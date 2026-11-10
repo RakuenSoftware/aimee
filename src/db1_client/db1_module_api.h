@@ -365,10 +365,10 @@
  * (refuses to fire for M) -- both need "how many turns ago". */
 #define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_INSERT_TURN 61u
 #define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_ACTIVATION  62u
-#define AIMEE_DB1_OP_SESSION_CACHE_GET 63u
-#define AIMEE_DB1_OP_SESSION_CACHE_CAS 64u
-#define AIMEE_DB1_OP_SESSION_CACHE_DELETE 65u
-#define AIMEE_DB1_OP_SESSION_CACHE_RECEIPT 66u
+#define AIMEE_DB1_OP_SESSION_CACHE_GET            63u
+#define AIMEE_DB1_OP_SESSION_CACHE_CAS            64u
+#define AIMEE_DB1_OP_SESSION_CACHE_DELETE         65u
+#define AIMEE_DB1_OP_SESSION_CACHE_RECEIPT        66u
 
 /* Family 8: what the system spent and what it noticed: token and cost ledgers,
  * guardrail and interaction events, eval results and diagnoses. */

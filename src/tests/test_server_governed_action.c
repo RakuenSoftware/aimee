@@ -156,7 +156,9 @@ int aimee_module_commands_dispatch_internal_caller_timeout(const char *method, c
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
                                                     int timeout, cJSON **reply)
 {
-   (void)method; (void)args; (void)timeout;
+   (void)method;
+   (void)args;
+   (void)timeout;
    *reply = NULL;
    return -1;
 }

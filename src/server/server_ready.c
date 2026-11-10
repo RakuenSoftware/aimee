@@ -85,7 +85,7 @@ typedef struct
    long long retry_after_ms;
    long long last_success_query_ms;
    char last_ingest_at[64];
-   long sampled_at; /* epoch seconds; 0 = never sampled */
+   long sampled_at;           /* epoch seconds; 0 = never sampled */
    uint64_t slot_fingerprint; /* registry identity sampled with these dependencies */
 } ready_snapshot_t;
 
@@ -340,7 +340,8 @@ static void sample_if_due_locked(uint64_t fingerprint)
 {
    long now = (long)time(NULL);
    long age = g_snap.sampled_at > 0 && g_snap.slot_fingerprint == fingerprint
-                  ? now - g_snap.sampled_at : -1;
+                  ? now - g_snap.sampled_at
+                  : -1;
    if (age >= 0 && age < ready_interval_secs())
       return;
    if (!g_ready_thread_started)

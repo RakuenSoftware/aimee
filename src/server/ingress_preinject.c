@@ -484,13 +484,14 @@ static cJSON *ingress_source_answers(const cJSON *plan, const request_context_t 
    cJSON_AddItemToObject(scope.request, "execution_grade_response",
                          grade_response ? grade_response : cJSON_CreateNull());
    int remaining = ingress_remaining_ms();
-   char *raw = owner_request && remaining > 0
-                   ? (ingress_receipt_deadline_ns
-                          ? kb_v1_action_request_with_timeout("memory.revalidate_sources",
-                                cJSON_Duplicate(owner_request, 1), remaining)
-                          : kb_v1_action_request("memory.revalidate_sources",
-                                cJSON_Duplicate(owner_request, 1)))
-                   : NULL;
+   char *raw =
+       owner_request && remaining > 0
+           ? (ingress_receipt_deadline_ns
+                  ? kb_v1_action_request_with_timeout("memory.revalidate_sources",
+                                                      cJSON_Duplicate(owner_request, 1), remaining)
+                  : kb_v1_action_request("memory.revalidate_sources",
+                                         cJSON_Duplicate(owner_request, 1)))
+           : NULL;
    cJSON *owner_response = raw ? cJSON_Parse(raw) : NULL;
    free(raw);
    cJSON_AddItemToObject(scope.request, "owner_response",
@@ -833,7 +834,6 @@ static int ingress_release_send_guard(cJSON *plan)
    return 0;
 }
 
-
 void ingress_preinject_release_send_guard(void *state)
 {
    (void)ingress_release_send_guard(state);
@@ -897,8 +897,8 @@ static void ingress_receipt_refresh_cleanup(void *opaque)
 }
 static cJSON *ingress_receipt_plan(cJSON *request)
 {
-   struct ingress_receipt_refresh_scope scope = {
-       .request = request, .previous_deadline = ingress_receipt_deadline_ns};
+   struct ingress_receipt_refresh_scope scope = {.request = request,
+                                                 .previous_deadline = ingress_receipt_deadline_ns};
    cJSON *volatile result = NULL;
    pthread_cleanup_push(ingress_receipt_refresh_cleanup, &scope);
    uint64_t now = ingress_monotonic_ns();

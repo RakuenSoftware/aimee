@@ -20,9 +20,12 @@
 #include <stdint.h>
 
 /* --- stubs for the sampler's dependency closure (link-only) --- */
-static _Atomic uint64_t g_registry_generation=1;
-static _Atomic int g_probe_healthy=1, g_flip_generation;
-uint64_t obs_bus_slot_fingerprint(void){return atomic_load(&g_registry_generation);}
+static _Atomic uint64_t g_registry_generation = 1;
+static _Atomic int g_probe_healthy = 1, g_flip_generation;
+uint64_t obs_bus_slot_fingerprint(void)
+{
+   return atomic_load(&g_registry_generation);
+}
 static _Atomic int g_db1_probe_calls; /* the sampler thread probes too */
 static int g_kb_probe_calls;
 static int g_kb_configured;
@@ -34,7 +37,8 @@ int kb_client_connection_configured(void)
 int db1_store_probe(void)
 {
    g_db1_probe_calls++;
-   if(atomic_exchange(&g_flip_generation,0))atomic_fetch_add(&g_registry_generation,1);
+   if (atomic_exchange(&g_flip_generation, 0))
+      atomic_fetch_add(&g_registry_generation, 1);
    return atomic_load(&g_probe_healthy);
 }
 
@@ -103,23 +107,23 @@ static void test_samples_only_when_asked(void)
 static void test_owner_generation_invalidates_even_fresh_snapshot(void)
 {
    char resp[2048];
-   assert(g_provider(resp,sizeof resp)==200);
-   int before=g_db1_probe_calls;
-   assert(g_provider(resp,sizeof resp)==200 && g_db1_probe_calls==before);
-   atomic_store(&g_probe_healthy,0);
-   atomic_fetch_add(&g_registry_generation,1);
-   assert(g_provider(resp,sizeof resp)==503);
-   assert(g_db1_probe_calls==before+1);
-   atomic_store(&g_probe_healthy,1);
-   atomic_fetch_add(&g_registry_generation,1);
-   assert(g_provider(resp,sizeof resp)==200);
-   before=g_db1_probe_calls;
-   assert(g_provider(resp,sizeof resp)==200 && g_db1_probe_calls==before);
+   assert(g_provider(resp, sizeof resp) == 200);
+   int before = g_db1_probe_calls;
+   assert(g_provider(resp, sizeof resp) == 200 && g_db1_probe_calls == before);
+   atomic_store(&g_probe_healthy, 0);
+   atomic_fetch_add(&g_registry_generation, 1);
+   assert(g_provider(resp, sizeof resp) == 503);
+   assert(g_db1_probe_calls == before + 1);
+   atomic_store(&g_probe_healthy, 1);
+   atomic_fetch_add(&g_registry_generation, 1);
+   assert(g_provider(resp, sizeof resp) == 200);
+   before = g_db1_probe_calls;
+   assert(g_provider(resp, sizeof resp) == 200 && g_db1_probe_calls == before);
    /* A replacement racing dependency I/O invalidates the entire sample. */
-   atomic_store(&g_flip_generation,1);
-   atomic_fetch_add(&g_registry_generation,1);
-   assert(g_provider(resp,sizeof resp)==503);
-   assert(g_provider(resp,sizeof resp)==200);
+   atomic_store(&g_flip_generation, 1);
+   atomic_fetch_add(&g_registry_generation, 1);
+   assert(g_provider(resp, sizeof resp) == 503);
+   assert(g_provider(resp, sizeof resp) == 200);
    puts("  readiness invalidates replacement generations and in-probe changes");
 }
 

@@ -291,8 +291,8 @@ static cJSON *user_memory_owner_command_as(const char *operation, const cJSON *r
       cJSON_Delete(transport);
       if (outcome.stage == AIMEE_COMMAND_SDK_RESULT &&
           outcome.sdk_result == OURO_MODULE_CALL_INVALID_REQUEST)
-         return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
-                                       "user memory request refused", NULL);
+         return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT, "user memory request refused",
+                                       NULL);
       return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "user memory module unavailable", NULL);
    }
    if (transport && !strcmp(jo_cstr(transport, "status"), "error"))
