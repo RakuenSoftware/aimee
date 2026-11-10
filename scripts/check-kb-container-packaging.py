@@ -152,13 +152,67 @@ def port_failures(ports: object) -> list[str]:
     return failures
 
 
+MEMORY_ROOT = '/opt/aims-memory'
+MEMORY_MUTABLE = ('etc', 'state', 'run')
+
+
+def role_volumes(volumes: list, role: str) -> list:
+    """The Server's mount list as another role must restate it."""
+    def rename(value):
+        if isinstance(value, str):
+            return value.replace(MEMORY_ROOT + '/server', MEMORY_ROOT + '/' + role).replace(
+                'private-memory/server', 'private-memory/' + role)
+        if isinstance(value, dict):
+            return {key: rename(item) for key, item in value.items()}
+        return value
+    return [rename(volume) for volume in volumes]
+
+
+def memory_failures(role: str, app: dict, init: dict, model: dict) -> list[str]:
+    """Memory is provisioned by a networkless one-shot container and mounted immutable."""
+    failures = []
+    if init.get('image') != app.get('image') or init.get('entrypoint') != ['/usr/local/bin/aimee-memory-provision']:
+        failures.append('memory provisioning must run the application image\'s own provisioning command')
+    if init.get('network_mode') != 'none' or init.get('privileged') or init.get('ports') or init.get('cap_add'):
+        failures.append('memory provisioning must have no network and no extra privileges')
+    if init.get('restart') != 'no' or init.get('user') != 'root':
+        failures.append('memory provisioning must be a one-shot root container')
+    if init.get('volumes') != ['aimee-memory:' + MEMORY_ROOT, 'aimee-server-home:/var/lib/aimee']:
+        failures.append('memory provisioning may mount only the memory volume and the application home')
+    if init.get('environment', {}).get('AIMEE_INSTANCE_ROLE') != role:
+        failures.append('memory provisioning must name the composition role')
+    if app.get('depends_on', {}).get('aimee-memory-init', {}).get('condition') != 'service_completed_successfully':
+        failures.append('application must wait for memory provisioning')
+    mounts = [volume for volume in app.get('volumes', []) if isinstance(volume, dict)]
+    artifacts = {'type': 'volume', 'source': 'aimee-memory', 'target': MEMORY_ROOT, 'read_only': True,
+                 'volume': {'nocopy': True}}
+    if artifacts not in mounts:
+        failures.append('application must mount the provisioned memory artifacts read-only')
+    for name in MEMORY_MUTABLE:
+        writable = {'type': 'volume', 'source': 'aimee-server-home', 'target': f'{MEMORY_ROOT}/{role}/{name}',
+                    'volume': {'nocopy': True, 'subpath': f'private-memory/{role}/{name}'}}
+        if writable not in mounts:
+            failures.append('application must keep memory ' + name + ' in its home volume')
+    if len(mounts) != 1 + len(MEMORY_MUTABLE):
+        failures.append('application has an undeclared structured mount')
+    if any(str(volume).startswith('aimee-memory:') for volume in app.get('volumes', [])):
+        failures.append('application must not mount memory artifacts writable')
+    if 'aimee-memory' not in model.get('volumes', {}):
+        failures.append('composition must declare the memory artifact volume')
+    for name in ('AIMS_MEMORY_BRIDGE_CONFIG', 'AIMEE_MODULE_MANIFEST', 'AIMEE_MODULE_POLICY_DIR'):
+        if name in app.get('environment', {}):
+            failures.append(name + ' is selected by the entrypoint from the provisioned installation, not Config.Env')
+    return failures
+
+
 def composition_failures(base: dict, kb: dict, managed: dict) -> list[str]:
     failures = []
     services = base.get('services', {})
-    if set(services) != {'aimee-server', 'aimee-store-db', 'aimee-embedder', 'aimee-llm'}:
-        failures.append('standard composition must install only Server, PostgreSQL and model services')
+    if set(services) != {'aimee-server', 'aimee-store-db', 'aimee-embedder', 'aimee-llm', 'aimee-memory-init'}:
+        failures.append('standard composition must install only Server, PostgreSQL, model services and one-shot memory provisioning')
         return failures
     app, pg = services['aimee-server'], services['aimee-store-db']
+    failures += memory_failures('server', app, services['aimee-memory-init'], base)
     env = app.get('environment', {})
     if env.get('AIMEE_INSTANCE_ROLE') != 'server':
         failures.append('base composition must establish Server identity')
@@ -200,15 +254,27 @@ def composition_failures(base: dict, kb: dict, managed: dict) -> list[str]:
     if services['aimee-llm'].get('profiles') != ['synthesis']:
         failures.append('synthesis must remain optional')
     kb_services = kb.get('services', {})
-    if set(kb_services) != {'aimee-kb', 'aimee-store-db', 'aimee-embedder', 'aimee-llm'}:
-        failures.append('KB must use the same PostgreSQL and model composition')
+    if set(kb_services) != {'aimee-kb', 'aimee-store-db', 'aimee-embedder', 'aimee-llm', 'aimee-memory-init'}:
+        failures.append('KB must use the same PostgreSQL, model and memory provisioning composition')
     role = kb_services.get('aimee-kb', {})
     if role.get('extends') != {'file': 'compose.yaml', 'service': 'aimee-server'}:
         failures.append('KB must inherit the unified application')
     if kb_services.get('aimee-store-db', {}).get('extends') != {'file': 'compose.yaml', 'service': 'aimee-store-db'}:
         failures.append('KB must inherit standardized PostgreSQL')
-    if any(name in role for name in ('image', 'entrypoint', 'command', 'volumes', 'network_mode', 'privileged')):
+    if any(name in role for name in ('image', 'entrypoint', 'command', 'network_mode', 'privileged')):
         failures.append('KB must not override the shared image, startup or custody mounts')
+    # The memory installation lives at a role-named path, so the KB restates the
+    # Server's mounts with exactly that one substitution and nothing else.
+    if role.get('volumes') != role_volumes(app.get('volumes', []), 'kb'):
+        failures.append('KB mounts must be the Server mounts with only the memory role path changed')
+    kb_init = kb_services.get('aimee-memory-init', {})
+    if kb_init.get('extends') != {'file': 'compose.yaml', 'service': 'aimee-memory-init'} or set(kb_init) - {'extends', 'environment'} \
+            or kb_init.get('environment') != {'AIMEE_INSTANCE_ROLE': 'kb'}:
+        failures.append('KB memory provisioning must inherit the standard service and change only its role')
+    if role.get('depends_on', {}).get('aimee-memory-init', {}).get('condition') != 'service_completed_successfully':
+        failures.append('KB must wait for memory provisioning')
+    if 'aimee-memory' not in kb.get('volumes', {}):
+        failures.append('KB must declare the memory artifact volume')
     kb_env = role.get('environment', {})
     if kb_env.get('AIMEE_INSTANCE_ROLE') != 'kb' or kb_env.get('AIMEE_KB_MTLS_PORT') != '8745':
         failures.append('KB must establish KB identity and enable authenticated TLS')
@@ -290,6 +356,16 @@ def plant_test(root: Path) -> int:
         ('model obtains client key', lambda b,k,m: b['services']['aimee-llm']['volumes'].append('client:/run/client')),
         ('wizard installs KB', lambda b,k,m: m['services'].update({'aimee-kb': {}})),
         ('KB bypasses unified image', lambda b,k,m: k['services']['aimee-kb'].update(image='other')),
+        ('memory provisioning has network', lambda b,k,m: b['services']['aimee-memory-init'].pop('network_mode')),
+        ('memory provisioning runs another command', lambda b,k,m: b['services']['aimee-memory-init'].update(entrypoint=['/bin/sh'])),
+        ('memory provisioning sees the database', lambda b,k,m: b['services']['aimee-memory-init']['volumes'].append('aimee-postgres-encrypted:/pg')),
+        ('application does not wait for memory', lambda b,k,m: b['services']['aimee-server']['depends_on'].pop('aimee-memory-init')),
+        ('memory artifacts writable', lambda b,k,m: [v for v in b['services']['aimee-server']['volumes'] if isinstance(v, dict) and v['target'] == '/opt/aims-memory'][0].pop('read_only')),
+        ('memory state outside home', lambda b,k,m: [v for v in b['services']['aimee-server']['volumes'] if isinstance(v, dict) and v['target'].endswith('/state')][0].update(source='aimee-memory')),
+        ('memory route pinned in Config.Env', lambda b,k,m: b['services']['aimee-server']['environment'].update(AIMS_MEMORY_BRIDGE_CONFIG='/x')),
+        ('KB adds a custody mount', lambda b,k,m: k['services']['aimee-kb']['volumes'].append('other:/var/lib/other')),
+        ('KB keeps Server memory path', lambda b,k,m: k['services']['aimee-kb'].update(volumes=copy.deepcopy(b['services']['aimee-server']['volumes']))),
+        ('KB provisions as Server', lambda b,k,m: k['services']['aimee-memory-init'].update(environment={'AIMEE_INSTANCE_ROLE': 'server'})),
     ]
     for name, mutate in plants:
         b,k,m = copy.deepcopy((base,kb,managed)); mutate(b,k,m)

@@ -3,8 +3,9 @@
 aimee is a local-first runtime between AI tools, model providers, code, and durable knowledge. It
 keeps the thin client separate from stateful services and sends module events through each
 instance's bounded bus. Server assists one human; an optional KB serves a shared corpus. Durable
-memory in either role is served by a separately installed implementation behind the generic memory
-contract; the public tree ships no memory datastore ([Memory boundary](MEMORY.md)).
+memory in either role is served by a separate implementation behind the generic memory contract.
+Its source is private; the image carries it as a vendored binary bundle and each deployment
+provisions its own installation ([Memory boundary](MEMORY.md)).
 [Server and KB](SERVER_AND_KB.md) is the canonical ownership guide.
 
 ## Processes
@@ -19,8 +20,8 @@ Both containers use the same application image. A Go `server` or `kb` compositio
 establishes the immutable first-boot identity and supervises the standard module processes.
 Core's event bus rejects duplicate or conflicting roles. Both compositions deploy the same
 PostgreSQL provider with independent databases, local Vaults, and model identities. Every module
-process is Go. The bundled memory executable is an explicit unavailable adapter; each role selects
-its installed memory implementation through its module manifest and executable grants. The existing
+process is Go. Each role runs the memory implementation provisioned for it, through a module manifest
+and executable grants generated at provisioning; without one the public unavailable adapter runs. The existing
 C resource hosts remain during the transition of their domain handlers into Go modules.
 
 | Process | Owns | Does not own |
@@ -165,20 +166,27 @@ stays with the Server's own memory implementation even when a shared KB is conne
 
 ## Memory boundary
 
-The public application keeps the generic memory SDK, the host/module transport and the host-side
+The public source keeps the generic memory SDK, the host/module transport and the host-side
 obligations of a provider-bound request: context pre-injection, source release and revalidation,
-the send guard and provider receipts. It ships no memory datastore. The bundled `memory`
-executable is an explicit unavailable adapter that exits before bus attachment and declares no
-commands or stages; a deployment that selects it reports `missing_module: memory` and is not ready.
+the send guard and provider receipts. It contains no memory datastore. The implementation is built
+from a private repository and vendored as a binary bundle under `vendor/aims-memory`: bridge
+objects linked into `aimee-server` and `aimee-kb`, a database process, a memory module process and
+provisioning scripts.
 
-An operator installs a memory implementation separately and selects its exact executable through
-the role module manifest and executable grants. That implementation declares the public
-`memory.*` commands it actually serves (for example store, search, `memory.receipt` and
-`memory.verify_receipt`); a command it does not declare returns `404` from `/v1/commands/`.
-Public CI tests the adapter, the SDK, the canonical DB1 producers and the PostgreSQL provider. It
-does not certify an installed implementation, whose own process, datastore, provider-send and
-recovery qualification accompanies its deployment. See [Memory boundary](MEMORY.md) and the
-[memory module](modules/memory.md).
+At first start the one-shot `aimee-memory-init` service provisions the installation for the
+instance's role: it generates a memory identity, exact executable grants and an owner key, and
+prepares `/opt/aims-memory/<role>`, which the application mounts read-only. Only the
+configuration, state and runtime directories are writable, and they live under `private-memory/`
+in the home volume. After an image update the installation is prepared again under the same
+identity and the stored memory is kept. The implementation declares the public `memory.*`
+commands it serves (for example store, search and `memory.verify_receipt`); a command it does not
+declare returns `404` from `/v1/commands/`.
+
+Without a provisioned installation the public unavailable adapter runs: it exits before bus
+attachment and declares no commands, and the instance reports `missing_module: memory` and is not
+ready. Public CI tests the adapter, the SDK, the canonical DB1 producers, the PostgreSQL provider,
+the bundle check and the provisioning decisions; it does not build the implementation. See
+[Memory boundary](MEMORY.md) and the [memory module](modules/memory.md).
 
 ## Request paths
 

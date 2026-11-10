@@ -15,7 +15,7 @@ Start here:
 | find a command | [Generated command reference](gen/cli-commands.md) |
 | operate delegates and workflows | [Delegates](DELEGATES.md), [sandbox](DELEGATE_SANDBOX.md), [role permissions](DELEGATE_ROLE_PERMISSIONS.md), and [workflows](WORKFLOWS.md) |
 | understand memory and retrieval | [Memory boundary](MEMORY.md), [knowledge](KNOWLEDGE.md), [curator](CURATOR_PIPELINE.md), and [retrieval](retrieval-stack.md) |
-| install or replace the memory implementation | [Memory boundary](MEMORY.md) and [memory module](modules/memory.md) |
+| understand how memory is shipped and provisioned | [Memory boundary](MEMORY.md), [Deployment](DEPLOYMENT.md#memory) and [memory module](modules/memory.md) |
 | upgrade an existing deployment | [Upgrading](UPGRADING.md) |
 | deliver memory to a supported local model | [Native memory plugin](NATIVE_MEMORY_PLUGIN.md) |
 | prepare a Discord chatbot with Gemma4 E2B | [Discord bridge](../integrations/discord/README.md) |

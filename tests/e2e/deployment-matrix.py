@@ -276,6 +276,11 @@ class Stack:
         self.env['AIMEE_KB_HOST'] = 'aimee-kb'
         for kind in ('ADMIN', 'MIGRATOR', 'RUNTIME'):
             self.env[f'AIMEE_STORE_{kind}_PASSWORD'] = secrets.token_hex(24)
+        # The frozen reference owner is selected through the image's public
+        # module manifest. Leave the shipped memory unprovisioned for those
+        # runs so that manifest, and therefore the reference, is what serves.
+        if reference_memory_owner:
+            self.env['AIMEE_MEMORY_PROVISION'] = 'off'
         self.file = 'compose.kb.yaml' if role == 'kb' else 'compose.yaml'
         self.application = f'{self.project}-aimee-{role}-1'
         self.postgres = f'{self.project}-aimee-store-db-1'

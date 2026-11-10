@@ -9,13 +9,14 @@ means the contract or branch exists but is not part of the integrated path yet.
 Use [Server and KB](SERVER_AND_KB.md) for placement and deployment boundaries. The
 [Atlas review](reviews/agent-memory-atlas-2026-09-29.md) records remaining source-confirmed gaps.
 
-Memory moved out of the application image in this release. The public tree keeps the generic
-memory SDK, the module transport and the host-side guarantees of a provider-bound request; the
-bundled `memory` executable is an explicit unavailable adapter, and records, retrieval and
-lifecycle belong to a separately installed implementation ([Memory boundary](MEMORY.md)). Rows
-below marked `Installed implementation` describe behaviour that implementation must provide; the
-public tree no longer ships it and public CI does not certify it. Existing 1.0.x memories are
-carried forward with the procedure in [Upgrading](UPGRADING.md#upgrade-from-102).
+Memory is a separate implementation from this release on. The public tree keeps the generic
+memory SDK, the module transport and the host-side guarantees of a provider-bound request;
+records, retrieval and lifecycle belong to an implementation whose source is private and which
+ships in the application image as a vendored binary bundle, provisioned per deployment at first
+start ([Memory boundary](MEMORY.md)). Rows below marked `Installed implementation` describe
+behaviour that implementation provides; public CI tests the packaging, provisioning and host
+paths, not the implementation's internals. Existing 1.0.x memories are carried forward with the
+procedure in [Upgrading](UPGRADING.md#upgrade-from-102).
 
 ## Browser chat integration (2026-10-20)
 
@@ -66,7 +67,8 @@ See the [current handoff](IR_MIGRATION_HANDOFF.md).
 
 | Feature | State | Boundary |
 | --- | --- | --- |
-| Memory boundary | Done | Generic memory SDK and module transport; bundled unavailable adapter; implementation selected per role in the module manifest. An instance without one reports `missing_module: memory` and is not ready. |
+| Shared memory writes on a KB | Not working | The shipped implementation refuses `memory.store` sent to a KB's API (`unsupported_mode`); list and search are served. 1.0.x shared memories cannot be imported yet. |
+| Memory boundary | Done | Generic memory SDK and module transport; implementation vendored as a binary bundle (`linux/amd64`), provisioned per deployment by `aimee-memory-init` and re-prepared on image update with stored memory kept. An instance without a provisioned installation reports `missing_module: memory` and is not ready. |
 | Persistent typed memory | Installed implementation | Facts, rules, decisions, episodes, provenance, contradiction, and staleness are the installed implementation's contract. |
 | Server/KB placement | Done | Independent stores and immutable roles. Server owns private code and the personal placement; KB owns the shared corpus and the shared placement. Both use the Go PostgreSQL module and select their own memory implementation. |
 | PostgreSQL deployment | Done | Separate PostgreSQL service per standard composition; ordinary persistent storage by default, LUKS opt-in. Both roles use the Go PostgreSQL provider; native KB algorithms use session transport. |

@@ -77,10 +77,28 @@ ARG AIMEE_VERSION=""
 # `aimee hooks pre` is the PreToolUse guard. Without the binary in the image a
 # delegate has no aimee tools and no guard can run — it gets a bare shell and its
 # own credentials, which is the opposite of the intent.
+# Memory ships as a vendored binary bundle (vendor/aims-memory): prebuilt bridge
+# archives that are linked into the Server and KB resources here, and the memory
+# executables and provisioning scripts that go into the runtime image. The
+# bundle is verified against this tree before use; a platform without a bundle
+# builds the resources without memory, and such an image cannot provision it.
+ARG TARGETARCH
 RUN build_version="$AIMEE_VERSION" \
     && if [ -z "$build_version" ]; then build_version=$(cat src/core/VERSION); fi \
     && sh scripts/fetch-treesitter.sh \
-    && make -C src ../aimee-server ../aimee-kb ../aimee-kb-worm ../aimee ../aimee-forwarder -j"$(nproc)" \
+    && memory_platform="linux-${TARGETARCH:-amd64}" \
+    && memory_make="" \
+    && mkdir -p /memory-image \
+    && if [ -f "vendor/aims-memory/$memory_platform.tar.xz" ]; then \
+         python3 -I scripts/check_memory_bundle.py --platform "$memory_platform" --unpack /memory-bundle \
+         && memory_make="-f Makefile -f /memory-bundle/link/overlay-link.mk AIMS_VENDOR=/memory-bundle" \
+         && install -d /memory-image/source/src/modules /memory-image/source/tests/baselines/modules \
+         && cp -a /memory-bundle/bin /memory-bundle/provision /memory-image/ \
+         && cp /memory-bundle/MANIFEST.json /memory-image/MANIFEST.json \
+         && cp src/modules/process-contracts.json /memory-image/source/src/modules/ \
+         && cp tests/baselines/modules/canonical-inventory.yaml /memory-image/source/tests/baselines/modules/; \
+       fi \
+    && make -C src $memory_make ../aimee-server ../aimee-kb ../aimee-kb-worm ../aimee ../aimee-forwarder -j"$(nproc)" \
          AIMEE_TREESITTER=1 GIT_VERSION="v$build_version" \
     && cmake -S . -B /thinclient-build \
          -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_INSTALL_PREFIX=/usr/local \
@@ -436,6 +454,10 @@ VOLUME /var/lib/aimee-workspaces /mnt/media/cores
 COPY --from=build /src/aimee-server /usr/local/bin/aimee-server
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
+# Memory executables, provisioning scripts and the two public catalog files the
+# provisioning step reads; empty on a platform without a memory bundle.
+COPY --from=build /memory-image/ /opt/aimee/memory/
+COPY --chmod=0755 deploy/container/memory-provision.py /usr/local/bin/aimee-memory-provision
 COPY --from=build /src/aimee-kb-worm /usr/local/bin/aimee-kb-worm
 COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
 COPY --from=build /module-runtime/grants/ /opt/aimee/module-grants/

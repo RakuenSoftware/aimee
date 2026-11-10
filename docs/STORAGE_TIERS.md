@@ -8,9 +8,9 @@ without a KB. See [Server and KB](SERVER_AND_KB.md) for deployment and request s
 | --- | --- | --- | --- |
 | Server runtime, historically DB1 | `aimee`; `aimee-wfe` owns workflow lifecycle | Server PostgreSQL | Sessions, working memory, jobs, workflows, policy, caches |
 | Private code | Server | Server PostgreSQL + pgvector | Private code index and vectors |
-| Personal memory | Installed memory implementation, Server placement | The implementation's own datastore | Personal records, revisions and vectors. The 1.0.x `user_memories` tables are retained in Server PostgreSQL after an upgrade but are no longer read; see [Upgrading](UPGRADING.md#upgrade-from-102) |
+| Personal memory | Memory implementation, Server placement | Its own database under `private-memory/server` in the home volume | Personal records, revisions and vectors. The 1.0.x `user_memories` tables are retained in Server PostgreSQL after an upgrade but are no longer read; see [Upgrading](UPGRADING.md#upgrade-from-102) |
 | Shared knowledge | KB knowledge domains | KB PostgreSQL + pgvector | Facts, documents, shared code, evidence, curation queues |
-| Shared memory | Installed memory implementation, KB placement | The implementation's own datastore | Shared records in global, workspace and project scopes. The 1.0.x `memories` table is retained in KB PostgreSQL after an upgrade but is no longer read |
+| Shared memory | Memory implementation, KB placement | Its own database under `private-memory/kb` in the home volume | Shared records in global, workspace and project scopes. The 1.0.x `memories` table is retained in KB PostgreSQL after an upgrade but is no longer read |
 | Server WORM | Server audit owner | Separate SQLite ledger | Append-only evidence chain and checkpoints |
 | KB WORM | `aimee-kb-worm` | Separate SQLite ledger | Append-only KB evidence chain and checkpoints |
 
@@ -67,6 +67,7 @@ Back up each instance's home, Vault, PostgreSQL data, workspaces, and audit evid
 Use consistent PostgreSQL dumps or coordinated snapshots, and preserve the original identity when
 restoring. Follow [Deployment](DEPLOYMENT.md#volumes-and-backup) and [WORM worker](WORM_WORKER.md).
 
-The installed memory implementation's datastore is a separate recovery dependency. Back it up and
-restore it with the instance's home, Vault and PostgreSQL store, following the implementation's
-own instructions; see [Memory boundary](MEMORY.md).
+The memory implementation keeps its records, configuration and owner key under `private-memory/`
+in the instance's home volume, so the home backup covers them; restore it together with the Vault
+and PostgreSQL store. The `aimee-memory` volume holds prepared artifacts only and is regenerated at
+the next start. See [Deployment](DEPLOYMENT.md#memory).

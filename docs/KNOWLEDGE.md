@@ -2,8 +2,8 @@
 
 Server keeps one human's private code and serves that human's personal memory. An optional KB
 turns shared sessions, documents, code, and explicit facts into a scoped corpus with source
-evidence, retrieval, and curation. Memory records in either placement are served by a separately
-installed memory implementation; the application image ships only an unavailable adapter
+evidence, retrieval, and curation. Memory records in either placement are served by the memory
+implementation that ships in the application image and is provisioned per deployment
 ([Memory boundary](MEMORY.md)). Statements below about memory records, revisions and recall
 describe the contract the public commands expose, which the installed implementation fulfils;
 the KB's own document, code and fact pipelines are part of this tree.

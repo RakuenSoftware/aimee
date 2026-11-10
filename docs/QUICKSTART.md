@@ -9,11 +9,12 @@ This guide follows the current tree, the release after published
 [1.0.2](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.2). Check
 [What's new](WHATS_NEW.md) before assuming a tagged image includes an integration feature.
 
-**Memory is installed separately.** The application image ships no memory engine. The steps below
-start a working Server for chat, code and workflows, but it reports `missing_module: memory` in
-`/v1/ready`, its container health stays unhealthy and memory commands return `503` until you
-install a memory implementation and select it in the role module manifest
-([Memory boundary](MEMORY.md)). Upgrading an existing 1.0.x deployment has its own procedure in
+**Memory is provisioned at first start.** The application image carries its memory implementation.
+The startup helper used below runs the one-shot `aimee-memory-init` service, which creates this
+deployment's memory installation before the application starts, so the Server becomes ready with
+working memory and no further step. It needs Docker Engine 26 or later and Compose 2.26 or later
+(the application mounts subdirectories of its home volume), and the `linux/amd64` image.
+Upgrading an existing 1.0.x deployment has its own procedure in
 [Upgrading](UPGRADING.md#upgrade-from-102).
 
 ![Standard personal Server deployment and separately deployed optional shared KB](images/architecture/deployment.svg)
@@ -40,8 +41,10 @@ scripts/compose-local.sh -f compose.yaml up -d
 scripts/compose-local.sh -f compose.yaml logs aimee-server
 ```
 
-The helper seals database credentials into the application Vault before starting services.
-It uses the selected Docker context without inspecting the client's kernel or devices.
+The helper provisions memory and seals database credentials into the application Vault before
+starting services. It uses the selected Docker context without inspecting the client's kernel or
+devices. Start the stack through it every time, including after an image update: a plain
+`docker compose up` skips the step that reads the embedder's identity for memory.
 The examples use a POSIX shell. From PowerShell, after creating the private `.env`, run
 `python scripts/compose-vault-init.py -f compose.yaml up` followed by
 `docker compose -f compose.yaml up -d`.
@@ -50,8 +53,8 @@ The three database passwords configure separate administrator, migrator, and run
 `.env` private and preserve its values: changing them later does not change existing database roles.
 SQL connections still require TLS and scoped credentials in the default storage mode.
 
-This starts one application container, one PostgreSQL container, and one local embedder. It does
-not start a KB, a synthesis model or a memory implementation. `compose.server.yaml`, `compose.server-standalone.yaml`, and
+This runs the one-shot memory provisioning container, then starts one application container, one
+PostgreSQL container, and one local embedder. It does not start a KB or a synthesis model. `compose.server.yaml`, `compose.server-standalone.yaml`, and
 `deploy/compose/aimee.yaml` are aliases of this standard deployment.
 
 ### Browser-managed models
@@ -287,8 +290,8 @@ aimee memory store quickstart "Enrollment works"
 aimee memory search "Enrollment works"
 ```
 
-Both commands need an installed memory implementation; without one they fail with
-`user memory module unavailable`, which says nothing about the grant.
+If they fail with `user memory module unavailable`, memory is not provisioned on this instance
+(`missing_module: memory` in `/v1/ready`); that says nothing about the grant.
 
 The bearer alone remains read-only, and changing the retired `aimee.api.remote_writes` setting does
 not grant access.

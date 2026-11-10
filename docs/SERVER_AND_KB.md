@@ -4,9 +4,9 @@
 own identity, Vault, PostgreSQL store, event bus, and model configuration. Server works without a KB.
 Connecting a KB adds an explicitly selected shared store; it does not relocate personal memory.
 
-Memory itself is not part of the public application. Each instance selects a separately installed
-memory implementation through its role module manifest; the bundled `memory` executable is an
-explicit unavailable adapter, and an instance that selects it is not ready. This page describes
+Memory is served by a separate implementation that ships in the application image and is
+provisioned for each instance at first start; its source is not part of this repository. An
+instance without a provisioned installation runs the unavailable adapter and is not ready. This page describes
 which instance a memory operation belongs to. What an implementation stores and how it retrieves
 are its own contract; see [Memory boundary](MEMORY.md).
 
@@ -61,8 +61,8 @@ Both roles ship in the same application image. First boot persists the selected 
 `instance-identity.json`. A later boot with the opposite role is refused. The role supervisor
 requires the role, configuration, PostgreSQL, and memory modules and rejects a conflicting role.
 
-The same bundled `memory` executable, the unavailable adapter, ships in each composition, and each
-role's manifest names the implementation that actually runs. The supervisor passes
+The same memory bundle ships in each composition, and provisioning generates the manifest and
+grants for the role that runs. The supervisor passes
 `AIMEE_MODULE_PLACEMENT` to module processes: a `server` placement serves only the instance-local
 `user` scope; `kb` serves `global`, `workspace`, and `project`. Placement is explicit; the presence
 of a table cannot grant another placement.
@@ -160,9 +160,7 @@ remain a failure. KB availability and local personal-memory availability are sep
 
 ## Implementations preserve the role boundary
 
-Selecting a memory implementation does not merge instances or widen a scope. Each instance selects
-its own implementation, with its own canonical source and namespace, through its own manifest. The
-host still applies authentication, caller identity and audit, and provider-bound requests still
-pass the host's wire fence and receipts. Public CI does not certify an installed implementation;
-its process, datastore, provider-send and recovery qualification accompanies its deployment
-([Memory boundary](MEMORY.md)). A unified Aimee node with parent connections remains separate work.
+Provisioning memory does not merge instances or widen a scope. Each instance has its own
+installation, with its own memory identity, owner key and namespace. The host still applies
+authentication, caller identity and audit, and provider-bound requests still pass the host's wire
+fence and receipts ([Memory boundary](MEMORY.md)). A unified Aimee node with parent connections remains separate work.

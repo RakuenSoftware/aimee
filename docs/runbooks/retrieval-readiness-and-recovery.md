@@ -76,7 +76,8 @@ Do not delete queues, DB volumes, benchmark artifacts, or breaker evidence as a
 recovery shortcut. Escalate if the breaker repeatedly reopens or the last successful
 ingest/query timestamps do not advance after the dependency is healthy.
 
-Memory itself is served by the installed memory implementation. `missing_module: memory` in
-`/v1/ready` means none is attached; otherwise follow that implementation's own recovery
-procedure. Its recovery must pass both scoped retrieval and erasure verification; a green HTTP
+Memory itself is served by the implementation provisioned from the image. `missing_module: memory`
+in `/v1/ready` means none is attached: start the stack through `scripts/compose-local.sh` and read
+its `[memory-provision]` lines. After restoring the home volume, a start re-prepares the
+installation around the restored records. Its recovery must pass both scoped retrieval and erasure verification; a green HTTP
 listener alone is insufficient. See [Memory boundary](../MEMORY.md).

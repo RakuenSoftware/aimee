@@ -2,40 +2,43 @@
 
 ## Upgrade from 1.0.2
 
-This section covers an existing 1.0.x Server or KB moving to the release after 1.0.2. The
+This section covers an existing 1.0.x Server or KB moving to 1.1.0. The
 procedure and every outcome below were run against a 1.0.2 Server and a 1.0.2 KB that held
 memories, upgraded in place on their existing volumes.
 
 ### What changes
 
-- **Memory is no longer part of the application image.** 1.0.2 served memory from a built-in
-  owner. This release ships only an explicit unavailable adapter; a memory implementation is
-  installed separately and selected through the role module manifest
-  ([Memory boundary](MEMORY.md)). Starting the new image on an existing deployment without one
-  is safe but not useful: the store opens, chat and the other `/v1` routes work, `/v1/ready`
-  returns `503` with `missing_module: memory`, every memory command returns
-  `503 user memory module unavailable`, and the supervisor log repeats
-  `memory capability unavailable` while it restarts the adapter.
+- **Memory is a separate implementation that ships in the image.** 1.0.2 served memory from a
+  built-in owner. From 1.1.0 the application image carries a memory implementation as a binary
+  bundle and provisions it for each deployment ([Memory boundary](MEMORY.md),
+  [Deployment](DEPLOYMENT.md#memory)). The first start of the new images runs the one-shot
+  `aimee-memory-init` service, which creates the installation; no separate install step exists.
+- **A KB's shared memory is read-only in this release.** The shipped implementation serves shared
+  memory list and search on a KB but refuses writes sent to the KB's API, so 1.0.x shared memories
+  cannot be imported yet; see the KB note under the procedure.
 - **Existing memories are kept but not served.** The upgrade does not drop or rewrite the
   1.0.x memory tables: a Server's personal memories stay in `user_memories` and a KB's shared
-  memories stay in `memories`. An installed implementation starts with its own empty store and
-  never reads those tables, so memory list, search and recall are empty until the records are
-  imported with `scripts/upgrade/migrate-memory.py`.
-- **The embedder may need to change with the implementation.** An implementation that pins the
-  embedding identity needs an embedder whose `/health` reports `embedding_identity`. The embedder
-  image pinned at 1.0.2 does not report it; a KB started against it failed store initialization
-  with `could not read the recorded embedding dim`. Use the embedder build your implementation
-  names.
+  memories stay in `memories`. The new implementation starts with its own empty store and never
+  reads those tables, so memory list, search and recall are empty until the records are imported
+  with `scripts/upgrade/migrate-memory.py`.
+- **The Compose files change.** `compose.yaml` and `compose.kb.yaml` gain the `aimee-memory-init`
+  service, an `aimee-memory` volume, and mounts of `private-memory/<role>` from the home volume
+  into the application. Use the files from this release; a deployment kept on its 1.0.2 Compose
+  file starts the new image without memory (`missing_module: memory`, not ready). These mounts
+  need Docker Engine 26 or later and Compose 2.26 or later.
+- **Use this release's embedder image.** Memory pins the embedding provider by identity. The
+  embedder image published with 1.0.2 does not report one, and startup stops with a message
+  saying so. The default image tag of this release does.
+- **The image is `linux/amd64` for memory.** The memory bundle exists for that platform only. An
+  image for another platform has no memory and its provisioning service fails with a message.
 - **Memory commands are declared by the implementation.** The fixed `/v1/memory/*` routes used
   by 1.0.2 clients are unchanged. `/v1/commands/memory.<verb>`, which answered `no such command`
-  in 1.0.2, now reaches every memory command the installed implementation declares on the RPC
-  surface, and returns `404` for one it does not declare.
+  in 1.0.2, now reaches every memory command the implementation declares on the RPC surface, and
+  returns `404` for one it does not declare.
 - **Oversized provider requests are classified by the host.** A request that overflows the
-  deployment or caller byte budget is refused as `request_budget_exceeded` (HTTP 413), whichever
-  memory implementation is installed.
+  deployment or caller byte budget is refused as `request_budget_exceeded` (HTTP 413).
 
-Nothing else about the deployment shape changes: the same Compose files, project, volumes, role
-identity, Vault and PostgreSQL layout are reused. The checks in
+The project, volumes, role identity, Vault and PostgreSQL layout are reused. The checks in
 [Upgrade to the 1.0.0 deployment](#upgrade-to-the-100-deployment) still apply to a database older
 than the current layout.
 
@@ -61,18 +64,22 @@ project. The examples use a Server; the KB differences are listed after them.
    Only active, unexpired records with no erasure intent are exported. Retired, merged, expired
    and erased memories stay behind on purpose.
 
-3. **Start the new images on the same project and volumes.**
+3. **Stop the stack, then start the new images on the same project and volumes** with this
+   release's Compose files:
 
    ```sh
+   docker compose -p <project> -f compose.yaml down
    scripts/compose-local.sh -p <project> -f compose.yaml up -d
    ```
 
    Use the project name, environment file and overrides the deployment already has, including
-   the LUKS overlay for an encrypted store.
+   the LUKS overlay for an encrypted store. `down` without `-v` keeps every volume. The helper
+   prints `[memory-provision]` lines; the last one reads
+   `memory installation created for server`.
 
-4. **Install and select a memory implementation** following its own instructions, then wait for
-   readiness. `GET /v1/ready` must report `"ready": true` with an empty `missing_module`. On a
-   KB, read `GET /v1/health`; `memory_ready` must be true.
+4. **Wait for readiness.** `GET /v1/ready` must report `"ready": true` with an empty
+   `missing_module`. On a KB, read `GET /v1/health`; `memory_ready` must be true. Memory is
+   working and empty at this point.
 
 5. **Import.** Run the import where the instance's local API is reachable, as the runtime user.
    Do a dry run first:
@@ -97,11 +104,14 @@ project. The examples use a Server; the KB differences are listed after them.
    import is confirmed; they contain private memory. The old tables are left untouched by both
    steps. Keep them, and the backup, until the upgraded deployment has been accepted.
 
-For a **KB**, use `--placement kb`, the `compose.kb.yaml` project and the `aimee-kb` service. The
-export reads `memories`; the import calls the KB's authenticated loopback API and needs its API
-bearer token in `AIMEE_KB_API_BEARER_TOKEN` or `--token-file`. Global, project and workspace
-scopes are preserved; a record in any other scope is reported as not placeable and left for a
-manual decision.
+For a **KB**, steps 1 to 4 are the same with `--placement kb`, the `compose.kb.yaml` project and
+the `aimee-kb` service; the export reads `memories`. **The import does not work on a KB in
+1.1.0.** The shipped implementation refuses every `memory.store` sent to the KB's own API with
+`unsupported_mode`, for global, project and workspace scopes alike, so `migrate-memory.py import
+--placement kb` reports each record as failed and stores none. Shared memory list and search are
+served and return nothing. Keep the exported snapshot and the retained `memories` table; they are
+the only copy of the 1.0.x shared memories until a later release accepts them. A KB that depends
+on shared memory writes should stay on 1.0.2.
 
 ### What the import does and does not carry
 
@@ -118,9 +128,25 @@ release and `migrate-memory.py` does not read their catalogs. Keep the catalog f
 `erasures.json`; moving those records is a separate, backend-specific conversion that must map
 identities and retained erasure authority before the records are served again.
 
-The import uses only the public `memory.store` and `memory.list` commands, so it works with any
-implementation that serves them. If the implementation refuses a record, the failure is printed
+The import uses only the public `memory.store` and `memory.list` commands. If the implementation
+refuses a record, the failure is printed
 with its kind and message and nothing is lost: the snapshot and the old table still hold it.
+
+### Later image updates
+
+From 1.1.0 onward a memory installation belongs to the image that prepared it. To move to a newer
+image, stop the stack and start it again through the helper:
+
+```sh
+docker compose -p <project> -f compose.yaml down
+scripts/compose-local.sh -p <project> -f compose.yaml up -d
+```
+
+Provisioning notices the changed image, prepares the installation again under the same memory
+identity and keeps the owner key and stored memory; it prints
+`memory installation for server re-prepared; stored memory kept`. It refuses to do this while the
+application is still running, with a message saying to stop it first. The same happens when
+`AIMEE_MEMORY_ACCOUNTS` or the embedder image changes.
 
 ## Upgrade to the 1.0.0 deployment
 
@@ -184,8 +210,8 @@ persistent custodian of the volume key; losing it can make the database unrecove
 ### Verify before retiring the old deployment
 
 Check application and database readiness, client enrollment, personal store/get/search, private code,
-shared KB access when configured, workflow recovery and audit verification. Memory is served by
-a separately installed implementation from the release after 1.0.2 onward; see
+shared KB access when configured, workflow recovery and audit verification. From 1.1.0 memory is
+served by the implementation provisioned from the image; see
 [Upgrade from 1.0.2](#upgrade-from-102).
 
 Retain the original home, database, snapshots and image until the cutover and restore checks pass.

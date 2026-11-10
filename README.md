@@ -15,7 +15,7 @@ and governs what an agent may read, execute, send and change. A model consumes t
 and proposes actions. Durable workflows retain their execution state across individual model
 calls. You take on a server, its backups and its upgrades in exchange for control of that state.
 
-![Aimee overview: enrolled tools and browser use a personal Server; shared knowledge is optional and memory is served by an installed implementation](docs/images/architecture/overview.svg)
+![Aimee overview: enrolled tools and browser use a personal Server; shared knowledge is optional and memory is served by the implementation provisioned in each instance](docs/images/architecture/overview.svg)
 
 ## Security and Governance are the core of the runtime
 
@@ -125,20 +125,22 @@ still has these two roles. See [Server and KB](docs/SERVER_AND_KB.md).
   External witnesses are needed for evidence against a compromised host.
   See [Security](docs/SECURITY.md) and [WORM worker](docs/WORM_WORKER.md).
 
-## Memory is an installed implementation
+## Memory ships in the image
 
-The application image no longer contains a memory engine. Aimee keeps the generic memory
-contract, the module transport and the host-side guarantees of a provider-bound request:
-authenticated callers, context pre-injection, source release and revalidation, the byte budget,
-the send guard and provider receipts. The bundled `memory` executable is an explicit unavailable
-adapter, and a deployment that selects it reports `missing_module: memory` and is not ready.
+From 1.1.0 the application image carries its memory implementation as a vendored binary bundle
+([`vendor/aims-memory`](vendor/aims-memory/README.md)); its source lives in a separate, private
+repository. Each deployment provisions its own installation at first boot: the one-shot
+`aimee-memory-init` service generates the instance's memory identity, grants and owner key, and
+the application then mounts the result read-only. Records live in the instance's home volume.
+After an image update the installation is prepared again and the stored memory is kept.
 
-You install a memory implementation separately and select its executable in the role module
-manifest. That implementation owns its records, retrieval and datastore and declares the
-`memory.*` commands it serves. Public CI tests the adapter, the SDK and the host paths; it does
-not certify an installed implementation, whose own qualification accompanies its deployment.
-[Memory boundary](docs/MEMORY.md) states the contract, and [Upgrading](docs/UPGRADING.md#upgrade-from-102)
-covers moving existing 1.0.x memories into an installed implementation.
+Aimee itself keeps the generic memory contract, the module transport and the host-side guarantees
+of a provider-bound request: authenticated callers, context pre-injection, source release and
+revalidation, the byte budget, the send guard and provider receipts. The bundle exists for
+`linux/amd64`; an image for another platform carries no memory, reports `missing_module: memory`
+and is not ready. [Memory boundary](docs/MEMORY.md) states the contract,
+[Deployment](docs/DEPLOYMENT.md#memory) covers provisioning and backup, and
+[Upgrading](docs/UPGRADING.md#upgrade-from-102) covers moving existing 1.0.x memories across.
 
 The separate [native-memory vLLM plugin](docs/NATIVE_MEMORY_PLUGIN.md) lets supported local models
 consume selected Aimee records as native attention memory. That model-side delivery mechanism and

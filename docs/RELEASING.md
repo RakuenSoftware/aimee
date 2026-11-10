@@ -85,6 +85,21 @@ PostgreSQL shipping inside it, so anything deploying `:latest` got a KB that cou
 
 If a tag survives a failed run, delete it by hand before the next release or that version is skipped.
 
+## The memory bundle is part of the release
+
+The application image links and ships the vendored memory bundle under `vendor/aims-memory`
+([its README](../vendor/aims-memory/README.md)). The bundle is compiled against specific public
+files, recorded with their hashes in `vendor/aims-memory/bundle.json`. `make -C src lint` and the
+image build both run `scripts/check_memory_bundle.py` and refuse a bundle whose recorded files
+differ from the tree, naming them.
+
+Two consequences for a release:
+
+- A change to a recorded file cannot merge until a maintainer with access to the private memory
+  repository rebuilds the bundle from the changed tree and commits it with the change.
+- The published images are multi-architecture, but the bundle exists for `linux/amd64` only. The
+  `linux/arm64` application image is built without memory and cannot provision it.
+
 ## A tag is not a release
 
 A tag may exist without a successful release. The [0.2.196 entry](https://github.com/RakuenSoftware/aimee/releases/tag/v0.2.196)

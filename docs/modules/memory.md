@@ -2,28 +2,25 @@
 
 ## Purpose and non-goals
 
-The public memory module packages a generic SDK, a bus probe and an unavailable adapter
-(`server-go/modules/memory/adapter/unavailable.go`). It owns no datastore, retrieval policy,
-ontology, maintenance, or source-release implementation. The bundled adapter exits before bus
-attachment and advertises no handler or stages, so selecting its executable is not serving
-readiness.
+Memory stores and retrieves what an instance has learned: personal records on a Server, shared
+records on a KB. From 1.1.0 it is served by a separate implementation that ships inside the
+application image as a vendored binary bundle (`vendor/aims-memory`) and is provisioned for each
+deployment at first boot. The implementation's source is not part of this repository.
 
-Aimee-specific memory behavior belongs in an installed memory implementation; reusable datastore
-behavior belongs in an independent database product. Neither the canonical DB1 source producers
-nor the generic adapter silently implement the retired Go memory owner. No private implementation
-or database credentials are installed by this repository. See [Memory boundary](../MEMORY.md) for
-the boundary statement and qualification responsibilities.
+This repository owns the generic SDK, the host paths that call memory, the bundle's packaging and
+verification, and the provisioning command. It does not own the datastore, retrieval policy,
+ontology or maintenance, and the retired Go memory owner is not restored. The public tree still
+builds an unavailable adapter (`server-go/modules/memory/adapter/unavailable.go`), which is what
+runs when no installation has been provisioned. See [Memory boundary](../MEMORY.md).
 
 ## Public contracts
 
 The public `server-go/memory` SDK (`client.go`, `store.go`, `wire.go`, `scope.go`, `version.go`)
 defines the generic client, store interface, wire types, scope selection and record versions an
-implementation speaks. An installed implementation declares the public `memory.*` commands it
-actually serves, for example store, get, list, search, delete, `memory.receipt` and
-`memory.verify_receipt`; the host exposes exactly those through the fixed `/v1/memory/*` routes and
-`/v1/commands/memory.<verb>`. A command that is not declared returns `404` from the command route,
-and the bundled adapter declares none. Legacy stage IDs alone do not establish protocol
-compatibility; the implementation must honestly declare its supported wire capabilities.
+implementation speaks. The implementation declares the public `memory.*` commands it serves; the
+host exposes exactly those through the fixed `/v1/memory/*` routes and
+`/v1/commands/memory.<verb>`. A command that is not declared returns `404` from the command route.
+Legacy stage IDs alone do not establish protocol compatibility.
 
 ## Dependencies and consumers
 
@@ -31,59 +28,79 @@ The descriptor `src/modules/memory/module.yaml` declares no dependencies. The SD
 already admitted bus caller and stays independent of server domain storage. Consumers are the C
 resource hosts, which authenticate callers and forward memory commands, and the host paths of a
 provider-bound request in `src/server/ingress_preinject.c` and `src/wire_fence.c`, which ask the
-installed implementation for context, a source release and revalidation.
+implementation for context, a source release and revalidation. The bundle's bridge objects are
+linked into `aimee-server` and `aimee-kb` by `Dockerfile.server`.
 
 ## Providers and readiness
 
-Each role's supervisor requires a `memory` module. With the bundled adapter the process prints
-`memory capability unavailable` and exits, the supervisor restarts it, and the instance reports
-`missing_module: memory` in `/v1/ready` with memory commands answering `503`. Readiness is reached
-only when the implementation selected in the role module manifest attaches to the bus and
-declares its commands. Public CI does not certify an installed implementation; its process,
-datastore, provider-send and recovery qualification accompanies its deployment.
+Each role's supervisor requires a `memory` module. A provisioned installation supplies it together
+with its database process; readiness is reached when both attach to the bus and the
+implementation declares its commands. Without a provisioned installation the unavailable adapter
+runs: it prints `memory capability unavailable` and exits, the supervisor restarts it, the instance
+reports `missing_module: memory` in `/v1/ready`, and memory commands answer `503`.
+
+Vector retrieval needs the embedding provider. Provisioning pins the provider by its identity, read
+from the embedder image by `scripts/embedder-identity.py`; a composition without a local embedder
+service is provisioned without vector retrieval.
 
 ## Configuration and activation
 
-Select an independently installed implementation through the existing role module manifest
-(`server.modules` or `kb.modules` under the image's module-grant directory) with exact executable
-grants. The supervisor passes `AIMEE_MODULE_PLACEMENT` to module processes: `server` serves the
-instance-local user scope, `kb` serves global, workspace and project scopes. Memory is selected at
-deployment, not switched at run time:
+The one-shot `aimee-memory-init` service in `compose.yaml` runs `aimee-memory-provision`
+(`deploy/container/memory-provision.py`) before the application starts:
 
-- `runtime_toggle.supported`: `false`; replacing the implementation means changing the manifest and
-  restarting the role.
+- first boot: it generates this deployment's memory identity, grants and owner key, prepares the
+  installation under `/opt/aims-memory/<role>` in the `aimee-memory` volume, and creates the
+  writable subtree `private-memory/<role>` in the home volume;
+- later boots: it verifies the installation and changes nothing;
+- after an image update, or when the requested accounts or embedding provider change: it prepares
+  the installation again under the same identity and keeps the owner key and the stored memory.
+  This is refused while the application is running.
+
+`AIMEE_MEMORY_ACCOUNTS` names the accounts a Server serves personal memory for (default `aimee`,
+at most 32); a KB has one shared owner. The supervisor passes `AIMEE_MODULE_PLACEMENT` to module
+processes: `server` serves the instance-local user scope, `kb` serves the shared scope. Memory is
+selected at deployment, not switched at run time:
+
+- `runtime_toggle.supported`: `false`; the installation is replaced only by provisioning while the
+  application is stopped.
 
 ## Surfaces
 
-The public tree builds one process for this module, the adapter installed as
-`/usr/local/libexec/aimee-modules/aimee-module-memory`, and the generic probe
-`server-go/cmd/aimee-memory-bus-probe`. CLI, MCP and HTTP memory surfaces are host surfaces that
-dispatch to whatever the installed implementation declares; none of them is implemented by this
-module.
+The image carries the memory executables and provisioning scripts under `/opt/aimee/memory` and
+the provisioning command as `/usr/local/bin/aimee-memory-provision`. The public tree also builds
+the unavailable adapter, installed as `/usr/local/libexec/aimee-modules/aimee-module-memory`, and
+the generic probe `server-go/cmd/aimee-memory-bus-probe`. CLI, MCP and HTTP memory surfaces are
+host surfaces that dispatch to whatever the implementation declares.
 
 ## Data and migrations
 
-This module owns no tables and ships no migrations. Canonical source producers, access, erasure
-and replay records remain with DB1 under `server-go/modules/aimee/families/`. The 1.0.x memory
-tables (`user_memories` on a Server, `memories` on a KB) are retained by an upgrade but are no
-longer read; `scripts/upgrade/migrate-memory.py` exports their active records and imports them
-through the installed implementation's public store command. See
+The implementation keeps its records in its own database under `private-memory/<role>/state` in
+the home volume, next to its configuration and owner key; one backup of the home volume covers
+them. The `aimee-memory` volume holds only prepared artifacts and can be regenerated. Canonical
+source producers, access, erasure and replay records remain with DB1 under
+`server-go/modules/aimee/families/`.
+
+The 1.0.x memory tables (`user_memories` on a Server, `memories` on a KB) are retained by an
+upgrade but are no longer read; `scripts/upgrade/migrate-memory.py` exports their active records
+and imports them through the public store command. See
 [Upgrading](../UPGRADING.md#upgrade-from-102).
 
 ## Security and privacy
 
-The adapter opens no storage and attaches to no bus, so it cannot disclose or mutate memory. An
-installed implementation runs under exact executable grants in the role's grant directory and
-receives only the calls the host admits for an authenticated caller. Host-side checks do not move
-with the implementation: source revalidation, the byte budget (`request_budget_exceeded`), the send
-guard and provider receipts stay in `src/wire_fence.c` and `src/server/ingress_preinject.c`.
+The application mounts the prepared installation read-only and can write only its configuration,
+state and runtime directories. Every module process runs under an exact executable grant generated
+at provisioning, and the owner key is created on the deployment and never leaves its home volume.
+Host-side checks do not move with the implementation: source revalidation, the byte budget
+(`request_budget_exceeded`), the send guard and provider receipts stay in `src/wire_fence.c` and
+`src/server/ingress_preinject.c`. The bundle is verified against its recorded hashes before it is
+linked (`scripts/check_memory_bundle.py`).
 
 ## Supported journeys
 
-Operators install an implementation, select it in the role manifest, wait for readiness and then
-use the ordinary memory commands. Deployment compatibility tests can explicitly select the actual
+Operators start the composition through `scripts/compose-local.sh`, wait for readiness and use the
+ordinary memory commands. Deployment compatibility tests can explicitly select the actual
 historical Go owner as an external reference fixture. [Its frozen public source pin](../../tests/fixtures/legacy-memory-owner.json)
-is separate from the shipped adapter. With Go 1.26.10 available, run
+is separate from the shipped implementation. With Go 1.26.10 available, run
 `python3 scripts/build_reference_memory_fixture.py --output /absolute/test-cache/aimee-module-memory`
 from the repository root; create the output directory first. The builder exports the pinned source
 into a disposable directory outside the checkout and writes a fresh executable plus a `.json`
@@ -92,43 +109,47 @@ or shipped by the builder.
 
 ## Tests and failure behavior
 
-Deployment tests select the reference through an exact executable grant at
+`scripts/tests/test_memory_provision.py` covers the provisioning decisions,
+`scripts/tests/test_check_memory_bundle.py` the bundle verification and
+`scripts/tests/test_compose_vault_init.py` the startup order. `make -C src lint` fails when a
+public file the bundle was compiled against has changed, naming the file, so a stale bundle is
+never linked.
+
+Deployment tests can select the reference owner through an exact executable grant at
 `/opt/aimee-test-memory-reference/aimee-module-memory`; other multicall roles retain their shipped
-executables. Its historical SQL behavior does not establish readiness or parity for the default
-unavailable adapter. The live write-tier authorization rig selects the same reference explicitly
-with `AIMEE_LIVE_REFERENCE_MEMORY_OWNER=/absolute/test-cache/aimee-module-memory`. The shared live
-helper verifies the sidecar before arming it and preserves every generated grant field except the
-executable path. Other authentication rigs retain their owner-free configuration.
+executables. The live write-tier authorization rig selects the same reference explicitly with
+`AIMEE_LIVE_REFERENCE_MEMORY_OWNER=/absolute/test-cache/aimee-module-memory`.
 `python3 scripts/build_reference_memory_fixture.py --verify /absolute/test-cache/aimee-module-memory`
 checks an existing artifact without building or installing it.
 
-Shared deployment qualification has two explicit profiles. The default `owner-client` profile in
-`tests/e2e/memory-placement-e2e.py` retains the original Server HTTP/CLI/MCP forwarding and
-cwd/scope assertions and requires a compatible installed C owner client. Selecting the frozen
-fixture makes the public Docker matrix choose `public-reference`: positive scope/state/authority
-checks use the real authenticated KB owner transport, while Server KB paths must return typed
-unavailability. Its qualification artifact records `server_forwarding_qualified: false`. Direct KB
-owner checks do not qualify private Server forwarding or cwd propagation; those require the
-separate `owner-client` run. A failed request never switches profiles or skips an assertion.
+Shared deployment qualification has two explicit profiles in `tests/e2e/memory-placement-e2e.py`:
+`owner-client` retains the original Server HTTP/CLI/MCP forwarding and cwd/scope assertions, and
+`public-reference` is chosen when the frozen fixture is selected. A failed request never switches
+profiles or skips an assertion.
 
 ## Operational diagnostics
 
 `GET /v1/ready` names the failed boundary: `missing_module: memory` means no implementation is
-attached. The supervisor log shows `memory capability unavailable` each time it restarts the
-bundled adapter. `server-go/cmd/aimee-memory-bus-probe` exercises the generic bus contract against
-an attached implementation. Beyond that, diagnostics are the installed implementation's own.
+attached. Provisioning prints `[memory-provision]` lines saying whether the installation was
+created, verified or updated, and a refusal says what to do. The supervisor log shows
+`memory capability unavailable` each time it restarts the unavailable adapter.
+`server-go/cmd/aimee-memory-bus-probe` exercises the generic bus contract against an attached
+implementation.
 
 ## Compatibility
 
 The wire types in `server-go/memory/wire.go` and the command names the host routes are the
-compatibility surface. The frozen reference in `tests/fixtures/legacy-memory-owner.json` records
-the last public Go owner for compatibility tests only; it is not a default or a runtime fallback.
-Similar stage numbers do not imply compatibility with the retired owner's ABI.
+compatibility surface. The bundle is tied to the exact public files recorded in
+`vendor/aims-memory/bundle.json`; a change to one of them needs a rebuilt bundle. A bundle exists
+for `linux-amd64` only, so an image for another platform carries no memory and cannot provision
+it. In the `kb` placement the shipped implementation serves list and search but refuses
+`memory.store` sent to the KB's own API with `unsupported_mode`. The frozen reference in `tests/fixtures/legacy-memory-owner.json` records the last public Go
+owner for compatibility tests only; it is not a default or a runtime fallback.
 
 ## Extension and removal
 
-A new implementation is added by installing its executable and selecting it in the role manifest;
-nothing in this module changes. The bundled adapter stays as the explicit default so that a
-deployment without an implementation fails closed and visibly, as `missing_module: memory`, and
-never falls back to a built-in datastore. Removing an implementation returns the instance to that
-unready state.
+A new bundle release replaces the archive under `vendor/aims-memory` and is recorded with
+`scripts/check_memory_bundle.py`; deployments pick it up at their next start after the image
+update. The unavailable adapter stays in the public tree so that an instance without a provisioned
+installation fails closed and visibly, as `missing_module: memory`, and never falls back to a
+built-in datastore.

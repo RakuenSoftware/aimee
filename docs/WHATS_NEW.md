@@ -6,15 +6,19 @@ This is the largest change since [1.0.2](https://github.com/RakuenSoftware/aimee
 Read [Upgrading](UPGRADING.md#upgrade-from-102) before starting this release on an existing
 deployment.
 
-- **Memory is an installed implementation.** The built-in Go memory owner, the Cognee adapter and
-  their evaluation tools were removed from the public tree. Aimee keeps the generic memory SDK,
-  the module transport and the host-side guarantees of a provider-bound request. The bundled
-  `memory` executable is an explicit unavailable adapter; an instance without an installed
-  implementation reports `missing_module: memory` and is not ready. See [Memory boundary](MEMORY.md).
+- **Memory is a new, separate implementation that ships in the image.** The built-in Go memory
+  owner, the Cognee adapter and their evaluation tools were removed from the public tree. Memory
+  is now served by the aims-db database and its Aimee memory module, vendored as a binary bundle
+  and provisioned for each deployment at first start by the one-shot `aimee-memory-init` service.
+  After an image update the installation is prepared again and the stored memory is kept. Aimee
+  keeps the generic memory SDK, the module transport and the host-side guarantees of a
+  provider-bound request. The bundle exists for `linux/amd64`, and a KB does not accept shared
+  memory writes in this release. See [Memory boundary](MEMORY.md) and
+  [Deployment](DEPLOYMENT.md#memory).
 - **Existing memories are kept and can be carried forward.** The 1.0.x memory tables are retained
   by the upgrade. `scripts/upgrade/migrate-memory.py` exports the active records read-only and
-  imports them through the installed implementation's public store command, idempotently, for both
-  a Server's personal memory and a KB's shared memory.
+  imports them through the public store command, idempotently, for a
+  Server's personal memory. A KB's shared memories are exported but cannot be imported yet.
 - **Every module process is Go.** The C module processes were retired and C that no shipped binary
   reaches was removed. The C resource hosts, the CLI and the bus embedding remain.
 - **The event bus is consumed by contract.** The ouroboros ring lives in its own repository and

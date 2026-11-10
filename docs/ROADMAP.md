@@ -54,8 +54,10 @@ current behavior lives in product guides and generated references.
 See [Proposals](PROPOSALS.md) for current design records and [Feature status](STATUS.md) for what is
 integrated.
 
-Memory is now a separately installed implementation behind the generic memory contract; the
-built-in engine and the Cognee adapter left the public tree ([Memory boundary](MEMORY.md)).
+Memory is now a separate implementation behind the generic memory contract, shipped in the image
+as a vendored binary bundle; the built-in engine and the Cognee adapter left the public tree
+([Memory boundary](MEMORY.md)). A bundle for `linux/arm64` and per-user provisioning of accounts
+created after first start are open.
 Remaining public work is on the contract and its host side, such as contract tests an
 implementation can run against itself, not a second authority or module infrastructure. Node
 unification and parent connections require a separate design.

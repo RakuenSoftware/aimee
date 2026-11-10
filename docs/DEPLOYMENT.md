@@ -213,14 +213,46 @@ Automatic adoption of older database layouts is removed. Startup does not rename
 `aimee_shared`, discover an `aimee` administrator, or transfer existing application
 objects. Existing volumes must already use the current database and role layout.
 
-## Memory implementation
+## Memory
 
-The application image contains no memory engine. `compose.yaml` and `compose.kb.yaml` start an
-instance whose bundled `memory` module is an unavailable adapter, so the instance stays unready
-(`missing_module: memory` in `/v1/ready`) until a memory implementation is installed. Install it
-separately for each role and select its executable in that role's module manifest with matching
-executable grants, following the implementation's own instructions. Its datastore is a separate
-recovery dependency: back it up and restore it together with the instance's home, Vault and
-PostgreSQL store. There is no memory service in the standard Compose files. See
-[Memory boundary](MEMORY.md).
+The application image carries the memory implementation as a vendored binary bundle and provisions
+it per deployment. `compose.yaml` and `compose.kb.yaml` define a one-shot `aimee-memory-init`
+service that runs `aimee-memory-provision` before the application starts:
+
+| Situation | What provisioning does |
+| --- | --- |
+| First start | Generates the instance's memory identity, grants and owner key; prepares the installation in the `aimee-memory` volume; creates `private-memory/<role>` in the home volume. |
+| Later starts | Verifies the installation and changes nothing. |
+| After an image update, or a changed `AIMEE_MEMORY_ACCOUNTS` or embedder | Prepares the installation again under the same identity; the owner key and stored memory are kept. Refused while the application is running: stop the stack, then start it again. |
+
+Start and restart the stack through `scripts/compose-local.sh` (or `scripts/compose-vault-init.py`
+followed by `docker compose up`). The helper reads the embedder image's identity, which memory pins
+for vector retrieval, and runs provisioning before it seals credentials. A plain
+`docker compose up` still verifies an existing installation but cannot supply that identity.
+
+Storage and recovery:
+
+- The application mounts the `aimee-memory` volume read-only. It holds prepared executables,
+  grants and configuration only and can be regenerated; it needs no backup.
+- Memory records, configuration and the owner key live under `private-memory/` in the home volume
+  (`aimee-server-home`). Back that volume up and restore it together with the Vault and the
+  PostgreSQL store. Without `private-memory/inputs-<role>` an installation cannot be re-prepared.
+- `AIMEE_MEMORY_ACCOUNTS` (default `aimee`, comma-separated, at most 32) names the accounts a
+  Server serves personal memory for. A KB has a single shared owner.
+- `AIMEE_MEMORY_PROVISION=off` skips provisioning and creates only the mount points. An instance
+  with no installation then runs without memory (`missing_module: memory`, not ready); an existing
+  installation is left untouched and stays active.
+
+Requirements and limits:
+
+- Docker Engine 26 or later and Compose 2.26 or later, for volume subpath mounts.
+- The memory bundle exists for `linux/amd64`. An image for another platform has no memory; its
+  provisioning service fails with a message saying so, unless provisioning is switched off.
+- An instance without a provisioned installation is not ready (`/v1/ready` returns `503`) and
+  answers memory commands with `503`.
+- On a KB the shipped implementation serves shared memory list and search but refuses
+  `memory.store` sent to the KB's API (`unsupported_mode`).
+- A composition without a local `aimee-embedder` service is provisioned without vector retrieval.
+
+See [Memory boundary](MEMORY.md) and the [memory module](modules/memory.md).
 
