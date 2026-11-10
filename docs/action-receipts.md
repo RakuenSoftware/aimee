@@ -17,7 +17,7 @@ without host resource resolution fail closed rather than inventing a destination
 
 ## Evidence and admission
 
-When the host retained memory, admission requires the Go memory owner's exact
+When the host retained memory, admission requires the memory implementation's exact
 source commitment and acknowledged provider receipt. It acquires the existing
 source mutation guards, revalidates current source versions, and retains those
 guards through the DB1 dispatch commit. The memory observation has a one-second

@@ -67,6 +67,13 @@ A remote client uploads file content. A server never treats a client path as a p
 
 ## Memory
 
+Memory commands are served by the memory implementation installed on each instance. The
+application image ships only an unavailable adapter: without an installed implementation every
+memory command returns `503` and the instance is not ready. Which commands, record kinds and
+retrieval behaviour are available is that implementation's contract; this section describes the
+selectors and ownership rules the host applies whichever implementation is installed. See
+[Memory boundary](docs/MEMORY.md).
+
 Memory has two separate stores. The server store belongs to the local user and can hold
 personal memories and PII. The KB holds shared knowledge across projects and workspaces.
 The same numeric ID can exist in both stores.
@@ -122,19 +129,17 @@ Do not use working memory for team facts. It is local, session-scoped DB1 state.
 
 See [Knowledge](docs/KNOWLEDGE.md) and [Retrieval](docs/retrieval-stack.md).
 
-### Select a memory engine
+### Install a memory implementation
 
-Native Aimee memory is the default. The 1.0.0 work adds Cognee 1.6.2 through the
-[generic memory contract](docs/modules/memory.md#memory-backend-contract). Selecting an engine
-does not change the personal/shared selector, record identity, authorization or correction review.
-Aimee retains canonical records and validates provider results against their current revisions.
-
-Configure the selected backend on each instance that will use it, using the documented URL and
-Vault credential transport. Restart the memory owner after changing the selection. Cognee's first
-adapter refuses scopes above 256 eligible records; its derived cleanup must succeed before
-subject-erasure completion. Test a scoped read, search, mutation and erasure before reopening traffic.
+Install the implementation on each instance that will serve memory and select its executable in
+that instance's role module manifest, with matching executable grants, following the
+implementation's own instructions. Selecting an implementation does not change the personal/shared
+selector, caller authentication or the host's provider-send checks. The instance reports
+`missing_module: memory` in `/v1/ready` until the implementation attaches. After installing or
+replacing one, test a scoped store, read, search and deletion before reopening traffic. To carry
+memories forward from a 1.0.x deployment, see [Upgrading](docs/UPGRADING.md#upgrade-from-102).
 The [native attention plugin](docs/NATIVE_MEMORY_PLUGIN.md) separately consumes selected records
-on a supported inference host; it does not choose the storage engine.
+on a supported inference host; it does not choose the memory implementation.
 
 ## Code intelligence
 

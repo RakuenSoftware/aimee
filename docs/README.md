@@ -14,8 +14,9 @@ Start here:
 | call the API | [Public API](PUBLIC_API.md) and [generated routes](gen/api-v1.md) |
 | find a command | [Generated command reference](gen/cli-commands.md) |
 | operate delegates and workflows | [Delegates](DELEGATES.md), [sandbox](DELEGATE_SANDBOX.md), [role permissions](DELEGATE_ROLE_PERMISSIONS.md), and [workflows](WORKFLOWS.md) |
-| understand memory and retrieval | [Knowledge](KNOWLEDGE.md), [memory behavior](MEMORY.md), [curator](CURATOR_PIPELINE.md), and [retrieval](retrieval-stack.md) |
-| replace the memory engine | [Generic memory contract and Cognee](modules/memory.md#memory-backend-contract) |
+| understand memory and retrieval | [Memory boundary](MEMORY.md), [knowledge](KNOWLEDGE.md), [curator](CURATOR_PIPELINE.md), and [retrieval](retrieval-stack.md) |
+| install or replace the memory implementation | [Memory boundary](MEMORY.md) and [memory module](modules/memory.md) |
+| upgrade an existing deployment | [Upgrading](UPGRADING.md) |
 | deliver memory to a supported local model | [Native memory plugin](NATIVE_MEMORY_PLUGIN.md) |
 | prepare a Discord chatbot with Gemma4 E2B | [Discord bridge](../integrations/discord/README.md) |
 | understand KB scaling and model placement | [KB fleet and model placement](KB_FLEET.md) |
@@ -30,10 +31,12 @@ Start here:
 
 ## Current baseline
 
-The application release being prepared is **1.0.1**, following published
-[1.0.0](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.0). The release preparation
-includes [five signed native-memory model bundles](releases/v1.0.1/README.md) and their
-installation documentation. The intended 0.3.0 release shipped on 2026-08-04.
+The latest published application release is
+[1.0.2](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.2). The current tree is the next
+release; its largest change moves memory out of the application image, and
+[Upgrading](UPGRADING.md#upgrade-from-102) describes the move. The 1.0.1 release prepared
+[five signed native-memory model bundles](releases/v1.0.1/README.md) and their installation
+documentation. The intended 0.3.0 release shipped on 2026-08-04.
 Integration work and open PRs can be newer than the release images; each guide identifies that
 boundary where it matters. Start with [What's new](WHATS_NEW.md) and [Feature status](STATUS.md).
 

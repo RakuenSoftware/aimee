@@ -1,5 +1,36 @@
 # What's new
 
+## After 1.0.2: memory leaves the application image
+
+This is the largest change since [1.0.2](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.2).
+Read [Upgrading](UPGRADING.md#upgrade-from-102) before starting this release on an existing
+deployment.
+
+- **Memory is an installed implementation.** The built-in Go memory owner, the Cognee adapter and
+  their evaluation tools were removed from the public tree. Aimee keeps the generic memory SDK,
+  the module transport and the host-side guarantees of a provider-bound request. The bundled
+  `memory` executable is an explicit unavailable adapter; an instance without an installed
+  implementation reports `missing_module: memory` and is not ready. See [Memory boundary](MEMORY.md).
+- **Existing memories are kept and can be carried forward.** The 1.0.x memory tables are retained
+  by the upgrade. `scripts/upgrade/migrate-memory.py` exports the active records read-only and
+  imports them through the installed implementation's public store command, idempotently, for both
+  a Server's personal memory and a KB's shared memory.
+- **Every module process is Go.** The C module processes were retired and C that no shipped binary
+  reaches was removed. The C resource hosts, the CLI and the bus embedding remain.
+- **The event bus is consumed by contract.** The ouroboros ring lives in its own repository and
+  is pinned in `dependencies/ouroboros-ring.json`; the in-tree core copy is gone.
+- **Idle instances do no polling.** Ring events leave the host as they are stamped.
+- **Session cache with compare-and-set receipts.** A per-session cache in the Server store lets
+  a host component commit a value against an expected revision and read back the receipt.
+- **Owner calls are bounded by the receipt deadline.** Ingress pre-injection passes the remaining
+  deadline, at most 500 ms, to each memory-owner call instead of a fixed timeout.
+- **Oversized requests are always `request_budget_exceeded`.** When a memory implementation has
+  already refused an oversized input, the wire fence still evaluates the deployment and caller
+  byte budget and reports a definite overflow as HTTP 413, so every implementation classifies the
+  same input the same way. Nothing is sent in either case.
+- **One `[DONE]` on streamed chat completions.** `/v1/chat/completions` with `stream: true`
+  ended with two `data: [DONE]` events; it now ends with one.
+
 ## Browser chat uses the canonical IR session log
 
 The existing web GUI now renders canonical model messages, thinking, tool arguments and results

@@ -1,6 +1,6 @@
 # Roadmap
 
-This is the remaining direction around the 1.0.0 release target. Accepted implementation detail lives in proposals;
+This is the remaining direction after published 1.0.2. Accepted implementation detail lives in proposals;
 current behavior lives in product guides and generated references.
 
 ## 1. Finish the event-bus move
@@ -54,7 +54,8 @@ current behavior lives in product guides and generated references.
 See [Proposals](PROPOSALS.md) for current design records and [Feature status](STATUS.md) for what is
 integrated.
 
-The generic memory contract and native/Cognee integration are implemented for the 1.0.0 work
-in [PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005). Remaining memory-engine work is
-larger-corpus pagination/indexing and additional provider qualification, not a second authority
-or module infrastructure. Node unification and parent connections require a separate design.
+Memory is now a separately installed implementation behind the generic memory contract; the
+built-in engine and the Cognee adapter left the public tree ([Memory boundary](MEMORY.md)).
+Remaining public work is on the contract and its host side, such as contract tests an
+implementation can run against itself, not a second authority or module infrastructure. Node
+unification and parent connections require a separate design.

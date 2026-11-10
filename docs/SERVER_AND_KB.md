@@ -1,10 +1,14 @@
-> Memory extraction: statements below describing the former Go memory owner are historical deployment context. Current public packaging supplies only an explicit unavailable adapter and generic SDK; select an independently installed external memory implementation through the existing role manifest. See [Memory boundary](MEMORY.md). No former Go memory functionality is implied by the public binary.
-
 # Server and KB
 
 **Server assists one human. KB serves a shared corpus.** Each is an independent instance with its
 own identity, Vault, PostgreSQL store, event bus, and model configuration. Server works without a KB.
 Connecting a KB adds an explicitly selected shared store; it does not relocate personal memory.
+
+Memory itself is not part of the public application. Each instance selects a separately installed
+memory implementation through its role module manifest; the bundled `memory` executable is an
+explicit unavailable adapter, and an instance that selects it is not ready. This page describes
+which instance a memory operation belongs to. What an implementation stores and how it retrieves
+are its own contract; see [Memory boundary](MEMORY.md).
 
 ## Choose the owning instance
 
@@ -12,9 +16,9 @@ Connecting a KB adds an explicitly selected shared store; it does not relocate p
 | --- | --- | --- |
 | Sessions, agents, tools, provider credentials | Owns the human's runtime | No ownership of a Server's sessions or credentials |
 | Workflow execution | Supervised `aimee-wfe` peer owns lifecycle | Supplies knowledge when requested |
-| Personal memory | Durable `user_memories`, local vectors, user scope | Rejects user-memory scope |
+| Personal memory | Served in user scope by the Server's installed memory implementation | Rejects user-memory scope |
 | Private code | Local code index and vectors | Receives only code published to its corpus |
-| Shared memory | Calls the selected KB through authenticated `/v1` | Owns `memories` in global, workspace, and project scopes |
+| Shared memory | Calls the selected KB through authenticated `/v1` | Served in global, workspace, and project scopes by the KB's installed memory implementation |
 | Documents, typed facts, shared graph, curation | Uses the KB's exposed operations | Owns the corpus and its background work |
 | Database and models | Instance-local PostgreSQL and embedding; optional synthesis | Separate PostgreSQL and embedding; optional synthesis |
 | Administration | Runtime browser workspace | KB administration and review console |
@@ -27,27 +31,29 @@ working directory, numeric ID, or failed private lookup cannot switch the destin
 flowchart LR
     CLIENT[CLI / MCP / browser] --> SH
     subgraph SERVER[Server instance]
-        SH[C resource host and authorization] -->|local bus| SM[Go memory: server placement]
-        SM -->|SQL over local bus| SP[Go postgres]
-        SP --> SD[(Personal memory and runtime database)]
+        SH[C resource host and authorization] -->|local bus| SM[Installed memory implementation: server placement]
+        SM --> SMD[(Its personal memory datastore)]
+        SH -->|SQL over local bus| SP[Go postgres]
+        SP --> SD[(Runtime database)]
         SE[Server embedder]
         SM -. governed embedding .-> SE
     end
     subgraph KB[Optional separate KB instance]
-        KH[C KB resource host and authorization] -->|local bus| KM[Go memory: kb placement]
-        KM -->|SQL over local bus| KP[Go postgres]
+        KH[C KB resource host and authorization] -->|local bus| KM[Installed memory implementation: kb placement]
+        KM --> KMD[(Its shared memory datastore)]
+        KH -->|SQL session transport for native knowledge paths| KP[Go postgres]
         KP --> KD[(Shared corpus database)]
-        KH -->|SQL session transport for native knowledge paths| KP
         KE[KB embedder]
         KM -. governed embedding .-> KE
     end
     SH -->|explicit shared operation: authenticated /v1| KH
 ```
 
-The diagram shows memory ownership and the native KB algorithms using the same PostgreSQL provider. Each instance has its
+The diagram shows memory ownership and the native KB algorithms using the Go PostgreSQL provider. Each instance has its
 own bus. Network authentication connects the instances; no shared bus or cross-instance SQL
-connection is implied. Embedding arrows summarize governed provider calls, not direct socket access
-from the memory module.
+connection is implied. Where an installed memory implementation keeps its records is its own
+decision; the public tree provisions no memory tables. Embedding arrows summarize governed provider
+calls, not direct socket access from the memory module.
 
 ## Shared code, separate state
 
@@ -55,12 +61,14 @@ Both roles ship in the same application image. First boot persists the selected 
 `instance-identity.json`. A later boot with the opposite role is refused. The role supervisor
 requires the role, configuration, PostgreSQL, and memory modules and rejects a conflicting role.
 
-The same pure-Go memory executable runs in each composition. `AIMEE_MODULE_PLACEMENT=server`
-accepts only the instance-local `user` scope; `kb` accepts `global`, `workspace`, and `project`.
-Placement is explicit and validated. The presence of a table cannot grant another placement.
+The same bundled `memory` executable, the unavailable adapter, ships in each composition, and each
+role's manifest names the implementation that actually runs. The supervisor passes
+`AIMEE_MODULE_PLACEMENT` to module processes: a `server` placement serves only the instance-local
+`user` scope; `kb` serves `global`, `workspace`, and `project`. Placement is explicit; the presence
+of a table cannot grant another placement.
 
-The Go memory module owns memory policy, retrieval, and mutations. It uses the PostgreSQL module
-through the local bus and holds no DSN. The C hosts authenticate and transport requests. Native KB knowledge algorithms use session
+The installed implementation owns memory policy, retrieval, and mutations and declares the public
+`memory.*` commands it serves. The C hosts authenticate and transport requests. Native KB knowledge algorithms use session
 capabilities to reach the same Go PostgreSQL provider. Both roles have retired native libpq pools;
 remaining C domain code does not imply a second database provider.
 
@@ -130,7 +138,7 @@ and recovery procedures.
 
 | Symptom | First checks |
 | --- | --- |
-| Personal recall unavailable | Server memory attachment, `server` placement, local PostgreSQL, then local embedding |
+| Personal recall unavailable | The memory implementation selected in the Server manifest is installed and attached (`missing_module: memory` in readiness means it is not), `server` placement, its datastore, then local embedding |
 | Personal lookup returns no record | Personal store and ID, current lifecycle and validity; do not search KB implicitly |
 | Shared recall unavailable | KB selection, enrollment and service credentials, KB health, KB memory and store |
 | Shared results omit a record | Authorized project/workspace, lifecycle, validity, evidence visibility, embedding freshness |
@@ -150,10 +158,11 @@ remain a failure. KB availability and local personal-memory availability are sep
 - **Versioned evidence.** [The Atlas review](reviews/agent-memory-atlas-2026-09-29.md) distinguishes
   the reviewed commit and the remaining gaps after the latest upstream update.
 
-## Engines preserve the role boundary
+## Implementations preserve the role boundary
 
-The [generic memory contract](modules/memory.md#memory-backend-contract) is implemented by native
-memory and the Cognee adapter in PR #3005. Selecting an engine does not merge instances or widen a
-scope. Each node uses its own canonical source and derived namespace. The fixed Aimee owner still
-applies authorization, identity, audit and lifecycle; external retrieval goes through existing egress.
-This is newer than published 0.4.6. A unified Aimee node with parent connections remains separate work.
+Selecting a memory implementation does not merge instances or widen a scope. Each instance selects
+its own implementation, with its own canonical source and namespace, through its own manifest. The
+host still applies authentication, caller identity and audit, and provider-bound requests still
+pass the host's wire fence and receipts. Public CI does not certify an installed implementation;
+its process, datastore, provider-send and recovery qualification accompanies its deployment
+([Memory boundary](MEMORY.md)). A unified Aimee node with parent connections remains separate work.

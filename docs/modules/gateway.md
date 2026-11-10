@@ -31,9 +31,8 @@ public-surface audit is recorded in `docs/validation/core-modularization-slice-3
 
 `gateway_policy_apply_ir` polices canonical tool catalogs, including namespace
 children, before provider rendering. The former vendor-JSON request mutation and
-model-pinning helpers are retired. `gateway_policy_is_denied_tool` remains a pure
-predicate covered by the module tests; live response governance uses the shared
-canonical tool-name policy.
+model-pinning helpers are retired, as is the former `gateway_policy_is_denied_tool`
+predicate; live response governance uses the shared canonical tool-name policy.
 
 The standalone `aimee-gateway` delivery binary (`src/gateway`: Telegram/ntfy/webhook platforms,
 pairing, STT, TTS) and the `send_message` MCP tool that stood in for it are retired; nothing shipped
@@ -81,8 +80,9 @@ belong to their independently enabled web modules, not to the headless core gate
 ## Data and migrations
 
 Gateway coordinates identity and route correlation; durable records are stored through the relevant
-server/DB owners. Migrations must preserve identity and route correlation. Transient IR data remains per
-turn.
+server/DB owners. The module owns no schema: `src/modules/gateway/module.yaml` declares no data or
+migration files, and `gateway_policy.c` and `gateway_delegate.c` keep no persistent state. Migrations
+in the owning stores must preserve identity and route correlation. Transient IR data remains per turn.
 
 ## Security and privacy
 
@@ -119,7 +119,9 @@ and protocol/translation diagnostics. Health should never log bearer tokens or f
 ## Compatibility
 
 Ingress routes, authentication identity, stage order, IR mutation semantics, response/stream behavior,
-and session formats are compatibility contracts.
+and session formats are compatibility contracts. Within this module the callable surface is
+`gateway_policy_apply_ir` in `src/modules/gateway/gateway_policy.c`, reached for delegates through
+`gateway_delegate.c`; changing its tool-catalog policy changes what every frontend may render.
 
 ## Extension and removal
 

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="630" viewBox="0 0 1160 630" role="img" aria-labelledby="title desc"><title id="title">One personal runtime, optional shared knowledge</title><desc id="desc">Enrolled tools use Server. Server owns personal runtime and memory, local PostgreSQL, embedding and optional synthesis. KB is independent. Cognee replaces retrieval through the existing governed path.</desc><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#52657a"/></marker></defs><rect width="100%" height="100%" fill="#ffffff"/><style>text{font-family:DejaVu Sans,Arial,sans-serif;fill:#172b40}.title{font-size:23px;font-weight:700}.label{font-size:17px;font-weight:600}.body{font-size:15px}.edge{font-size:14px;fill:#394d62}</style>
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="630" viewBox="0 0 1160 630" role="img" aria-labelledby="title desc"><title id="title">One personal runtime, optional shared knowledge</title><desc id="desc">Enrolled tools use Server. Server owns the personal runtime, local PostgreSQL, embedding and optional synthesis. KB is independent. Memory is served by a separately installed implementation selected in each role manifest.</desc><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#52657a"/></marker></defs><rect width="100%" height="100%" fill="#ffffff"/><style>text{font-family:DejaVu Sans,Arial,sans-serif;fill:#172b40}.title{font-size:23px;font-weight:700}.label{font-size:17px;font-weight:600}.body{font-size:15px}.edge{font-size:14px;fill:#394d62}</style>
 <text class="title" x="580.0" y="32" text-anchor="middle">One personal runtime, optional shared knowledge</text>
 <rect x="25" y="170" width="230" height="130" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
 <text class="label" x="140.0" y="198" text-anchor="middle">Your clients</text>
@@ -7,15 +7,15 @@
 <text class="body" x="140.0" y="270" text-anchor="middle">Enrolled / scoped access</text>
 <rect x="350" y="110" width="370" height="240" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
 <text class="label" x="535.0" y="138" text-anchor="middle">Server: one runtime owner</text>
-<text class="body" x="535.0" y="164" text-anchor="middle">Sessions · private code · memory</text>
-<text class="body" x="535.0" y="187" text-anchor="middle">Tools · delegates · workflows</text>
+<text class="body" x="535.0" y="164" text-anchor="middle">Sessions · private code · tools</text>
+<text class="body" x="535.0" y="187" text-anchor="middle">Delegates · workflows · Vault</text>
 <text class="body" x="535.0" y="210" text-anchor="middle">C resource host + event bus</text>
 <text class="body" x="535.0" y="233" text-anchor="middle">Supervised Go modules</text>
 <polyline points="255,230 350,230" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
 <text class="edge" x="302" y="205" text-anchor="middle">TLS / local UDS</text>
 <rect x="830" y="90" width="300" height="100" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
 <text class="label" x="980.0" y="118" text-anchor="middle">Server PostgreSQL</text>
-<text class="body" x="980.0" y="144" text-anchor="middle">Runtime + canonical personal data</text>
+<text class="body" x="980.0" y="144" text-anchor="middle">Runtime + canonical session data</text>
 <polyline points="720,155 830,155" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
 <text class="edge" x="775" y="140" text-anchor="middle">local bus / SQL</text>
 <rect x="830" y="235" width="300" height="105" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
@@ -32,11 +32,11 @@
 <polyline points="535,350 535,425" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
 <text class="edge" x="625" y="395" text-anchor="middle">authenticated /v1</text>
 <rect x="830" y="425" width="300" height="130" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5" stroke-dasharray="7 5"/>
-<text class="label" x="980.0" y="453" text-anchor="middle">Optional Cognee retrieval</text>
-<text class="body" x="980.0" y="479" text-anchor="middle">Selected by memory contract</text>
-<text class="body" x="980.0" y="502" text-anchor="middle">Existing egress + Vault transport</text>
-<text class="body" x="980.0" y="525" text-anchor="middle">Aimee keeps canonical ownership</text>
+<text class="label" x="980.0" y="453" text-anchor="middle">Installed memory implementation</text>
+<text class="body" x="980.0" y="479" text-anchor="middle">Selected in the role manifest</text>
+<text class="body" x="980.0" y="502" text-anchor="middle">Own datastore and qualification</text>
+<text class="body" x="980.0" y="525" text-anchor="middle">Host keeps identity, fence, receipts</text>
 <polyline points="690,350 775,385 775,490 830,490" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="6 4"/>
-<text class="edge" x="868" y="393" text-anchor="middle">selected engine</text>
+<text class="edge" x="868" y="393" text-anchor="middle">local module bus</text>
 <text class="body" x="580" y="605" text-anchor="middle">Server and KB remain separate roles. Parent-node federation is separate design work.</text>
 </svg>

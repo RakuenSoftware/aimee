@@ -48,7 +48,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "9c4c07362801d2cc3920a463bc833c7a201f378aa7dae6fd592fecb0742a68fb"
+      "source_sha256": "05181c413934fcfc814eda32a39e1c7ca8b1a423f96b9e6f2dab2c9a7a5f76c6"
     },
     {
       "id": "translation",
@@ -70,7 +70,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "97fdb56aa2477fe406db92baf4bf344dc52efc963b73aa7df91d6796401e15d8"
+      "source_sha256": "db5d80145d8ed6033b0714a14c18e7295c942e5357c0aed955360f58142ea4e8"
     },
     {
       "id": "gateway",
@@ -81,7 +81,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "aa16ffd3a75e5e3e8f31692fd003016806f9550ae565cf58f81dcbea64c34258"
+      "source_sha256": "a93259df4074244d6a2dd75086af98a47a657ba1a2c4e8e9059358bb16d660b8"
     },
     {
       "id": "memory",
@@ -92,7 +92,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "adab6d74c5a2db6747e18ccc610aa181ca1c21f92a4d8181c812a3a8aa5c9ed7",
+      "source_sha256": "ca73d63df0ca01780dc4bbf3f12e714a3f30878651c1df6a8aa58acb2338fac7",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 7,
@@ -280,7 +280,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "6d905d30e8f1d0937f9f42f5cdd3d3562ade0b4505ad29fa5c0dc699e621394e"
+      "source_sha256": "25181061d2de2028a0762c5ea8852cd31328a6aeee7316de6fe50b9c863ec8c5"
     },
     {
       "id": "execution-policy",
@@ -307,7 +307,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "af6d03854ffb9d9d5cd6125300ad3d7fd49630fc99038f0925f68d4dfabd8e26"
+      "source_sha256": "bcae67ffa6b27e01806f1a9764edb5be06d2e9ecabc71ae0a72d161579e69269"
     },
     {
       "id": "sandbox",
@@ -336,7 +336,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "a838e9a191ad910cc26449ec2c10d66d7d6659fa1473e1baad9d76cb935c48ad",
+      "source_sha256": "e3c7bd33eee6e1628d3243112d701c28cf7079aaa89f970c710bf19f4a316946",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 30,
@@ -448,7 +448,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "31caf56de0947065788d995f50e110b7fafac0599ab1c094420cafe2e2235a1a",
+      "source_sha256": "c4722bb1baff44ec5e2a51adb318515d204652179b38958419acccb15606b234",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 28,

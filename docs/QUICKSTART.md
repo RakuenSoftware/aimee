@@ -1,12 +1,20 @@
 # Quickstart
 
-A single user needs Server, its PostgreSQL store, and an embedding service. A shared KB is optional.
-Server and KB use the same application image, with the role established permanently on first boot.
-Each deployment has its own Vault and standardized PostgreSQL container.
+A single user needs Server, its PostgreSQL store, an embedding service, and a memory
+implementation. A shared KB is optional. Server and KB use the same application image, with the
+role established permanently on first boot. Each deployment has its own Vault and standardized
+PostgreSQL container.
 
-This guide follows the **1.0.0 release target**. The previous published application release is
-0.4.6; a checkout of `testing` has newer behavior. Check [What's new](WHATS_NEW.md) before assuming a tagged image includes
-an integration feature. The Cognee adapter and native-memory primitive require their newer builds.
+This guide follows the current tree, the release after published
+[1.0.2](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.2). Check
+[What's new](WHATS_NEW.md) before assuming a tagged image includes an integration feature.
+
+**Memory is installed separately.** The application image ships no memory engine. The steps below
+start a working Server for chat, code and workflows, but it reports `missing_module: memory` in
+`/v1/ready`, its container health stays unhealthy and memory commands return `503` until you
+install a memory implementation and select it in the role module manifest
+([Memory boundary](MEMORY.md)). Upgrading an existing 1.0.x deployment has its own procedure in
+[Upgrading](UPGRADING.md#upgrade-from-102).
 
 ![Standard personal Server deployment and separately deployed optional shared KB](images/architecture/deployment.svg)
 
@@ -43,7 +51,7 @@ The three database passwords configure separate administrator, migrator, and run
 SQL connections still require TLS and scoped credentials in the default storage mode.
 
 This starts one application container, one PostgreSQL container, and one local embedder. It does
-not start a KB or synthesis model. `compose.server.yaml`, `compose.server-standalone.yaml`, and
+not start a KB, a synthesis model or a memory implementation. `compose.server.yaml`, `compose.server-standalone.yaml`, and
 `deploy/compose/aimee.yaml` are aliases of this standard deployment.
 
 ### Browser-managed models
@@ -278,6 +286,9 @@ that the setup is durable before continuing:
 aimee memory store quickstart "Enrollment works"
 aimee memory search "Enrollment works"
 ```
+
+Both commands need an installed memory implementation; without one they fail with
+`user memory module unavailable`, which says nothing about the grant.
 
 The bearer alone remains read-only, and changing the retired `aimee.api.remote_writes` setting does
 not grant access.

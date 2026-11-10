@@ -116,8 +116,8 @@ The descriptor's eleven direct tests are `test_workspace.c`, `test_workspace_han
 `test_workspace_provider_container.c`, `test_workspace_provider_detached.c`,
 `test_workspace_runner_queue.c`, `test_workspace_runner_registry.c`, `test_workspace_scope.c`, and
 `test_workspace_turn.c`, covering the implementation. The former native `test_workspace_memory.c` and `memory_auto_tag_workspace` implementation are
-retired with the C memory engine; current memory scope/tagging behavior belongs to the Go memory
-owner and its tests. Workspace does not inherit that policy by sharing a worktree.
+retired with the C memory engine; current memory scope/tagging behavior belongs to the installed
+memory implementation and its tests. Workspace does not inherit that policy by sharing a worktree.
 Invalid or foreign
 roots, traversal/symlink escape, missing runner, drift, provider mismatch, and dirty cleanup must
 surface explicitly. A failed isolated binding must never retry through the shared host provider.

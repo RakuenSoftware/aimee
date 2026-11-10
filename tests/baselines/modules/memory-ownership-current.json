@@ -3866,7 +3866,7 @@
       "src/tests/Rules.mk": "69c6dd121b7a25a470bea774c371e9d93f11d839b01663aedf14e199636333b1",
       "src/tests/test_vault_fenced_use.c": "326310cc668833acf1aedd11d7ac65b752a8c555ad264eca88b6fbb9e1c95bdf",
       "src/tests/test_vault_local_use.c": "8771469833820266d7ff26fe4ef82a24d7a0d8aae46a52c38e5e5e07bc9d7596",
-      "docs/modules/vault-conditional-custody.md": "177c9e58ed37f04cfc66c477142f485e658b315eedf342d70b0aa99fa8ed9540"
+      "docs/VAULT_CONDITIONAL_CUSTODY.md": "177c9e58ed37f04cfc66c477142f485e658b315eedf342d70b0aa99fa8ed9540"
     },
     "qualified_targets": [
       "unit-test-vault-fenced-use",

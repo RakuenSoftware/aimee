@@ -9,8 +9,8 @@ credential owners. Model execution runs separately from the application in the s
 | embedding | embedding sidecar | configured embedding endpoint |
 | synthesis | model-specific `aimee-llm-e2b` or `aimee-llm-e4b` sidecar | OpenAI-compatible endpoint |
 
-The native Go memory engine combines lexical, dense and graph signals without requiring a
-reranking model. Curator
+Retrieval for memory is the installed memory implementation's concern; the KB's own document and
+code retrieval combines lexical, dense and graph signals without requiring a reranking model. Curator
 extraction and reasoning use one synthesis role with stage-specific budgets.
 
 ## Embedding
@@ -75,5 +75,5 @@ overrides. See [KB model backends](KB_LLM_BACKENDS.md) for placement and trust b
 The [vLLM native memory plugin](NATIVE_MEMORY_PLUGIN.md) prepares selected Aimee records into
 model-specific attention banks on the inference host. Its separately staged release and GPU
 requirements differ from the embedding and synthesis sidecars. It consumes Aimee records;
-it is not a replacement storage or retrieval engine. Cognee instead implements the
-[generic memory backend contract](modules/memory.md#memory-backend-contract).
+it is not a memory implementation. Storage and retrieval belong to the implementation installed
+behind the [memory boundary](MEMORY.md).
