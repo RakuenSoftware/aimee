@@ -2450,7 +2450,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "f33ad9887199f2d9195b3da6f46feaa07c2b9f8732b73e9d4da43f1adaf98720",
+      "sha256": "ab89832871a005d96ad2d742a27c024a90fe41c9468d9d1a30fb0233a7033ab3",
       "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
       "current_source_revisions": [
         {
@@ -2757,7 +2757,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "714146bd9bfbc168b82a4d3295baac98d4e416e9dee528b3972b9322f67ba7ad",
+      "sha256": "c1bc4b208d133675a507813fa8bf2343ea97d539bf9899482772e050be83767e",
       "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
       "source_revisions": [
         {
@@ -2834,7 +2834,7 @@
       "symbols": [
         "AIMEE_MEMORY_EVENT_RERANK"
       ],
-      "sha256": "494ab00d341761f6c72126795cb228e37f7bd1ecc57043d270b37eec2277944c",
+      "sha256": "cc8b40f5919991efcef408245be092fb52933a437b218ce512e5e94ff3b15865",
       "review": "2026-10-14: Audit capacity readiness only; memory rerank attachment and transport owner are unchanged. test_server_ready covers capacity failure and recovery.",
       "source_revisions": [
         {
@@ -2952,7 +2952,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "3a8da13699cfa233be1d68b56832f2de68c5c07f179f01cf156dbaeaef4e2cf2",
+      "sha256": "9f08cf07018b67d43668147d1368b34dc6414f7e508137a8108893edb431b52e",
       "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
       "current_source_revisions": [
         {
@@ -3224,7 +3224,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "b5715c6eca75c3f14f0cc13fb5678acbd4455879c67864394d7663f8aab31876",
+      "sha256": "376d3aabef1b31122299bb2edfaa86be14ae2d66dff1f78275070a0cf4788155",
       "boundary_review": "PR #3091 CI fixture repair: add the current caller-context personal-recall transport seam, assert its exact memory.runtime/personal-recall route and all four calls, then forward to the existing owner-envelope fixture. Existing assertions and memory ownership symbols are retained; no authenticated caller or memory policy is fabricated.",
       "source_revisions": [
         {

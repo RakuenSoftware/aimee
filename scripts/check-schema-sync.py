@@ -124,6 +124,8 @@ DB1_ONLY_TABLES = {
     "server_sessions",
     # Ordered canonical transcript, owned and retained with its DB1 session.
     "session_ir_events",
+    # Per-session cache compare-and-set receipts; server-local, never KB rows.
+    "session_cache_receipts",
     # Host-owned input reservation/delivery and plan CAS journals. These retain
     # canonical source pointers and execution state, never KB knowledge rows.
     "session_input_deliveries",
