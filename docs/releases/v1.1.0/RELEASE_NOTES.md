@@ -23,10 +23,9 @@ because the memory owner built into 1.0.x is replaced by a new, separate impleme
 
 Limits of this release:
 
-- A KB serves an exact list of shared scopes: `global` and each `project:NAME` and
-  `workspace:NAME` named in `AIMEE_MEMORY_SHARED_SCOPES`. 1.0.x accepted any project a caller
-  named; an undeclared one is now refused. Shared facts are stored as written; no extraction
-  pipeline runs on them.
+- Shared facts on a KB are stored as written; no extraction pipeline runs on them, so typed
+  facts are not yet derived from shared memory. A KB serves global and every project and
+  workspace by default; `AIMEE_MEMORY_SHARED_SCOPES` can restrict it to an exact list.
 - The memory bundle exists for `linux/amd64` only. An image for another platform carries no
   memory: its provisioning service fails with a message, and an instance without a provisioned
   installation reports `missing_module: memory` and is not ready.

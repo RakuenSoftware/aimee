@@ -241,11 +241,12 @@ Storage and recovery:
   further account named in `AIMEE_MEMORY_ACCOUNTS` (comma-separated), at most 32 in all. The
   list is re-evaluated at each start; a browser login created while the stack runs gets personal
   memory after the next restart, and until then its memory commands are refused.
-- A KB serves an exact list of shared scopes, `AIMEE_MEMORY_SHARED_SCOPES` (default `global`,
-  comma-separated `global`, `project:NAME` and `workspace:NAME`). `global` is always included. A
-  project or workspace that is not listed cannot be written; a store into one is refused with a
-  message naming this setting, and reads there return only global memory. Add it and restart
-  the KB.
+- A KB serves the shared scopes in `AIMEE_MEMORY_SHARED_SCOPES`, comma-separated: `global`,
+  `project:NAME`, `workspace:NAME`, and `project:*` / `workspace:*` for every project or
+  workspace. The default, `global,project:*,workspace:*`, serves any scope a caller names, as
+  1.0.x did. `global` is always included. With an exact list, a project or workspace that is not
+  listed cannot be written; a store into one is refused with a message naming this setting, and
+  reads there return only global memory. Add it and restart the KB.
   Shared facts are stored as written, with no extraction pipeline.
 - `AIMEE_MEMORY_PROVISION=off` skips provisioning and creates only the mount points. An instance
   with no installation then runs without memory (`missing_module: memory`, not ready); an existing

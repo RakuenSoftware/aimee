@@ -57,8 +57,9 @@ The one-shot `aimee-memory-init` service in `compose.yaml` runs `aimee-memory-pr
   This is refused while the application is running.
 
 A Server serves personal memory for `aimee`, every browser login and any account in
-`AIMEE_MEMORY_ACCOUNTS`, at most 32. A KB serves `global` and each scope in
-`AIMEE_MEMORY_SHARED_SCOPES`, storing shared facts as written. The supervisor passes `AIMEE_MODULE_PLACEMENT` to module
+`AIMEE_MEMORY_ACCOUNTS`, at most 32. A KB serves `global` and the scopes in
+`AIMEE_MEMORY_SHARED_SCOPES` (by default every project and workspace), storing shared facts as
+written. The supervisor passes `AIMEE_MODULE_PLACEMENT` to module
 processes: `server` serves the instance-local user scope, `kb` serves the shared scope. Memory is
 selected at deployment, not switched at run time:
 
@@ -143,7 +144,8 @@ The wire types in `server-go/memory/wire.go` and the command names the host rout
 compatibility surface. The bundle is tied to the exact public files recorded in
 `vendor/aims-memory/bundle.json`; a change to one of them needs a rebuilt bundle. A bundle exists
 for `linux-amd64` only, so an image for another platform carries no memory and cannot provision
-it. In the `kb` placement only the scopes declared in `AIMEE_MEMORY_SHARED_SCOPES` are served;
+it. In the `kb` placement the scopes in `AIMEE_MEMORY_SHARED_SCOPES` are served (by default every
+project and workspace);
 a shared store that names no scope is global, as in 1.0.x. The frozen reference in `tests/fixtures/legacy-memory-owner.json` records the last public Go
 owner for compatibility tests only; it is not a default or a runtime fallback.
 

@@ -13,9 +13,9 @@ memories, upgraded in place on their existing volumes.
   bundle and provisions it for each deployment ([Memory boundary](MEMORY.md),
   [Deployment](DEPLOYMENT.md#memory)). The first start of the new images runs the one-shot
   `aimee-memory-init` service, which creates the installation; no separate install step exists.
-- **A KB serves an exact list of shared scopes.** `global` is always served; each project and
-  workspace that holds shared memory is named in `AIMEE_MEMORY_SHARED_SCOPES`. 1.0.x served any
-  project a caller named. See the KB note under the procedure.
+- **A KB serves global and every project and workspace by default, as 1.0.x did.**
+  `AIMEE_MEMORY_SHARED_SCOPES` can restrict it to an exact list. See the KB note under the
+  procedure.
 - **Existing memories are kept but not served.** The upgrade does not drop or rewrite the
   1.0.x memory tables: a Server's personal memories stay in `user_memories` and a KB's shared
   memories stay in `memories`. The new implementation starts with its own empty store and never
@@ -106,19 +106,19 @@ project. The examples use a Server; the KB differences are listed after them.
 
 For a **KB**, use `--placement kb`, the `compose.kb.yaml` project and the `aimee-kb` service. The
 export reads `memories`; the import calls the KB's authenticated loopback API and needs its API
-bearer token in `AIMEE_KB_API_BEARER_TOKEN` or `--token-file`. A KB serves an exact list of shared
-scopes, so declare the ones the snapshot uses before step 3:
+bearer token in `AIMEE_KB_API_BEARER_TOKEN` or `--token-file`. A KB serves every project and
+workspace by default, so the snapshot's scopes need no preparation. If the KB restricts
+`AIMEE_MEMORY_SHARED_SCOPES` to an exact list, include the scopes the snapshot uses before step 3:
 
 ```sh
 python3 scripts/upgrade/migrate-memory.py scopes --file /secure/shared-memory.jsonl
 # prints, for example: global,project:apollo,workspace:/srv/ws
 ```
 
-Put that value in `AIMEE_MEMORY_SHARED_SCOPES` in the KB's environment file. A project or
-workspace that is not declared cannot be written or read; the import reports its records as
-failed and running it again after adding the scope and restarting the KB places them. A record
-in any scope other than global, project or workspace is reported as not placeable and left for a
-manual decision.
+A project or workspace outside a restricted list cannot be written or read; the import reports
+its records as failed, and running it again after adding the scope and restarting the KB places
+them. A record in any scope other than global, project or workspace is reported as not placeable
+and left for a manual decision.
 
 ### What the import does and does not carry
 

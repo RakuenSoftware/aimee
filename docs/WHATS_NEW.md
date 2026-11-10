@@ -12,8 +12,8 @@ deployment.
   and provisioned for each deployment at first start by the one-shot `aimee-memory-init` service.
   After an image update the installation is prepared again and the stored memory is kept. Aimee
   keeps the generic memory SDK, the module transport and the host-side guarantees of a
-  provider-bound request. The bundle exists for `linux/amd64`. A KB serves the shared scopes
-  declared in `AIMEE_MEMORY_SHARED_SCOPES`. See [Memory boundary](MEMORY.md) and
+  provider-bound request. The bundle exists for `linux/amd64`. A KB serves global and every
+  project and workspace by default; `AIMEE_MEMORY_SHARED_SCOPES` can restrict it. See [Memory boundary](MEMORY.md) and
   [Deployment](DEPLOYMENT.md#memory).
 - **Existing memories are kept and can be carried forward.** The 1.0.x memory tables are retained
   by the upgrade. `scripts/upgrade/migrate-memory.py` exports the active records read-only and
