@@ -741,6 +741,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-server-erasure-protocol \
                $(TESTPREFIX)/unit-test-memory-view-transport \
                $(TESTPREFIX)/unit-test-memory-demotion-transport \
+               $(TESTPREFIX)/unit-test-task-check-drift \
                $(TESTPREFIX)/unit-test-workflow-transport \
                $(TESTPREFIX)/unit-test-assertion-transport \
                $(TESTPREFIX)/unit-test-kb-memory-facts-connection \
@@ -6556,6 +6557,9 @@ legacy-memory-compatibility-tests: $(LEGACY_MEMORY_COMPAT_TARGETS)
 	for t in $(LEGACY_MEMORY_COMPAT_TARGETS); do \
 	  env -i PATH="$$PATH" HOME="$$th" TMPDIR="$$th" AIMEE_TEST_RUNTIME_FIXTURE="$(abspath $(OBJDIR)/aimee-memory-fixture)" "$$t" || exit $$?; \
 	done
+
+$(TESTPREFIX)/unit-test-task-check-drift: $(OBJDIR)/tests/test_task_check_drift.o $(OBJDIR)/kb/kb_store_adapters/kb_service_backend_memory.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-memory-demotion-transport: $(OBJDIR)/tests/test_memory_demotion_transport.o $(OBJDIR)/kb/kb_service_agent.o $(OBJDIR)/kb/kb_intel_payload.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

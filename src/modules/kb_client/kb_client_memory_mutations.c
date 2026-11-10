@@ -23,7 +23,7 @@ int kb_client_memory_check_drift(int64_t task_id, const char *file_path, const c
       cJSON_AddStringToObject(req, "file_path", file_path);
    if (command && command[0])
       cJSON_AddStringToObject(req, "command", command);
-   char *json = kb_v1_action_request("memory.check_drift", req);
+   char *json = kb_v1_action_request("task.check_drift", req);
    if (!json)
       return -1;
 

@@ -3,12 +3,15 @@
 #include "kb_service_backend.h"
 
 #include "aimee.h"
+#include "json_fluent.h"
 #include "config.h"
 #include "modules/kb/c/kb_payload.h" /* kb_store_kb_async_enqueue */
 #include "modules/kb/c/decision_log.h"
 #include "session_briefing.h"
 #include "modules/kb/c/tasks.h"
 
+#include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -173,5 +176,85 @@ cJSON *kb_store_kb_service_task_list_json(const char *state, const char *session
       cJSON_AddStringToObject(obj, "session_id", rows[i].session_id);
       cJSON_AddItemToArray(arr, obj);
    }
+   return resp;
+}
+
+/* A scope term: a run of [a-z0-9_./-] of at least 3 characters that is not a
+ * filler word. Lower-cases into term; returns the input position after it. */
+static const char *task_next_term(const char *p, char *term, size_t cap)
+{
+   static const char *const filler[] = {"the",  "and",  "for",  "with", "from",
+                                        "into", "task", "this", "that", NULL};
+   for (;;)
+   {
+      while (*p && !(isalnum((unsigned char)*p) || strchr("_./-", *p)))
+         p++;
+      if (!*p)
+         return NULL;
+      size_t n = 0;
+      while (*p && (isalnum((unsigned char)*p) || strchr("_./-", *p)))
+      {
+         if (n + 1 < cap)
+            term[n++] = (char)tolower((unsigned char)*p);
+         p++;
+      }
+      term[n] = '\0';
+      int skip = n < 3;
+      for (int i = 0; !skip && filler[i]; i++)
+         skip = !strcmp(term, filler[i]);
+      if (!skip)
+         return p;
+   }
+}
+
+int kb_task_scope_overlaps(const char *const *titles, int n, const char *file_path,
+                           const char *command)
+{
+   file_path = file_path ? file_path : "";
+   command = command ? command : "";
+   if (!file_path[0] && !command[0])
+      return 1;
+   size_t len = strlen(file_path) + strlen(command) + 2;
+   char *target = malloc(len);
+   if (!target)
+      return 1;
+   snprintf(target, len, "%s %s", file_path, command);
+   for (char *c = target; *c; c++)
+      *c = (char)tolower((unsigned char)*c);
+   int overlaps = 0;
+   char term[256];
+   for (int i = 0; i < n && !overlaps; i++)
+      for (const char *p = titles[i]; !overlaps && (p = task_next_term(p, term, sizeof(term)));)
+         overlaps = strstr(target, term) != NULL;
+   free(target);
+   return overlaps;
+}
+
+cJSON *kb_store_kb_service_task_check_drift_json(int64_t task_id, const char *file_path,
+                                                 const char *command)
+{
+   aimee_task_t task;
+   if (task_id <= 0 || kb_store_task_get(task_id, &task) != 0)
+      return jo_ok();
+   aimee_task_t children[32];
+   int n = kb_store_task_children(task_id, children, 32);
+   if (n < 0)
+      return NULL;
+   const char *titles[33] = {task.title};
+   for (int i = 0; i < n; i++)
+      titles[i + 1] = children[i].title;
+   int drifted = !kb_task_scope_overlaps(titles, n + 1, file_path, command);
+   cJSON *resp = jo_ok();
+   cJSON_AddNumberToObject(resp, "task_id", (double)task_id);
+   cJSON_AddStringToObject(resp, "task_title", task.title);
+   cJSON_AddBoolToObject(resp, "drifted", drifted);
+   char message[400];
+   if (drifted)
+      snprintf(message, sizeof(message),
+               "The requested file or command does not overlap the active task scope: %s",
+               task.title);
+   else
+      snprintf(message, sizeof(message), "Action overlaps the active task scope");
+   cJSON_AddStringToObject(resp, "message", message);
    return resp;
 }

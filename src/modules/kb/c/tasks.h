@@ -44,6 +44,8 @@ extern "C"
    int kb_store_task_list(const char *state, const char *session_id, int limit, aimee_task_t *out,
                           int max);
    int kb_store_task_delete(int64_t id);
+   /* Direct subtasks of `parent_id`, by id, at most `max`. Returns the count or -1. */
+   int kb_store_task_children(int64_t parent_id, aimee_task_t *out, int max);
 
    /* Task edges */
    int kb_store_task_add_edge(int64_t source, int64_t target, const char *relation);

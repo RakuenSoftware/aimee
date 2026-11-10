@@ -24,6 +24,7 @@ int kb_handle_css_signals(int fd, cJSON *req);
 int kb_handle_entities_merge(int fd, cJSON *req);
 int kb_handle_entities_unmerge(int fd, cJSON *req);
 int kb_handle_task_list(int fd, cJSON *req);
+int kb_handle_task_check_drift(int fd, cJSON *req);
 int kb_handle_task_create(int fd, cJSON *req);
 int kb_handle_task_update_state(int fd, cJSON *req);
 int kb_handle_task_delete(int fd, cJSON *req);

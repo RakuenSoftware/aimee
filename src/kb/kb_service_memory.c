@@ -586,3 +586,15 @@ int kb_handle_task_list(int fd, cJSON *req)
    cJSON *resp = kb_store_kb_service_task_list_json(state, sid, limit);
    return kb_reply_or_error(fd, resp, "failed to list tasks");
 }
+
+/* task.check_drift: whether a file or command falls outside the active task. */
+int kb_handle_task_check_drift(int fd, cJSON *req)
+{
+   int64_t task_id = 0;
+   if (!jo_read_i64_exact(cJSON_GetObjectItemCaseSensitive(req, "task_id"), &task_id) ||
+       task_id <= 0)
+      return kb_send_error(fd, "task.check_drift requires task_id");
+   cJSON *resp = kb_store_kb_service_task_check_drift_json(task_id, jo_str(req, "file_path", ""),
+                                                           jo_str(req, "command", ""));
+   return kb_reply_or_error(fd, resp, "failed to check task drift");
+}

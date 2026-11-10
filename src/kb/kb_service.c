@@ -696,6 +696,7 @@ static const struct
     {"entities.merge", kb_handle_entities_merge},
     {"entities.unmerge", kb_handle_entities_unmerge},
     {"task.list", kb_handle_task_list},
+    {"task.check_drift", kb_handle_task_check_drift},
     {"task.create", kb_handle_task_create},
     {"task.update_state", kb_handle_task_update_state},
     {"task.delete", kb_handle_task_delete},
