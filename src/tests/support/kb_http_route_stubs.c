@@ -10,7 +10,6 @@
 #include "modules/kb/c/evidence_lifecycle.h"
 #include "modules/kb/c/management_identity_journal.h"
 #include "memory.h"
-#include "modules/kb/c/memory_query.h"
 #include "modules/kb/c/write_tier_grant.h"
 #include "kb_oidc_token_exchange.h"
 #include "vault_service.h"
@@ -24,16 +23,6 @@ static int g_enrollment_authority = 1;
 void test_kb_enrollment_authority_set(int status)
 {
    g_enrollment_authority = status;
-}
-
-int kb_store_memory_review_list(const char *state, int limit, kb_store_memory_review_row_t *out,
-                                int max)
-{
-   (void)state;
-   (void)limit;
-   (void)out;
-   (void)max;
-   return 0;
 }
 
 int kb_store_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)

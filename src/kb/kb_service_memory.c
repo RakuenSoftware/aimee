@@ -14,7 +14,6 @@
 #include "modules/kb/c/kb_service_backend.h"
 #include "modules/kb/c/demotion.h" /* kb_store_demotion_retrieval_event_write_turn (auditable-correctness P1) */
 #include "modules/kb/c/evidence_lifecycle.h" /* P5 outcome history on provenance export */
-#include "modules/kb/c/memory_query.h"
 #include "modules/kb/c/fact_mutation.h"
 #include "modules/kb/c/code_index_ops.h" /* kb_store_code_file_hash (auditable-correctness P1.5 code provenance) */
 #include "kb_service_memory.h"

@@ -45,7 +45,6 @@
 #include "util.h"
 #include "cJSON.h"
 #include "memory.h"
-#include "modules/kb/c/memory_vectors.h"
 #include "modules/kb/c/vault_pg.h" /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include "kb/kb_vault_policy.h"    /* kb_vault_policy_select (custody selection, P7 §3) */
 #include "kb/kb_management_runtime.h"

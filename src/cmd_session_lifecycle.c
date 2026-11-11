@@ -8,7 +8,6 @@
 #include "headers/owned_feature.h"
 AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_context_legacy_guard_contract_v1);
 #include "db1_client/db1.h"
-#include "modules/kb/c/memory_query.h"
 #include "modules/kb/c/rules.h"
 #include "kb_client.h"
 #include "headers/cmd_hooks_scope.h"

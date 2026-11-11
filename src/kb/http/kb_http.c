@@ -1998,8 +1998,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       int dry_run = kb_http_json_bool(body, "dry_run", 0);
       pgvec_kb_service_reconcile_result_t reconcile;
       memset(&reconcile, 0, sizeof(reconcile));
-      if (pgvec_kb_service_reconcile_orphans(kb_store_kb_service_memory_record_exists,
-                                             kb_store_kb_service_kb_document_exists, dry_run,
+      if (pgvec_kb_service_reconcile_orphans(kb_store_kb_service_kb_document_exists, dry_run,
                                              &reconcile) != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"reconcile failed\"}");
@@ -2007,10 +2006,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       }
       snprintf(out_buf, (size_t)out_cap,
                "{\"status\":\"ok\",\"rc\":%d,\"dry_run\":%s,"
-               "\"memory\":{\"kept\":%lld,\"pruned\":%lld},"
                "\"kb\":{\"kept\":%lld,\"pruned\":%lld}}",
-               reconcile.rc, dry_run ? "true" : "false", (long long)reconcile.mem_kept,
-               (long long)reconcile.mem_pruned, (long long)reconcile.kb_kept,
+               reconcile.rc, dry_run ? "true" : "false", (long long)reconcile.kb_kept,
                (long long)reconcile.kb_pruned);
       return 200;
    }

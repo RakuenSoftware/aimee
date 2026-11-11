@@ -5,7 +5,6 @@
 #include "decision_log.h"  /* kb_store_decision_log_row_t */
 #include "index.h"         /* project_info_t, term_hit_t, blast_radius_t */
 #include "memory.h"        /* memory_t, edge_t */
-#include "memory_query.h"  /* kb_store_memory_low_eff_row_t etc. */
 #include "rules.h"         /* rule_t */
 #include "tasks.h"         /* aimee_task_t */
 #include "kb_paths.h"      /* kb_client_default_*_path */

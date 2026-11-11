@@ -253,51 +253,9 @@ typedef struct
 
 /* --- Functional Tier Helpers --- */
 
-/* Synthesize L5 pattern memories from L2 facts observed across >= 3
- * distinct sessions.  Returns number of L5 patterns synthesized, or -1 on
- * DB error.  Safe to call repeatedly. */
-int memory_synthesize_l5_patterns(void);
-
-/* Record operator approval for an L3→L4 promotion.  Used by the approval
- * gate and by the `memory approve` CLI / MCP tool. */
-int memory_approve_l4_promotion(int64_t memory_id, const char *approver, const char *note);
-
 /* memory_authority_t — who is asking for a destructive memory edit. Lives in its
  * own dependency-free header so the kb_service backend contract can name it. */
 #include "memory_authority.h"
-
-/* --- Tiered Memory ---
- *
- * memory_insert_ex() takes the write's `authority`, which it PERSISTS as the
- * row's provenance_category (MEMORY_PROVENANCE_FOR). It is not about this write's
- * permissions — an insert destroys nothing — but about what the typed-fact drain
- * may later mine out of the note: only text the user actually stated can produce
- * a Class-A fact (typed-fact §5). It must therefore be derived from the calling
- * SURFACE and the caller's authentication, never from a request field.
- *
- * memory_insert() is the MODEL-authority spelling, which is what its callers are:
- * promotion, synthesis, learning, trace analysis and the benchmarks all write
- * text the system produced, not text the user said. */
-int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
-                  double confidence, const char *session_id, memory_t *out);
-int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
-                     const char *use_cases, double confidence, const char *session_id,
-                     memory_authority_t authority, memory_t *out);
-int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *epistemic_kind,
-                               const char *key, const char *content, const char *use_cases,
-                               double confidence, const char *session_id,
-                               memory_authority_t authority, memory_t *out);
-int memory_stats(memory_stats_t *out);
-
-/* Legacy direct mutation consumers; public authority-preserving edits are
- * memory.update and memory.delete commands owned by Go. */
-int memory_update_content(int64_t id, const char *content);
-int memory_delete(int64_t id);
-
-int memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max);
-
-/* Returns 1 if answer contains at least one citation marker ([#N]). */
-int memory_citation_gate_check(const char *answer);
 
 /* Lineage record: tracks which session/source produced a graph node or edge.
  * object_type: "memory", "relation", or "edge".
@@ -315,37 +273,10 @@ typedef struct
    double confidence;
 } memory_lineage_t;
 
-/* Insert a lineage record for a newly created node or edge.
- * Returns the new rowid on success, -1 on failure. */
-int64_t memory_lineage_insert(const char *object_type, int64_t object_id, const char *source_kind,
-                              const char *source_ref, double confidence);
-
 /* Recursively validate declared memory sources before a derived write. The
  * walk fails closed on a rejected/suppressed/missing source, cycle, row cap or
  * depth cap. */
 #define MEMORY_DERIVATION_MAX_SOURCES 256
-int memory_derived_sources_allowed(const int64_t *source_ids, int source_count);
-
-/* Cite: show provenance chain for a memory ID in human-readable form. */
-void memory_cite(int64_t memory_id, int json_out);
-
-/* Profile card API (entity_profiles table).
- *
- * memory_is_profile_query: return 1 if query is profile-shaped.
- * memory_profile_card_build: aggregate entity_edges/memory_entities into a JSON card
- *   and upsert it into entity_profiles. Returns 0 on success, -1 on failure.
- * memory_profile_card_get: load a stored card into memory_profile_card_t.
- *   Returns 0 on success, -1 if not found.
- * memory_profile_card_refresh: refresh cards older than stale_secs for entities
- *   with >= min_obs observations. Returns count of cards refreshed. */
-int memory_is_profile_query(const char *query);
-int memory_profile_card_build(const char *entity_id, int min_obs, char *out_json,
-                              size_t out_json_len);
-int memory_profile_card_get(const char *entity, char *out_json, size_t out_json_len);
-int memory_profile_card_refresh(int min_obs, int stale_secs);
-int memory_query_plan(const char *query, int limit, int hard_cap, memory_query_plan_t *out);
-const char *memory_query_route_name(memory_query_route_t route);
-const char *memory_query_shape_name(memory_query_shape_t shape);
 
 /* --- Aggregation-Aware Query Routing ---
  *
@@ -369,27 +300,6 @@ typedef struct
    char status_word[MEMORY_AGGREGATION_MAX_STATUS]; /* lowercased status keyword */
 } memory_aggregation_hint_t;
 
-/* Inspect `query` for an aggregation shape.  Writes detection state into
- * `hint` and returns hint->detected.  Safe to call with NULL/empty query. */
-int memory_detect_aggregation_shape(const char *query, memory_aggregation_hint_t *hint);
-
-/* Retrieve an unranked (or recency-ranked) set of memories matching the
- * aggregation hint.  Bypasses vector search entirely — pure SQL against the
- * `memories`/`memory_entities` tables.  When the underlying result set
- * exceeds max_items, writes up to max_items rows and sets *truncated=1.
- *
- * `query` supplies fallback keyword(s) when no entity seed is present; pass
- * the original user query.
- *
- * Returns the number of rows written (>= 0), or -1 on error.  max_items is
- * clamped against the caller-supplied `max` array size and against
- * MEMORY_AGGREGATION_DEFAULT_MAX_ITEMS when <= 0. */
-int memory_aggregate(const memory_aggregation_hint_t *hint, const char *query, int max_items,
-                     memory_t *out, int max, int *truncated);
-
-/* Promotion/demotion/expiry. Returns count of affected memories. */
-int memory_promote(void);
-
 /* Health query: rolling 7-day stats. */
 typedef struct
 {
@@ -408,8 +318,6 @@ typedef struct
    double write_to_readable_p99_secs;
 } memory_health_t;
 
-int memory_query_health(memory_health_t *out);
-
 /* Provenance surfacing. */
 typedef struct
 {
@@ -423,9 +331,6 @@ typedef struct
 
 #define MAX_PROVENANCE_ENTRIES 64
 
-void add_provenance(int64_t memory_id, const char *session_id, const char *action,
-                    const char *details);
-
 /* Session folding: compress a bounded, complete L0 session into an L1
  * checkpoint. Returns the number of source rows folded, 0 when empty, or -1
  * when the source set is over the bound, recursively refused, or cannot be
@@ -434,10 +339,6 @@ void add_provenance(int64_t memory_id, const char *session_id, const char *actio
 /* --- Conversation Scanning --- */
 
 /* --- Window Compaction --- */
-
-/* --- Workspace Scoping --- */
-int memory_tag_global(int64_t memory_id);
-int memory_tag_project(int64_t memory_id, const char *project);
 
 /* --- Canonical filter / scope contract (memory-public-contract) --- */
 
@@ -472,14 +373,6 @@ typedef struct
    int kind_count;
    char as_of[32]; /* ISO-8601 timestamp or "" */
 } memory_filter_t;
-
-/* Resolve a (scope_type, scope_value) pair into a memory_filter_t.
- * scope_type / scope_value may be NULL (ambient context only). */
-void memory_filter_from_scope(const char *scope_type, const char *scope_value,
-                              memory_filter_t *out);
-
-/* Serialize a filter to a fresh cJSON object.  Caller owns it. */
-struct cJSON *memory_filter_to_json(const memory_filter_t *f);
 
 /* --- Workflow Learning --- */
 
@@ -552,22 +445,6 @@ typedef struct
    int count;
 } memory_derived_facts_t;
 
-/* Classify the query shape for |query|.  Returns MEM_SHAPE_QUANTITATIVE,
- * MEM_SHAPE_TEMPORAL_INTERVAL, or MEM_SHAPE_UNKNOWN if the query does not
- * match a deriver-eligible pattern. */
-memory_query_shape_t memory_classify_deriver_shape(const char *query);
-
-/* Post-retrieval deriver: scan |candidates| (up to |cand_count| memories) for
- * typed edge data (OCCURRED_AT, valid_from, etc.) and compute counts, date
- * diffs, and aggregated intervals relevant to |query|.
- * Results are written into |out|.  Returns the number of derived facts, or 0
- * if the deriver is disabled / inapplicable. */
-int memory_derive_facts(const char *query, int64_t *candidate_ids, int cand_count,
-                        memory_derived_facts_t *out);
-
-/* Format |facts| as a compact JSON string (caller must free). */
-char *memory_derived_facts_to_json(const memory_derived_facts_t *facts);
-
 /* --- Retrieval-Failure Detection --- */
 
 /* Summary of retrieval confidence computed over the top-K candidates.
@@ -585,13 +462,6 @@ typedef struct
    int below_threshold;
    int fallback_triggered;
 } retrieval_confidence_t;
-
-/* Compute retrieval confidence for |candidates| (|cand_count| entries) against
- * |query_terms| (|term_count| entries).  Writes results into |out|.
- * |threshold| is the configured failure threshold (e.g. 0.35). */
-void memory_retrieval_confidence(const char **query_terms, int term_count,
-                                 const void *candidates_opaque, int cand_count, double threshold,
-                                 retrieval_confidence_t *out);
 
 /* --- Context Assembly --- */
 
@@ -626,20 +496,6 @@ typedef struct
    int held_for_activation;
 } context_budget_metrics_t;
 
-char *memory_assemble_context(const char *task_hint);
-char *memory_assemble_context_ws(const char *task_hint, const char *workspace);
-
-/* Like memory_assemble_context but additionally populates explain[] with
- * per-candidate selection details and metrics.  Pass NULL/0 to skip explain. */
-char *memory_assemble_context_explain(const char *task_hint,
-                                      context_assemble_explain_entry_t *explain, int *explain_count,
-                                      int explain_max, context_budget_metrics_t *metrics);
-
-/* Set the four independent, human-authorable retrieval activation controls for
- * one memory unit. Returns 0 on success. */
-int memory_activation_policy_set(int64_t memory_id, int sticky_turns, int cooldown_turns,
-                                 int delay_turns, int suppressed);
-
 /* --- Graph Boost (for context scoring) --- */
 #define MAX_BOOST_ENTRIES 256
 
@@ -654,14 +510,6 @@ typedef struct
    boost_entry_t entries[MAX_BOOST_ENTRIES];
    int count;
 } boost_map_t;
-
-void memory_graph_boost(char **query_terms, int term_count, boost_map_t *out);
-
-/* --- Conflict Detection --- */
-int64_t memory_detect_conflict(const char *key, const char *content);
-int memory_record_conflict(int64_t mem_a, int64_t mem_b);
-int memory_list_conflicts(conflict_t *out, int max);
-int memory_resolve_conflict(int64_t conflict_id, const char *resolution);
 
 /* --- Anti-Patterns ---
  * Storage primitives (insert/list/check/bump/delete/exists_*) live in
@@ -711,8 +559,6 @@ typedef struct
 } graph_related_t;
 _Static_assert(sizeof(((graph_related_t *)0)->key) >= GRAPH_ENDPOINT_MAX,
                "graph_related_t.key must be at least GRAPH_ENDPOINT_MAX bytes");
-
-int memory_graph_related(char **seed_keys, int seed_count, graph_related_t *out, int max);
 
 /* The embed command that selects the in-process lexical fixture. TEST BUILDS ONLY —
  * it is compiled out of aimee-kb, so passing it there is an ordinary (failing) exec.
@@ -765,7 +611,6 @@ typedef struct
    char created_at[32];
 } memory_link_t;
 
-int memory_link_create(int64_t source_id, int64_t target_id, const char *relation);
 /* --- Content Safety --- */
 
 #define SCAN_BLOCK    0 /* never persist */
@@ -773,16 +618,6 @@ int memory_link_create(int64_t source_id, int64_t target_id, const char *relatio
 #define SCAN_CLASSIFY 2 /* persist but mark sensitive */
 
 /* --- Memory Improve Loop --- */
-
-/* Deduplicate memories with identical or near-identical keys.  For each key
- * collision, the lower-confidence duplicate is marked merged_into=canonical_id.
- * Returns the number of merged rows; -1 on error. */
-int memory_improve_dedupe(int dry_run);
-
-/* Summarise clusters of low-confidence L1 memories sharing entity tags.
- * Groups are superseded by a synthetic L2 observation.
- * Returns the number of summary memories created; -1 on error. */
-int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confidence);
 
 /* --- Scene Clustering --- */
 
@@ -828,44 +663,6 @@ typedef struct
    char created_at[MEMORY_PROSPECTIVE_TS_LEN];
    char updated_at[MEMORY_PROSPECTIVE_TS_LEN];
 } memory_prospective_t;
-
-/* Create a new armed prospective memory.  `recurrence` defaults to
- * MEMORY_PROSPECTIVE_RECUR_ONCE when NULL/empty.  `valid_until` may be empty
- * to mean "no expiry".  On success, out (if non-NULL) is populated with the
- * new row.  Returns 0 on success, -1 on error. */
-int memory_prospective_create(const char *trigger_text, const char *action_text,
-                              const char *anchor_entity, const char *anchor_file,
-                              const char *recurrence, const char *valid_until,
-                              const char *source_session, memory_prospective_t *out);
-
-/* List reminders matching the supplied state (NULL/empty = all states).
- * Newest-first by created_at.  Returns count written (<= max). */
-int memory_prospective_list(const char *state, memory_prospective_t *out, int max);
-
-/* Fetch a single reminder by id. Returns 0 on success, -1 if not found. */
-int memory_prospective_get(int64_t id, memory_prospective_t *out);
-
-/* Transition a reminder to `completed`.  Returns 0 on success, -1 if the row
- * is missing or already terminal. */
-int memory_prospective_complete(int64_t id);
-
-/* Mark any armed reminders whose valid_until has passed as `expired`.
- * Returns the number of rows updated. */
-int memory_prospective_sweep_expired(void);
-
-/* Run the pre-turn matcher against the current user turn and active entity /
- * file anchors.  Returns up to max armed-and-unexpired reminders, in
- * descending match-strength order (exact entity/file anchors first, then lexical
- * hits, then content substring matches).  Recurrence handling is the
- * caller's job: after surfacing, call memory_prospective_mark_triggered()
- * with the ids that should flip state. */
-int memory_prospective_match(const char *turn_text, const char *active_entity,
-                             const char *active_file, memory_prospective_t *out, int max);
-
-/* Record a trigger event: increments trigger_count and last_triggered_at; for
- * `once` reminders, transitions state to `triggered`.  `repeat` reminders
- * stay `armed`.  Returns 0 on success, -1 on error. */
-int memory_prospective_mark_triggered(int64_t id);
 
 /* --- Epistemic Directives and Active Clarification ---
  *
@@ -921,60 +718,10 @@ typedef struct
    char updated_at[MEMORY_DIRECTIVE_TS_LEN];
 } memory_directive_t;
 
-/* Create a new open directive.  Dedup-safe:
- *   cause='contradiction'     → unique on (memory_a_id, memory_b_id)
- *   cause='retrieval_failure' → unique on (cause, topic)
- *   cause='missing_config'    → unique on (cause, topic)
- * Returns 0 on success (new or pre-existing row; out populated on success),
- * -1 on error, +1 when dedup rejected the insert. */
-int memory_directive_create(const char *question, const char *topic, const char *anchor_entity,
-                            const char *anchor_file, const char *cause, int priority,
-                            int64_t memory_a_id, int64_t memory_b_id, const char *evidence,
-                            const char *source_session, const char *valid_until,
-                            memory_directive_t *out);
-
-/* List directives matching |state| (NULL/empty = all) and |cause| (NULL/empty
- * = all), priority DESC then created DESC.  Returns count written. */
-int memory_directive_list(const char *state, const char *cause, memory_directive_t *out, int max);
-
-int memory_directive_get(int64_t id, memory_directive_t *out);
-
-/* Transition an open directive to resolved, optionally linking the memory
- * whose content answered the question.  Returns 0, -1 if not open. */
-int memory_directive_resolve(int64_t id, int64_t resolution_memory_id, const char *note);
-
-/* Suppress an open directive (operator says "stop asking").  Returns 0, -1
- * if not open. */
-int memory_directive_suppress(int64_t id);
-
-/* Sweep open directives whose valid_until has passed into state='expired'.
- * Idempotent.  Returns count transitioned. */
-int memory_directive_sweep_expired(void);
-
 /* JSON envelope helpers used by the aimee-kb RPC seam (kb_service.c, the
  * cmd_memory_core directive handlers, and dashboard code).  to_json returns
  * a heap-allocated cJSON the caller owns; from_json populates `out` from an
  * object of the same shape and returns 0 on success, -1 on malformed input. */
-
-/* Match-on-turn: pick the most relevant open directives for the supplied
- * turn text / active anchors.  Three stages:
- *   1. exact anchor_entity match
- *   2. exact anchor_file match
- *   3. lexical match on question+topic
- * Orders by priority DESC within each stage.  Returns count written. */
-int memory_directive_match(const char *turn_text, const char *active_entity,
-                           const char *active_file, memory_directive_t *out, int max);
-
-/* Record a surface event: increments surfaced_count and last_surfaced_at.
- * Called by the recall integration once the directive is actually emitted
- * into the bundle. */
-int memory_directive_mark_surfaced(int64_t id);
-
-/* Record a retrieval failure against a normalised query key.  When the
- * rolling count crosses |threshold|, auto-creates a retrieval_failure
- * directive and returns the new directive id; otherwise returns 0. */
-int64_t memory_directive_record_retrieval_failure(const char *query_norm, int threshold,
-                                                  const char *source_session);
 
 /* Counts per state, written into |out|. */
 typedef struct
@@ -984,13 +731,6 @@ typedef struct
    int64_t resolved;
    int64_t expired;
 } memory_directive_counts_t;
-
-int memory_directive_counts(memory_directive_counts_t *out);
-
-/* Process-local metrics accessor.  Any output pointer may be NULL. */
-void memory_directive_metrics(int64_t *created_total, int64_t *resolved_total,
-                              int64_t *expired_total, int64_t *surfaced_total, int64_t *match_calls,
-                              double *match_ms_avg, double *match_ms_max);
 
 /* --- Memory Lifecycle States and Alerts ---
  *
@@ -1022,31 +762,6 @@ void memory_directive_metrics(int64_t *created_total, int64_t *resolved_total,
 #define MEMORY_LIFECYCLE_TTL_DEFAULT_RELATIVE_DAYS   7
 #define MEMORY_LIFECYCLE_TTL_DEFAULT_OPEN_ENDED_DAYS 30
 
-int memory_detect_commitment_shape(const char *content, char *shape_out, size_t shape_out_len,
-                                   int *ttl_days_out);
-
-/* Transition a memory's lifecycle_state with state-machine enforcement.
- * Valid transitions:
- *   active     -> superseded | archived
- *   pending    -> fulfilled | archived
- *   fulfilled  -> archived
- *   superseded -> archived
- * Invalid transitions return -1. On success the ttl_at column is cleared
- * when leaving `pending`, and archive_reason is stored when transitioning
- * to `archived`. */
-int memory_transition_lifecycle(int64_t memory_id, const char *new_state,
-                                const char *archive_reason);
-
-/* Mark a memory as pending with an explicit TTL horizon (wall-clock
- * computed as now + ttl_days).  Use when a caller knows the item is a
- * commitment without needing the heuristic.  Returns 0 on success. */
-int memory_mark_pending(int64_t memory_id, int ttl_days);
-
-/* Run a pending-TTL sweep: transitions any `pending` row whose ttl_at is
- * past into `archived` with archive_reason='pending_ttl_expired'.
- * Idempotent — re-running touches nothing. Returns count archived. */
-int memory_lifecycle_sweep_expired(void);
-
 /* Counts per lifecycle state, written into `out` (indexed by the
  * lifecycle-state constants' order above).  Any NULL counts are skipped. */
 typedef struct
@@ -1057,8 +772,6 @@ typedef struct
    int64_t superseded;
    int64_t archived;
 } memory_lifecycle_counts_t;
-
-int memory_lifecycle_counts(memory_lifecycle_counts_t *out);
 
 /* Topic-pivot detection between consecutive user turns.  Pure
  * function — no DB access — so callers can invoke it cheaply and
@@ -1075,7 +788,6 @@ int memory_lifecycle_counts(memory_lifecycle_counts_t *out);
  *
  * See docs/proposals/done/personal-agent-phase-2-per-turn-recall.md. */
 #define MEMORY_RECALL_PIVOT_DEFAULT_THRESHOLD 0.15
-int memory_recall_topic_pivot(const char *prev_text, const char *cur_text, double threshold);
 
 /* --- Scheduled Memory Maintenance Cycles ---
  *
@@ -1133,20 +845,5 @@ typedef struct
    int64_t memory_count_after;
    char summary_json[2048];
 } memory_maintenance_summary_t;
-
-/* Run a maintenance cycle.  `modes` is a bitmask of
- * MEMORY_MAINTENANCE_MODE_* flags; pass 0 for
- * MEMORY_MAINTENANCE_MODES_DEFAULT.  When `force` is 0 the idle guard is
- * consulted and the cycle may short-circuit (summary.skipped=1).  When
- * `dry_run` is 1 no mutations run and summary.dry_run is set.  `cfg` is
- * optional; pass NULL for hardwired defaults.  Returns 0 on success
- * (even when skipped), -1 on error. */
-int memory_maintenance_run(unsigned int modes, int force, int dry_run,
-                           memory_maintenance_summary_t *summary);
-
-/* Scheduler entry point: run a cycle when `interval_seconds` has
- * elapsed since the last run (or when no previous run exists).  Cheap
- * no-op when not yet due.  Returns 1 if a cycle ran, 0 if skipped. */
-int memory_maintenance_maybe_run(memory_maintenance_summary_t *summary_out);
 
 #endif /* DEC_MEMORY_H */

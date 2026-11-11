@@ -393,8 +393,6 @@ typedef struct
 typedef struct
 {
    int rc;
-   int64_t mem_pruned;
-   int64_t mem_kept;
    int64_t kb_pruned;
    int64_t kb_kept;
 } pgvec_kb_service_reconcile_result_t;
@@ -2014,23 +2012,15 @@ int kb_store_kb_service_clear_current_project(const char *project)
    return kb_store_kb_service_clear_project(project);
 }
 
-int kb_store_kb_service_memory_record_exists(int64_t record_id)
-{
-   (void)record_id;
-   return 1;
-}
-
 int kb_store_kb_service_kb_document_exists(int64_t document_id)
 {
    (void)document_id;
    return 1;
 }
 
-int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn mem_exists,
-                                       pgvec_kb_service_record_exists_fn kb_exists, int dry_run,
+int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn kb_exists, int dry_run,
                                        pgvec_kb_service_reconcile_result_t *out)
 {
-   assert(mem_exists != NULL);
    assert(kb_exists != NULL);
    g_reconcile_dry_run = dry_run;
    if (g_reconcile_rc != 0)
@@ -2038,8 +2028,6 @@ int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn mem_exi
    if (out)
    {
       out->rc = 0;
-      out->mem_kept = 4;
-      out->mem_pruned = 1;
       out->kb_kept = 6;
       out->kb_pruned = 2;
    }
@@ -6609,8 +6597,9 @@ static void test_maintenance_reconcile_ok(void)
    assert(s == 200);
    assert(g_reconcile_dry_run == 1);
    assert(strstr(buf, "\"dry_run\":true") != NULL);
-   assert(strstr(buf, "\"pruned\":1") != NULL);
+   assert(strstr(buf, "\"pruned\":2") != NULL);
    assert(strstr(buf, "\"kept\":6") != NULL);
+   assert(strstr(buf, "\"memory\"") == NULL);
 }
 
 static void test_maintenance_clear_ok(void)

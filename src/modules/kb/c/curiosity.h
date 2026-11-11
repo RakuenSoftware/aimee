@@ -82,10 +82,21 @@ extern "C"
     * create one each. Returns the number of new items created. */
    int kb_store_curiosity_sweep_failed_queries(void);
 
+   /* Memory signals for rescoring, answered by the memory implementation:
+    * total() the number of stored memories, coverage() the number that
+    * match a topic (a bounded count is enough; it feeds 1/(1+n)). A
+    * negative answer means unknown and counts as 0. */
+   typedef struct
+   {
+      int (*total)(void *ctx);
+      int (*coverage)(void *ctx, const char *needle);
+      void *ctx;
+   } kb_store_curiosity_memory_t;
+
    /* Recompute importance / novelty / progress / routing_score for
-    * every open or in-progress item. Returns the number of rows
-    * rescored. */
-   int kb_store_curiosity_rescore_all(void);
+    * every open or in-progress item. memory may be NULL (no memory
+    * signal: maturity 0, novelty 1). Returns the number of rows rescored. */
+   int kb_store_curiosity_rescore_all(const kb_store_curiosity_memory_t *memory);
 
    /* Remove every curiosity item. Test-only. */
    int kb_store_curiosity_reset(void);

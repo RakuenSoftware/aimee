@@ -18,7 +18,6 @@
 #include "role_templates.h"
 #include "provider_catalog.h"
 #include "modules/kb/c/agent_hints.h"
-#include "modules/kb/c/memory_query.h"
 #include "modules/kb/c/rules.h"
 #include "modules/kb/c/tasks.h"
 #include "kb_client.h"

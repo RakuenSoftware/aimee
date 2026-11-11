@@ -1,7 +1,6 @@
 /* kb_client_memory_mutations.c: mutation/bookkeeping wrappers for memory.* RPCs */
 #include "kb_client_memory_internal.h"
 #include "kb_client_pii.h"
-#include "memory_query.h"
 #include "tasks.h"
 
 #include "kb_client.h" /* kb_client_memory_audit_note (defined in kb_client_memory_audit.c) */
