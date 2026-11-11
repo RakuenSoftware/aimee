@@ -209,6 +209,9 @@ def prepare(role: str, prefix: Path, inputs: Path, adopt: Path | None) -> None:
             '--role', role, '--prefix', str(prefix),
             '--module-manifest', f'/opt/aimee/module-grants/{role}.modules',
             '--grant-dir', f'/opt/aimee/module-grants/{role}',
+            # Plugin grants an operator installs in the instance's own module
+            # directory join the installation's policy at each start.
+            '--operator-grants', f'/var/lib/aimee/modules.d/{role}',
             '--db-config', str(inputs / 'database.json'), '--frontend-config', str(inputs / 'frontend.json'),
             '--resource-binary', f'/usr/local/bin/aimee-{role}',
             '--db-binary', str(binaries / 'aims-db-module'), '--memory-binary', str(binaries / 'aimee-memory-module'),

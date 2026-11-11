@@ -53,7 +53,9 @@ case "$_memory_role" in
             # replace the image's public ones for every process started below.
             export AIMEE_MODULE_BUS_SOCKET="$AIMEE_HOME/$_memory_role-module-bus.sock"
             export AIMEE_MODULE_MANIFEST="/opt/aims-memory/$_memory_role/etc/modules"
-            export AIMEE_MODULE_POLICY_DIR="/opt/aims-memory/$_memory_role/grants"
+            # Composed at each start from the installation's grants and the
+            # operator's plugin grants in $AIMEE_HOME/modules.d/<role>.
+            export AIMEE_MODULE_POLICY_DIR="/opt/aims-memory/$_memory_role/run/grants"
             export AIMEE_MODULE_RUNTIME_BIN="/usr/local/libexec/aimee-modules/aimee-module-$_memory_role"
             export AIMS_MEMORY_BRIDGE_CONFIG="/opt/aims-memory/$_memory_role/etc/bridge.json"
         fi
