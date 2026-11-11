@@ -2,9 +2,9 @@
   "platforms": {
     "linux-amd64": {
       "aimee_commit": "d6588980136cb8906f5aaef4db12503aefe9f168",
-      "aims_db_commit": "51471ab8c711daa1bdd4cb243d860dc159f0d2dc",
+      "aims_db_commit": "89f5a4d200e1763120de1c2fb4eb764358b739ea",
       "archive": "linux-amd64.tar.xz",
-      "bytes": 25054404,
+      "bytes": 25062068,
       "public_headers": {
         "src/core/codec/include/aimee/core/codec/base64.h": "cd2a11f93c6c515ab03ac489fa0dbf34fa1f193f0b67dedfbd1519bda9fe2fce",
         "src/db1_client/caches.h": "127e251b55faa57b0a74d2d71d092ed0b79bb1b0dca8af9ba06f1b30888b5827",
@@ -86,7 +86,7 @@
         "src/vendor/cJSON.c": "ce880e1f26f9a10f54a5b8d534604b6159fdebb83075a522779bb7f7322aa37b",
         "src/vendor/headers/cJSON.h": "0e390c0955c04baf5c2eca34839a17b4f01bb2d9a51c05ef8198cd9c37aa9718"
       },
-      "sha256": "a2828b36eb7346a7f184f44c29d500417e9ad330a0959975610dbd04f3ec495c"
+      "sha256": "96fc6bbd33f54e4d72270fd51e9ce70446437d003fcf1cbdb13ef36865a2ffd5"
     }
   },
   "schema_version": 1
