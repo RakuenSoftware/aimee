@@ -1294,6 +1294,22 @@ int main(void)
    assert(!agent_rc_should_try_another(rc, result.error));
    agent_result_clear_response(&result);
    request_context_clear();
+   /* A later failed assembly in an already refused request reports the owner's
+    * first refusal, not the generic failure it causes afterwards. */
+   {
+      request_context_t refused_earlier = {0};
+      request_context_set(&refused_earlier);
+      assert(request_context_refuse_assembly("stale_context") == 0);
+      const char *before_reply = recall_reply;
+      recall_reply = "{\"status\":\"error\",\"kind\":\"unavailable\",\"message\":\"later\"}";
+      char stale_error[512] = "";
+      char *stale_text = context_text_view(&agent, &network, "review", "original prompt", 0,
+                                           stale_error, sizeof(stale_error));
+      assert(!stale_text);
+      assert(strcmp(stale_error, "memory context refused: stale_context") == 0);
+      recall_reply = before_reply;
+      request_context_clear();
+   }
    recalls = 0;
    rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(rc == 0 && result.success && !result.error[0]);

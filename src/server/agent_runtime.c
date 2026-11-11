@@ -1513,7 +1513,7 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
                                            int mark_reminders, int *native_started, char *error,
                                            size_t error_len)
 {
-   /* The Go owner decides whether recall is usable. Preserve explicit
+   /* The memory owner decides whether recall is usable. Preserve explicit
     * refusals instead of treating an absent recall member as empty memory.
     * No host interpretation of memory policy or individual error kinds. */
    const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "status"));
@@ -1522,6 +1522,14 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
       const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "kind"));
       const char *message =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "message"));
+      /* A request the owner already refused reports that first refusal (for
+       * example stale_context), not the failure it causes in a later call. */
+      const request_context_t *owner = request_context_get();
+      if (owner && owner->context_refused && owner->context_refusal_kind[0])
+      {
+         kind = owner->context_refusal_kind;
+         message = NULL;
+      }
       if (error && error_len)
          snprintf(error, error_len, "memory context refused: %s%s%s",
                   kind ? kind : (status ? status : "unavailable"), message ? ": " : "",
