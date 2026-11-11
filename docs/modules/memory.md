@@ -54,7 +54,8 @@ The one-shot `aimee-memory-init` service in `compose.yaml` runs `aimee-memory-pr
 - later boots: it verifies the installation and changes nothing;
 - after an image update, or when the requested accounts or embedding provider change: it prepares
   the installation again under the same identity and keeps the owner key and the stored memory.
-  This is refused while the application is running.
+  An image update is refused while the application is running; a changed account list, shared
+  scope or embedder found while it runs keeps the current installation until the next start.
 
 A Server serves personal memory for `aimee`, every browser login and any account in
 `AIMEE_MEMORY_ACCOUNTS`, at most 32. A KB serves `global` and the scopes in
@@ -65,6 +66,13 @@ selected at deployment, not switched at run time:
 
 - `runtime_toggle.supported`: `false`; the installation is replaced only by provisioning while the
   application is stopped.
+
+A Server enrolled into a separately deployed KB reaches it over HTTPS, and that link never carries
+memory. Such a Server serves personal memory only, as in 1.0: a shared-store request (`store=kb`)
+answers the typed, retryable `unavailable` result ("memory bus service unavailable or
+unsupported", dependency `kb`), and with `kb_mode` `remote` and automatic recall on, a native run
+refuses its memory context rather than continue without the shared lane. Set `kb_mode` to `none`
+for private-only context on that Server. Shared memory is written and read on the KB itself.
 
 ## Surfaces
 
@@ -92,6 +100,10 @@ and imports them through the public store command. See
 The application mounts the prepared installation read-only and can write only its configuration,
 state and runtime directories. Every module process runs under an exact executable grant generated
 at provisioning, and the owner key is created on the deployment and never leaves its home volume.
+At each start the resource composes its module grant policy from the installation's grants and the
+grants an operator keeps in `$AIMEE_HOME/modules.d/<role>`, such as an installed plugin's; the
+installation's grants win, and an operator grant for a principal the installation owns, or for the
+public memory adapter it replaces, is left out and named in the startup log.
 Host-side checks do not move with the implementation: source revalidation, the byte budget
 (`request_budget_exceeded`), the send guard and provider receipts stay in `src/wire_fence.c` and
 `src/server/ingress_preinject.c`. The bundle is verified against its recorded hashes before it is
@@ -100,14 +112,7 @@ linked (`scripts/check_memory_bundle.py`).
 ## Supported journeys
 
 Operators start the composition through `scripts/compose-local.sh`, wait for readiness and use the
-ordinary memory commands. Deployment compatibility tests can explicitly select the actual
-historical Go owner as an external reference fixture. [Its frozen public source pin](../../tests/fixtures/legacy-memory-owner.json)
-is separate from the shipped implementation. With Go 1.26.10 available, run
-`python3 scripts/build_reference_memory_fixture.py --output /absolute/test-cache/aimee-module-memory`
-from the repository root; create the output directory first. The builder exports the pinned source
-into a disposable directory outside the checkout and writes a fresh executable plus a `.json`
-provenance sidecar recording its source commit and binary SHA-256. This reference is not installed
-or shipped by the builder.
+ordinary memory commands.
 
 ## Tests and failure behavior
 
@@ -117,17 +122,18 @@ or shipped by the builder.
 public file the bundle was compiled against has changed, naming the file, so a stale bundle is
 never linked.
 
-Deployment tests can select the reference owner through an exact executable grant at
-`/opt/aimee-test-memory-reference/aimee-module-memory`; other multicall roles retain their shipped
-executables. The live write-tier authorization rig selects the same reference explicitly with
-`AIMEE_LIVE_REFERENCE_MEMORY_OWNER=/absolute/test-cache/aimee-module-memory`.
-`python3 scripts/build_reference_memory_fixture.py --verify /absolute/test-cache/aimee-module-memory`
-checks an existing artifact without building or installing it.
+The Docker deployment tests (`tests/e2e/deployment-matrix.py`, `egress-vault-e2e.py`,
+`kb-upgrade-e2e.py`) run the shipped image with its provisioned memory, as an operator would.
 
-Shared deployment qualification has two explicit profiles in `tests/e2e/memory-placement-e2e.py`:
-`owner-client` retains the original Server HTTP/CLI/MCP forwarding and cwd/scope assertions, and
-`public-reference` is chosen when the frozen fixture is selected. A failed request never switches
-profiles or skips an assertion.
+Two bare-metal rigs test host-side gates, not memory, and need some memory module behind them:
+the live write-tier rig (`AIMEE_LIVE_REFERENCE_MEMORY_OWNER`) and the execution-grade journey.
+They use the frozen 1.0 Go owner as a test double. [Its public source pin](../../tests/fixtures/legacy-memory-owner.json)
+is separate from the shipped implementation; with Go 1.26.10 available, run
+`python3 scripts/build_reference_memory_fixture.py --output /absolute/test-cache/aimee-module-memory`
+from the repository root (create the output directory first) and check an existing artifact with
+`--verify`. The reference is never installed or shipped. The Docker tests still accept
+`--reference-memory-owner` to qualify against it explicitly; that run uses the `public-reference`
+profile of `tests/e2e/memory-placement-e2e.py`, and a failed request never switches profiles.
 
 ## Operational diagnostics
 

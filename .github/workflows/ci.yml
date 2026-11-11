@@ -2011,18 +2011,13 @@ jobs:
       - name: Configure optional encrypted storage
         if: matrix.storage == 'luks'
         run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
-      - name: Set up Go for external reference and configured tests
+      - name: Set up Go for configured tests
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
-      - name: Build the frozen external memory reference (test only)
-        run: |
-          git fetch --no-tags --depth=1 origin 0e29dd14f8c96de8f8366d763dfe56992aedc2b0
-          mkdir -p "$RUNNER_TEMP/reference-memory"
-          python3 scripts/build_reference_memory_fixture.py --output "$RUNNER_TEMP/reference-memory/aimee-module-memory"
-      - name: Run shipped deployment with explicitly selected external memory reference
-        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --reference-memory-owner "$RUNNER_TEMP/reference-memory/aimee-module-memory" --output /tmp/aimee-e2e-evidence
+      - name: Run the shipped deployment with its provisioned memory
+        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --output /tmp/aimee-e2e-evidence
       - name: Private configured tests use actual Docker custody and joined cleanup
         if: matrix.topology == 'T3'
         working-directory: server-go
@@ -2039,7 +2034,7 @@ jobs:
           go test -race -count=1 -v ./modules/delegates -run '^TestPrivateVerifierRealDocker$'
       - name: Installed Vault helper under hardened egress (both roles)
         if: matrix.topology == 'T3'
-        run: python3 tests/e2e/egress-vault-e2e.py --reference-memory-owner "$RUNNER_TEMP/reference-memory/aimee-module-memory" --output /tmp/aimee-e2e-evidence
+        run: python3 tests/e2e/egress-vault-e2e.py --output /tmp/aimee-e2e-evidence
       - name: Ordinary PostgreSQL persistence and storage mode boundaries
         if: matrix.topology == 'T3'
         run: |
@@ -2059,7 +2054,7 @@ jobs:
         if: matrix.topology == 'T1' || matrix.storage == 'luks'
         run: |
           sudo --preserve-env=AIMEE_APPLICATION_IMAGE,AIMEE_POSTGRES_IMAGE,AIMEE_EMBEDDER_IMAGE \
-            python3 tests/e2e/kb-upgrade-e2e.py --storage ${{ matrix.storage }} --reference-memory-owner "$RUNNER_TEMP/reference-memory/aimee-module-memory" --output /tmp/aimee-e2e-evidence
+            python3 tests/e2e/kb-upgrade-e2e.py --storage ${{ matrix.storage }} --output /tmp/aimee-e2e-evidence
       - name: Upload regression verdicts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

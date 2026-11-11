@@ -34,15 +34,22 @@ def strings(value):
             yield from strings(child)
 
 
+# Profiles whose Server has no shared-memory owner client: the frozen 1.0
+# reference owner, and shipped aims-db memory, where an enrolled KB is reached
+# over HTTPS and that link never carries memory.
+NO_SHARED_OWNER_PROFILES = ('public-reference', 'no-shared-owner')
+PROFILES = ('owner-client', *NO_SHARED_OWNER_PROFILES)
+
+
 def shared_lane_enabled(profile, remote, api, check):
-    if profile not in ('owner-client', 'public-reference'):
+    if profile not in PROFILES:
         raise ValueError('unknown shared memory qualification profile')
     if profile == 'owner-client':
         return remote
-    # This declared profile has no Server shared-memory owner client. A failed
+    # These declared profiles have no Server shared-memory owner client. A failed
     # owner-client request never switches profiles or turns into a passing skip.
     status, reply = api('/v1/memory/recall', dict(store='kb', query='native-profile-boundary', scope='all'))
-    check('public-reference Server shared recall is explicitly unavailable without data',
+    check(profile + ' Server shared recall is explicitly unavailable without data',
           status == 200 and reply.get('status') == 'unavailable'
           and reply.get('message') == 'memory bus service unavailable or unsupported'
           and reply.get('retryable') is True and reply.get('dependency') == 'kb'
@@ -307,11 +314,12 @@ def inside(output, shared_profile='owner-client'):
             if not path.name.isdigit():
                 continue
             try:
-                if (path / 'cmdline').read_bytes().split(b'\0')[0].endswith(b'/aimee-module-memory'):
+                # 1.0 Go owner or the shipped aims-db memory frontend.
+                if (path / 'cmdline').read_bytes().split(b'\0')[0].endswith((b'/aimee-module-memory', b'/aimee-memory-module')):
                     found.append(int(path.name))
             except OSError:
                 pass
-        check('native fixture identifies exactly one Go memory owner', len(found) == 1)
+        check('native fixture identifies exactly one memory owner', len(found) == 1)
         return found[0]
 
     def recover():
@@ -367,20 +375,20 @@ def inside(output, shared_profile='owner-client'):
         version_status, versioned = api('/v1/memory/get', dict(id=str(memory_id), include_version=True))
         observed_version = versioned.get('memory', {}).get('version')
         check('native fixture reads its private source version', version_status == 200 and isinstance(observed_version, dict))
-        if shared_profile == 'public-reference' and shared_remote:
+        if shared_profile in NO_SHARED_OWNER_PROFILES and shared_remote:
             before = len(captures)
             result, events = run('unavailable shared native context')
-            check('public-reference remote native context refuses the missing shared owner client',
+            check(shared_profile + ' remote native context refuses the missing shared owner client',
                   result.get('status') == 'failed' and
                   any('unavailable' in text for text in strings(events)))
-            check('public-reference shared context refusal sends zero provider requests', len(captures) == before)
+            check(shared_profile + ' shared context refusal sends zero provider requests', len(captures) == before)
             shared_remote_refusal_qualified = True
             # This declared profile qualifies the real private owner separately;
             # a remote configuration correctly requires the absent shared client.
             # Use the existing explicit private-only mode, not a failed-read fallback.
             previous_kb_mode = config('get', 'kb_mode')['value']
             config('set', 'kb_mode', 'none')
-            check('public-reference explicitly selects private-only native context',
+            check(shared_profile + ' explicitly selects private-only native context',
                   config('get', 'kb_mode')['value'] == 'none')
         before = len(captures)
         result, _ = run('healthy native run')
@@ -396,15 +404,28 @@ def inside(output, shared_profile='owner-client'):
               verification.get('evidence', {}).get('binding_commitment') == 'matched' and
               verification.get('evidence', {}).get('payload_correspondence') == 'matched' and
               verification.get('evidence', {}).get('source_commitment') == 'matched')
-        check('native receipt binds the retained private revision and fresh source check',
-              verification.get('source_coverage') == 'retained_versioned_inputs' and
-              len(prepared['binding'].get('source_check_id', '')) == 32 and
-              any(ref.get('source_version', {}).get('record_kind') == 'user_memory_record' and
-                  ref.get('source_version', {}).get('version') == observed_version
-                  for ref in prepared['binding'].get('sources', [])))
-        check('native receipt retains the private collection dependency', any(
-            ref.get('source_version', {}).get('record_kind') == 'user_memory_collection'
-            for ref in prepared['binding'].get('sources', [])))
+        sources = prepared['binding'].get('sources', [])
+        if isinstance(sources, dict) and sources.get('contract') == 'aims-projected-evidence/v1':
+            # The shipped implementation binds native projected evidence: its
+            # owner and, per projection, a digest and the exact source versions.
+            projections = sources.get('projections') or []
+            check('native receipt binds the retained private revision',
+                  verification.get('source_coverage') == 'retained_native_versioned_inputs' and
+                  sources.get('owner') == observed_version.get('owner_id') and
+                  any(str(source.get('belief')) == str(observed_version.get('record_revision'))
+                      for projection in projections for source in projection.get('sources', [])))
+            check('native receipt retains a digest for every projected source group', bool(projections) and all(
+                len(projection.get('digest', [])) == 32 and projection.get('sources') for projection in projections))
+        else:
+            check('native receipt binds the retained private revision and fresh source check',
+                  verification.get('source_coverage') == 'retained_versioned_inputs' and
+                  len(prepared['binding'].get('source_check_id', '')) == 32 and
+                  any(ref.get('source_version', {}).get('record_kind') == 'user_memory_record' and
+                      ref.get('source_version', {}).get('version') == observed_version
+                      for ref in sources))
+            check('native receipt retains the private collection dependency', any(
+                ref.get('source_version', {}).get('record_kind') == 'user_memory_collection'
+                for ref in sources))
         check('supplied receipt does not claim producer or chain authentication',
               verification.get('evidence', {}).get('authenticated_producer') == 'unavailable' and
               verification.get('evidence', {}).get('chain_included') == 'not_checked' and
@@ -664,7 +685,7 @@ def main():
     parser.add_argument('--server')
     parser.add_argument('--output', required=True)
     parser.add_argument('--inside', action='store_true', help=argparse.SUPPRESS)
-    parser.add_argument('--shared-profile', choices=('owner-client', 'public-reference'), default='owner-client')
+    parser.add_argument('--shared-profile', choices=PROFILES, default='owner-client')
     args = parser.parse_args()
     if args.inside:
         return inside(args.output, args.shared_profile)

@@ -1628,17 +1628,24 @@ def main():
             check('KB ranked search uses its local embedding service', code == 200 and isinstance(body.get('hits'), list))
             code, body = kb.kb_request('/v1/actions/memory.find_facts', dict(query='shared deployment fixture', limit=3, graph_code_fusion_state='on'))
             check('KB graph and memory retrieval survives the deepest worker path', code == 200 and isinstance(body.get('facts'), list))
-            typed_context_budget_gate(kb, check)
-            typed_source_version_gate(kb, check)
-            linked_relation_input_gate(kb, check)
-            relation_consumer_rebuild_gate(kb, check)
-            future_index_admission_gate(kb, check)
-            graph_intermediate_scope_gate(kb, check)
-            legacy_query_eligibility_gate(kb, check)
-            preview_source_version_gate(kb, check)
+            code, body = kb.kb_request('/v1/actions/memory.stats', dict(view='console'))
+            check('KB memory statistics count the stored shared record',
+                  code == 200 and body.get('status') == 'ok' and body.get('stats', {}).get('total', 0) >= 1)
             evidence_exact_identity_gate(kb, check)
-            lineage_release_gate(kb, check)
-        if kb and args.skip_kb_gates and not args.boot_only:
+            if args.reference_memory_owner:
+                # These gates seed and read the frozen 1.0 owner's PostgreSQL
+                # tables (typed facts, relations, lineage, embedding generations);
+                # the shipped implementation keeps none of them.
+                typed_context_budget_gate(kb, check)
+                typed_source_version_gate(kb, check)
+                linked_relation_input_gate(kb, check)
+                relation_consumer_rebuild_gate(kb, check)
+                future_index_admission_gate(kb, check)
+                graph_intermediate_scope_gate(kb, check)
+                legacy_query_eligibility_gate(kb, check)
+                preview_source_version_gate(kb, check)
+                lineage_release_gate(kb, check)
+        if kb and args.skip_kb_gates and not args.boot_only and args.reference_memory_owner:
             # The direct T1 assertion gate initializes its own generation. T2
             # owns a different fresh KB, so skipping those assertions must not
             # skip the setup required by authenticated recovery below.
@@ -1652,8 +1659,13 @@ def main():
         if args.topology in ('T2', 'T3') and not args.boot_only:
             gate_script = ROOT / 'tests/e2e/memory-placement-e2e.py'
             common = ['--server', server.application, '--store-db', server.postgres]
+            shipped_script = ROOT / 'tests/e2e/shipped-memory-e2e.py'
             if not args.skip_kb_free_gate:
-                command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'), timeout=900)
+                if args.reference_memory_owner:
+                    command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'), timeout=900)
+                else:
+                    command('python3', str(shipped_script), '--server', server.application,
+                            '--output', str(args.output / 'local-memory.json'), timeout=900)
                 check('KB-free personal memory regression gate', True)
             if kb:
                 # The two projects retain separate stores, model identities and
@@ -1680,20 +1692,29 @@ def main():
                         raise RuntimeError('KB credential response was not redacted')
                 command('docker', 'restart', server.application)
                 server.start()
-                profile = 'public-reference' if args.reference_memory_owner else 'owner-client'
-                correction_review_gate(kb, server, placement, args.output, profile)
-                check('Model correction drafts and authenticated decisions via ' + profile, True)
-                command('python3', str(gate_script), *common, '--kb', kb.application,
-                    '--kb-store-db', kb.postgres, '--shared-profile', profile,
-                    '--output', str(args.output / 'shared-memory.json'), timeout=900,
-                    env=dict(os.environ, AIMEE_E2E_REFERENCE_BEARER=kb.env['AIMEE_KB_API_BEARER_TOKEN'],
-                             AIMEE_E2E_REFERENCE_SERVICE=kb.service_identity))
-                check('Shared memory qualification via ' + profile, True)
+                if args.reference_memory_owner:
+                    # The frozen 1.0 owner's own placement and correction gates
+                    # read its PostgreSQL tables directly.
+                    profile = 'public-reference'
+                    correction_review_gate(kb, server, placement, args.output, profile)
+                    check('Model correction drafts and authenticated decisions via ' + profile, True)
+                    command('python3', str(gate_script), *common, '--kb', kb.application,
+                        '--kb-store-db', kb.postgres, '--shared-profile', profile,
+                        '--output', str(args.output / 'shared-memory.json'), timeout=900,
+                        env=dict(os.environ, AIMEE_E2E_REFERENCE_BEARER=kb.env['AIMEE_KB_API_BEARER_TOKEN'],
+                                 AIMEE_E2E_REFERENCE_SERVICE=kb.service_identity))
+                    check('Shared memory qualification via ' + profile, True)
+                else:
+                    command('python3', str(shipped_script), '--server', server.application, '--kb', kb.application,
+                        '--output', str(args.output / 'shared-memory.json'), timeout=900,
+                        env=dict(os.environ, AIMEE_E2E_KB_BEARER=kb.env['AIMEE_KB_API_BEARER_TOKEN']))
+                    check('Shared memory qualification via the shipped implementation', True)
                 command('python3', str(ROOT / 'tests/e2e/instance-identity-e2e.py'),
                     '--server', server.application, '--kb', kb.application,
                     '--image', env['AIMEE_APPLICATION_IMAGE'], '--output', str(args.output / 'identity.json'))
                 check('One application image and immutable first-boot identities', True)
-            else:
+            elif args.reference_memory_owner:
+                # Both read and seed the 1.0 owner's user_memories tables.
                 command('python3', str(ROOT / 'tests/e2e/local-model-memory-e2e.py'), *common,
                     '--embedder', server.embedder, '--output', str(args.output / 'semantic-memory.json'), timeout=600)
                 check('Real local semantic recall, outage recovery and retirement gate', True)
@@ -1705,7 +1726,7 @@ def main():
             check('Provider-bound memory, constraints, tools and continuation gate', True)
             command('python3', str(ROOT / 'tests/e2e/memory-native-async-e2e.py'),
                 '--server', server.application,
-                '--shared-profile', 'public-reference' if args.reference_memory_owner else 'owner-client',
+                '--shared-profile', 'public-reference' if args.reference_memory_owner else 'no-shared-owner',
                 '--output', str(args.output / 'native-async.json'), timeout=600)
             check('Live asynchronous native memory refusal and recovery gate', True)
             if env.get('AIMEE_MEMORY_HEALTH_FIXTURE') == '1':
