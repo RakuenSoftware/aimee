@@ -417,7 +417,9 @@ def inside(output, budget_benchmark=False):
                 executable = (process / 'cmdline').read_bytes().split(b'\0')[0]
             except (FileNotFoundError, PermissionError, ProcessLookupError):
                 continue
-            if executable.endswith(b'/aimee-module-memory'):
+            # The frozen 1.0 owner runs as aimee-module-memory; the shipped
+            # implementation's memory frontend as aimee-memory-module.
+            if executable.endswith((b'/aimee-module-memory', b'/aimee-memory-module')):
                 memory_pids.append(int(process.name))
         check('provider refusal fixture identifies one real memory owner', len(memory_pids) == 1)
         owner_pid = memory_pids[0]

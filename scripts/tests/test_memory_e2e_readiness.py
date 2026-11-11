@@ -54,8 +54,9 @@ class MemoryReadinessTests(unittest.TestCase):
             'deployment_matrix', Path(__file__).resolve().parents[2] / 'tests/e2e/deployment-matrix.py')
         matrix = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(matrix)
-        for boot_only in (False, True):
-            with self.subTest(boot_only=boot_only), tempfile.TemporaryDirectory() as directory:
+        cases = [(boot_only, reference) for boot_only in (False, True) for reference in (False, True)]
+        for boot_only, reference in cases:
+            with self.subTest(boot_only=boot_only, reference=reference), tempfile.TemporaryDirectory() as directory:
                 kb = Mock(role='kb', application='kb', service_identity='service')
                 kb.kb_request.side_effect = [
                     (200, dict(postgres_ok=True)), (200, dict(status='ok'))]
@@ -63,6 +64,10 @@ class MemoryReadinessTests(unittest.TestCase):
                         '--skip-kb-free-gate', '--output', directory]
                 if boot_only:
                     argv.append('--boot-only')
+                if reference:
+                    # The frozen 1.0 owner needs its embedding generation; shipped
+                    # memory keeps its own and has no reembed commands.
+                    argv += ['--reference-memory-owner', directory + '/aimee-module-memory']
                 order = []
                 def stack(role, *args):
                     order.append(role)
@@ -79,7 +84,7 @@ class MemoryReadinessTests(unittest.TestCase):
                         matrix, 'application_metadata_is_private', return_value=True), patch.object(
                         matrix, 'activate_embedding_generation', side_effect=activate):
                     self.assertEqual(matrix.main(), 1)
-                self.assertEqual(order, ['kb', 'server'] if boot_only else ['kb', 'activate', 'server'])
+                self.assertEqual(order, ['kb', 'activate', 'server'] if reference and not boot_only else ['kb', 'server'])
 
     def test_generation_setup_restores_service_bearer_when_indexing_fails(self):
         spec = importlib.util.spec_from_file_location(
