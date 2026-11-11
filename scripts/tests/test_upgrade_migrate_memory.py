@@ -44,6 +44,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             status, reply = 503, {'status': 'error', 'kind': 'unavailable', 'message': 'memory module unavailable'}
         elif self.path.endswith('list'):
             reply = {'status': 'ok', 'memories': []}
+        elif body['key'] in state['sensitive']:
+            # The memory client screen answers a raw sensitive value with HTTP 400.
+            status, reply = 400, {'status': 'error', 'kind': 'invalid_argument',
+                                  'message': 'memory does not store sensitive values; keep the value in the vault'}
         elif body['key'] in state['refuse']:
             # The KB action bridge returns HTTP 200 for a domain refusal envelope.
             status, reply = 200, {'status': 'error', 'kind': 'invalid_argument', 'message': 'refused'}
@@ -69,7 +73,7 @@ class MigrateMemoryTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         self.socket = str(self.root / 'aimee-http.sock')
-        state = dict(requests=[], seen=set(), refuse=set(), unavailable=False)
+        state = dict(requests=[], seen=set(), refuse=set(), sensitive=set(), unavailable=False)
         self.state = state
         self.servers = [UnixServer(self.socket, Handler), http.server.HTTPServer(('127.0.0.1', 0), Handler)]
         for server in self.servers:
@@ -184,6 +188,17 @@ class MigrateMemoryTests(unittest.TestCase):
         server = self.snapshot([row(7)], name='personal.jsonl')
         with self.assertRaises(SystemExit):
             self.run_tool('scopes', '--file', str(server))
+
+    def test_a_refused_sensitive_record_is_reported_and_the_rest_imported(self):
+        path = self.snapshot([row(1), row(2, content='call me at person@example.invalid'), row(3)])
+        self.state['sensitive'] = {'key-2'}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            self.assertEqual(self.run_tool('import', '--placement', 'server', '--file', str(path),
+                                           '--socket', self.socket), 1)
+        self.assertEqual(len(self.state['seen']), 2)
+        self.assertIn('FAILED', out.getvalue())
+        self.assertIn('vault', out.getvalue())
 
     def test_import_refuses_the_wrong_placement_an_unready_instance_and_reports_failures(self):
         path = self.snapshot([row(1), row(2)])

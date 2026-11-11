@@ -29,6 +29,9 @@ Limits of this release:
   `memory.episode_card_generate` answers `disabled`. Extraction on a KB is planned for the next
   release. A KB serves global and every project and workspace by default;
   `AIMEE_MEMORY_SHARED_SCOPES` can restrict it to an exact list.
+- Memory refuses a record whose text contains a raw sensitive value (an email address, phone
+  number, IP address, password or key) and says the value belongs in the vault. 1.0.x stored
+  such records and withheld them from injected context.
 - Memory maintenance commands are not available: `memory.compact_windows` and
   `memory.maintenance_run` answer `not_available` (old session memory stays as stored), and
   `memory.embed`, `repair`, `rebuild`, `reindex` and `reembed_*` answer `not_available` because
