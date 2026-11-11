@@ -1,10 +1,10 @@
 {
   "platforms": {
     "linux-amd64": {
-      "aimee_commit": "fc3d9425d232dcff8ec5ff869cc9cb6f975ca920",
-      "aims_db_commit": "0e72962089879d959ddc73e78fd4bea1b4a9c6ad",
+      "aimee_commit": "f70414473c0db2ab796fc783349d3bc013c4bd9f",
+      "aims_db_commit": "45cd6eb2b42a71ab9de406b297da38a1b7c0cde5",
       "archive": "linux-amd64.tar.xz",
-      "bytes": 24918612,
+      "bytes": 25030764,
       "public_headers": {
         "src/core/codec/include/aimee/core/codec/base64.h": "cd2a11f93c6c515ab03ac489fa0dbf34fa1f193f0b67dedfbd1519bda9fe2fce",
         "src/db1_client/caches.h": "127e251b55faa57b0a74d2d71d092ed0b79bb1b0dca8af9ba06f1b30888b5827",
@@ -41,7 +41,7 @@
         "src/headers/kb_reqctx.h": "151ff7e70d1fa8a76f74cbad759cd935092fc2111c2109260a1e301940400e77",
         "src/headers/kb_service.h": "f38c36a0ff14d0d152781d21232daf949f71bc8eaba534618add485938172e23",
         "src/headers/kb_verifier.h": "63cd1cd6e0a4350603ecee8a7c27b40c20f06ab44cefd8b8275ac3d11fd6ca43",
-        "src/headers/memory.h": "abcd4361bd1c79938690c8fc64c27ce62c5e2acd44c824caf9a2770a464662e2",
+        "src/headers/memory.h": "277288eb26167acf14a1761713d30e4da0a2f7e5141e99a029c5fad59318f211",
         "src/headers/memory_authority.h": "8f57154d3fd8a924ae1f7cc091f377675831cd1b6d249973e26aec99186c6cb6",
         "src/headers/module_commands.h": "b8510e5dad07b44983e3852fe9276125d40e8888604ca5cc0d9be66006aa4338",
         "src/headers/platform.h": "46588175228be4c30d9179e45a2cdff11b875a60af6440ce299e1dcec8742d16",
@@ -65,12 +65,11 @@
         "src/modules/kb/c/anti_patterns.h": "aba3f105f6982b67d8e747fbd3d424df40fc0bf0df2e467cd142e56f1f4066b7",
         "src/modules/kb/c/decision_log.h": "d716d0c8f588a006afe6ea5a48c751e7fa46219c6bf979a8222c5984afe03524",
         "src/modules/kb/c/feedback.h": "273c9c92d7dee15399e1b2124a638a36a72d91751a629f9777b71a4b566c317c",
-        "src/modules/kb/c/memory_query.h": "889c02d9b6bdf7ada455b4f8e2a52ae2dd929c3d60671b830e7734958b9182c1",
         "src/modules/kb/c/notes.h": "d5a7fc8ac18c0b90f75a6e9b5fa5332d51f85e89bff69cbb8344c82c1bd7e4b1",
         "src/modules/kb/c/rules.h": "1af72008c913fe126dd5caeee5bdd92c0cb28587f67d77e587290130275d1f1d",
-        "src/modules/kb/c/tasks.h": "e81daa49b71511f05ee730beb339dba5a02f0ceb3bef643af19edef01e24c1b6",
+        "src/modules/kb/c/tasks.h": "be08375eb5ea718c0935499ee6c46332bebae336f445666ec9bc772b1390be8a",
         "src/modules/kb/include/aimee/kb/index_observer.h": "2b238ad2d39119db5622584c2a111a8fc8d206fdf52f21979f938b1cb97d24c0",
-        "src/modules/kb_client/kb_client.h": "b7013e0617f0b9d75da64f63c1a3b34b708cee81aa6f0783d0e5a0fec4ee43e8",
+        "src/modules/kb_client/kb_client.h": "1547cbc2a826e49e0c642d0f872f3e55eae420694657fe633424baa7181b9c93",
         "src/modules/learning/include/aimee/learning/learning.h": "de589bc1f77fb23e901d9d65b6f35255453d54b22c31ec0048a927269659fc10",
         "src/modules/tools/include/aimee/tools/agent_tools.h": "5f6aa5a6523bc1840d118287c2c810cae470f81367b29f96ff31168c35ec3c44",
         "src/modules/tools/include/aimee/tools/module_api.h": "a1107367a6bf92e4db92be9d006ce41ab81c19c9b540d2262618c5f38ad743c5",
@@ -87,7 +86,7 @@
         "src/vendor/cJSON.c": "ce880e1f26f9a10f54a5b8d534604b6159fdebb83075a522779bb7f7322aa37b",
         "src/vendor/headers/cJSON.h": "0e390c0955c04baf5c2eca34839a17b4f01bb2d9a51c05ef8198cd9c37aa9718"
       },
-      "sha256": "074d1a1818906ad2bee6225e0dfb04102b3d3c9889bbecfb1535961b848e4e10"
+      "sha256": "1632b255c078fb4f16be2c6b7e4198bdb7b04a452e1050bc4123f4f5a06a03d5"
     }
   },
   "schema_version": 1
