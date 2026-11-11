@@ -24,8 +24,17 @@ because the memory owner built into 1.0.x is replaced by a new, separate impleme
 Limits of this release:
 
 - Shared facts on a KB are stored as written; no extraction pipeline runs on them, so typed
-  facts are not yet derived from shared memory. A KB serves global and every project and
-  workspace by default; `AIMEE_MEMORY_SHARED_SCOPES` can restrict it to an exact list.
+  facts are not derived from shared memory even with a synthesis model configured.
+  `memory.facts` returns an empty block, as a 1.0.x install without a synthesis model did, and
+  `memory.episode_card_generate` answers `disabled`. Extraction on a KB is planned for the next
+  release. A KB serves global and every project and workspace by default;
+  `AIMEE_MEMORY_SHARED_SCOPES` can restrict it to an exact list.
+- Memory maintenance commands are not available: `memory.compact_windows` and
+  `memory.maintenance_run` answer `not_available` (old session memory stays as stored), and
+  `memory.embed`, `repair`, `rebuild`, `reindex` and `reembed_*` answer `not_available` because
+  the memory service maintains its own vector index; an embedding model change is applied by
+  provisioning when the embedder image changes.
+- The guardrail's task-drift check is answered by the KB's task store (`task.check_drift`).
 - The memory bundle exists for `linux/amd64` only. An image for another platform carries no
   memory: its provisioning service fails with a message, and an instance without a provisioned
   installation reports `missing_module: memory` and is not ready.
