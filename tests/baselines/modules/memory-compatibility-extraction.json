@@ -381,7 +381,7 @@
     {
       "target": "unit-test-kb-http-routes",
       "source": "src/tests/test_kb_http_routes.c",
-      "sha256": "1031f26550f730f300382dbda94d26dc4c003ac01158be5e4a62b6fad1d52153",
+      "sha256": "fa2faaac175da1cc4a2e680217280822a7c42ef7db0901b202cce31cd7839a48",
       "assert_calls": 1291,
       "test_functions": [
         "test_health",
