@@ -223,7 +223,7 @@ service that runs `aimee-memory-provision` before the application starts:
 | --- | --- |
 | First start | Generates the instance's memory identity, grants and owner key; prepares the installation in the `aimee-memory` volume; creates `private-memory/<role>` in the home volume. |
 | Later starts | Verifies the installation and changes nothing. |
-| After an image update, or a change in the served accounts, shared scopes or embedder | Prepares the installation again under the same identity; the owner key and stored memory are kept. Refused while the application is running: stop the stack, then start it again. |
+| After an image update, or a change in the served accounts, shared scopes or embedder | Prepares the installation again under the same identity; the owner key and stored memory are kept. An image update is refused while the application is running: stop the stack, then start it again. A changed account list, shared scope or embedder found while the application runs, such as a browser login created since the last start, keeps the current installation and takes effect at the next start. |
 
 Start and restart the stack through `scripts/compose-local.sh` (or `scripts/compose-vault-init.py`
 followed by `docker compose up`). The helper reads the embedder image's identity, which memory pins

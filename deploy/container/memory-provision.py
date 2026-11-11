@@ -14,7 +14,8 @@ installation that belongs to this deployment:
            requested accounts or embedding provider changed: prepare again
            under the same memory identity while keeping the owner key and the
            stored memory, then switch the configuration over. Refused while the
-           application is running.
+           application is running, except that a changed account list, shared
+           scope or embedder keeps the current installation until the next start.
 
 A KB serves the shared scopes in AIMEE_MEMORY_SHARED_SCOPES: `global` always, and
 by default every project and workspace (`project:*`, `workspace:*`); listing
@@ -414,8 +415,18 @@ def provision(role: str, health: dict | None = None) -> str:
 
     # Stored memory exists and the installation has to change. Keep the node,
     # the owner and the data; regenerate everything derived from them.
+    running = application_running(role)
+    if running and prepared and not stale_reasons(prefix, role):
+        # Only the requested policy differs (for example a browser login created
+        # while the stack ran). The installation is still valid for the running
+        # application, so a repeated `up` succeeds and the change waits for the
+        # next start instead of failing the command.
+        log('memory installation is current; ' + '; '.join(reasons[:4])
+            + ' and takes effect at the next start (docker compose down, then up)')
+        install_home(prefix)
+        return 'deferred'
     log('memory installation has to be re-prepared: ' + '; '.join(reasons[:4]))
-    if application_running(role):
+    if running:
         raise Refused('the application is still running; stop it (docker compose down) and start again '
                       'so the memory installation can be updated')
     regenerated = None
@@ -466,7 +477,8 @@ def main() -> int:
                 'installation already exists',
          'fresh': f'memory installation created for {role}',
          'current': f'memory installation for {role} verified; nothing changed',
-         'update': f'memory installation for {role} re-prepared; stored memory kept'}[outcome])
+         'update': f'memory installation for {role} re-prepared; stored memory kept',
+         'deferred': f'memory installation for {role} kept while the application runs'}[outcome])
     return 0
 
 

@@ -204,3 +204,50 @@ class RunningApplication(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RunningApplication(unittest.TestCase):
+    """A repeated `up` against a running application never fails for a policy-only change."""
+
+    def setUp(self):
+        self.work = tempfile.TemporaryDirectory()
+        root = Path(self.work.name)
+        self.saved = {name: getattr(module, name) for name in (
+            'ROOT', 'HOME', 'BUNDLE', 'owned', 'recorded_policy', 'stale_reasons', 'application_running',
+            'install_home', 'prepare', 'served_accounts')}
+        module.ROOT, module.HOME, module.BUNDLE = root / 'volume', root / 'home', root / 'bundle'
+        for path in (module.ROOT / 'server', module.HOME / 'private-memory/server', module.BUNDLE / 'provision'):
+            path.mkdir(parents=True)
+        (module.BUNDLE / 'provision/prepare.py').write_text('')
+        (module.HOME / 'private-memory/server/installation.json').write_text('{}')
+        (module.ROOT / 'server/overlay-manifest.json').write_text('{}')
+        module.owned = lambda path: None
+        import shutil, types
+        self.saved_shutil = module.shutil
+        module.shutil = types.SimpleNamespace(**{name: getattr(shutil, name) for name in dir(shutil)
+                                                 if not name.startswith('__')})
+        module.shutil.chown = lambda *args, **kwargs: None  # ownership needs the runtime user
+        module.recorded_policy = lambda inputs: {'accounts': ['aimee'], 'embedding_provider_identity_digest': None,
+                                                 'node': 'n', 'shared_scopes': []}
+        module.served_accounts = lambda role, value, home: 'aimee,first-boot-login'
+        module.install_home = lambda prefix: None
+        module.application_running = lambda role, *args: True
+        self.prepared = []
+        module.prepare = lambda *args: self.prepared.append(args)
+
+    def tearDown(self):
+        for name, value in self.saved.items():
+            setattr(module, name, value)
+        module.shutil = self.saved_shutil
+        self.work.cleanup()
+
+    def test_a_new_login_waits_for_the_next_start(self):
+        module.stale_reasons = lambda prefix, role: []
+        self.assertEqual(module.provision('server'), 'deferred')
+        self.assertEqual(self.prepared, [])
+
+    def test_a_stale_installation_still_needs_a_stop(self):
+        module.stale_reasons = lambda prefix, role: ['the image changed']
+        with self.assertRaises(module.Refused):
+            module.provision('server')
+        self.assertEqual(self.prepared, [])
