@@ -448,6 +448,13 @@ def inside(output, budget_benchmark=False):
             os.kill(owner_pid, signal.SIGTERM)
             deadline = time.monotonic() + 75
             while True:
+                # A resumed owner may answer a read before SIGTERM finishes; that
+                # is not evidence that its supervised replacement is ready.
+                if Path('/proc', str(owner_pid)).exists():
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('paused memory owner did not exit after SIGTERM')
+                    time.sleep(0.1)
+                    continue
                 status, recovered = api('/v1/memory/get', dict(id=str(memory_id)))
                 if status == 200 and recovered.get('memory', {}).get('content') == content:
                     break
