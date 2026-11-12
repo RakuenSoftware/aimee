@@ -153,8 +153,8 @@ static void *heartbeat_main(void *unused)
    while (atomic_load(&g_running))
    {
       char server_id[128];
-      int ready = server_runtime_server_id_load(server_id, sizeof(server_id)) &&
-                  kb_client_mtls_configured();
+      int linked = kb_client_mtls_configured();
+      int ready = server_runtime_server_id_load(server_id, sizeof(server_id)) && linked;
       if (ready)
       {
          if (kb_client_mtls_heartbeat(server_id, "ready", AIMEE_VERSION) != 0)
@@ -164,14 +164,16 @@ static void *heartbeat_main(void *unused)
             jwks_ready = 1;
             LOG_INFO("server.mgmt", "management JWKS authorization ready");
          }
-         if (!owner_trusted)
-            owner_trusted = memory_owner_trust_exchange();
       }
       /* Before the wizard's one-shot writes the identity, sleep until a file
        * in the config directory changes (the identity is written there) or a
        * config change is announced. Once enrolled, keep the 30-second
        * registry cadence. */
-      heartbeat_wait(ready);
+      /* Any Server enrolled over the mTLS link, registry-managed or not,
+       * exchanges memory owner identities with its KB once. */
+      if (linked && !owner_trusted)
+         owner_trusted = memory_owner_trust_exchange();
+      heartbeat_wait(ready || (linked && !owner_trusted));
    }
    return NULL;
 }
