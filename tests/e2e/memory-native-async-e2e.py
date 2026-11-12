@@ -38,7 +38,10 @@ def strings(value):
 # reference owner, and shipped aims-db memory, where an enrolled KB is reached
 # over HTTPS and that link never carries memory.
 NO_SHARED_OWNER_PROFILES = ('public-reference', 'no-shared-owner')
-PROFILES = ('owner-client', *NO_SHARED_OWNER_PROFILES)
+# The shipped 1.1 memory: an enrolled Server reaches its KB's shared memory over
+# the mTLS link. The 1.0 owner's collection-head scenarios do not apply.
+KB_LINK_PROFILE = 'kb-link'
+PROFILES = ('owner-client', KB_LINK_PROFILE, *NO_SHARED_OWNER_PROFILES)
 
 
 def shared_lane_enabled(profile, remote, api, check):
@@ -46,6 +49,8 @@ def shared_lane_enabled(profile, remote, api, check):
         raise ValueError('unknown shared memory qualification profile')
     if profile == 'owner-client':
         return remote
+    if profile == KB_LINK_PROFILE:
+        return False
     # These declared profiles have no Server shared-memory owner client. A failed
     # owner-client request never switches profiles or turns into a passing skip.
     status, reply = api('/v1/memory/recall', dict(store='kb', query='native-profile-boundary', scope='all'))
@@ -299,7 +304,12 @@ def inside(output, shared_profile='owner-client'):
                     elapsed_seconds=time.monotonic()-started, provider_requests=len(captures)-before,
                     provider_request_bytes=request_sizes[before:],
                     refusal_kinds=[kind for kind in ('request_budget_exceeded', 'request_budget_unavailable', 'unavailable', 'stale_context')
-                                   if any(kind in text for text in strings(events))]))
+                                   if any(kind in text for text in strings(events))],
+                    # Short closed refusal strings only: codes and fixed prose,
+                    # never the memory or tool content the run carried.
+                    refusal_texts=sorted({text for text in strings(events) if len(text) <= 160 and
+                                          any(k in text for k in ('unavailable', 'stale', 'refus'))})[:12]
+                                  if result['status'] == 'failed' else []))
                 return result, events
             time.sleep(0.1)
         runs.append(dict(name=name, run_id=run_id, status='fixture_timeout',
@@ -377,6 +387,23 @@ def inside(output, shared_profile='owner-client'):
         version_status, versioned = api('/v1/memory/get', dict(id=str(memory_id), include_version=True))
         observed_version = versioned.get('memory', {}).get('version')
         check('native fixture reads its private source version', version_status == 200 and isinstance(observed_version, dict))
+        if shared_profile == KB_LINK_PROFILE and shared_remote:
+            # A shared fact stored through this Server lands on the KB, comes
+            # back through Server recall, and reaches the provider as context.
+            shared_fact = 'Shared KB link fact ' + prefix + ': deployments need two reviewers.'
+            status, stored_shared = api('/v1/memory/store', dict(store='kb', scope='all', key=prefix + '-kb-link',
+                                                                 content=shared_fact, tier='L2', kind='fact'))
+            check('kb-link Server stores shared memory on its KB',
+                  status == 200 and stored_shared.get('status') == 'ok')
+            status, recalled = api('/v1/memory/recall', dict(store='kb', query=prefix, scope='all'))
+            check('kb-link Server recalls its KB shared memory',
+                  status == 200 and recalled.get('status') == 'ok' and shared_fact in json.dumps(recalled))
+            before = len(captures)
+            result, _ = run('kb-link shared native context')
+            check('kb-link native run completes with KB shared context',
+                  result.get('status') == 'completed' and len(captures) == before + 1)
+            check('kb-link provider receives the KB shared fact',
+                  any(shared_fact in text for text in strings(captures[-1])))
         if shared_profile in NO_SHARED_OWNER_PROFILES and shared_remote:
             before = len(captures)
             result, events = run('unavailable shared native context')
@@ -407,15 +434,29 @@ def inside(output, shared_profile='owner-client'):
               verification.get('evidence', {}).get('payload_correspondence') == 'matched' and
               verification.get('evidence', {}).get('source_commitment') == 'matched')
         sources = prepared['binding'].get('sources', [])
-        if isinstance(sources, dict) and sources.get('contract') == 'aims-projected-evidence/v1':
+        contract = sources.get('contract') if isinstance(sources, dict) else None
+        if contract in ('aims-projected-evidence/v1', 'aims-projected-evidence/v2'):
             # The shipped implementation binds native projected evidence: its
             # owner and, per projection, a digest and the exact source versions.
+            # v2 is the multi-owner form: each projection names its owner, and
+            # a foreign (KB) projection carries that owner's signed attestation.
             projections = sources.get('projections') or []
+            private_owner = observed_version.get('owner_id')
+            if contract == 'aims-projected-evidence/v1':
+                private = projections if sources.get('owner') == private_owner else []
+            else:
+                private = [p for p in projections if p.get('owner') == private_owner]
+                check('multi-owner receipt is anchored at the private context owner',
+                      sources.get('context_owner') == private_owner)
+                foreign = [p for p in projections if p.get('owner') != private_owner]
+                check('every KB projection in the receipt carries its owner attestation',
+                      all(isinstance(p.get('owner_attestation'), dict) for p in foreign))
+                if shared_profile == KB_LINK_PROFILE and shared_remote:
+                    check('kb-link receipt binds the KB shared source', bool(foreign))
             check('native receipt binds the retained private revision',
                   verification.get('source_coverage') == 'retained_native_versioned_inputs' and
-                  sources.get('owner') == observed_version.get('owner_id') and
                   any(str(source.get('belief')) == str(observed_version.get('record_revision'))
-                      for projection in projections for source in projection.get('sources', [])))
+                      for projection in private for source in projection.get('sources', [])))
             check('native receipt retains a digest for every projected source group', bool(projections) and all(
                 len(projection.get('digest', [])) == 32 and projection.get('sources') for projection in projections))
         else:
