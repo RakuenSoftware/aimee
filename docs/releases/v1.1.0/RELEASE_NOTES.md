@@ -29,10 +29,13 @@ Limits of this release:
   `memory.episode_card_generate` answers `disabled`. Extraction on a KB is planned for the next
   release. A KB serves global and every project and workspace by default;
   `AIMEE_MEMORY_SHARED_SCOPES` can restrict it to an exact list.
-- A Server enrolled into a separately deployed KB serves personal memory only, as in 1.0.x: the
-  KB link carries no memory, so a shared-store request from that Server answers a typed,
-  retryable `unavailable`, and with `kb_mode` `remote` and automatic recall on a run refuses its
-  memory context. Use shared memory on the KB itself, or set `kb_mode` to `none` on that Server.
+- A Server enrolled into a separately deployed KB over the mutually authenticated (mTLS) KB link
+  forwards shared memory to that KB: shared-store writes and recall reach the KB, and a run's
+  memory context carries the KB's shared facts beside personal memory. The KB re-checks each
+  shared source before every provider request and governed action, under the project or
+  workspace it was recalled in. The two instances exchange their memory owner keys over the
+  link on the Server's KB heartbeat. A KB link authenticated by bearer token only carries no memory:
+  a shared-store request from that Server answers a typed, retryable `unavailable`.
 - Memory refuses a record whose text contains a raw sensitive value (an email address, phone
   number, IP address, password or key) and says the value belongs in the vault. 1.0.x stored
   such records and withheld them from injected context.
