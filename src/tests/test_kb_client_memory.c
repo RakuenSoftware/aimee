@@ -15,6 +15,31 @@
 #include <string.h>
 
 static int owner_mode, owner_calls, http_calls;
+/* An enrolled owner-to-owner mTLS link to a separately deployed KB. */
+static int mtls_enabled, mtls_calls;
+static char mtls_path[256];
+int kb_client_mtls_configured(void)
+{
+   return mtls_enabled;
+}
+char *kb_client_mtls_request_timeout_with_type(const char *method, const char *path,
+                                               const char *body, const char *content_type,
+                                               int timeout_ms, int *status_out)
+{
+   (void)content_type;
+   (void)timeout_ms;
+   assert(mtls_enabled && !strcmp(method, "POST") && body);
+   mtls_calls++;
+   snprintf(mtls_path, sizeof mtls_path, "%s", path);
+   *status_out = 200;
+   return strdup("{\"status\":\"ok\",\"recall\":{\"active_context\":[]}}");
+}
+char *kb_client_mtls_request_timeout(const char *method, const char *path, const char *body,
+                                     int timeout_ms, int *status_out)
+{
+   return kb_client_mtls_request_timeout_with_type(method, path, body, NULL, timeout_ms,
+                                                   status_out);
+}
 static const char *expected_method, *owner_reply;
 static int expected_timeout;
 static cJSON *observed_arguments;
@@ -177,6 +202,24 @@ static void unrelated_business_http_is_not_removed(void)
    free(raw);
    assert(http_calls == 2);
 }
+/* The one memory transport exception: a Server enrolled into a separate KB
+ * over mTLS reaches that KB's shared memory owner-to-owner. A bearer URL never
+ * carries memory, and an installed owner still answers first. */
+static void enrolled_mtls_link_carries_shared_memory(void)
+{
+   owner_mode = 0;
+   mtls_enabled = 1;
+   mtls_calls = http_calls = 0;
+   char *raw = request("memory.recall", "{}", 731);
+   assert(raw && strstr(raw, "\"recall\""));
+   free(raw);
+   assert(mtls_calls == 1 && !strcmp(mtls_path, "/v1/actions/memory.recall") && !http_calls);
+   mtls_enabled = 0;
+   raw = request("memory.recall", "{}", 731);
+   assert(raw && strstr(raw, "memory bus service unavailable or unsupported"));
+   free(raw);
+   assert(mtls_calls == 1 && !http_calls);
+}
 int main(void)
 {
    assert(!setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1));
@@ -185,6 +228,7 @@ int main(void)
    unavailable_is_not_empty();
    exact_raw_data_scope_and_budget();
    every_memory_namespace_refuses_fallback();
+   enrolled_mtls_link_carries_shared_memory();
    unrelated_business_http_is_not_removed();
    assert(owner_calls >= 17);
    cJSON_Delete(observed_arguments);
