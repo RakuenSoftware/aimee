@@ -1571,8 +1571,16 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
    cJSON_Delete(accepted_projection);
    if (accepted != 0)
    {
+      /* As above: an owner refusal earlier in this request (for example a
+       * stale retained source) is the reason, not this later import. */
+      const request_context_t *owner = request_context_get();
       if (error && error_len)
-         snprintf(error, error_len, "memory context refused: source release unavailable");
+      {
+         if (owner && owner->context_refused && owner->context_refusal_kind[0])
+            snprintf(error, error_len, "memory context refused: %s", owner->context_refusal_kind);
+         else
+            snprintf(error, error_len, "memory context refused: source release unavailable");
+      }
       return -1;
    }
    *native_started = 1;
