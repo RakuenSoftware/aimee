@@ -249,6 +249,10 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
    command_outcome_reset(outcome);
    if (!event_kind || !stage_id || !verb || !verb[0] || strlen(verb) > 127)
       return NULL;
+   /* pthread_cleanup_push may setjmp; read the verb only from this frame's
+    * own copy so no argument register is live across it (-Wclobbered). */
+   char verb_copy[128];
+   snprintf(verb_copy, sizeof(verb_copy), "%s", verb);
    volatile command_call_scope_t owned = {0};
    cJSON *volatile result = NULL;
    pthread_cleanup_push(command_call_cleanup, (void *)&owned);
@@ -265,7 +269,7 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
       goto done;
    size_t context_len = owned.context_json ? strlen(owned.context_json) : 0;
    size_t header_len = context ? 20 : INVOKE_REQUEST_HEADER;
-   size_t verb_len = strlen(verb);
+   size_t verb_len = strlen(verb_copy);
    size_t request_len = header_len + verb_len + args_len + context_len;
    if (request_len > OURO_MODULE_MESSAGE_MAX_BODY || context_len > 4096)
       goto done;
@@ -279,7 +283,7 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
    wr_u32(owned.request + 12, (uint32_t)args_len);
    if (context)
       wr_u32(owned.request + 16, (uint32_t)context_len);
-   memcpy(owned.request + header_len, verb, verb_len);
+   memcpy(owned.request + header_len, verb_copy, verb_len);
    if (args_len)
       memcpy(owned.request + header_len + verb_len, owned.args_json, args_len);
    if (context_len)
@@ -304,7 +308,8 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
    }
    if (rc != OURO_MODULE_CALL_OK)
    {
-      LOG_WARN("commands", "command %s: invoke failed: %s", verb, ouro_module_call_result_name(rc));
+      LOG_WARN("commands", "command %s: invoke failed: %s", verb_copy,
+               ouro_module_call_result_name(rc));
       goto done;
    }
    if (outcome)
@@ -312,13 +317,13 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
    if (response_len < INVOKE_RESPONSE_HEADER || rd_u32(owned.response) != INVOKE_RESPONSE_MAGIC ||
        rd_u32(owned.response + 4) != DECL_WIRE_VERSION)
    {
-      LOG_WARN("commands", "command %s: malformed frame", verb);
+      LOG_WARN("commands", "command %s: malformed frame", verb_copy);
       goto done;
    }
    uint32_t body_len = rd_u32(owned.response + 8);
    if ((uint64_t)INVOKE_RESPONSE_HEADER + body_len != response_len)
    {
-      LOG_WARN("commands", "command %s: frame length disagrees with its header", verb);
+      LOG_WARN("commands", "command %s: frame length disagrees with its header", verb_copy);
       goto done;
    }
    /* The raw sibling transports untrusted response bytes without normalizing
