@@ -1742,14 +1742,13 @@
     "src/cmd_session_lifecycle.c": {
       "disposition": "host-context",
       "symbols": [
-        "kb_client_memory_compact_windows",
         "kb_client_memory_learn_style",
         "kb_client_memory_scan_conversations",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "399d0c2b602276edefbe8dcbdc455ea1f95bf971b4d84ff912178a0f22889971",
+      "sha256": "9f26ae6fcae13aa1f3a9c54d650142caf8bb7fb8211419b3f2e26f41f5df2dcd",
       "source_revisions": [
         {
           "disposition": "host-context",
@@ -1765,51 +1764,6 @@
         }
       ],
       "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
-    },
-    "src/headers/memory.h": {
-      "disposition": "storage-protocol",
-      "symbols": [
-        "add_provenance",
-        "memory_assemble_context",
-        "memory_assemble_context_ws",
-        "memory_delete",
-        "memory_diagnose",
-        "memory_directive_counts",
-        "memory_directive_create",
-        "memory_directive_get",
-        "memory_directive_list",
-        "memory_directive_mark_surfaced",
-        "memory_directive_match",
-        "memory_directive_metrics",
-        "memory_directive_resolve",
-        "memory_directive_suppress",
-        "memory_directive_sweep_expired",
-        "memory_insert",
-        "memory_insert_epistemic_ex",
-        "memory_insert_ex",
-        "memory_lifecycle_counts",
-        "memory_lifecycle_sweep_expired",
-        "memory_link_create",
-        "memory_list_conflicts",
-        "memory_maintenance_run",
-        "memory_mark_pending",
-        "memory_prospective_complete",
-        "memory_prospective_create",
-        "memory_prospective_get",
-        "memory_prospective_list",
-        "memory_prospective_mark_triggered",
-        "memory_prospective_match",
-        "memory_prospective_sweep_expired",
-        "memory_query_health",
-        "memory_record_conflict",
-        "memory_resolve_conflict",
-        "memory_stats",
-        "memory_tag_global",
-        "memory_tag_project",
-        "memory_transition_lifecycle",
-        "memory_update_content"
-      ],
-      "sha256": "abcd4361bd1c79938690c8fc64c27ce62c5e2acd44c824caf9a2770a464662e2"
     },
     "src/headers/memory_stage_contract.h": {
       "disposition": "host-transport",
@@ -1887,7 +1841,7 @@
       "symbols": [
         "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED"
       ],
-      "sha256": "e2c0a0ea9745fc1cf39e589d22c60cdebec5973813238ae84239c6c846e8c44d",
+      "sha256": "0cd9eb67c2edcc53fef9d7d3b527ac006fe8a8002bccc4397e3fc81c89ca7c2f",
       "source_revisions": [
         {
           "disposition": "host-transport",
@@ -1991,7 +1945,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "009f2da643c881e4e2136ccb5d37931d041f798a34b330cece31b665c4d115f4",
+      "sha256": "0f6fa22df0b6893d13e28005cccd2dd012c339c39a09504d4409985fa3f6fe9e",
       "source_revisions": [
         {
           "disposition": "protocol-catalog",
@@ -2010,28 +1964,6 @@
         "memory_relation_kind_t"
       ],
       "sha256": "e42397ecea4b786b846a9138032d41d078156f71612dcb9aaa69d4343d8ce291"
-    },
-    "src/modules/kb/c/memory_payload.h": {
-      "disposition": "storage-protocol",
-      "symbols": [
-        "kb_store_memory_key_exists"
-      ],
-      "sha256": "721d1278f387b099e5767cb52fae733e9d24c98078e6fab417376ecbe25f4ab6"
-    },
-    "src/modules/kb/c/memory_query.h": {
-      "disposition": "storage-protocol",
-      "symbols": [
-        "kb_store_memory_find_id_by_key_kind",
-        "kb_store_memory_review_list"
-      ],
-      "sha256": "889c02d9b6bdf7ada455b4f8e2a52ae2dd929c3d60671b830e7734958b9182c1"
-    },
-    "src/modules/kb/c/memory_vectors.h": {
-      "disposition": "storage-protocol",
-      "symbols": [
-        "pgvec_memory_vector_collection_recreate"
-      ],
-      "sha256": "1ed650572b45d276d6e9d718e9216c6935e54ef4557975a201f40c1fc7b0a41f"
     },
     "src/modules/guardrails/guardrails_orchestrator.c": {
       "disposition": "host-transport",
@@ -2066,7 +1998,7 @@
         "kb_client_memory_scope_context_snapshot",
         "kb_client_memory_scope_context_state_t"
       ],
-      "sha256": "b7013e0617f0b9d75da64f63c1a3b34b708cee81aa6f0783d0e5a0fec4ee43e8",
+      "sha256": "1547cbc2a826e49e0c642d0f872f3e55eae420694657fe633424baa7181b9c93",
       "source_revisions": [
         {
           "disposition": "kb-client",
@@ -2199,7 +2131,7 @@
         "kb_client_memory_scope_context_snapshot",
         "kb_client_memory_scope_context_state_t"
       ],
-      "sha256": "cf56f0486670a5119b6be3d340f4272cb7682e3663662bb9722a421034a092cb",
+      "sha256": "3745692862a15fac332088331790474d8e2f27a4b24bd48e9ac3b2859a3dda1e",
       "source_revisions": [
         {
           "disposition": "kb-client",
@@ -2271,7 +2203,7 @@
         "kb_client_memory_check_drift",
         "kb_client_memory_internal"
       ],
-      "sha256": "89d07d96c67f6f0d855c1a2cc8daff77f72659cfa00d8538e9fb2e8198b81a25",
+      "sha256": "b02ce7b1d92ae4f2936cdd7d2de91765067339c45817b5196244881c28386bcf",
       "source_revisions": [
         {
           "disposition": "kb-client",
@@ -2412,7 +2344,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "632809c4ae96df1561bd46aba8263a867dfd0854432e1110e9b876138fdb0b83",
+      "sha256": "457ca40dc571cac84373f632157447bcd099660cf0793e61327467f17d410d28",
       "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
       "source_revisions": [
         {
@@ -2904,13 +2836,6 @@
       ],
       "sha256": "6a588c5b77735ea686ce9c85c23ff5443340147bfdd63f53fd1a5a410302c4f2"
     },
-    "src/tests/support/kb_http_route_stubs.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "kb_store_memory_review_list"
-      ],
-      "sha256": "8f2f1495329a06423d85da2995c0f9ebde05f38f886cb3f26545f7c63a575d81"
-    },
     "src/tests/test_agent_memory_transport.c": {
       "disposition": "host-fixture",
       "symbols": [
@@ -3359,7 +3284,7 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "1031f26550f730f300382dbda94d26dc4c003ac01158be5e4a62b6fad1d52153",
+      "sha256": "fa2faaac175da1cc4a2e680217280822a7c42ef7db0901b202cce31cd7839a48",
       "evidence": [
         "server-go/modules/memory/personal_versions_test.go",
         "src/tests/test_module_json_call.c"

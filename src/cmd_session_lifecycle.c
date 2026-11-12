@@ -29,6 +29,7 @@ AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_context_legacy_guard_contract_v1);
 #include "persona.h"
 #include "session_briefing.h"
 #include "cJSON.h"
+#include "json_fluent.h"
 #include <dirent.h>
 #include <pthread.h>
 #include <sys/stat.h>
@@ -568,6 +569,54 @@ static void remove_stale_worktrees(const char *sid)
    }
 }
 
+/* The memory overlay's owner maintenance lane: folds each named ended session's
+ * raw memories into one summary under that owner's maintenance Operator. Absent
+ * when the memory overlay is not linked; a request can never reach it. */
+extern int aimee_module_memory_maintenance_extension(const char *verb, const char *principal,
+                                                      const char *args_json, char *out, int cap)
+    __attribute__((weak));
+
+/* Fold the pruned sessions' memories, grouped by the owner each session
+ * belongs to (at most 64 sessions per owner per call). */
+static void compact_pruned_sessions(char (*ids)[DB1_SS_SID_LEN],
+                                    char (*owners)[DB1_SS_PRINCIPAL_LEN], int n)
+{
+   if (!aimee_module_memory_maintenance_extension)
+      return;
+   int done[64] = {0};
+   for (int i = 0; i < n && i < 64; i++)
+   {
+      if (done[i] || !ids[i][0] || !owners[i][0])
+         continue;
+      cJSON *args = cJSON_CreateObject();
+      cJSON *sessions = cJSON_AddArrayToObject(args, "sessions");
+      for (int j = i; j < n && j < 64; j++)
+      {
+         if (done[j] || !ids[j][0] || strcmp(owners[j], owners[i]) != 0)
+            continue;
+         cJSON_AddItemToArray(sessions, cJSON_CreateString(ids[j]));
+         done[j] = 1;
+      }
+      char *raw = cJSON_PrintUnformatted(args);
+      cJSON_Delete(args);
+      static char reply[16384];
+      reply[0] = '\0';
+      int rc = raw ? aimee_module_memory_maintenance_extension("compact_windows", owners[i], raw,
+                                                               reply, (int)sizeof(reply))
+                   : -1;
+      free(raw);
+      cJSON *answer = rc == 0 ? cJSON_Parse(reply) : NULL;
+      const cJSON *summaries = cJSON_GetObjectItemCaseSensitive(answer, "summaries");
+      if (answer && strcmp(jo_cstr(answer, "status"), "ok") == 0 && cJSON_IsNumber(summaries))
+         LOG_INFO("session", "folded %d ended session(s) of %s into summaries",
+                  (int)summaries->valuedouble, owners[i]);
+      else
+         LOG_WARN("session", "ended-session memory fold for %s did not run: %.200s", owners[i],
+                  reply[0] ? reply : "no reply");
+      cJSON_Delete(answer);
+   }
+}
+
 /* Prune stale sessions: fold their memories, run maintenance, clean up worktrees
  * and DB1 state rows. This replaces the explicit wrapup command for ended sessions. */
 void prune_stale_sessions(void)
@@ -575,6 +624,9 @@ void prune_stale_sessions(void)
    int did_maintenance = 0;
 
    char stale_ids[64][DB1_SS_SID_LEN];
+   static char owners[64][DB1_SS_PRINCIPAL_LEN];
+   char pruned[64][DB1_SS_SID_LEN];
+   int pruned_count = 0;
    int n = db1_session_state_list_expired(stale_session_threshold_secs(), stale_ids, 64);
    const char *cur = session_id();
 
@@ -584,11 +636,15 @@ void prune_stale_sessions(void)
       if (!stale_sid[0] || strcmp(stale_sid, cur) == 0)
          continue;
 
-      /* Fold this session's L0 memories into L1 (runs inside aimee-kb). */
-      cJSON *fold_request = cJSON_CreateObject();
-      cJSON_AddStringToObject(fold_request, "session_id", stale_sid);
-      char *fold_response = kb_v1_action_request("maintenance.fold_session", fold_request);
-      free(fold_response);
+      /* Remember whose session this was: its memories are folded below. */
+      db1_server_session_owner_t owner;
+      memset(&owner, 0, sizeof(owner));
+      if (db1_server_session_owner_get(stale_sid, &owner) == 0 && owner.principal[0])
+      {
+         snprintf(pruned[pruned_count], sizeof(pruned[pruned_count]), "%s", stale_sid);
+         snprintf(owners[pruned_count], sizeof(owners[pruned_count]), "%s", owner.principal);
+         pruned_count++;
+      }
       did_maintenance = 1;
 
       /* Remove worktrees for this session */
@@ -609,11 +665,6 @@ void prune_stale_sessions(void)
       /* Expire session directives */
       kb_client_directive_expire_session();
 
-      cJSON *maintenance_args = cJSON_CreateObject();
-      cJSON_AddNumberToObject(maintenance_args, "modes", 1);
-      cJSON_AddBoolToObject(maintenance_args, "force", 1);
-      char *maintenance_reply = kb_v1_action_request("memory.maintenance_run", maintenance_args);
-      free(maintenance_reply);
 
       /* Extract anti-patterns */
       kb_client_anti_pattern_extract_from_feedback();
@@ -622,9 +673,8 @@ void prune_stale_sessions(void)
       /* Learn style */
       kb_client_memory_learn_style();
 
-      /* Compact old windows */
-      int sc = 0, fc = 0;
-      kb_client_memory_compact_windows(&sc, &fc);
+      /* Fold the ended sessions' raw memories into summaries. */
+      compact_pruned_sessions(pruned, owners, pruned_count);
 
       /* Regenerate rules — round-tripped through aimee-kb so the cache
        * inside that process gets refreshed alongside the local one. */

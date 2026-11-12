@@ -11,7 +11,7 @@
         },
         {
           "path": "src/kb/kb_main.c",
-          "sha256": "b45c0a4c2e1a9031a6017fc1673b4f1df2944efd75b205f6eac8e797576c1dd0"
+          "sha256": "eeb2242460ce01ba78411b11dd3e4103ceae0c55195909312b3e0217fdb8b479"
         },
         {
           "path": "src/server/server_main.c",
@@ -295,7 +295,7 @@
       "files": [
         {
           "path": "Dockerfile",
-          "sha256": "c492ce3e4035d15a7b2de24b02e57aea45ad8027035f3e45bfa13a115b7ca96d"
+          "sha256": "82c220598b5afe33b029ddfc402f07803a69343e97502a1f368d21b38d7ddf36"
         },
         {
           "path": "Dockerfile.authority-bootstrap",
@@ -307,19 +307,19 @@
         },
         {
           "path": "Dockerfile.embedder",
-          "sha256": "d5ce565990324662aa22192839d58099b63950b22612031bd7117a60045c1e0c"
+          "sha256": "2dc6474744f999a5810f1e44d276043f7bf0131f8408f2c5ec131382b4fc450c"
         },
         {
           "path": "Dockerfile.llm",
-          "sha256": "48fad1c38f5936f4ec6bdbd41650133541daafe54df7dff2e48c549f14c24540"
+          "sha256": "f4fd49e22c79d42ec4ff9556b6b0d6b8234e07656a743f43ddee1e8d612eb2bd"
         },
         {
           "path": "Dockerfile.model",
-          "sha256": "c287010c5a4c1d52f627f6f04197e27c176915fe3a772dbcef682db2358bd60a"
+          "sha256": "530efe93341a4db591def4a4ebe6789e90f312253b777f253dfcc56fb2480326"
         },
         {
           "path": "Dockerfile.postgres",
-          "sha256": "e9903c6a1da073958f949f1253183e80243962c0ef91c82dea78f2a340f02e70"
+          "sha256": "62bd26d6236ebc26dafc71b132c2d046a84e053ac23740118637e7dc269adb05"
         },
         {
           "path": "Dockerfile.proxy",
@@ -327,7 +327,7 @@
         },
         {
           "path": "Dockerfile.server",
-          "sha256": "c492ce3e4035d15a7b2de24b02e57aea45ad8027035f3e45bfa13a115b7ca96d"
+          "sha256": "82c220598b5afe33b029ddfc402f07803a69343e97502a1f368d21b38d7ddf36"
         },
         {
           "path": "Dockerfile.status-authority",
@@ -1219,7 +1219,7 @@
         },
         {
           "path": "src/headers/memory.h",
-          "sha256": "abcd4361bd1c79938690c8fc64c27ce62c5e2acd44c824caf9a2770a464662e2"
+          "sha256": "277288eb26167acf14a1761713d30e4da0a2f7e5141e99a029c5fad59318f211"
         },
         {
           "path": "src/headers/memory_authority.h",
@@ -2148,7 +2148,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "fd20ab6823c68abb3a720564d4cbb73884a55ad76b31c2982d948bb9495cd1c6",
+      "sha256": "a0bfc15d268748ef819f12a13b1b84b32be9ad89806f5f26426ea4bf4415eee4",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
