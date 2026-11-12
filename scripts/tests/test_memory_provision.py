@@ -144,6 +144,12 @@ class Policy(unittest.TestCase):
                     self.assertIsNone(module.typed_facts('kb'))
                 with patch.dict(os.environ, {'SYNTHESIS_KEY_FILE': ''}):
                     self.assertIsNone(module.typed_facts('kb'))
+                # Managed model services: the KB's own sidecar identity, as its client uses.
+                with patch.dict(os.environ, {'AIMEE_MODEL_SERVICES_ENABLED': '1', 'SYNTHESIS_CA_FILE': '',
+                                             'SYNTHESIS_CERT_FILE': '', 'SYNTHESIS_KEY_FILE': ''}):
+                    managed = module.typed_facts('kb')
+                    self.assertEqual(managed['cert_file'], '/run/aimee-model-tls/synthesis/client/client.pem')
+                    self.assertEqual(managed['key_file'], '/run/aimee-model-tls/synthesis/client/client.key')
                 with patch.dict(os.environ, {'SYNTHESIS_ENDPOINT': 'http://models.example:8000'}):
                     self.assertIsNone(module.typed_facts('kb'))
                 with patch.dict(os.environ, {'SYNTHESIS_ENDPOINT': 'http://127.0.0.1:8000'}):

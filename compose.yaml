@@ -47,6 +47,12 @@ services:
       # `off` creates only the mount points; the instance then runs without
       # memory and reports missing_module: memory.
       AIMEE_MEMORY_PROVISION: ${AIMEE_MEMORY_PROVISION:-on}
+      # KB only: with a synthesis model the KB derives typed facts from its
+      # shared memory, through the managed sidecar identity its own client uses.
+      # A Server never processes shared memory, so these change nothing there.
+      AIMEE_MODEL_SERVICES_ENABLED: '1'
+      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
+      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
     volumes:
       - aimee-memory:/opt/aims-memory
       - aimee-server-home:/var/lib/aimee

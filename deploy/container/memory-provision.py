@@ -288,13 +288,21 @@ def desired_policy(role: str, recorded: dict | None, requested_accounts: str | N
             'typed_facts': typed_facts(role)}
 
 
+# The client identity a managed KB issues itself for the aimee-llm sidecar.
+MANAGED_SYNTHESIS_IDENTITY = {'ca_file': '/run/aimee-model-tls/synthesis/client/ca.pem',
+                              'cert_file': '/run/aimee-model-tls/synthesis/client/client.pem',
+                              'key_file': '/run/aimee-model-tls/synthesis/client/client.key'}
+
+
 def typed_facts(role: str) -> dict | None:
     """The synthesis model a KB derives typed facts with, or None.
 
     The same settings the KB's synthesis client uses: SYNTHESIS_ENDPOINT and
     SYNTHESIS_MODEL, and for an https endpoint the client identity in
-    SYNTHESIS_CA_FILE / SYNTHESIS_CERT_FILE / SYNTHESIS_KEY_FILE. A Server never
-    processes; AIMEE_MEMORY_TYPED_FACTS=off keeps a KB's shared facts plain."""
+    SYNTHESIS_CA_FILE / SYNTHESIS_CERT_FILE / SYNTHESIS_KEY_FILE. With managed model
+    services the KB's client always presents the identity it issued for the
+    aimee-llm sidecar (agent_bridge.c), so that is the default here too. A Server
+    never processes; AIMEE_MEMORY_TYPED_FACTS=off keeps a KB's shared facts plain."""
     if role != 'kb' or os.environ.get('AIMEE_MEMORY_TYPED_FACTS', 'on') == 'off':
         return None
     endpoint = (os.environ.get('SYNTHESIS_ENDPOINT') or '').rstrip('/')
@@ -307,6 +315,8 @@ def typed_facts(role: str) -> dict | None:
         files = {key: os.environ.get(env) or '' for key, env in
                  (('ca_file', 'SYNTHESIS_CA_FILE'), ('cert_file', 'SYNTHESIS_CERT_FILE'),
                   ('key_file', 'SYNTHESIS_KEY_FILE'))}
+        if os.environ.get('AIMEE_MODEL_SERVICES_ENABLED') == '1':
+            files = dict(MANAGED_SYNTHESIS_IDENTITY)
         if not all(files.values()):
             log('typed facts stay off: the https synthesis endpoint has no client identity '
                 '(SYNTHESIS_CA_FILE, SYNTHESIS_CERT_FILE, SYNTHESIS_KEY_FILE)')
