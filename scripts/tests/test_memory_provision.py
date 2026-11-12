@@ -2,10 +2,12 @@
 import hashlib
 import importlib.util
 import json
+import os
 import socket
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location(
     'memory_provision', Path(__file__).resolve().parents[2] / 'deploy/container/memory-provision.py')
@@ -74,13 +76,13 @@ class Policy(unittest.TestCase):
     def test_changed_accounts_and_provider_are_reported(self):
         desired = module.desired_policy('server', self.RECORDED, 'bob', HEALTH)
         self.assertEqual(desired, {'accounts': ['aimee', 'bob'], 'shared_scopes': [],
-                                   'embedding_provider_identity_digest': 'sha256:new'})
+                                   'embedding_provider_identity_digest': 'sha256:new', 'typed_facts': None})
         self.assertEqual(module.policy_changes(self.RECORDED, desired), ['accounts', 'embedding provider'])
 
     def test_first_provisioning_without_an_embedder_has_no_provider(self):
         desired = module.desired_policy('server', None, None, None)
         self.assertEqual(desired, {'accounts': ['aimee'], 'shared_scopes': [],
-                                   'embedding_provider_identity_digest': None})
+                                   'embedding_provider_identity_digest': None, 'typed_facts': None})
 
     def test_kb_serves_global_and_each_declared_scope(self):
         self.assertEqual(module.shared_scopes('server', 'project:apollo'), [])
@@ -122,7 +124,35 @@ class Policy(unittest.TestCase):
             with self.assertRaises(module.Refused):
                 module.recorded_policy(inputs)
             (inputs / 'OPERATOR_POLICY_SAFE.json').write_text(json.dumps(self.RECORDED))
-            self.assertEqual(module.recorded_policy(inputs), self.RECORDED)
+            self.assertEqual(module.recorded_policy(inputs), dict(self.RECORDED, typed_facts=None))
+            (inputs / 'TYPED_FACTS.json').write_text(json.dumps({'model': 'm', 'upstream': 'http://127.0.0.1:9/v1'}))
+            self.assertEqual(module.recorded_policy(inputs)['typed_facts']['model'], 'm')
+
+    def test_a_kb_with_a_synthesis_model_selects_typed_facts(self):
+        env = {'SYNTHESIS_ENDPOINT': 'https://aimee-llm:8761/v1', 'SYNTHESIS_MODEL': 'gemma-4-E4B',
+               'SYNTHESIS_CA_FILE': '/run/ca.pem', 'SYNTHESIS_CERT_FILE': '/run/c.pem',
+               'SYNTHESIS_KEY_FILE': '/run/c.key'}
+        log = module.log
+        module.log = lambda message: None
+        try:
+            with patch.dict(os.environ, env, clear=False):
+                self.assertIsNone(module.typed_facts('server'))
+                self.assertEqual(module.typed_facts('kb'), {
+                    'model': 'gemma-4-E4B', 'upstream': 'https://aimee-llm:8761/v1', 'ca_file': '/run/ca.pem',
+                    'cert_file': '/run/c.pem', 'key_file': '/run/c.key'})
+                with patch.dict(os.environ, {'AIMEE_MEMORY_TYPED_FACTS': 'off'}):
+                    self.assertIsNone(module.typed_facts('kb'))
+                with patch.dict(os.environ, {'SYNTHESIS_KEY_FILE': ''}):
+                    self.assertIsNone(module.typed_facts('kb'))
+                with patch.dict(os.environ, {'SYNTHESIS_ENDPOINT': 'http://models.example:8000'}):
+                    self.assertIsNone(module.typed_facts('kb'))
+                with patch.dict(os.environ, {'SYNTHESIS_ENDPOINT': 'http://127.0.0.1:8000'}):
+                    self.assertEqual(module.typed_facts('kb')['upstream'], 'http://127.0.0.1:8000/v1')
+                recorded = dict(self.RECORDED, typed_facts=None)
+                desired = module.desired_policy('kb', recorded, None, None)
+                self.assertEqual(module.policy_changes(recorded, desired), ['typed facts'])
+        finally:
+            module.log = log
 
 
 class Placeholder(unittest.TestCase):

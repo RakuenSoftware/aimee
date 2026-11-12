@@ -223,6 +223,12 @@ def prepare(role: str, prefix: Path, inputs: Path, adopt: Path | None) -> None:
             '--schema-admin', f'{NAMESPACE_PREFIX}-{scope}={SCHEMA_ADMIN_REF}']
     if adopt is not None:
         argv += ['--adopt-source-owner', str(adopt)]
+    if (inputs / 'processing-plan.json').is_file():
+        # KB typed facts: the native extraction pipeline on the KB's global scope.
+        argv += ['--processing-plan', str(inputs / 'processing-plan.json'),
+                 '--processing-worker-binary', str(binaries / 'memory-processing-operator'),
+                 '--infer-adapter-config', str(inputs / 'infer-adapter.json'),
+                 '--infer-adapter-binary', str(binaries / 'aims-infer-adapter')]
     as_runtime_user(*argv)
     as_runtime_user(str(provision / 'verify.py'), str(prefix))
 
@@ -258,7 +264,9 @@ def recorded_policy(inputs: Path) -> dict | None:
         if inputs.exists():
             raise Refused(f'{inputs} is incomplete; restore the home volume from backup')
         return None
-    return json.loads(report.read_text())
+    policy = json.loads(report.read_text())
+    policy['typed_facts'] = recorded_typed_facts(inputs)
+    return policy
 
 
 def desired_policy(role: str, recorded: dict | None, requested_accounts: str | None, health: dict | None,
@@ -276,7 +284,43 @@ def desired_policy(role: str, recorded: dict | None, requested_accounts: str | N
         digest = health['embedding_identity_digest']
     else:
         digest = recorded.get('embedding_provider_identity_digest') if recorded else None
-    return {'accounts': names, 'shared_scopes': scopes, 'embedding_provider_identity_digest': digest}
+    return {'accounts': names, 'shared_scopes': scopes, 'embedding_provider_identity_digest': digest,
+            'typed_facts': typed_facts(role)}
+
+
+def typed_facts(role: str) -> dict | None:
+    """The synthesis model a KB derives typed facts with, or None.
+
+    The same settings the KB's synthesis client uses: SYNTHESIS_ENDPOINT and
+    SYNTHESIS_MODEL, and for an https endpoint the client identity in
+    SYNTHESIS_CA_FILE / SYNTHESIS_CERT_FILE / SYNTHESIS_KEY_FILE. A Server never
+    processes; AIMEE_MEMORY_TYPED_FACTS=off keeps a KB's shared facts plain."""
+    if role != 'kb' or os.environ.get('AIMEE_MEMORY_TYPED_FACTS', 'on') == 'off':
+        return None
+    endpoint = (os.environ.get('SYNTHESIS_ENDPOINT') or '').rstrip('/')
+    model = os.environ.get('SYNTHESIS_MODEL') or ''
+    if not endpoint or not model:
+        return None
+    upstream = endpoint if endpoint.endswith('/v1') else endpoint + '/v1'
+    selection = {'model': model, 'upstream': upstream}
+    if upstream.startswith('https://'):
+        files = {key: os.environ.get(env) or '' for key, env in
+                 (('ca_file', 'SYNTHESIS_CA_FILE'), ('cert_file', 'SYNTHESIS_CERT_FILE'),
+                  ('key_file', 'SYNTHESIS_KEY_FILE'))}
+        if not all(files.values()):
+            log('typed facts stay off: the https synthesis endpoint has no client identity '
+                '(SYNTHESIS_CA_FILE, SYNTHESIS_CERT_FILE, SYNTHESIS_KEY_FILE)')
+            return None
+        selection.update(files)
+    elif not upstream.startswith('http://127.0.0.1:'):
+        log('typed facts stay off: a plain http synthesis endpoint must be loopback')
+        return None
+    return selection
+
+
+def recorded_typed_facts(inputs: Path) -> dict | None:
+    path = inputs / 'TYPED_FACTS.json'
+    return json.loads(path.read_text()) if path.is_file() else None
 
 
 def policy_changes(recorded: dict, desired: dict) -> list[str]:
@@ -287,6 +331,8 @@ def policy_changes(recorded: dict, desired: dict) -> list[str]:
         changes.append('shared scopes')
     if recorded.get('embedding_provider_identity_digest') != desired['embedding_provider_identity_digest']:
         changes.append('embedding provider')
+    if recorded.get('typed_facts') != desired.get('typed_facts'):
+        changes.append('typed facts')
     return changes
 
 
@@ -315,6 +361,19 @@ def write_inputs(role: str, inputs: Path, desired: dict, health: dict | None, no
     finally:
         if handed is not None:
             handed.unlink(missing_ok=True)
+    selection = desired.get('typed_facts')
+    if selection is not None:
+        argv = [str(BUNDLE / 'provision/processing_kb_inputs.py'), '--inputs', str(inputs),
+                '--profile-binary', str(BUNDLE / 'bin/memory-profile'), '--model', selection['model'],
+                '--upstream', selection['upstream']]
+        for key in ('ca_file', 'cert_file', 'key_file'):
+            if selection.get(key):
+                argv += ['--' + key.replace('_', '-'), selection[key]]
+        as_runtime_user(*argv)
+        record = inputs / 'TYPED_FACTS.json'
+        record.write_text(json.dumps(selection, indent=2) + '\n')
+        record.chmod(0o600)
+        owned(record)
 
 
 def switch_configuration(prefix: Path, installed: Path) -> None:
