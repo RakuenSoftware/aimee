@@ -25,6 +25,9 @@
 #include "modules/kb/c/kb_service_backend.h"
 #include "modules/kb/c/canonical_index.h"
 #include "kb_enroll.h"
+/* Memory overlay owner trust hooks (absent without the memory overlay). */
+extern int aimee_module_memory_owner_identity(char *out, int cap) __attribute__((weak));
+extern int aimee_module_memory_owner_trust_add(const char *peer_json) __attribute__((weak));
 #include "kb_pki.h"
 #include "kb_paths.h"
 #include "kb_scope.h"
@@ -973,6 +976,30 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       return strcmp(method, "POST") == 0
                  ? kb_intel_bandit_promote_http(body, body_len, out_buf, out_cap)
                  : json_body_error(out_buf, out_cap, 405, "method not allowed");
+   /* POST /v1/memory/owner-trust -- an enrolled Server registers its memory
+    * owner identity and receives this KB's. Only the verified Server service
+    * transport (the enrolled mTLS identity) may call it; the memory overlay
+    * validates and pins the identity. Without the overlay there is no owner. */
+   if (strcmp(path, "/v1/memory/owner-trust") == 0)
+   {
+      if (strcmp(method, "POST") != 0)
+         return json_body_error(out_buf, out_cap, 405, "method not allowed");
+      if (strcmp(vr.scope_kind, KB_SCOPE_KIND_SERVICE) != 0)
+         return json_body_error(out_buf, out_cap, 403,
+                                "enrolled Server service identity required");
+      if (!aimee_module_memory_owner_trust_add || !aimee_module_memory_owner_identity)
+         return json_body_error(out_buf, out_cap, 503, "memory owner unavailable");
+      if (!body || body_len <= 0 || body_len > 4096)
+         return json_body_error(out_buf, out_cap, 400, "bounded owner identity required");
+      char peer[4097];
+      memcpy(peer, body, (size_t)body_len);
+      peer[body_len] = '\0';
+      if (aimee_module_memory_owner_trust_add(peer) < 0)
+         return json_body_error(out_buf, out_cap, 409, "owner identity refused");
+      if (aimee_module_memory_owner_identity(out_buf, out_cap) != 0)
+         return json_body_error(out_buf, out_cap, 503, "memory owner identity unavailable");
+      return 200;
+   }
    if (strncmp(path, "/v1/actions/", 12) == 0)
    {
       if (strcmp(method, "POST") != 0)

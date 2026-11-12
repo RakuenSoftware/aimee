@@ -112,10 +112,44 @@ void server_kb_heartbeat_wake(void)
       (void)!write(g_wake_fd, &one, sizeof one);
 }
 
+/* Memory overlay owner trust hooks (absent without the memory overlay). */
+extern int aimee_module_memory_owner_identity(char *out, int cap) __attribute__((weak));
+extern int aimee_module_memory_owner_trust_add(const char *peer_json) __attribute__((weak));
+
+/* An enrolled Server and its KB pin each other's memory owner over this same
+ * mTLS identity, so the KB's shared memory releases verify on this Server and
+ * this Server's completions verify on the KB. Returns 1 when done (or when no
+ * memory overlay is installed), 0 to retry on a later heartbeat. */
+static int memory_owner_trust_exchange(void)
+{
+   if (!aimee_module_memory_owner_identity || !aimee_module_memory_owner_trust_add)
+      return 1;
+   char identity[512];
+   if (aimee_module_memory_owner_identity(identity, sizeof identity) != 0)
+      return 0;
+   int status = -1;
+   char *reply = kb_client_mtls_request_timeout("POST", "/v1/memory/owner-trust", identity, 10000,
+                                                &status);
+   int done = 0;
+   if (status == 200 && reply && aimee_module_memory_owner_trust_add(reply) >= 0)
+   {
+      done = 1;
+      LOG_INFO("server.kb", "memory owner trust exchanged with the KB");
+   }
+   else if (status == 503)
+      done = 1; /* the KB has no memory owner: nothing to pin */
+   else
+      LOG_WARN("server.kb", "memory owner trust exchange with the KB did not complete (HTTP %d)",
+               status);
+   free(reply);
+   return done;
+}
+
 static void *heartbeat_main(void *unused)
 {
    (void)unused;
    int jwks_ready = 0;
+   int owner_trusted = 0;
    while (atomic_load(&g_running))
    {
       char server_id[128];
@@ -130,6 +164,8 @@ static void *heartbeat_main(void *unused)
             jwks_ready = 1;
             LOG_INFO("server.mgmt", "management JWKS authorization ready");
          }
+         if (!owner_trusted)
+            owner_trusted = memory_owner_trust_exchange();
       }
       /* Before the wizard's one-shot writes the identity, sleep until a file
        * in the config directory changes (the identity is written there) or a
