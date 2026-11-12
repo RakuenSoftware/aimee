@@ -1726,7 +1726,7 @@ def main():
             check('Provider-bound memory, constraints, tools and continuation gate', True)
             command('python3', str(ROOT / 'tests/e2e/memory-native-async-e2e.py'),
                 '--server', server.application,
-                '--shared-profile', 'public-reference' if args.reference_memory_owner else 'no-shared-owner',
+                '--shared-profile', 'public-reference' if args.reference_memory_owner else 'owner-client',
                 '--output', str(args.output / 'native-async.json'), timeout=600)
             check('Live asynchronous native memory refusal and recovery gate', True)
             if env.get('AIMEE_MEMORY_HEALTH_FIXTURE') == '1':
