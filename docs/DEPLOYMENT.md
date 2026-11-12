@@ -255,7 +255,7 @@ Storage and recovery:
 Requirements and limits:
 
 - Docker Engine 26 or later and Compose 2.26 or later, for volume subpath mounts.
-- The memory bundle exists for `linux/amd64`. An image for another platform has no memory; its
+- The memory bundle exists for `linux/amd64` and `linux/arm64`. An image for another platform has no memory; its
   provisioning service fails with a message saying so, unless provisioning is switched off.
 - An instance without a provisioned installation is not ready (`/v1/ready` returns `503`) and
   answers memory commands with `503`.

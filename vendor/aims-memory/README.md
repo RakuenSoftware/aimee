@@ -6,7 +6,7 @@ release image ships working memory without that source being present here.
 
 | File | Contents |
 | --- | --- |
-| `linux-amd64.tar.xz` | The bundle for one platform (about 25 MB; 149 MB unpacked). |
+| `linux-amd64.tar.xz`, `linux-arm64.tar.xz` | The bundle for each platform (25 MB and 22 MB; 149 MB and 132 MB unpacked). The image build takes the one matching its target platform. |
 | `bundle.json` | The archive's SHA-256, the two source commits it was built from, and a fingerprint of every public file its objects were compiled against. |
 
 The archive contains no source of the private repository:
@@ -54,6 +54,10 @@ tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 \
 python3 -I scripts/check_memory_bundle.py --record vendor/aims-memory/linux-amd64.tar.xz
 python3 -I scripts/check_memory_bundle.py
 ```
+
+The `linux-arm64` bundle is built the same way in an arm64 builder (native
+or emulated), with `--platform linux-arm64` and the archive named
+`linux-arm64.tar.xz`, so the binaries and the tools that strip them are arm64.
 
 ## Licensing
 
