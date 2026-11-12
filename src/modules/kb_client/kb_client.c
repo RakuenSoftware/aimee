@@ -1028,8 +1028,7 @@ static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int ti
    }
 
    /* Memory is a bus-owned service. HTTP is only its web edge, never an
-    * internal owner transport, including when no owner is installed --
-    * except the enrolled owner-to-owner link below. */
+    * internal owner transport, including when no owner is installed. */
    static const char *memory_owned_actions[] = {"session_briefing.commitments",
                                                 "session_briefing.directives",
                                                 "evidence.emit_retrieval_event",
@@ -1043,12 +1042,7 @@ static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int ti
    for (size_t i = 0;
         !memory_owned && i < sizeof(memory_owned_actions) / sizeof(memory_owned_actions[0]); i++)
       memory_owned = !strcmp(action, memory_owned_actions[i]);
-   /* The one exception: a Server enrolled into a separately deployed KB
-    * reaches that KB's shared memory owner-to-owner over the enrolled mTLS
-    * link. The KB authenticates this Server's service identity and applies
-    * its own scope and authority checks. A bearer URL or local socket is
-    * never a memory transport. */
-   if (memory_owned && !kb_client_mtls_configured())
+   if (memory_owned)
    {
       cJSON_Delete(req);
       return kb_typed_error_json(KB_CLIENT_RESULT_UNAVAILABLE,
