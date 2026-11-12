@@ -36,11 +36,17 @@ Limits of this release:
 - Memory refuses a record whose text contains a raw sensitive value (an email address, phone
   number, IP address, password or key) and says the value belongs in the vault. 1.0.x stored
   such records and withheld them from injected context.
-- Memory maintenance commands are not available: `memory.compact_windows` and
-  `memory.maintenance_run` answer `not_available` (old session memory stays as stored), and
-  `memory.embed`, `repair`, `rebuild`, `reindex` and `reembed_*` answer `not_available` because
-  the memory service maintains its own vector index; an embedding model change is applied by
-  provisioning when the embedder image changes.
+- Memory maintenance is the installation owner's operation. When aimee prunes ended sessions it
+  folds each one's raw (L0) memories into a summary through `memory.compact_windows`, under a
+  per-owner maintenance operator that only aimee's own in-process call can use; the folded
+  memories are archived, not deleted. 1.0.x folded sessions older than 30 days; the memory
+  service keeps no record age, so it folds the sessions aimee names as ended instead.
+  `memory.maintenance_run` reports replay and folds named sessions; `prune` (which deleted
+  memories in 1.0.x), `summarize` and `drift` are refused with the reason. A model, a public
+  caller or another account cannot run either command. `memory.embed`, `repair`, `rebuild`,
+  `reindex` and `reembed_*` answer `not_available` because the memory service maintains its own
+  vector index; an embedding model change is applied by provisioning when the embedder image
+  changes.
 - The guardrail's task-drift check is answered by the KB's task store (`task.check_drift`).
 - Server and KB images are published for `linux/amd64` only; `linux/arm64` server images are no
   longer built. The memory bundle exists for that platform and the image build refuses any
