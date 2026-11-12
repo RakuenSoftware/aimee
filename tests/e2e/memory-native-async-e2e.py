@@ -79,6 +79,8 @@ def inside(output, shared_profile='owner-client'):
     previous_kb_mode = None
     shared_remote_refusal_qualified = False
     exploration_session = None
+    # Readings kept only when a check fails, for diagnosis.
+    diagnostics = {}
     fixture_files = tempfile.TemporaryDirectory(prefix=prefix + '-')
     fixture_read_root = Path(fixture_files.name)
     for turn in range(1, 6):
@@ -521,9 +523,15 @@ def inside(output, shared_profile='owner-client'):
         result, events = run('native stable context refresh', mode='refresh-stable')
         check('native multi-turn run completes after five tool calls', result.get('status') == 'completed' and
               len(captures) == before + 6)
-        check('native refresh follows five real file reads', all(
-            any(f'Native refresh evidence {turn}: {prefix}' in text for text in strings(captures[-1]))
-            for turn in range(1, 6)))
+        refreshed = all(any(f'Native refresh evidence {turn}: {prefix}' in text for text in strings(captures[-1]))
+                        for turn in range(1, 6))
+        if not refreshed:
+            # Keep what the provider actually received for each read: the
+            # tool results are fixture files and host refusals, never secrets.
+            diagnostics['refresh_tool_results'] = [
+                [message.get('content') for message in body.get('messages', []) if message.get('role') == 'tool']
+                for body in captures[before:]]
+        check('native refresh follows five real file reads', refreshed)
         before = len(captures)
         result, events = run('native context refresh', mode='refresh-update')
         check('native refresh fixture commits its memory update', not provider_errors and refresh_id is not None)
@@ -676,7 +684,7 @@ def inside(output, shared_profile='owner-client'):
                 source_contracts=[entry['binding'].get('sources', []) for entry, _ in receipt_captures if entry is not None],
                 receipt_attempts=[entry['attempt_id'] for entry, _ in receipt_captures if entry is not None],
                 unresolved_attempts=sorted(expected_unresolved),
-                refresh_stop_ordinal=refresh_stop_ordinal), indent=2) + '\n')
+                refresh_stop_ordinal=refresh_stop_ordinal, diagnostics=diagnostics), indent=2) + '\n')
     return 0
 
 
@@ -771,6 +779,24 @@ print(json.dumps(rows))
                 recovered = True
                 break
             time.sleep(1)
+        if not recovered:
+            # Keep the container's readings in the matrix's fixed diagnostic
+            # grammar only (the stack is removed after a failure). Raw Docker
+            # output can carry bootstrap credentials and never leaves here.
+            import importlib.util
+            spec = importlib.util.spec_from_file_location('deployment_matrix', Path(__file__).with_name('deployment-matrix.py'))
+            matrix = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(matrix)
+            state = subprocess.run(['docker', 'inspect', '--format', '{{json .State}}', args.server],
+                                   capture_output=True, text=True)
+            logs = subprocess.run(['docker', 'logs', '--tail', '2000', args.server], capture_output=True, text=True)
+            try:
+                parsed = json.loads(state.stdout)
+            except ValueError:
+                parsed = {}
+            evidence.setdefault('diagnostics', {})['ungraceful_restart'] = dict(
+                state=matrix.safe_container_state(parsed),
+                log_summary=matrix.safe_startup_log_summary(logs.stdout + logs.stderr))
         def record(name, passed):
             evidence['checks'].append(dict(name=name, passed=bool(passed)))
             Path(args.output).write_text(json.dumps(evidence, indent=2) + '\n')
