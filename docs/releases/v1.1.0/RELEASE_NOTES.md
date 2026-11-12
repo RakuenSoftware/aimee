@@ -42,12 +42,9 @@ Limits of this release:
   the memory service maintains its own vector index; an embedding model change is applied by
   provisioning when the embedder image changes.
 - The guardrail's task-drift check is answered by the KB's task store (`task.check_drift`).
-- The memory bundle exists for `linux/amd64` and `linux/arm64`. The end-to-end memory suites
-  ran on `linux/amd64`; the `linux/arm64` bundle is built from the same sources in an arm64
-  builder and checked against the same public files, but was not run end to end for this
-  release. An image for another platform carries no memory: its provisioning service fails with
-  a message, and an instance without a provisioned installation reports `missing_module: memory`
-  and is not ready.
+- Server and KB images are published for `linux/amd64` only; `linux/arm64` server images are no
+  longer built. The memory bundle exists for that platform and the image build refuses any
+  other. Thin clients are still published for every platform.
 - The Compose files need Docker Engine 26 or later and Compose 2.26 or later (volume subpath
   mounts). Start the stack through `scripts/compose-local.sh`, which reads the embedder image's
   identity for memory and runs provisioning.

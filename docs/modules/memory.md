@@ -148,9 +148,9 @@ implementation.
 
 The wire types in `server-go/memory/wire.go` and the command names the host routes are the
 compatibility surface. The bundle is tied to the exact public files recorded in
-`vendor/aims-memory/bundle.json`; a change to one of them needs a rebuilt bundle. Bundles exist
-for `linux-amd64` and `linux-arm64`, and the image build takes the one for its target platform;
-an image for any other platform carries no memory and cannot provision it. In the `kb` placement the scopes in `AIMEE_MEMORY_SHARED_SCOPES` are served (by default every
+`vendor/aims-memory/bundle.json`; a change to one of them needs a rebuilt bundle. The bundle
+exists for `linux-amd64`, the only platform server images are built for; the image build refuses
+any other. In the `kb` placement the scopes in `AIMEE_MEMORY_SHARED_SCOPES` are served (by default every
 project and workspace);
 a shared store that names no scope is global, as in 1.0.x. The frozen reference in `tests/fixtures/legacy-memory-owner.json` records the last public Go
 owner for compatibility tests only; it is not a default or a runtime fallback.

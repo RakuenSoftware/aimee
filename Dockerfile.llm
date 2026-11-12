@@ -43,10 +43,9 @@ ARG LLAMACPP_VERSION=b10219
 # STRONGER guarantee than omitting curl: an explicit prohibition rather than a missing
 # code path, and it is checkable.
 #
-# BUILT, NOT DOWNLOADED. Upstream publishes a Linux binary for x64 only, so a
-# download-based install cannot produce the arm64 half of the matrix at all.
-# Compiling from a pinned tag gives both arches one code path, and a git tag is
-# verifiable in a way an unchecksummed release zip is not.
+# BUILT, NOT DOWNLOADED. Compiling from a pinned tag gives one verifiable code
+# path, and a git tag is verifiable in a way an unchecksummed release zip is
+# not. Images are built for linux/amd64.
 #
 # The .so copy takes SYMLINKS as well as regular files, with cp -a. The loader
 # resolves by SONAME (libllama-common.so.0), which is a symlink to the versioned

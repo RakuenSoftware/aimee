@@ -97,8 +97,8 @@ Two consequences for a release:
 
 - A change to a recorded file cannot merge until a maintainer with access to the private memory
   repository rebuilds the bundle from the changed tree and commits it with the change.
-- The published images are multi-architecture, but the bundle exists for `linux/amd64` only. The
-  `linux/arm64` application image is built without memory and cannot provision it.
+- The server images are published for `linux/amd64` only, the platform the bundle is built for;
+  the image build refuses any other target. Thin clients are still built for every platform.
 
 ## A tag is not a release
 

@@ -11,12 +11,11 @@ FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc401
 ARG PG_MAJOR=18
 ARG PGVECTORSCALE_VERSION=0.9.0
 # TARGETARCH is supplied by buildx and is exactly the token upstream uses in the
-# asset name (amd64 / arm64).
+# asset name. Images are built for linux/amd64 only.
 ARG TARGETARCH
 # Digests are per-arch and must move with PGVECTORSCALE_VERSION above. A release
 # asset is mutable in a way a git tag build was not, so it is pinned by content.
 ARG PGVECTORSCALE_SHA256_amd64=7a5450b81a7403ca20ff5e5a2f81aa13c81795ddd1fdfe9b986c42c48b12ed67
-ARG PGVECTORSCALE_SHA256_arm64=8d0916df999f082ceb3d019bdfa72f5df395c31b152f7906de59e429ee11edc7
 # Same retry as everywhere else in this file: an unretried fetch is a coin flip
 # wherever it sits.
 RUN apt-get update \
@@ -25,7 +24,6 @@ RUN apt-get update \
     && zip="pgvectorscale-${PGVECTORSCALE_VERSION}-pg${PG_MAJOR}-${TARGETARCH}.zip" \
     && case "$TARGETARCH" in \
          amd64) want="$PGVECTORSCALE_SHA256_amd64" ;; \
-         arm64) want="$PGVECTORSCALE_SHA256_arm64" ;; \
          *) echo "pgvectorscale: no pinned digest for arch '$TARGETARCH'" >&2; exit 1 ;; \
        esac \
     && for a in 1 2 3 4 5; do \

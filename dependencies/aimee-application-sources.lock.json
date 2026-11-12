@@ -92,7 +92,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "7869f12280fa7b03b463f53d436c8f2320b8c60e789c9ce2960a751d0365de00",
+      "source_sha256": "b9f907726483729a6dcb24dba9d84ded9d0f48779644b344b1e70fb963ea7ca7",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 7,
