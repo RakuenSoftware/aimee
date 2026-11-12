@@ -334,12 +334,38 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    cJSON_AddItemToObject(request, "freshness", evidence);
    evidence = NULL;
    const char *operations[] = {"admit", "dispatch"};
+   int refreshed = 0;
    for (size_t i = 0; i < 2; i++)
    {
       cJSON_ReplaceItemInObjectCaseSensitive(request, "operation",
                                              cJSON_CreateString(operations[i]));
       cJSON_Delete(decision);
       decision = action_store(request_context_session_actor(ctx), sid, request);
+      /* A freshness proof spans a sub-second admission lease. When the bus
+       * round trips outlast it, the policy asks for fresh evidence, never a
+       * replay: renew it once and retry this step. The intent's evidence,
+       * context and revocation commitments must be unchanged. */
+      if (!refreshed && !strcmp(action_text(decision, "reason"), "freshness_or_authority_unavailable"))
+      {
+         refreshed = 1;
+         ingress_preinject_release_send_guard(guard);
+         guard = NULL;
+         snprintf(action_state.refusal, sizeof(action_state.refusal),
+                  "current_memory_evidence_unavailable");
+         evidence = action_evidence(ctx, &guard);
+         if (!evidence)
+            goto done;
+         for (size_t f = 0; f < sizeof(fields) / sizeof(fields[0]); f++)
+            if (strcmp(action_text(evidence, fields[f]), action_text(next, fields[f])))
+               goto done;
+         cJSON_AddBoolToObject(evidence, "authorized", 1);
+         cJSON_AddStringToObject(evidence, "policy_generation",
+                                 action_text(next, "policy_generation"));
+         cJSON_ReplaceItemInObjectCaseSensitive(request, "freshness", evidence);
+         evidence = NULL;
+         i--;
+         continue;
+      }
       if (!cJSON_IsTrue(
               cJSON_GetObjectItemCaseSensitive(decision, i ? "dispatch_allowed" : "allowed")))
       {
