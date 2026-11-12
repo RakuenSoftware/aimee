@@ -34,7 +34,7 @@ apart.
 > them. **E4B is untouched**: still `UD-Q6_K_XL`, still the measured half, and the
 > Q6-over-Q4 result below is still the only quant comparison in the campaign that
 > cleared significance. The operator-facing half of this note is the F1 caveat under
-> "Pick one of three" in [`docs/SYNTHESIS_MODELS.md`](../../docs/SYNTHESIS_MODELS.md);
+> "Pick one of three" in [`docs/SYNTHESIS_MODELS.md`](SYNTHESIS_MODELS.md);
 > the two are meant to be read together.
 
 ## The measurement

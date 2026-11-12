@@ -1,3 +1,0 @@
-# Tests are approximate using memory only (no storage IO).
-# Algorithm |       Key |      Encryption |      Decryption
-    aes-xts        512b      8370.7 MiB/s      8612.3 MiB/s

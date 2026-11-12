@@ -1,8 +1,0 @@
-aimee 366fac9 — what's new:
-  (no changelog entry for this version)
-
-2026-04-16T10:21:23Z ERROR db: migrate: legacy schema_migrations database is unsupported; start fresh
-aimee 366fac9 — what's new:
-  (no changelog entry for this version)
-
-2026-04-16T10:26:41Z ERROR db: migrate: legacy schema_migrations database is unsupported; start fresh

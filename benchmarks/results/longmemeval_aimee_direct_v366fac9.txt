@@ -1,7 +1,0 @@
-LongMemEval Retrieval Evaluation — data/longmemeval/longmemeval_s_cleaned.json (470 cases)
-  MRR:       0.6593
-  NDCG@5:    0.4867
-  NDCG@10:   0.4988
-  Recall@5:  0.4883
-  Recall@10: 0.5233
-  Latency:   p50=12.628ms p95=29.630ms p99=36.422ms min=4.834ms max=46.328ms (470 queries)
