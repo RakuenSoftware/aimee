@@ -295,15 +295,15 @@
       "files": [
         {
           "path": "Dockerfile",
-          "sha256": "82c220598b5afe33b029ddfc402f07803a69343e97502a1f368d21b38d7ddf36"
+          "sha256": "d10af3199af3dc06e7224260684ffb3dc92a06e26731410a21e21a5d587a7403"
         },
         {
           "path": "Dockerfile.authority-bootstrap",
-          "sha256": "26742f50ba3ec8ec22cb87e7ba012147f1738621dbcfff1c733556be30751887"
+          "sha256": "a78a85645d5be52957b37b6dce9b0a8d0344ef867efc45817c4016f154eb060f"
         },
         {
           "path": "Dockerfile.control-web",
-          "sha256": "af5b9cc2f21f6df6def692a3747037c54b3016376b8a30c0ef232d4fca14af2c"
+          "sha256": "d5a5dd981bbacf8ba92b4602d62743fe39324830733918c16cd4481fcc8df5a0"
         },
         {
           "path": "Dockerfile.embedder",
@@ -319,7 +319,7 @@
         },
         {
           "path": "Dockerfile.postgres",
-          "sha256": "62bd26d6236ebc26dafc71b132c2d046a84e053ac23740118637e7dc269adb05"
+          "sha256": "91ea491aae05074c04da5240b5cf658f594469c00a12255d5c25e8c2eef189f4"
         },
         {
           "path": "Dockerfile.proxy",
@@ -327,11 +327,11 @@
         },
         {
           "path": "Dockerfile.server",
-          "sha256": "82c220598b5afe33b029ddfc402f07803a69343e97502a1f368d21b38d7ddf36"
+          "sha256": "d10af3199af3dc06e7224260684ffb3dc92a06e26731410a21e21a5d587a7403"
         },
         {
           "path": "Dockerfile.status-authority",
-          "sha256": "5fe81c8332cd589fc62a4ac6e6f4c34d96a7e8cc85a85ec884a26fd9d33717c5"
+          "sha256": "74d7b7b4fa72caff45f617fd4378d947fecdf58ba33163a949f9dcf75ff64cb9"
         },
         {
           "path": "editors/vscode/package-lock.json",
