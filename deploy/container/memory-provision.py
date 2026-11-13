@@ -224,11 +224,11 @@ def prepare(role: str, prefix: Path, inputs: Path, adopt: Path | None) -> None:
     if adopt is not None:
         argv += ['--adopt-source-owner', str(adopt)]
     if (inputs / 'processing-plan.json').is_file():
-        # KB typed facts: the native extraction pipeline on the KB's global scope.
+        # KB typed facts: the memory module's processing operator calls the
+        # synthesis model on the KB's global scope; aims-db stores the facts.
         argv += ['--processing-plan', str(inputs / 'processing-plan.json'),
                  '--processing-worker-binary', str(binaries / 'memory-processing-operator'),
-                 '--infer-adapter-config', str(inputs / 'infer-adapter.json'),
-                 '--infer-adapter-binary', str(binaries / 'aims-infer-adapter')]
+                 '--typed-facts-synthesis', str(inputs / 'typed-facts-synthesis.json')]
     as_runtime_user(*argv)
     as_runtime_user(str(provision / 'verify.py'), str(prefix))
 
@@ -375,7 +375,11 @@ def write_inputs(role: str, inputs: Path, desired: dict, health: dict | None, no
     if selection is not None:
         argv = [str(BUNDLE / 'provision/processing_kb_inputs.py'), '--inputs', str(inputs),
                 '--profile-binary', str(BUNDLE / 'bin/memory-profile'), '--model', selection['model'],
-                '--upstream', selection['upstream']]
+                '--upstream', selection['upstream'],
+                # The instance's ontology authority and graph outlive any one
+                # generation of inputs.
+                '--ontology-key', str(inputs.parent / f'typed-facts-{role}.key'),
+                '--graph-file', str(inputs.parent / f'typed-facts-{role}.graph')]
         for key in ('ca_file', 'cert_file', 'key_file'):
             if selection.get(key):
                 argv += ['--' + key.replace('_', '-'), selection[key]]

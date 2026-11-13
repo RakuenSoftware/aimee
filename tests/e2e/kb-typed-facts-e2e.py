@@ -29,9 +29,9 @@ matrix = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(matrix)
 
 MODELS = ('gemma-4-E4B-it', 'gemma-4-E2B-it')  # the supported synthesis models
-# Simple undated statements. The extraction pipeline rejects any proposal its
-# own witness cannot bind exactly, and a small CPU model gets some of these
-# wrong, so the gate requires at least one to come through, not every one.
+# Simple undated statements. The memory module keeps only candidates grounded
+# in the note and in the active ontology, and a small CPU model gets some of
+# these wrong, so the gate requires at least one to come through, not every one.
 FACTS = {
     'Margaret Hamilton': 'Margaret Hamilton works at MIT.',
     'Katherine Johnson': 'Katherine Johnson works at NASA Langley.',
