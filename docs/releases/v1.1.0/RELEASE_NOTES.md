@@ -84,8 +84,9 @@ Limits of this release:
 
 ## Runtime
 
-- Every module process is Go. The C module processes were retired and unreachable C was removed;
-  the C resource hosts, the CLI and the bus embedding remain.
+- The application module fleet uses Go processes; the new database and memory owners are
+  separate native executables. The C module processes were retired and unreachable C was
+  removed; the C resource hosts, the CLI and the bus embedding remain.
 - The ouroboros ring is consumed by contract from its own repository
   (`dependencies/ouroboros-ring.json`).
 - An idle instance does no polling; ring events leave the host as they are stamped.

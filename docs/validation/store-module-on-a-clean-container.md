@@ -12,8 +12,11 @@ PostgreSQL and embedder image identities and a persistent `AIMEE_EVIDENCE_DIR`.
 It checks typed facts on both roles with E4B and E2B, T1/T2/T3 deployment,
 the real Docker private verifier, egress/Vault, plain storage and KB upgrade.
 Individual drivers clean up their disposable stacks. LUKS remains a separate
-privileged-runner gate. The new candidate run is pending; this heading records
-the executable check count, not a passing release decision.
+privileged-runner gate. The image run passed all 11 checks. See the
+[qualification record](release-candidate-2026-11-13.json) for exact image and bundle
+identities, earlier failed runs, and coverage limits. The later erasure acknowledgment
+change has unit coverage and still needs image qualification. Subject erasure and
+remaining GitHub checks block promotion; these results are not a release decision.
 
 ## Historical store-module runs
 
