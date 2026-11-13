@@ -224,8 +224,9 @@ def prepare(role: str, prefix: Path, inputs: Path, adopt: Path | None) -> None:
     if adopt is not None:
         argv += ['--adopt-source-owner', str(adopt)]
     if (inputs / 'processing-plan.json').is_file():
-        # KB typed facts: the memory module's processing operator calls the
-        # synthesis model on the KB's global scope; aims-db stores the facts.
+        # Typed facts: the memory module's processing operator calls the
+        # synthesis model on the KB's global scope or the Server account's
+        # personal memory; aims-db stores the facts.
         argv += ['--processing-plan', str(inputs / 'processing-plan.json'),
                  '--processing-worker-binary', str(binaries / 'memory-processing-operator'),
                  '--typed-facts-synthesis', str(inputs / 'typed-facts-synthesis.json')]
@@ -295,15 +296,16 @@ MANAGED_SYNTHESIS_IDENTITY = {'ca_file': '/run/aimee-model-tls/synthesis/client/
 
 
 def typed_facts(role: str) -> dict | None:
-    """The synthesis model a KB derives typed facts with, or None.
+    """The synthesis model an instance derives typed facts with, or None.
 
     The same settings the KB's synthesis client uses: SYNTHESIS_ENDPOINT and
     SYNTHESIS_MODEL, and for an https endpoint the client identity in
     SYNTHESIS_CA_FILE / SYNTHESIS_CERT_FILE / SYNTHESIS_KEY_FILE. With managed model
     services the KB's client always presents the identity it issued for the
     aimee-llm sidecar (agent_bridge.c), so that is the default here too. A Server
-    never processes; AIMEE_MEMORY_TYPED_FACTS=off keeps a KB's shared facts plain."""
-    if role != 'kb' or os.environ.get('AIMEE_MEMORY_TYPED_FACTS', 'on') == 'off':
+    processes its account's personal memory and a KB its shared memory;
+    AIMEE_MEMORY_TYPED_FACTS=off keeps either plain."""
+    if os.environ.get('AIMEE_MEMORY_TYPED_FACTS', 'on') == 'off':
         return None
     endpoint = (os.environ.get('SYNTHESIS_ENDPOINT') or '').rstrip('/')
     model = os.environ.get('SYNTHESIS_MODEL') or ''

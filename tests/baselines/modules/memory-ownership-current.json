@@ -2621,10 +2621,23 @@
         "kb_client_memory_scope_context_set",
         "server_module_memory_data"
       ],
-      "sha256": "2073dc8e6c5eaa033aa830c252701ffc1b1cfb322180d5acfc43f75cdabca51e",
-      "boundary_change": "Isolated native callbacks apply the existing tools permission owner to the resolved callable before dispatch. Git family expansion moves before workflow externalization admission. Existing authenticated memory transport and scope owners are unchanged. This records boundary analysis, not independent approval. Native admission also delegates directive and execution-policy checks using the host callback identity; no memory eligibility policy or effect/human grant is added. Shared Git dispatch now restores its caller cwd/session/worktree context on every existing return and owns a copy of a potentially TLS-borrowed operation session. Review of this diff finds no changes to memory symbols, admission, transport or eligibility; this is source-boundary analysis, not independent release approval. Git now uses an independent nested workspace binding instead of changing/releasing the enclosing turn binding; its memory adapter symbols and paths remain unchanged. This is boundary analysis, not independent approval. The existing negative Git resolution return now frees its owned diagnostic before returning the same refusal. 2026-10-20: Git acquires the registered workspace scope before remapping its client path; failed acquisition cannot fall through, and a retained mirror cwd bypasses stale session routing. Replacing only dispatch_git_tool_inner with its previous body reproduces HEAD byte-for-byte. All memory adapter symbols, transport, admission and eligibility remain unchanged; this is boundary analysis, not independent release approval.",
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+      "sha256": "91d9c7047d999c4d242348aa025fd92bd6bf25c37f76c63faeea3f7df55cde71",
+      "boundary_change": "2026-11-13: search_graph and get_entity_edges also read the account's own typed facts through memory_user_typed_command (server_memory.c, the existing user-memory runtime transport with the verified account context) and append those rows after the KB's; with no KB answer they show the local rows. The KB request, its scope context and its refusal handling are unchanged. No memory policy, eligibility or fallback is implemented in C: the memory module owns typed-fact generation and answers.",
+      "boundary_review": "2026-11-13 typed facts on the Server: reviewed the two MCP graph consumers; the only new memory call is the existing personal runtime transport with operations user-search-graph/user-entity-edges. Covered by unit-test-server-memory-domain (merge and KB-unavailable cases). This is source-boundary analysis, not independent release approval.",
       "source_revisions": [
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "kb_client_memory_audit_note",
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_set",
+            "server_module_memory_data"
+          ],
+          "sha256": "2073dc8e6c5eaa033aa830c252701ffc1b1cfb322180d5acfc43f75cdabca51e",
+          "boundary_change": "Isolated native callbacks apply the existing tools permission owner to the resolved callable before dispatch. Git family expansion moves before workflow externalization admission. Existing authenticated memory transport and scope owners are unchanged. This records boundary analysis, not independent approval. Native admission also delegates directive and execution-policy checks using the host callback identity; no memory eligibility policy or effect/human grant is added. Shared Git dispatch now restores its caller cwd/session/worktree context on every existing return and owns a copy of a potentially TLS-borrowed operation session. Review of this diff finds no changes to memory symbols, admission, transport or eligibility; this is source-boundary analysis, not independent release approval. Git now uses an independent nested workspace binding instead of changing/releasing the enclosing turn binding; its memory adapter symbols and paths remain unchanged. This is boundary analysis, not independent approval. The existing negative Git resolution return now frees its owned diagnostic before returning the same refusal. 2026-10-20: Git acquires the registered workspace scope before remapping its client path; failed acquisition cannot fall through, and a retained mirror cwd bypasses stale session routing. Replacing only dispatch_git_tool_inner with its previous body reproduces HEAD byte-for-byte. All memory adapter symbols, transport, admission and eligibility remain unchanged; this is boundary analysis, not independent release approval.",
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+        },
         {
           "disposition": "host-transport",
           "symbols": [
@@ -2682,9 +2695,21 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "c1bc4b208d133675a507813fa8bf2343ea97d539bf9899482772e050be83767e",
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+      "sha256": "9f992e9ceff227b308bb72893e95334429e7ea96623437f66fa1f1fb14799586",
+      "boundary_review": "2026-11-13 typed facts on the Server: reviewed the new transport-only operations and the reply pass-through condition. This is source-boundary analysis, not independent release approval.",
       "source_revisions": [
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "aimee_memory_opaque_fields_contract_v1",
+            "aimee_memory_protected_intake_web_contract_v1",
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_set"
+          ],
+          "sha256": "c1bc4b208d133675a507813fa8bf2343ea97d539bf9899482772e050be83767e",
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+        },
         {
           "disposition": "host-transport",
           "symbols": [
@@ -2710,7 +2735,8 @@
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
         }
       ],
-      "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+      "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions.",
+      "boundary_change": "2026-11-13: memory_user_typed_command forwards user-facts, user-search-graph and user-entity-edges through the existing user_memory_owner_command transport with the same verified account context, and accepts their ok replies like user-search. It adds no memory policy; the memory module answers from the account's own typed facts."
     },
     "src/server/server_memory_benchmark.c": {
       "disposition": "host-transport",
@@ -3115,7 +3141,20 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "8ed09dd1e7db70410cf20f52d979568fa0f8971583a5464eac2a3a3d8d69bf78"
+      "sha256": "200de605133145b18d178e552f7a9ec1b4d4eae8f7ec6203559195ea712a7be5",
+      "source_revisions": [
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_set"
+          ],
+          "sha256": "8ed09dd1e7db70410cf20f52d979568fa0f8971583a5464eac2a3a3d8d69bf78"
+        }
+      ],
+      "boundary_change": "2026-11-13: stubs memory_user_typed_command and covers the MCP graph tools appending the account's own typed-fact rows after the KB's, and showing them alone when the KB has no answer.",
+      "boundary_review": "2026-11-13 typed facts on the Server: test-only fixture for the reviewed host transport."
     },
     "src/tests/test_server_memory_get.c": {
       "disposition": "host-fixture",

@@ -67,6 +67,89 @@ def wait_facts(stack, name, seconds, needle=''):
     return ''
 
 
+SERVER_HTTP = '''import http.client,socket,json,sys
+class C(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(90);self.sock.connect('/var/lib/aimee/aimee-http.sock')
+a=json.load(sys.stdin);c=C('localhost',timeout=90)
+c.request('POST',a['path'],json.dumps(a['body']),{'Content-Type':'application/json'})
+r=c.getresponse();print(json.dumps([r.status,json.loads(r.read() or b'{}')]))
+'''
+
+
+def server_request(stack, path, body):
+    """One request to the Server's own HTTP socket, as the account (uid 1000)."""
+    result = subprocess.run(['docker', 'exec', '-i', '-u', '1000', stack.application, 'python3', '-c', SERVER_HTTP],
+                            input=json.dumps(dict(path=path, body=body)), capture_output=True, text=True, timeout=120)
+    try:
+        return tuple(json.loads(result.stdout.strip().splitlines()[-1]))
+    except (IndexError, ValueError):
+        return 0, {}
+
+
+def server_tool_text(stack, tool, arguments):
+    status, body = server_request(stack, '/v1/mcp/call', dict(tool=tool, arguments=arguments))
+    return json.dumps(body) if status == 200 else ''
+
+
+def wait_tool(stack, tool, arguments, needles, seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        text = server_tool_text(stack, tool, arguments)
+        if all(needle in text for needle in needles):
+            return text
+        time.sleep(15)
+    return ''
+
+
+def exercise_server(stack, check, diagnostics, extraction_seconds):
+    """A Server's typed facts over its account's personal memory, read through
+    the Server's own MCP graph tools."""
+    stack.start()
+    check('Server with synthesis profile reaches healthy state', True)
+    check('synthesis sidecar becomes healthy', wait_healthy(stack.project + '-aimee-llm-1', 900))
+    for index, content in enumerate(FACTS.values()):
+        status, stored = server_request(stack, '/v1/memory/store', dict(key=f'typed-facts-e2e-{index}', content=content))
+        check(f'Server stores personal fact {index + 1}', status == 200 and stored.get('status') == 'ok')
+    started, subject_name, text = time.monotonic(), '', ''
+    deadline = started + extraction_seconds
+    while time.monotonic() < deadline and not text:
+        for name in FACTS:
+            text = server_tool_text(stack, 'search_graph', dict(query=name))
+            if name in text and 'graph relation' in text:
+                subject_name = name
+                break
+            text = ''
+        else:
+            time.sleep(15)
+    diagnostics['extraction_seconds'] = round(time.monotonic() - started, 1)
+    diagnostics['operator'] = operator_lines(stack)[-40:]
+    check('the memory module publishes a typed fact for personal memory',
+          any(line.startswith('typed facts: published ') and not line.startswith('typed facts: published 0 ')
+              for line in operator_lines(stack)))
+    check('search_graph serves the personal typed fact', bool(text) and subject_name in text)
+    diagnostics['first_typed_subject'] = subject_name
+    edges = server_tool_text(stack, 'get_entity_edges', dict(entity=subject_name))
+    check('get_entity_edges serves the edges of that subject', subject_name in edges and 'Edges for' in edges)
+    for index, content in enumerate(NOVEL_NOTES):
+        status, stored = server_request(stack, '/v1/memory/store', dict(key=f'typed-facts-novel-{index}', content=content))
+        check(f'Server stores novel-relation note {index + 1}', status == 200 and stored.get('status') == 'ok')
+    deadline, promoted = time.monotonic() + extraction_seconds, False
+    while time.monotonic() < deadline and not promoted:
+        promoted = any(line.startswith('typed facts: promoted relation ' + NOVEL + ' ')
+                       for line in operator_lines(stack))
+        if not promoted:
+            time.sleep(15)
+    diagnostics['operator'] = operator_lines(stack)[-40:]
+    check(f'the operator promotes {NOVEL} after three distinct notes', promoted)
+    name, content = NOVEL_PROBE
+    status, stored = server_request(stack, '/v1/memory/store', dict(key='typed-facts-novel-probe', content=content))
+    check('Server stores a note under the promoted relation', status == 200 and stored.get('status') == 'ok')
+    text = wait_tool(stack, 'search_graph', dict(query=name), [name, NOVEL], extraction_seconds)
+    diagnostics['operator'] = operator_lines(stack)[-40:]
+    check('a personal fact under the promoted relation is published', bool(text))
+
+
 def wait_healthy(container, seconds):
     deadline = time.monotonic() + seconds
     status = ''
@@ -154,6 +237,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--keep', action='store_true', help='retain test containers for diagnosis')
+    parser.add_argument('--role', choices=('kb', 'server'), default='kb',
+                        help='kb: shared memory on a KB; server: an account\'s personal memory on a Server')
     parser.add_argument('--model', choices=MODELS, default=MODELS[0],
                         help='synthesis model the AIMEE_LLM_IMAGE sidecar serves')
     parser.add_argument('--extraction-seconds', type=int, default=2400,
@@ -179,14 +264,14 @@ def main():
                    COMPOSE_PROFILES='synthesis', EMBEDDER_MODEL='bekko-a25m',
                    EMBEDDER_URL='https://aimee-embedder:8762', EMBEDDER_DIMS='384',
                    SYNTHESIS_MODEL=args.model, SYNTHESIS_ENDPOINT='https://aimee-llm:8761/v1')
-        stack = matrix.Stack('kb', env, args.output)
-        if args.keep:
+        stack = matrix.Stack(args.role, env, args.output)
+        if args.keep and args.role == 'kb':
             # A kept disposable stack is for diagnosis: keep its generated test
             # credential beside it, owner-only, so the stack can be driven.
             token = args.output / 'kb-bearer-token'
             token.write_text(stack.env['AIMEE_KB_API_BEARER_TOKEN'])
             token.chmod(0o600)
-        exercise(stack, check, diagnostics, args.extraction_seconds)
+        (exercise if args.role == 'kb' else exercise_server)(stack, check, diagnostics, args.extraction_seconds)
     except (RuntimeError, OSError, ValueError, KeyError, IndexError, subprocess.SubprocessError):
         checks.append(dict(name='KB typed facts completed', passed=False))
         print('FAIL KB typed facts completed', flush=True)

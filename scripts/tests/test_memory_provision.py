@@ -128,7 +128,7 @@ class Policy(unittest.TestCase):
             (inputs / 'TYPED_FACTS.json').write_text(json.dumps({'model': 'm', 'upstream': 'http://127.0.0.1:9/v1'}))
             self.assertEqual(module.recorded_policy(inputs)['typed_facts']['model'], 'm')
 
-    def test_a_kb_with_a_synthesis_model_selects_typed_facts(self):
+    def test_an_instance_with_a_synthesis_model_selects_typed_facts(self):
         env = {'SYNTHESIS_ENDPOINT': 'https://aimee-llm:8761/v1', 'SYNTHESIS_MODEL': 'gemma-4-E4B',
                'SYNTHESIS_CA_FILE': '/run/ca.pem', 'SYNTHESIS_CERT_FILE': '/run/c.pem',
                'SYNTHESIS_KEY_FILE': '/run/c.key'}
@@ -136,7 +136,8 @@ class Policy(unittest.TestCase):
         module.log = lambda message: None
         try:
             with patch.dict(os.environ, env, clear=False):
-                self.assertIsNone(module.typed_facts('server'))
+                # A Server processes its account's personal memory as a KB its shared memory.
+                self.assertEqual(module.typed_facts('server'), module.typed_facts('kb'))
                 self.assertEqual(module.typed_facts('kb'), {
                     'model': 'gemma-4-E4B', 'upstream': 'https://aimee-llm:8761/v1', 'ca_file': '/run/ca.pem',
                     'cert_file': '/run/c.pem', 'key_file': '/run/c.key'})
