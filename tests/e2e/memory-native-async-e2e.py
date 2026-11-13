@@ -562,6 +562,11 @@ def inside(output, shared_profile='owner-client'):
         check('recovered provider retains complete Go memory', any(content in text for text in strings(captures[-1])))
         before = len(captures)
         result, events = run('native stable context refresh', mode='refresh-stable')
+        if result.get('status') != 'completed':
+            # This fixture contains only synthetic file/tool text. Preserve the
+            # actual failed-run details rather than losing the refusal behind
+            # the generic multi-turn assertion.
+            diagnostics['stable_refresh_failure'] = dict(result=result, events=events)
         check('native multi-turn run completes after five tool calls', result.get('status') == 'completed' and
               len(captures) == before + 6)
         refreshed = all(any(f'Native refresh evidence {turn}: {prefix}' in text for text in strings(captures[-1]))

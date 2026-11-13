@@ -88,9 +88,9 @@ def build(output: Path) -> dict:
         ["git", "rev-parse", f"{SOURCE_COMMIT}:server-go"], cwd=ROOT, text=True).strip()
     if actual_tree != SOURCE_TREE:
         raise ValueError("frozen server-go source tree differs from its pin")
-    env = dict(os.environ, CGO_ENABLED="0", GOTOOLCHAIN="local", GOWORK="off",
+    env = dict(os.environ, CGO_ENABLED="0", GOTOOLCHAIN=manifest["go_version"], GOWORK="off",
                GOFLAGS="-mod=readonly")
-    version = subprocess.check_output(["go", "version"], env=env, text=True).split()
+    version = subprocess.check_output(["go", "version"], cwd=ROOT, env=env, text=True).split()
     if len(version) < 3 or version[2] != manifest["go_version"]:
         raise ValueError("reference fixture requires the pinned Go 1.26.10 toolchain")
 

@@ -52,6 +52,32 @@ def load_release_validator():
     return module
 
 
+# Historical validator regression fixtures must not move with the application.
+# The 1.1 memory replacement intentionally changes these host surfaces; it does
+# not inherit the frozen S1 study's certificate. The validator itself still
+# rejects unreviewed source changes when invoked on a descendant checkout.
+HISTORICAL_RELEASE = "53e5ccf2b6b5093ecf904a279d36d2f9f31c973f"
+
+
+def historical_release_source(path):
+    return subprocess.run(["git", "show", f"{HISTORICAL_RELEASE}:{path}"], cwd=ROOT,
+                          check=True, capture_output=True, text=True).stdout
+
+
+LIVE_READ_TEXT = Path.read_text
+HISTORICAL_PROTECTED_PATHS = load_release_validator().PROTECTED_PATHS
+
+
+def historical_protected_text(path, *args, **kwargs):
+    try:
+        relative = path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return LIVE_READ_TEXT(path, *args, **kwargs)
+    if relative in HISTORICAL_PROTECTED_PATHS:
+        return historical_release_source(relative)
+    return LIVE_READ_TEXT(path, *args, **kwargs)
+
+
 class LiveSemanticContextS1Test(unittest.TestCase):
     def test_contract_and_instrumentation_pins(self) -> None:
         subprocess.run(
@@ -253,7 +279,8 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         self.assertEqual(aggregate["reference_false_positive_rate"], 0.0)
         self.assertEqual(aggregate["peak_process_tree_count"], 3)
 
-    def test_release_validator_accepts_descendant_with_unchanged_semantic_surface(self) -> None:
+    @mock.patch.object(Path, "read_text", new=historical_protected_text)
+    def test_release_validator_accepts_historical_descendant_with_unchanged_semantic_surface(self) -> None:
         validator = load_release_validator()
         candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
         candidate_tree = "e6ba59ceba5a40323b006e834ac28ef39a2abc46"
@@ -372,7 +399,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
         for path, blocks in validator.REVIEWED_MEMORY_INTEGRATIONS.items():
             frozen = validator.git_output("show", f"{candidate}:{path}")
-            current = (ROOT / path).read_text()
+            current = historical_release_source(path)
             current = validator.host_integration_base(path, current) or current
             with self.subTest(path=path):
                 self.assertTrue(validator.reviewed_memory_equivalent(path, frozen, current))
@@ -392,7 +419,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         validator = load_release_validator()
         path = "src/modules/protocols/mcp/mcp_tools_extended.c"
         frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
-        current = (ROOT / path).read_text()
+        current = historical_release_source(path)
         self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
         block = next(row["release_text"] for row in validator.REVIEWED_HOST_INTEGRATIONS[path]
                      if "const char *mcp_family_discriminator(" in row["release_text"])
@@ -407,7 +434,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         validator = load_release_validator()
         path = "src/tests/test_mcp_client_registry.c"
         frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
-        current = (ROOT / path).read_text()
+        current = historical_release_source(path)
         self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
         blocks = validator.REVIEWED_HOST_INTEGRATIONS[path]
         coverage = next(block["release_text"] for block in blocks
@@ -424,7 +451,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         validator = load_release_validator()
         candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
         for path, blocks in validator.REVIEWED_SOURCE_CUSTODY_INTEGRATIONS.items():
-            current = (ROOT / path).read_text()
+            current = historical_release_source(path)
             frozen = validator.git_output("show", f"{candidate}:{path}")
             self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
             # Every new exact block must reverse to the previously reviewed
@@ -446,7 +473,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
         for path, blocks in validator.REVIEWED_HOST_INTEGRATIONS.items():
             frozen = validator.git_output("show", f"{candidate}:{path}")
-            current = (ROOT / path).read_text()
+            current = historical_release_source(path)
             with self.subTest(path=path):
                 self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
                 # Exact dispatch/catalog changes do not permit semantic drift,
@@ -478,7 +505,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         validator = load_release_validator()
         path = "src/server/server_mcp_call_table.c"
         frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
-        current = (ROOT / path).read_text()
+        current = historical_release_source(path)
         self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
         wrapper = next(block["release_text"] for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
                        if block["release_text"].startswith("static cJSON *mcph_git_verify("))
@@ -500,7 +527,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
     def test_release_validator_rejects_verifier_role_membership_drift(self) -> None:
         validator = load_release_validator()
         path = "src/server/server_mcp_call_table.c"
-        current = (ROOT / path).read_text()
+        current = historical_release_source(path)
         frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
         blocks = [block for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
                   if "canonical-git-role-membership:" in block.get("review", "")]
@@ -529,7 +556,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         baseline = "1ec815d36ae628a51d6a551264f9a1dc19ef13e9"
         for path in ("src/server/server_mcp_call_table.c",
                      "src/tests/test_mcp_client_registry.c"):
-            current = (ROOT / path).read_text()
+            current = historical_release_source(path)
             frozen = validator.git_output("show", f"{candidate}:{path}")
             blocks = [block for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
                       if "canonical-session-search:" in block.get("review", "")]
@@ -584,7 +611,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
         for path in ("src/modules/protocols/mcp/mcp_tools.c",
                      "src/tests/test_mcp_client_registry.c"):
-            current = (ROOT / path).read_text()
+            current = historical_release_source(path)
             frozen = validator.git_output("show", f"{candidate}:{path}")
             self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
             for row in validator.REVIEWED_HOST_INTEGRATIONS[path]:
@@ -600,7 +627,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         validator = load_release_validator()
         path = "src/server/server_mcp_call_table.c"
         frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
-        current = (ROOT / path).read_text()
+        current = historical_release_source(path)
         blocks = [block for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
                   if "canonical-native-project-dispatch:" in block.get("review", "")]
         self.assertEqual(len(blocks), 2)
