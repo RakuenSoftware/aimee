@@ -38,6 +38,33 @@ FACTS = {
     'Grace Hopper': 'Grace Hopper works at the Harvard Computation Laboratory.',
     'Alan Turing': 'Alan Turing works at Bletchley Park.',
 }
+# A relation the seed ontology lacks, in three distinct notes: the operator
+# records each occurrence and promotes the relation at the third (aimee 1.0's
+# threshold). A fourth note then publishes under the promoted relation.
+NOVEL = 'mentors'
+NOVEL_NOTES = ['Barbara Liskov mentors Andrew Myers.', 'Donald Knuth mentors Luis Trabb Pardo.',
+               'Frances Allen mentors Vivek Sarkar.']
+NOVEL_PROBE = ('Ada Lovelace', 'Ada Lovelace mentors Mary Somerville.')
+
+
+def operator_lines(stack):
+    """The processing operator's typed-fact lines from the KB's log (relation
+    names and counts only; it never logs memory text)."""
+    logs = subprocess.run(['docker', 'logs', '--tail', '5000', stack.application], capture_output=True,
+                          text=True, timeout=60)
+    return [line[line.index('typed facts:'):] for line in (logs.stdout + logs.stderr).splitlines()
+            if 'typed facts:' in line]
+
+
+def wait_facts(stack, name, seconds, needle=''):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        status, result = stack.kb_request('/v1/actions/memory.facts', dict(query=name))
+        facts = result.get('facts', '') if status == 200 and result.get('status') == 'ok' else ''
+        if facts and needle in facts:
+            return facts
+        time.sleep(15)
+    return ''
 
 
 def wait_healthy(container, seconds):
@@ -73,6 +100,7 @@ def exercise(stack, check, diagnostics, extraction_seconds):
             time.sleep(15)
     diagnostics['extraction_seconds'] = round(time.monotonic() - started, 1)
     if not facts:
+        diagnostics['operator'] = operator_lines(stack)[-40:]
         # Shape only: row counts, kinds and which interpretation markers are
         # present. No memory text or model output is recorded.
         status, recalled = stack.kb_request('/v1/actions/memory.recall',
@@ -100,6 +128,26 @@ def exercise(stack, check, diagnostics, extraction_seconds):
     rows = edges.get('edges') or []
     check('entity_edges serves the edges of that subject', status == 200 and rows and
           all(subject in (row.get('src_entity'), row.get('dst_entity')) for row in rows))
+
+    for index, content in enumerate(NOVEL_NOTES):
+        status, stored = stack.kb_request('/v1/actions/memory.store', dict(key=f'typed-facts-novel-{index}',
+                                                                           content=content))
+        check(f'KB stores novel-relation note {index + 1}', status == 200 and stored.get('status') == 'ok')
+    deadline, promoted = time.monotonic() + extraction_seconds, False
+    while time.monotonic() < deadline and not promoted:
+        promoted = any(line.startswith('typed facts: promoted relation ' + NOVEL + ' ')
+                       for line in operator_lines(stack))
+        if not promoted:
+            time.sleep(15)
+    diagnostics['operator'] = operator_lines(stack)[-40:]
+    check(f'the operator promotes {NOVEL} after three distinct notes', promoted)
+    name, content = NOVEL_PROBE
+    status, stored = stack.kb_request('/v1/actions/memory.store', dict(key='typed-facts-novel-probe',
+                                                                       content=content))
+    check('KB stores a note under the promoted relation', status == 200 and stored.get('status') == 'ok')
+    facts = wait_facts(stack, name, extraction_seconds, NOVEL)
+    diagnostics['operator'] = operator_lines(stack)[-40:]
+    check('a fact under the promoted relation is published', NOVEL in facts and name in facts)
 
 
 def main():
