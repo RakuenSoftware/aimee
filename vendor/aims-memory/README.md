@@ -6,7 +6,7 @@ release image ships working memory without that source being present here.
 
 | File | Contents |
 | --- | --- |
-| `linux-amd64.tar.xz` | The bundle for `linux/amd64`, the only platform server images are built for (about 25 MB; 149 MB unpacked). |
+| `linux-amd64.tar.xz` | The bundle for `linux/amd64`, the only platform server images are built for (about 26 MB; 170 MB unpacked). |
 | `bundle.json` | The archive's SHA-256, the two source commits it was built from, and a fingerprint of every public file its objects were compiled against. |
 
 The archive contains no source of the private repository:

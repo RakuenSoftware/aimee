@@ -285,6 +285,10 @@ def promoted_ontology_restart(stack, check):
     # miss the bootstrap repeatedly refusing the newly promoted package.
     matrix.command('docker', 'restart', stack.application)
     check('promoted ontology survives application restart', wait_healthy(stack.application, 180))
+    name, _ = NOVEL_PROBE
+    text = (wait_tool(stack, 'search_graph', dict(query=name), [name, NOVEL], 180)
+            if stack.role == 'server' else wait_facts(stack, name, 180, NOVEL))
+    check('promoted fact remains available after restart', name in text and NOVEL in text)
 
 
 def main():

@@ -37,6 +37,10 @@ Limits of this release:
   a Server, the `search_graph` and `get_entity_edges` tools select the account's own facts
   with `store:user`, or shared facts with `store:kb` when that owner is installed. The owner
   signs the exact tool output; native history retains and revalidates its source receipt. `AIMEE_MEMORY_TYPED_FACTS=off` keeps memory plain.
+- Ontology promotions survive supervision, image updates and restarts. Native verification
+  checks the active package's retained predecessor chain back to the pinned seed, every
+  signature, and the instance's signing authority and graph namespace. Startup preserves
+  an authorized successor; an unrelated package or changed authority is refused.
 - Typed facts are not pre-injected into a run's context in this release, and 1.0's
   evidence-based demotion is not ported: it scored retrieval feedback that 1.1 still records
   against 1.0 memory ids. On a Server with several accounts only the runtime account's personal

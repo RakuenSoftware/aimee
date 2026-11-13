@@ -57,6 +57,11 @@ The one-shot `aimee-memory-init` service in `compose.yaml` runs `aimee-memory-pr
   An image update is refused while the application is running; a changed account list, shared
   scope or embedder found while it runs keeps the current installation until the next start.
 
+Ontology startup pins the instance's signed seed and authority key. Native verification accepts
+an active successor only after checking its complete retained predecessor chain, signatures and
+graph namespace against those pins. Supervision and restart preserve authorized promotions;
+they do not reactivate the seed over a successor. Unrelated packages remain unavailable.
+
 A Server serves personal memory for `aimee`, every browser login and any account in
 `AIMEE_MEMORY_ACCOUNTS`, at most 32. A KB serves `global` and the scopes in
 `AIMEE_MEMORY_SHARED_SCOPES` (by default every project and workspace), storing shared facts as
