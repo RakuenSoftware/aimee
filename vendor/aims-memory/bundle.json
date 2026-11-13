@@ -1,10 +1,10 @@
 {
   "platforms": {
     "linux-amd64": {
-      "aimee_commit": "87c29f531a92e047f6817bf073401620592b3d98",
-      "aims_db_commit": "1d727f351848ed11281a41cad46c50972009ebd5",
+      "aimee_commit": "a72c46ba71ed83f9f7e58621110dfd6369464912",
+      "aims_db_commit": "75bf4a16cc113e78287b128b43c63816da2f93d4",
       "archive": "linux-amd64.tar.xz",
-      "bytes": 25098828,
+      "bytes": 26694924,
       "public_headers": {
         "src/core/codec/include/aimee/core/codec/base64.h": "cd2a11f93c6c515ab03ac489fa0dbf34fa1f193f0b67dedfbd1519bda9fe2fce",
         "src/db1_client/caches.h": "127e251b55faa57b0a74d2d71d092ed0b79bb1b0dca8af9ba06f1b30888b5827",
@@ -52,7 +52,7 @@
         "src/headers/request_context.h": "95ab1320fb10c32fbb1085ed2306f3af755d37690dc4929042659ce780c9108b",
         "src/headers/responses_history_owner.h": "71f1891426b72a18e12baac64628a7e15a79b8e39b31901310050ec017987d0e",
         "src/headers/sandbox.h": "114c278bbf8f887855176714b84a75e86a482ab5461bccc36840e69daa3673f9",
-        "src/headers/server.h": "58be524216d3f7e06ea62121a7d842078d88ad9eccca903a1fd446a19b41c398",
+        "src/headers/server.h": "b59355440ff88467ade584718429c5663dfdac391f2bc3a6b14b655cbead75cf",
         "src/headers/server_http.h": "dbc3d19737d7d7ca3d65250269dbcd1c0599d62c2f1011f5b68a14cfe48d19ff",
         "src/headers/server_http_identity.h": "25c54d4134c3a3f31d9c9b908dcf14fbf5b62882bb85e737c7eea5772aefe6ac",
         "src/headers/server_session_capture.h": "34578f89a6f052a3f52eeace6bf0289ef962516e193c2702fda34a6c153d1b5c",
@@ -86,7 +86,7 @@
         "src/vendor/cJSON.c": "ce880e1f26f9a10f54a5b8d534604b6159fdebb83075a522779bb7f7322aa37b",
         "src/vendor/headers/cJSON.h": "0e390c0955c04baf5c2eca34839a17b4f01bb2d9a51c05ef8198cd9c37aa9718"
       },
-      "sha256": "d668e3708a711abc71093d0a0d947561cb5a74ebda96e6f05a4c3651adab7e27"
+      "sha256": "1625395f3fd6a658e29731de5ff26bc6cd29b15e3a7c11cd27d3fd573d5a32b0"
     }
   },
   "schema_version": 1
