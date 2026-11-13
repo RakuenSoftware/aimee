@@ -28,7 +28,7 @@ spec = importlib.util.spec_from_file_location('matrix', ROOT / 'tests/e2e/deploy
 matrix = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(matrix)
 
-MODEL = 'gemma-4-E2B-it'
+MODELS = ('gemma-4-E4B-it', 'gemma-4-E2B-it')  # the supported synthesis models
 # Simple undated statements. The extraction pipeline rejects any proposal its
 # own witness cannot bind exactly, and a small CPU model gets some of these
 # wrong, so the gate requires at least one to come through, not every one.
@@ -106,6 +106,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--keep', action='store_true', help='retain test containers for diagnosis')
+    parser.add_argument('--model', choices=MODELS, default=MODELS[0],
+                        help='synthesis model the AIMEE_LLM_IMAGE sidecar serves')
     parser.add_argument('--extraction-seconds', type=int, default=2400,
                         help='bound on CPU extraction by the sidecar model')
     args = parser.parse_args()
@@ -128,7 +130,7 @@ def main():
         env = dict(os.environ, AIMEE_RUNTIME_WEB_ENABLED='0', AIMEE_POSTGRES_VOLUME_MIB='2048',
                    COMPOSE_PROFILES='synthesis', EMBEDDER_MODEL='bekko-a25m',
                    EMBEDDER_URL='https://aimee-embedder:8762', EMBEDDER_DIMS='384',
-                   SYNTHESIS_MODEL=MODEL, SYNTHESIS_ENDPOINT='https://aimee-llm:8761/v1')
+                   SYNTHESIS_MODEL=args.model, SYNTHESIS_ENDPOINT='https://aimee-llm:8761/v1')
         stack = matrix.Stack('kb', env, args.output)
         if args.keep:
             # A kept disposable stack is for diagnosis: keep its generated test
