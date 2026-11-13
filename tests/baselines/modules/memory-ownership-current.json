@@ -1790,17 +1790,15 @@
     "src/headers/module_stage_adapters.h": {
       "disposition": "host-transport",
       "symbols": [
-        "server_module_memory_data",
-        "server_module_memory_erase_subject",
-        "server_module_memory_reset_derived"
+        "server_module_memory_data"
       ],
-      "sha256": "394bb26f88a2af9136585edfb6e449fc7e6cbca21adb3d15f225bccf0b489e4c",
+      "sha256": "6307840aaa14f82644a7445798b4c5dce1ab98902840b69fad0c85b803184261",
       "evidence": [
         "server-go/modules/memory/personal_versions_test.go",
         "src/tests/test_module_json_call.c"
       ],
       "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
       "source_revisions": [
         {
           "disposition": "host-transport",
@@ -1816,6 +1814,21 @@
           ],
           "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
           "boundary_review": "PR #3050: exposes only the tools adapter registration entry point for isolated real-owner qualification. Memory declarations and ownership are unchanged. This records boundary analysis, not independent production-promotion approval."
+        },
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "server_module_memory_data",
+            "server_module_memory_erase_subject",
+            "server_module_memory_reset_derived"
+          ],
+          "sha256": "394bb26f88a2af9136585edfb6e449fc7e6cbca21adb3d15f225bccf0b489e4c",
+          "evidence": [
+            "server-go/modules/memory/personal_versions_test.go",
+            "src/tests/test_module_json_call.c"
+          ],
+          "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
         }
       ]
     },
@@ -1860,11 +1873,9 @@
         "AIMEE_MEMORY_EVENT_EMBED",
         "AIMEE_MEMORY_STAGE_DATA",
         "AIMEE_MEMORY_STAGE_EMBED",
-        "kb_module_memory_data",
-        "kb_module_memory_erase_subject",
-        "kb_module_memory_reset_derived"
+        "kb_module_memory_data"
       ],
-      "sha256": "b75e81f70ed39d54637df3f4b34df90adfbdb33a18cd83e991d2815f41afe3d0",
+      "sha256": "1960dac6df1c31df9e72a649b901907f87a2eaa1b12911716b5dede7a6a13467",
       "evidence": [
         "server-go/modules/memory/personal_versions_test.go",
         "src/tests/test_module_json_call.c"
@@ -1907,18 +1918,35 @@
           ],
           "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+        },
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "AIMEE_MEMORY_EVENT_DATA",
+            "AIMEE_MEMORY_EVENT_EMBED",
+            "AIMEE_MEMORY_STAGE_DATA",
+            "AIMEE_MEMORY_STAGE_EMBED",
+            "kb_module_memory_data",
+            "kb_module_memory_erase_subject",
+            "kb_module_memory_reset_derived"
+          ],
+          "sha256": "b75e81f70ed39d54637df3f4b34df90adfbdb33a18cd83e991d2815f41afe3d0",
+          "evidence": [
+            "server-go/modules/memory/personal_versions_test.go",
+            "src/tests/test_module_json_call.c"
+          ],
+          "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
+          "boundary_review": "Require explicit separate-owner deletion acknowledgment for native and other backends; unsupported and unavailable cleanup fails. The fixture verifies the production JSON transport, erasure payload and refusal, without implementing memory policy in the host."
         }
       ],
-      "boundary_review": "Require explicit separate-owner deletion acknowledgment for native and other backends; unsupported and unavailable cleanup fails. The fixture verifies the production JSON transport, erasure payload and refusal, without implementing memory policy in the host."
+      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced."
     },
     "src/kb/kb_module_stage_adapters.h": {
       "disposition": "host-transport",
       "symbols": [
-        "kb_module_memory_data",
-        "kb_module_memory_erase_subject",
-        "kb_module_memory_reset_derived"
+        "kb_module_memory_data"
       ],
-      "sha256": "263b1b9462d254179c89283f19a3b4441d9cf8e094fae1a58e6212d6c3b8653c",
+      "sha256": "3c80b075ccdf0888bf5dc0f24b7c675e76b40288b1639dd822c2746c61a8b954",
       "evidence": [
         "server-go/modules/memory/personal_versions_test.go",
         "src/tests/test_module_json_call.c"
@@ -1938,9 +1966,24 @@
             "src/tests/test_module_json_call.c"
           ],
           "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
+        },
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "kb_module_memory_data",
+            "kb_module_memory_erase_subject",
+            "kb_module_memory_reset_derived"
+          ],
+          "sha256": "263b1b9462d254179c89283f19a3b4441d9cf8e094fae1a58e6212d6c3b8653c",
+          "evidence": [
+            "server-go/modules/memory/personal_versions_test.go",
+            "src/tests/test_module_json_call.c"
+          ],
+          "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
         }
       ],
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced."
     },
     "src/kb/kb_service.c": {
       "disposition": "protocol-catalog",
@@ -2000,7 +2043,7 @@
         "kb_client_memory_scope_context_snapshot",
         "kb_client_memory_scope_context_state_t"
       ],
-      "sha256": "1547cbc2a826e49e0c642d0f872f3e55eae420694657fe633424baa7181b9c93",
+      "sha256": "871b6e31ad6afc7e450723bc34faa799010b226533d0d045c60ba9ebb2b9c170",
       "source_revisions": [
         {
           "disposition": "kb-client",
@@ -2064,9 +2107,38 @@
           ],
           "sha256": "52a2c6bd25a0b9ca71fa54c51f02522f916dbfee1c27b888aa8f8f19e9194b52",
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+        },
+        {
+          "disposition": "kb-client",
+          "symbols": [
+            "kb_client_memory_assemble_typed_context",
+            "kb_client_memory_assemble_typed_context_json",
+            "kb_client_memory_assemble_typed_context_requirements_json",
+            "kb_client_memory_assemble_typed_context_with_limits",
+            "kb_client_memory_audit_hook_fn",
+            "kb_client_memory_audit_note",
+            "kb_client_memory_benchmark_json",
+            "kb_client_memory_check_drift",
+            "kb_client_memory_compact_windows",
+            "kb_client_memory_learn_style",
+            "kb_client_memory_recall_json",
+            "kb_client_memory_recall_json_ex",
+            "kb_client_memory_recall_native_json",
+            "kb_client_memory_recall_shared_json",
+            "kb_client_memory_scan_conversations",
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_restore",
+            "kb_client_memory_scope_context_set",
+            "kb_client_memory_scope_context_snapshot",
+            "kb_client_memory_scope_context_state_t"
+          ],
+          "sha256": "1547cbc2a826e49e0c642d0f872f3e55eae420694657fe633424baa7181b9c93",
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
       ],
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
       "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
     },
     "src/modules/kb_client/kb_client_agent.c": {
@@ -2459,17 +2531,15 @@
       "symbols": [
         "AIMEE_MEMORY_EVENT_DATA",
         "AIMEE_MEMORY_STAGE_DATA",
-        "server_module_memory_data",
-        "server_module_memory_erase_subject",
-        "server_module_memory_reset_derived"
+        "server_module_memory_data"
       ],
-      "sha256": "dfcae983fde0d5bdd7f99f6a0ac90809eaa8c3822befdf40cfa1b14a945de9b2",
+      "sha256": "1ed3793a9d67b8e7583db152800c6924991b886ffafa76fb0bca5d5bf5a2b7b9",
       "evidence": [
         "server-go/modules/memory/personal_versions_test.go",
         "src/tests/test_module_json_call.c"
       ],
       "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
-      "boundary_review": "Require explicit separate-owner deletion acknowledgment for native and other backends; unsupported and unavailable cleanup fails. The fixture verifies the production JSON transport, erasure payload and refusal, without implementing memory policy in the host.",
+      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
       "boundary_change": " Tools-only adapter registration is extracted with its production initialization order preserved. Tool classification consumes the existing full-name metadata wire; legacy wire serving remains intact. Memory stage registrations, scoped request forwarding and eligibility remain unchanged and Go-owned. This is boundary analysis, not independent reviewer approval.",
       "source_revisions": [
         {
@@ -2524,6 +2594,25 @@
           ],
           "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+          "boundary_change": " Tools-only adapter registration is extracted with its production initialization order preserved. Tool classification consumes the existing full-name metadata wire; legacy wire serving remains intact. Memory stage registrations, scoped request forwarding and eligibility remain unchanged and Go-owned. This is boundary analysis, not independent reviewer approval.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+        },
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "AIMEE_MEMORY_EVENT_DATA",
+            "AIMEE_MEMORY_STAGE_DATA",
+            "server_module_memory_data",
+            "server_module_memory_erase_subject",
+            "server_module_memory_reset_derived"
+          ],
+          "sha256": "dfcae983fde0d5bdd7f99f6a0ac90809eaa8c3822befdf40cfa1b14a945de9b2",
+          "evidence": [
+            "server-go/modules/memory/personal_versions_test.go",
+            "src/tests/test_module_json_call.c"
+          ],
+          "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
+          "boundary_review": "Require explicit separate-owner deletion acknowledgment for native and other backends; unsupported and unavailable cleanup fails. The fixture verifies the production JSON transport, erasure payload and refusal, without implementing memory policy in the host.",
           "boundary_change": " Tools-only adapter registration is extracted with its production initialization order preserved. Tool classification consumes the existing full-name metadata wire; legacy wire serving remains intact. Memory stage registrations, scoped request forwarding and eligibility remain unchanged and Go-owned. This is boundary analysis, not independent reviewer approval.",
           "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
@@ -2581,8 +2670,8 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "ae1325b811d7563612d6b88c6065c2d37b360fca1f95ff36811bcd7c4c720fa1",
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+      "sha256": "3f1b88e48b9afdc31d9c4cb519771fbf7c61f1b5776d2106299e22e9821bba83",
+      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
       "source_revisions": [
         {
           "disposition": "protocol-catalog",
@@ -2599,6 +2688,15 @@
           ],
           "sha256": "8a841db47a3ab02c838d2a64a9bc7875248d1ec5ed397aac3063be6ca0fbe912",
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+        },
+        {
+          "disposition": "protocol-catalog",
+          "symbols": [
+            "memory_stats"
+          ],
+          "sha256": "ae1325b811d7563612d6b88c6065c2d37b360fca1f95ff36811bcd7c4c720fa1",
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
       ],
       "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
@@ -2615,9 +2713,9 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "17ee0462a889a408c001025d633c48a094788da0d591c6b7d396a2322ee0e1dc",
+      "sha256": "63b3829ac5504512528304fb3fd1b73f57dde060383e9a6f231e37b3a1e918f8",
       "review": "2026-10-18: async op-run lifecycle moved to server_http_op_runs.c; the memory_stats catalog entry and Go memory-owner calls remain here unchanged. Browser control replies now require an actual interactive attested request, excluding inherited compute owners. 2026-10-19: the browser control-reply handler now uses the canonical exact-frame JSON codec before selecting routing fields. The sole memory_stats catalog symbol and all Go memory routing/authority remain unchanged; the diff contains only this control-frame parser replacement.",
-      "boundary_review": "PR #3091 CI repair: replace the included generic console implementation with its separately compiled server_http_module_console.c owner. The sole memory_stats protocol-catalog finding is unchanged; no memory policy moves into the host.",
+      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
       "source_revisions": [
         {
           "disposition": "protocol-catalog",
@@ -2645,6 +2743,16 @@
           "sha256": "7e766cb6b1aead4b0720b9657e6e3e7ad0579db4b6f9eca5e529980e3a600dda",
           "review": "2026-10-18: async op-run lifecycle moved to server_http_op_runs.c; the memory_stats catalog entry and Go memory-owner calls remain here unchanged. Browser control replies now require an actual interactive attested request, excluding inherited compute owners. 2026-10-19: the browser control-reply handler now uses the canonical exact-frame JSON codec before selecting routing fields. The sole memory_stats catalog symbol and all Go memory routing/authority remain unchanged; the diff contains only this control-frame parser replacement.",
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+        },
+        {
+          "disposition": "protocol-catalog",
+          "symbols": [
+            "memory_stats"
+          ],
+          "sha256": "17ee0462a889a408c001025d633c48a094788da0d591c6b7d396a2322ee0e1dc",
+          "review": "2026-10-18: async op-run lifecycle moved to server_http_op_runs.c; the memory_stats catalog entry and Go memory-owner calls remain here unchanged. Browser control replies now require an actual interactive attested request, excluding inherited compute owners. 2026-10-19: the browser control-reply handler now uses the canonical exact-frame JSON codec before selecting routing fields. The sole memory_stats catalog symbol and all Go memory routing/authority remain unchanged; the diff contains only this control-frame parser replacement.",
+          "boundary_review": "PR #3091 CI repair: replace the included generic console implementation with its separately compiled server_http_module_console.c owner. The sole memory_stats protocol-catalog finding is unchanged; no memory policy moves into the host.",
           "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
       ],
@@ -3105,11 +3213,9 @@
       "disposition": "host-fixture",
       "symbols": [
         "AIMEE_MEMORY_BACKEND",
-        "server_module_memory_data",
-        "server_module_memory_erase_subject",
-        "server_module_memory_reset_derived"
+        "server_module_memory_data"
       ],
-      "sha256": "3ff7dfb5c7a741d049ae35b93c45aab83d1fc48a84dc687308eba09c0dc3a377",
+      "sha256": "70c0699cd1271929e912e4c466c0e698229fe3aefd2edd7cac0efead388629ea",
       "source_revisions": [
         {
           "disposition": "host-fixture",
@@ -3139,9 +3245,20 @@
           ],
           "sha256": "d10fbbd1e1bb31ae859ad13bfa8e903a33d7f926e8d8db0428d432fd90510e18",
           "boundary_review": "PR #3091 final JSON transport fixture repair: provide the current MCP effect-discovery seam with an unconditional assertion if unexpectedly invoked, preserving strict header/API compilation and all existing JSON transport assertions. The fixture installs no MCP effects or memory policy; no discovery call is authorized or fabricated."
+        },
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "AIMEE_MEMORY_BACKEND",
+            "server_module_memory_data",
+            "server_module_memory_erase_subject",
+            "server_module_memory_reset_derived"
+          ],
+          "sha256": "3ff7dfb5c7a741d049ae35b93c45aab83d1fc48a84dc687308eba09c0dc3a377",
+          "boundary_review": "Require explicit separate-owner deletion acknowledgment for native and other backends; unsupported and unavailable cleanup fails. The fixture verifies the production JSON transport, erasure payload and refusal, without implementing memory policy in the host."
         }
       ],
-      "boundary_review": "Require explicit separate-owner deletion acknowledgment for native and other backends; unsupported and unavailable cleanup fails. The fixture verifies the production JSON transport, erasure payload and refusal, without implementing memory policy in the host."
+      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced."
     },
     "src/tests/test_server_dispatch.c": {
       "disposition": "host-fixture",
@@ -3150,8 +3267,8 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "5da4b5992212821d3507441ffe618df4c0a471be0c327e4247fd69bfa704e0f2",
-      "boundary_review": "PR #3091 CI fixture closure: reviewed the added dispatch-only memory.protected-intake marker using the existing stub_handler pattern, and the asserting, fail-closed OSV-discovery seam for an unexercised module-launch path. Existing memory data/scope/stat fixtures and dispatch authorization assertions are unchanged. The full prior reviewed row is retained in source_revisions; this does not approve a C memory implementation or grant source authority.",
+      "sha256": "6fd1344decc89aaadd274c5b93d8a9a8ba4cee00ffcc4bb41508bb1910c44607",
+      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
       "source_revisions": [
         {
           "disposition": "host-fixture",
@@ -3184,6 +3301,16 @@
               "boundary_review": "2026-10-20 PR #3052: Hook resource-provider fixtures now cover nested acquisition, approved mirror cwd and enclosing binding restoration. Reversing only hook_test_exec/provider peers, pre_tool_check fixture and test_hooks_pre_remote_workspace_scope reproduces the pinned fixture byte-for-byte. Memory data/scope/stat fixtures are unchanged. 2026-10-20 PR #3052: Added only fail-closed filesystem/project custody stubs to the minimal dispatcher fixture for the new scoped learning reader. Exact reversal restores the prior reviewed hash. Production memory ownership and existing fixture assertions are unchanged; not independent production approval. 2026-10-20 PR #3052: Added only the new local-source identity stub, delegating to the existing refusing resource stub. Removing exactly that function restores the prior reviewed hash. No memory fixture or source authority is granted; not independent production approval. 2026-10-20 PR #3052: Added only the primary-session adapter include and an asserting refusal stub for browser history opening in this dispatch-only fixture. Exact removal restores the prior reviewed hash byte-for-byte. Existing memory fixtures and authority remain unchanged; not independent production approval. 2026-10-21 PR #3057: Adds only an asserting refusal stub for the new DB1 exact operator cancellation entry point to the dispatch-only fixture; every call fails the fixture. Existing assertions, memory symbols and memory owner routing remain unchanged. This is source-boundary review, not independent production approval."
             }
           ]
+        },
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "kb_client_memory_scope_context_clear",
+            "memory_stats",
+            "server_module_memory_data"
+          ],
+          "sha256": "5da4b5992212821d3507441ffe618df4c0a471be0c327e4247fd69bfa704e0f2",
+          "boundary_review": "PR #3091 CI fixture closure: reviewed the added dispatch-only memory.protected-intake marker using the existing stub_handler pattern, and the asserting, fail-closed OSV-discovery seam for an unexercised module-launch path. Existing memory data/scope/stat fixtures and dispatch authorization assertions are unchanged. The full prior reviewed row is retained in source_revisions; this does not approve a C memory implementation or grant source authority."
         }
       ]
     },
@@ -3286,19 +3413,6 @@
       ],
       "sha256": "bdd928a66bebeee343ed1da935aac55547cc8d78e3e78b79794659de7609041c"
     },
-    "src/kb/http/kb_http_governance.c": {
-      "disposition": "host-transport",
-      "symbols": [
-        "kb_module_memory_erase_subject",
-        "kb_module_memory_reset_derived"
-      ],
-      "sha256": "2b2d9f18cd6579ac80ca71fcdee280b8d657f2952d70c65d6bd9cecf4c7a87ff",
-      "evidence": [
-        "server-go/modules/memory/personal_versions_test.go",
-        "src/tests/test_module_json_call.c"
-      ],
-      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
-    },
     "src/modules/vault/vault_env_bootstrap.c": {
       "disposition": "credential-custody",
       "symbols": [
@@ -3327,123 +3441,6 @@
         }
       ],
       "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
-    },
-    "src/server/server_state_vectors.c": {
-      "disposition": "host-transport",
-      "symbols": [
-        "server_module_memory_erase_subject",
-        "server_module_memory_reset_derived"
-      ],
-      "sha256": "a2351f261e7273408c2357706294397686c0b7d9f76e55fd3747afe8b1b7e369",
-      "evidence": [
-        "server-go/modules/memory/personal_versions_test.go",
-        "src/tests/test_module_json_call.c"
-      ],
-      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
-      "source_revisions": [
-        {
-          "disposition": "host-transport",
-          "symbols": [
-            "server_module_memory_erase_subject",
-            "server_module_memory_reset_derived"
-          ],
-          "sha256": "322ff96444b6de86ec616f5df7291724474441a7559d8695298bf2114f59b9b0",
-          "evidence": [
-            "server-go/modules/memory/personal_versions_test.go",
-            "src/tests/test_module_json_call.c"
-          ],
-          "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
-        },
-        {
-          "disposition": "host-transport",
-          "symbols": [
-            "server_module_memory_erase_subject",
-            "server_module_memory_reset_derived"
-          ],
-          "sha256": "65ab10b5ef4fc59f327291638322e84cc59b5fd30eb6200e36a7253137535475",
-          "evidence": [
-            "server-go/modules/memory/personal_versions_test.go",
-            "src/tests/test_module_json_call.c"
-          ],
-          "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
-          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
-        }
-      ],
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
-      "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
-    },
-    "src/tests/test_kb_http_routes.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "kb_module_memory_erase_subject",
-        "kb_module_memory_reset_derived"
-      ],
-      "sha256": "fa2faaac175da1cc4a2e680217280822a7c42ef7db0901b202cce31cd7839a48",
-      "evidence": [
-        "server-go/modules/memory/personal_versions_test.go",
-        "src/tests/test_module_json_call.c"
-      ],
-      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
-      "source_revisions": [
-        {
-          "disposition": "host-fixture",
-          "symbols": [
-            "kb_module_memory_erase_subject",
-            "kb_module_memory_reset_derived"
-          ],
-          "sha256": "7a81904c468d0d805eeb70718826128cf21067a6c85bcc9ab40c5bfe445db2be",
-          "evidence": [
-            "server-go/modules/memory/personal_versions_test.go",
-            "src/tests/test_module_json_call.c"
-          ],
-          "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
-        }
-      ],
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
-    },
-    "src/tests/test_server_erasure_protocol.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "server_module_memory_erase_subject",
-        "server_module_memory_reset_derived"
-      ],
-      "sha256": "20277ddcdc936d7d52f98de3f413d8e168cbc9c78013fb98841ee94c1f758f32",
-      "evidence": [
-        "server-go/modules/memory/personal_versions_test.go",
-        "src/tests/test_module_json_call.c"
-      ],
-      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
-      "source_revisions": [
-        {
-          "disposition": "host-fixture",
-          "symbols": [
-            "server_module_memory_erase_subject",
-            "server_module_memory_reset_derived"
-          ],
-          "sha256": "f3961c603e77311d2a5b50f19e3aa668ee769f5e7d1cda6c07c66186c495ddb4",
-          "evidence": [
-            "server-go/modules/memory/personal_versions_test.go",
-            "src/tests/test_module_json_call.c"
-          ],
-          "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
-        },
-        {
-          "disposition": "host-fixture",
-          "symbols": [
-            "server_module_memory_erase_subject",
-            "server_module_memory_reset_derived"
-          ],
-          "sha256": "33f909f6a92b59f89a1c18d4a66e4f5bac24775817bfcc09c3abbc5a907f1286",
-          "evidence": [
-            "server-go/modules/memory/personal_versions_test.go",
-            "src/tests/test_module_json_call.c"
-          ],
-          "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
-          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
-        }
-      ],
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
-      "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
     },
     "src/config_client.c": {
       "disposition": "credential-custody",
@@ -3585,15 +3582,15 @@
   "generated_files": {
     "src/schema_data.h": {
       "disposition": "protocol-catalog",
-      "boundary_review": "IR #3036: regenerate the public catalog after trajectory v2 export and owned batch-session contract changes. The two existing memory health/stats symbols and their API contracts remain unchanged. This records input/output source reasoning, not independent production-promotion approval. PR #3091: schema inputs change Vault rotation persistence; OpenAPI adds canonical chat/steer and generic host endpoints; tool catalog retires legacy phase metadata. Generators and memory-symbol ownership remain unchanged.",
+      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
       "symbols": [
         "aimee_memory_hygiene",
         "kb_store_memory_find_facts_like"
       ],
-      "sha256": "c921c4956a20f3670e411fe542f98f534ecaeea7b2a3a4a54231cd2324b4fe7b",
+      "sha256": "49d46deff27cdabd4fcc88c03e2c21ca26b90189a9374ec0301fd9ab050ae2da",
       "inputs": {
         "src/gen_schema.py": "594e22f8c740edeab764e881f22bf4b1fb044bcefe9eb1079ae41ffaa971f3c6",
-        "src/modules/kb/c/schema.sql": "51ad55b0e43c932fab8b3729dbe7af4c03915fb99d98747054beb1d44e6343e8",
+        "src/modules/kb/c/schema.sql": "01add100fd201d58e87dbaca9033bb03fa19b120d453c817bb3960974456acb9",
         "src/modules/kb/c/schema_sqlite.sql": "c57604a89ffbf7668e0c2f4c68fcdfe911d8f0cfc1c9140640859fb3ac4473ca"
       },
       "source_revisions": [
@@ -3610,6 +3607,20 @@
             "src/modules/kb/c/schema.sql": "e1b088299913d5d4b77666ed9ac3b5e46f1c84d42c23873ade5f924ce2d897c7",
             "src/modules/kb/c/schema_sqlite.sql": "432e5ef11ecc0b7db4e2216b5b6412ff806f59f8d885017dc39e18d3ce5f4fd3"
           }
+        },
+        {
+          "disposition": "protocol-catalog",
+          "boundary_review": "IR #3036: regenerate the public catalog after trajectory v2 export and owned batch-session contract changes. The two existing memory health/stats symbols and their API contracts remain unchanged. This records input/output source reasoning, not independent production-promotion approval. PR #3091: schema inputs change Vault rotation persistence; OpenAPI adds canonical chat/steer and generic host endpoints; tool catalog retires legacy phase metadata. Generators and memory-symbol ownership remain unchanged.",
+          "symbols": [
+            "aimee_memory_hygiene",
+            "kb_store_memory_find_facts_like"
+          ],
+          "sha256": "c921c4956a20f3670e411fe542f98f534ecaeea7b2a3a4a54231cd2324b4fe7b",
+          "inputs": {
+            "src/gen_schema.py": "594e22f8c740edeab764e881f22bf4b1fb044bcefe9eb1079ae41ffaa971f3c6",
+            "src/modules/kb/c/schema.sql": "51ad55b0e43c932fab8b3729dbe7af4c03915fb99d98747054beb1d44e6343e8",
+            "src/modules/kb/c/schema_sqlite.sql": "c57604a89ffbf7668e0c2f4c68fcdfe911d8f0cfc1c9140640859fb3ac4473ca"
+          }
         }
       ]
     },
@@ -3619,12 +3630,12 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "de7918e8fcfd8095fb9a44e24684c3d261cf41fa6bf8253607a63c8db67fc6fa",
+      "sha256": "0e80fe6a0c45af26b8cf96240f9edcf2074c9764f90944ca12c80d8ea3e4722f",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "3565020e223e6f50cb5b16d822875f9d7cd552c3b619c09f63dc93d7b5e0d4ac"
+        "api/openapi-server-v1.yaml": "45de473d3055768e9a038d94e9be42d08f08f0f78925b2b4fb00739ec92e8a44"
       },
-      "boundary_review": "PR #3091 CI repair: document existing generic console forwarding and user-source terminal/source-only routes, then regenerate using the unchanged generator. Optional module owners retain policy and the generated memory-symbol finding set is unchanged.",
+      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
       "source_revisions": [
         {
           "disposition": "protocol-catalog",
@@ -3651,6 +3662,19 @@
             "api/openapi-server-v1.yaml": "2b9867b9958eb306c2363e31bfdb255b74c4fcaeaff4ff18fd647d3dd8c2678c"
           },
           "boundary_review": "2026-10-20 PR #3052: reviewed only /runs native Codex/Claude workspace cwd documentation/property. Reversing those additions reproduces both previously pinned source and generated output hashes exactly. Memory routes, symbols and Go ownership are unchanged. 2026-10-21 PR #3057: Reviewed the sole added /chat/graceful_cancel documentation path and its regenerated output using the unchanged pinned generator. Exact actor-owned operator cancellation, no queued message and no effect-quiescence claim are documented; existing memory paths, symbols and Go ownership are unchanged. This is source-boundary review, not independent production approval. 2026-10-26 local extraction: serve/claim-card web schemas now describe the shared typed bus query, native historical coordinates, exact scope and bounded context fields. The unchanged generator and 392 endpoint conformance pass; ownership symbols remain unchanged. 2026-10-26 local extraction: preserve native_applicability_json and native_region_json as opaque UTF-8 strings through User/Shared web adapters. Private owner validates bounds and meaning; no public temporal or ontology policy added. Strong capability marker prevents pairing a new private frontend with a host that drops these fields. Actual User/KB adapter tests preserve coordinates beyond binary64 range; ownership symbols unchanged. This is local source-boundary review, not deployment approval. 2026-10-26 local protected-intake transport review: optional human-only verified-context raw intake hook, fixed bounded preallocated buffers/full-capacity cleansing, opaque safe reply transport and retained web capability marker. Actual Vault/native custody, scope, admission and semantic policy remain outside this generic web adapter; no public memory engine or model/MCP raw-value route added. No independent deployment or package promotion is implied. PR #3091: schema inputs change Vault rotation persistence; OpenAPI adds canonical chat/steer and generic host endpoints; tool catalog retires legacy phase metadata. Generators and memory-symbol ownership remain unchanged."
+        },
+        {
+          "disposition": "protocol-catalog",
+          "symbols": [
+            "AIMEE_MEMORY_HEALTH_ENABLED",
+            "memory_stats"
+          ],
+          "sha256": "de7918e8fcfd8095fb9a44e24684c3d261cf41fa6bf8253607a63c8db67fc6fa",
+          "inputs": {
+            "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
+            "api/openapi-server-v1.yaml": "3565020e223e6f50cb5b16d822875f9d7cd552c3b619c09f63dc93d7b5e0d4ac"
+          },
+          "boundary_review": "PR #3091 CI repair: document existing generic console forwarding and user-source terminal/source-only routes, then regenerate using the unchanged generator. Optional module owners retain policy and the generated memory-symbol finding set is unchanged."
         }
       ]
     },
@@ -3700,6 +3724,164 @@
     "src/tests/test_workspace_memory.c": {
       "sha256": "59ad08a618e76d2bc5bde969d0b563fb17bb04228779c7782fce4f7a7eff1a48",
       "reason": "Explicitly unbuilt fixture calling retired C APIs; removal and current regression owners documented in docs/validation/memory-c-retirement-2026-10-24.md"
+    },
+    "src/kb/http/kb_http_governance.c": {
+      "original": {
+        "disposition": "host-transport",
+        "symbols": [
+          "kb_module_memory_erase_subject",
+          "kb_module_memory_reset_derived"
+        ],
+        "sha256": "2b2d9f18cd6579ac80ca71fcdee280b8d657f2952d70c65d6bd9cecf4c7a87ff",
+        "evidence": [
+          "server-go/modules/memory/personal_versions_test.go",
+          "src/tests/test_module_json_call.c"
+        ],
+        "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
+      },
+      "reason": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
+      "evidence": [
+        "scripts/retired-erasure-pg-test.sql",
+        "tests/e2e/knowledge-schema-upgrade.py"
+      ]
+    },
+    "src/server/server_state_vectors.c": {
+      "original": {
+        "disposition": "host-transport",
+        "symbols": [
+          "server_module_memory_erase_subject",
+          "server_module_memory_reset_derived"
+        ],
+        "sha256": "a2351f261e7273408c2357706294397686c0b7d9f76e55fd3747afe8b1b7e369",
+        "evidence": [
+          "server-go/modules/memory/personal_versions_test.go",
+          "src/tests/test_module_json_call.c"
+        ],
+        "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
+        "source_revisions": [
+          {
+            "disposition": "host-transport",
+            "symbols": [
+              "server_module_memory_erase_subject",
+              "server_module_memory_reset_derived"
+            ],
+            "sha256": "322ff96444b6de86ec616f5df7291724474441a7559d8695298bf2114f59b9b0",
+            "evidence": [
+              "server-go/modules/memory/personal_versions_test.go",
+              "src/tests/test_module_json_call.c"
+            ],
+            "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
+          },
+          {
+            "disposition": "host-transport",
+            "symbols": [
+              "server_module_memory_erase_subject",
+              "server_module_memory_reset_derived"
+            ],
+            "sha256": "65ab10b5ef4fc59f327291638322e84cc59b5fd30eb6200e36a7253137535475",
+            "evidence": [
+              "server-go/modules/memory/personal_versions_test.go",
+              "src/tests/test_module_json_call.c"
+            ],
+            "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
+            "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+          }
+        ],
+        "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+        "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+      },
+      "reason": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
+      "evidence": [
+        "scripts/retired-erasure-pg-test.sql",
+        "tests/e2e/knowledge-schema-upgrade.py"
+      ]
+    },
+    "src/tests/test_kb_http_routes.c": {
+      "original": {
+        "disposition": "host-fixture",
+        "symbols": [
+          "kb_module_memory_erase_subject",
+          "kb_module_memory_reset_derived"
+        ],
+        "sha256": "fa2faaac175da1cc4a2e680217280822a7c42ef7db0901b202cce31cd7839a48",
+        "evidence": [
+          "server-go/modules/memory/personal_versions_test.go",
+          "src/tests/test_module_json_call.c"
+        ],
+        "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
+        "source_revisions": [
+          {
+            "disposition": "host-fixture",
+            "symbols": [
+              "kb_module_memory_erase_subject",
+              "kb_module_memory_reset_derived"
+            ],
+            "sha256": "7a81904c468d0d805eeb70718826128cf21067a6c85bcc9ab40c5bfe445db2be",
+            "evidence": [
+              "server-go/modules/memory/personal_versions_test.go",
+              "src/tests/test_module_json_call.c"
+            ],
+            "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
+          }
+        ],
+        "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+      },
+      "reason": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
+      "evidence": [
+        "scripts/retired-erasure-pg-test.sql",
+        "tests/e2e/knowledge-schema-upgrade.py"
+      ]
+    },
+    "src/tests/test_server_erasure_protocol.c": {
+      "original": {
+        "disposition": "host-fixture",
+        "symbols": [
+          "server_module_memory_erase_subject",
+          "server_module_memory_reset_derived"
+        ],
+        "sha256": "20277ddcdc936d7d52f98de3f413d8e168cbc9c78013fb98841ee94c1f758f32",
+        "evidence": [
+          "server-go/modules/memory/personal_versions_test.go",
+          "src/tests/test_module_json_call.c"
+        ],
+        "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
+        "source_revisions": [
+          {
+            "disposition": "host-fixture",
+            "symbols": [
+              "server_module_memory_erase_subject",
+              "server_module_memory_reset_derived"
+            ],
+            "sha256": "f3961c603e77311d2a5b50f19e3aa668ee769f5e7d1cda6c07c66186c495ddb4",
+            "evidence": [
+              "server-go/modules/memory/personal_versions_test.go",
+              "src/tests/test_module_json_call.c"
+            ],
+            "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
+          },
+          {
+            "disposition": "host-fixture",
+            "symbols": [
+              "server_module_memory_erase_subject",
+              "server_module_memory_reset_derived"
+            ],
+            "sha256": "33f909f6a92b59f89a1c18d4a66e4f5bac24775817bfcc09c3abbc5a907f1286",
+            "evidence": [
+              "server-go/modules/memory/personal_versions_test.go",
+              "src/tests/test_module_json_call.c"
+            ],
+            "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
+            "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+          }
+        ],
+        "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+        "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+      },
+      "reason": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
+      "evidence": [
+        "scripts/retired-erasure-pg-test.sql",
+        "tests/e2e/knowledge-schema-upgrade.py"
+      ]
     }
   },
   "historical_ledger": "tests/baselines/modules/memory-ownership.json",

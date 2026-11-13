@@ -406,40 +406,4 @@ void kb_module_stage_adapters_configure(void)
    learning_router_register_signal_classifier(learning_classify);
 }
 
-int kb_module_memory_reset_derived(void)
-{
-   /* Every memory owner must acknowledge cleanup. The retired built-in owner
-    * shared the host's SQL deletion; a separate native owner does not. */
-   cJSON *request = cJSON_CreateObject();
-   if (!request)
-      return -1;
-   cJSON_AddStringToObject(request, "operation", "reset-derived");
-   cJSON *reply = kb_module_memory_data(request);
-   cJSON_Delete(request);
-   int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "deleted"));
-   cJSON_Delete(reply);
-   return ok ? 0 : -1;
-}
-
 /* Called only by the existing authenticated erasure coordinator. */
-int kb_module_memory_erase_subject(const char *request_id, const char *subject,
-                                   const cJSON *sessions)
-{
-   /* Every memory owner must acknowledge cleanup. The retired built-in owner
-    * shared the host's SQL deletion; a separate native owner does not. */
-   if (!subject || !subject[0])
-      return -1;
-   cJSON *request = cJSON_CreateObject();
-   if (!request)
-      return -1;
-   cJSON_AddStringToObject(request, "operation", "erase-backend");
-   cJSON_AddStringToObject(request, "backend_subject", subject);
-   cJSON_AddStringToObject(request, "backend_erasure_id", request_id);
-   if (sessions)
-      cJSON_AddItemToObject(request, "backend_sessions", cJSON_Duplicate(sessions, 1));
-   cJSON *reply = kb_module_memory_data(request);
-   cJSON_Delete(request);
-   int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "deleted"));
-   cJSON_Delete(reply);
-   return ok ? 0 : -1;
-}

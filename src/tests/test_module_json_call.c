@@ -102,74 +102,8 @@ static cJSON *req(void)
    return o;
 }
 
-static void test_memory_reset_backend(const char *engine, int from_snapshot)
-{
-   /* Each backend starts in a fresh process before pthread_once captures it. */
-   pid_t child = fork();
-   assert(child >= 0);
-   if (child == 0)
-   {
-      g_saved_backend = from_snapshot ? engine : "native";
-      assert(unsetenv("AIMEE_MEMORY_BACKEND") == 0);
-      if (!from_snapshot)
-         assert(setenv("AIMEE_MEMORY_BACKEND", engine, 1) == 0);
-      assert(strcmp(config_memory_backend_current(), engine) == 0);
-      g_calls = 0;
-      int native = strcmp(engine, "native") == 0;
-      g_required_budget_ms = 6500;
-      g_reply = "{\"records\":[],\"deleted\":true}";
-      assert(server_module_memory_reset_derived() == 0);
-      assert(g_calls == 1);
-      {
-         assert(strstr(g_body, "\"operation\":\"reset-derived\""));
-         assert(strstr(g_body, "\"scope\":{\"type\":\"user\"}"));
-         g_reply = "{\"records\":[],\"deleted\":false}";
-         assert(server_module_memory_reset_derived() == -1);
-         g_result = OURO_MODULE_CALL_CAPABILITY_ABSENT;
-         assert(server_module_memory_reset_derived() == -1);
-      }
-      /* Native now lives in a separate owner too: unsupported erasure must
-       * fail rather than certifying the host's partial SQL cleanup. */
-      g_required_budget_ms = 0;
-      g_result = OURO_MODULE_CALL_OK;
-      g_reply = "{\"deleted\":true}";
-      cJSON *sessions = cJSON_CreateArray();
-      cJSON_AddItemToArray(sessions, cJSON_CreateString("session-fixture"));
-      assert(server_module_memory_erase_subject("request-fixture", "subject-fixture", sessions) ==
-             0);
-      assert(strstr(g_body, "\"operation\":\"erase-backend\""));
-      assert(strstr(g_body, "\"backend_subject\":\"subject-fixture\""));
-      assert(strstr(g_body, "session-fixture"));
-      g_reply = "{\"status\":\"error\",\"kind\":\"unsupported_operation\"}";
-      assert(server_module_memory_erase_subject("request-fixture", "subject-fixture", sessions) ==
-             -1);
-      g_result = OURO_MODULE_CALL_CAPABILITY_ABSENT;
-      assert(server_module_memory_erase_subject("request-fixture", "subject-fixture", sessions) ==
-             -1);
-      cJSON_Delete(sessions);
-      /* Later saves and environment edits cannot reroute the running owner. */
-      g_saved_backend = native ? "hillock" : "native";
-      assert(setenv("AIMEE_MEMORY_BACKEND", g_saved_backend, 1) == 0);
-      assert(strcmp(config_memory_backend_current(), engine) == 0);
-      g_result = OURO_MODULE_CALL_OK;
-      g_reply = "{\"records\":[],\"deleted\":true}";
-      g_calls = 0;
-      assert(server_module_memory_reset_derived() == 0);
-      assert(g_calls == 1);
-      exit(0);
-   }
-   int status;
-   assert(waitpid(child, &status, 0) == child);
-   assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
-}
-
 int main(void)
 {
-   test_memory_reset_backend("native", 0);
-   test_memory_reset_backend("cognee", 0);
-   test_memory_reset_backend("hillock", 0);
-   test_memory_reset_backend("cognee", 1);
-   printf("  ok    startup-selected erasure verifies cleanup and remains stable until restart\n");
    assert(unsetenv("AIMEE_MEMORY_BACKEND") == 0);
 
    ouro_module_call_result_t result;

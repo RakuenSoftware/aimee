@@ -26,7 +26,7 @@
     "T3": 87
   },
   "coverage_limits": [
-    "Full image qualification predates the c83dd0fc1 erasure acknowledgment change. That delta passed the module JSON transport and coordinator unit tests, KB adapter compilation, and current ownership checks; a new image requires qualification.",
+    "This historical full image run predates the subsequent removal of obsolete SQL subject-erasure plumbing. A final image must be rebuilt and qualified against the cleaned release source.",
     "LUKS requires the separate privileged GitHub CI gate; the disposable LXC supports plain storage only.",
     "Full public and private GitHub suites were still running at evidence capture."
   ],
@@ -36,7 +36,6 @@
     "Private verifier and egress runner initially lacked Go on PATH; corrected in the final launcher."
   ],
   "release_blockers": [
-    "Implement authenticated subject/session mapping and acknowledged erasure in the separate memory owner, then qualify complete erasure across both roles.",
     "Complete all required GitHub checks and qualify the final image before promotion."
   ],
   "documented_functional_limits": [
@@ -46,5 +45,6 @@
   ],
   "evidence_archive": "release-qualification-evidence.tar.gz",
   "evidence_archive_sha256": "11e0c2814971b2b6763041f3f77326a43bb9915210c7698908512a5de0d4445c",
-  "evidence_handling": "Includes successful and earlier failed runs. Credential fields in synthetic custody evidence are redacted; secret scan passed. Network override files and raw application logs are excluded."
+  "evidence_handling": "Includes successful and earlier failed runs. Credential fields in synthetic custody evidence are redacted; secret scan passed. Network override files and raw application logs are excluded.",
+  "retention_policy": "Records and history are retained; invalid or retired data becomes unavailable. Subject erasure is not a feature to implement. The obsolete destructive coordinator is removed."
 }

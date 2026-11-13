@@ -985,10 +985,6 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       return kb_dispatch_action_json(action, body, body_len, out_buf, out_cap);
    }
 
-   int erasure_status =
-       kb_http_subject_erasure_route(method, path, body, !vr.scope_kind[0], out_buf, out_cap);
-   if (erasure_status >= 0)
-      return erasure_status;
    /* POST /v1/implements {"topic": "..."} — deep-curator doc<->code bridge. */
    if (strcmp(path, "/v1/implements") == 0)
    {

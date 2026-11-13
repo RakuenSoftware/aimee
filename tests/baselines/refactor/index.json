@@ -275,11 +275,11 @@
         },
         {
           "path": "src/modules/kb/c/schema.sql",
-          "sha256": "51ad55b0e43c932fab8b3729dbe7af4c03915fb99d98747054beb1d44e6343e8"
+          "sha256": "01add100fd201d58e87dbaca9033bb03fa19b120d453c817bb3960974456acb9"
         },
         {
           "path": "src/modules/kb/c/schema_grants.sql",
-          "sha256": "bef2afb8072c53b47caf61c4b166f6a6233951d7219813c03efed5091df91cbb"
+          "sha256": "4635fc6b19b1bb7b1a2637696bf973375cf33836bb66384a93928c1a728079c3"
         },
         {
           "path": "src/modules/kb/c/schema_roles.sql",
@@ -639,7 +639,7 @@
         },
         {
           "path": "src/headers/cli_v1_routes_internal.h",
-          "sha256": "799ccc6fcb0f6e850c3e9de699cee8975a28f78597a04cefd059c8fae51b4f92"
+          "sha256": "bd40aa2ec523b6cb549324890f74cd9ce62f8e80d4b44f847b04c0051f427fef"
         },
         {
           "path": "src/headers/client_config.h",
@@ -991,7 +991,7 @@
         },
         {
           "path": "src/headers/kb_http_governance.h",
-          "sha256": "7b8db0f0adc95605889fb29a4f93661a1ec316262ce52f9d03f514e5c0f6c894"
+          "sha256": "594926922dfa9e6115604d02960f37c74888444626ef198e1242607cd55c6e69"
         },
         {
           "path": "src/headers/kb_http_grants.h",
@@ -1263,7 +1263,7 @@
         },
         {
           "path": "src/headers/module_stage_adapters.h",
-          "sha256": "394bb26f88a2af9136585edfb6e449fc7e6cbca21adb3d15f225bccf0b489e4c"
+          "sha256": "6307840aaa14f82644a7445798b4c5dce1ab98902840b69fad0c85b803184261"
         },
         {
           "path": "src/headers/msg_session_key.h",
@@ -1451,7 +1451,7 @@
         },
         {
           "path": "src/headers/server.h",
-          "sha256": "b59355440ff88467ade584718429c5663dfdac391f2bc3a6b14b655cbead75cf"
+          "sha256": "e45c15023f4c4a4a8a833508fef15d35ec04f1b1ae28df74f1b15a52b08577e3"
         },
         {
           "path": "src/headers/server_cli_oauth.h",
@@ -2148,7 +2148,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "deb1bfcfd07414cc51b06e6332dad6f79e9fbe28145b75185c9f09e9365d3b21",
+      "sha256": "358d2c13231b68cd81eedcbd3dd302b414e26b27c4a823d4ec51a646e00bdb95",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

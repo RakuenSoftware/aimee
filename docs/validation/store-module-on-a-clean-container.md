@@ -14,9 +14,9 @@ the real Docker private verifier, egress/Vault, plain storage and KB upgrade.
 Individual drivers clean up their disposable stacks. LUKS remains a separate
 privileged-runner gate. The image run passed all 11 checks. See the
 [qualification record](release-candidate-2026-11-13.json) for exact image and bundle
-identities, earlier failed runs, and coverage limits. The later erasure acknowledgment
-change has unit coverage and still needs image qualification. Subject erasure and
-remaining GitHub checks block promotion; these results are not a release decision.
+identities, earlier failed runs, and coverage limits. The later legacy-erasure cleanup needs image qualification. The obsolete deletion
+workflow is removed rather than ported; current memory retirement retains records.
+Remaining GitHub checks and final image qualification still gate promotion.
 
 ## Historical store-module runs
 

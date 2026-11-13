@@ -50,11 +50,11 @@ Limits of this release:
   workspace it was recalled in. The two instances exchange their memory owner keys over the
   link on the Server's KB heartbeat. A KB link authenticated by bearer token only carries no memory:
   a shared-store request from that Server answers a typed, retryable `unavailable`.
-- Subject erasure is a release blocker: the legacy privacy coordinator does not yet map
-  authenticated subjects and session coverage into the new owner's erasure protocol. Cleanup
-  requires an explicit owner acknowledgment; unsupported operations return a retryable failure
-  rather than certifying partial host cleanup. Do not promote this candidate until end-to-end
-  subject erasure is implemented and verified.
+- Memory records and their history are retained. A retired or invalid record becomes
+  unavailable for current use; its payload is not physically deleted. The obsolete SQL
+  subject-erasure command, HTTP routes, coordinator, destructive retention functions and
+  startup deletion replay have been removed. Upgrades remove the old callable functions
+  while keeping existing data and historical receipts.
 - Memory refuses a record whose text contains a raw sensitive value (an email address, phone
   number, IP address, password or key) and says the value belongs in the vault. 1.0.x stored
   such records and withheld them from injected context.

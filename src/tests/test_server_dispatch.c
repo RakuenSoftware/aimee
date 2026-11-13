@@ -1111,10 +1111,6 @@ int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.embed");
 }
-int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "kb.erase-subject");
-}
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "kb.status");
