@@ -1853,23 +1853,6 @@
       ],
       "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
     },
-    "src/kb/kb_memory_facts.c": {
-      "disposition": "host-transport",
-      "symbols": [
-        "kb_module_memory_data"
-      ],
-      "sha256": "af3e0146f7bc5c2e6f348ef6a830fe9ab7799b3f2d7b24a100510791cd0ba60e",
-      "source_revisions": [
-        {
-          "disposition": "host-transport",
-          "symbols": [
-            "kb_module_memory_data"
-          ],
-          "sha256": "4f3c8634fa78f7d7c52475e1fad5037d6ca812d42d0a21e5e871622947f74298"
-        }
-      ],
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
-    },
     "src/kb/kb_module_stage_adapters.c": {
       "disposition": "host-transport",
       "symbols": [
@@ -2344,8 +2327,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "457ca40dc571cac84373f632157447bcd099660cf0793e61327467f17d410d28",
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+      "sha256": "74cd4ca2182bfdb307b8fb5a2523c56c6e55448c39750e33de5a3b208dcc06b3",
+      "boundary_review": "Native projection import refusal now reports the owner's first refusal kind already recorded in the request context (for example stale_context) instead of the generic source-release failure. Host-side error text only: no memory policy, recall, fallback or new memory symbol is introduced.",
       "source_revisions": [
         {
           "disposition": "host-context",
@@ -2368,6 +2351,16 @@
           ],
           "sha256": "42a22a74c732d2827e40262668456ecf1cad7c2a0327e3eaf54ef9d61ed1b952",
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+        },
+        {
+          "disposition": "host-context",
+          "symbols": [
+            "kb_client_memory_recall_native_json",
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_set"
+          ],
+          "sha256": "457ca40dc571cac84373f632157447bcd099660cf0793e61327467f17d410d28"
         }
       ],
       "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
@@ -2968,23 +2961,6 @@
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
         }
       ]
-    },
-    "src/tests/test_kb_memory_facts_connection.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "kb_module_memory_data"
-      ],
-      "sha256": "3cfbd4297c29a1f4df1958305a2b172accc7d37d13d3cc64ebf80e33f7877f7b",
-      "source_revisions": [
-        {
-          "disposition": "host-fixture",
-          "symbols": [
-            "kb_module_memory_data"
-          ],
-          "sha256": "45d755121fe560505d3fdeb8fb8f315ef7f0acf06201d68fd5b95aad0e162129"
-        }
-      ],
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
     },
     "src/tests/test_mcp_client_registry.c": {
       "disposition": "host-fixture",

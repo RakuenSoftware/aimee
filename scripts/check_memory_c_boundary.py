@@ -225,29 +225,6 @@ FORBIDDEN_STORE_CALLS = (
     "aimee_pg_",
 )
 
-KB_CONNECTION_C = {
-    "src/kb/kb_memory_facts.c",
-}
-
-FORBIDDEN_KB_MEMORY_POLICY = (
-    "SELECT ",
-    "INSERT INTO",
-    "UPDATE ",
-    "DELETE FROM",
-    "SHA256",
-    "fact_grounded",
-    "fact_norm_text",
-    "rel_type_canonicalize",
-    "mf_claim_job",
-    "mf_mark_done",
-    "mf_mark_retry_or_fail",
-    "mf_build_system_prompt",
-    "mf_commit_facts",
-    "mf_subject_kind",
-)
-
-
-
 class BoundaryError(ValueError):
     pass
 
@@ -283,18 +260,6 @@ def validate(root: Path) -> None:
             raise BoundaryError(
                 f"rule=retired-memory-native-client file={path.relative_to(root)} "
                 f"symbol={match.group(0)}"
-            )
-
-    missing_connections = [relative for relative in KB_CONNECTION_C if not (root / relative).exists()]
-    if missing_connections:
-        raise BoundaryError(f"rule=memory-c-connection-inventory missing={missing_connections}")
-
-    for relative in sorted(KB_CONNECTION_C):
-        text = (root / relative).read_text(encoding="utf-8")
-        returned = [token for token in FORBIDDEN_KB_MEMORY_POLICY if token in text]
-        if returned:
-            raise BoundaryError(
-                f"rule=kb-memory-c-policy file={relative} tokens={returned}"
             )
 
     violations: list[str] = []

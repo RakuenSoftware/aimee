@@ -1204,27 +1204,6 @@ int kb_store_kb_pdf_search_chunks(const char *project, const char *query, int ma
    return n;
 }
 
-int kb_store_kb_async_count_kind_pending(const char *kind)
-{
-   if (!kind || !*kind)
-      return -1;
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-   char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT COUNT(*) FROM kb_async_jobs WHERE kind = ?1 AND status = 'pending'", err,
-       sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", kind);
-   int n = -1;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      n = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
-   return n;
-}
-
 int kb_store_kb_async_count_kind(const char *kind)
 {
    if (!kind || !*kind)

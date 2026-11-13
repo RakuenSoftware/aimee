@@ -395,12 +395,10 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_validate.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_canonical.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_custom.c
-    ${AIMEE_SRC_DIR}/modules/workflows/wfe_manager_artifacts.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_externalization.c
     ${AIMEE_SRC_DIR}/modules/workflows/tool_egress.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_native_gate.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_enforce.c
-    ${AIMEE_SRC_DIR}/modules/workflows/wfe_deliver.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_advance.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_router.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_router_catalog.c

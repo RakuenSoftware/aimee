@@ -17,7 +17,6 @@ sys.modules[SPEC.name] = checker
 SPEC.loader.exec_module(checker)
 
 ALLOWED_C = checker.ALLOWED_C
-KB_CONNECTION_C = checker.KB_CONNECTION_C
 BoundaryError = checker.BoundaryError
 validate = checker.validate
 
@@ -44,10 +43,6 @@ class MemoryCBoundaryTest(unittest.TestCase):
         for relative in ALLOWED_C:
             path = root / relative
             path.write_text("/* event bus adapter */\n", encoding="utf-8")
-        for relative in KB_CONNECTION_C:
-            path = root / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("/* provider and event connection adapter */\n", encoding="utf-8")
         (root / "src/modules/memory/module.yaml").write_text(
             json.dumps({"sources": sorted(ALLOWED_C)}), encoding="utf-8"
         )
@@ -191,13 +186,6 @@ class MemoryCBoundaryTest(unittest.TestCase):
         root = self.fixture()
         target = self.allowed_owner(root)
         target.write_text("void *p = kb_store_conn();\n", encoding="utf-8")
-        with self.assertRaises(BoundaryError):
-            validate(root)
-
-    def test_rejects_kb_memory_policy_returning_to_c(self) -> None:
-        root = self.fixture()
-        target = root / next(iter(KB_CONNECTION_C))
-        target.write_text("static void mf_build_system_prompt(void) {}\n", encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)
 

@@ -29,7 +29,7 @@ extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, 
 /* The job kinds this drain handles — the single source of truth for BOTH the
  * claim's IN-list and the dispatch in kb_store_kb_service_async_queue_drain. They
  * must agree, and the failure mode when they drift is silent and destructive:
- * kb_async_jobs is shared with the curator stages (extract_doc, memory_facts),
+ * kb_async_jobs is shared with the curator stages (extract_doc and the code stages),
  * which own their own claim lifecycle, and the dispatch marks every kind it
  * does not recognize 'failed'. An unfiltered claim therefore takes the
  * lowest-id pending row of ANY kind, so a single call to the drain endpoint

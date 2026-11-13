@@ -272,7 +272,7 @@ CLASSIFIED_DISPATCH_FILES = {
 # Business JSON is allowed after canonical terminal admission. These model
 # consumers cannot obtain model results from arbitrary command stdout.
 CANONICAL_MODEL_FILES = DISCORD_MODEL_FILES | {
-    "src/kb/kb_memory_facts.c", "src/kb/kb_reflection.c",
+    "src/kb/kb_reflection.c",
     "src/kb/kb_surprising_judge.c", "src/kb/kb_learning_synth.c",
     "src/modules/kb-synthesis/kb_curator_llm.c",
     "src/modules/kb-synthesis/kb_curator_extract.c",
