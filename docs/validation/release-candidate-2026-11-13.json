@@ -1,18 +1,21 @@
 {
-  "recorded_at": "2026-11-13T20:16:56.106602+00:00",
+  "recorded_at": "2026-11-13T21:38:37.447816+00:00",
   "release": "1.1.0 candidate",
   "release_ready": false,
-  "application_source_commit": "bba508b86562324278613789368759dad32f0465",
-  "validation_followup_commit": "cc9827b7f3f909cf5374fc43f014c233f82bb6bb",
-  "application_image_id": "sha256:70b18c031fe9be57c903e6c7cbb11580afdf3911e7c449d07ddb887dbcf8d28b",
-  "postgres_image_id": "sha256:45d1babc536a0f14c83812284f49cac44eff49cd1dff8cee94ef0a6f3a4d27da",
-  "memory_bundle_sha256": "296caa7f6c677d52f56ec19d56712dc5f9c086be84b05b8d9a6b25319a5fe5d3",
-  "memory_source_commit": "75bf4a16cc113e78287b128b43c63816da2f93d4",
+  "application_source_commit": "c7d797e74a47a596c452d2f8ae78de79502a37b6",
+  "application_image_id": "sha256:f5f4d3e68fcab29eb68a9fdca14f34a5b2cc69743b04a7badbaee6e34aaa198e",
+  "postgres_image_id": "sha256:8296fd32b3c22de347b68bc9e4b128e3ff0527554defef3b21a3bbcafca997bd",
+  "memory_bundle_sha256": "d0fb57cb2dd4cb9a5797b3c065991bb14cb333bab2628d4afca0733575489cda",
+  "memory_source_commit": "5bdbad7a4c8498024ba10b686474b352b335ef64",
+  "rust_binaries_source_commit": "810c05b47db2fe458b3382446cf812792a319a4a",
+  "production_rust_sources_unchanged_since_binary_build": true,
+  "private_adversarial_test_commit": "c7c08421660c4935e9709532d60db108366b71d9",
   "gate_command": "scripts/validation/release-candidate.sh",
   "gates_passed": [
     "kb-typed-facts-e4b",
     "kb-typed-facts-e2b",
     "server-typed-facts-e4b",
+    "server-typed-facts-e2b",
     "T1",
     "T2",
     "T3",
@@ -21,9 +24,134 @@
     "postgres-plain",
     "kb-upgrade-plain"
   ],
-  "gates_failed": [
-    "server-typed-facts-e2b: added post-promotion restart regression"
+  "gates_failed": [],
+  "post_promotion_restart": {
+    "kb-typed-facts-e4b": {
+      "checks_passed": 19,
+      "healthy_after_restart": true,
+      "promoted_fact_readable_after_restart": true
+    },
+    "kb-typed-facts-e2b": {
+      "checks_passed": 19,
+      "healthy_after_restart": true,
+      "promoted_fact_readable_after_restart": true
+    },
+    "server-typed-facts-e4b": {
+      "checks_passed": 19,
+      "healthy_after_restart": true,
+      "promoted_fact_readable_after_restart": true
+    },
+    "server-typed-facts-e2b": {
+      "checks_passed": 19,
+      "healthy_after_restart": true,
+      "promoted_fact_readable_after_restart": true
+    }
+  },
+  "existing_owner_upgrade": {
+    "checks_passed": 75,
+    "checks_failed": 0,
+    "read_only_journal_snapshots": 4,
+    "scopes": [
+      "Server personal",
+      "KB global",
+      "KB project"
+    ],
+    "verified": [
+      "Reproduced the old bootstrap refusal after real model-driven ontology promotion.",
+      "Upgraded the same retained volumes from the old image to the fixed image.",
+      "Preserved producer, scope and record owner when adding served accounts or narrowing supported KB access policy.",
+      "Original record contents, owners and versions survive upgrade, normal restart and forced restart.",
+      "Newly promoted facts remain readable through real graph tools with signed custody.",
+      "Every old canonical journal frame remains a byte-identical prefix, and original canary bytes remain in history."
+    ],
+    "processing_identities": {
+      "server": {
+        "before": {
+          "producer": {
+            "extraction": "aimee-ordinary-processing-v1",
+            "synthesis_model": "gemma-4-E4B-it/reviewer",
+            "embedding_generation": "9a1775cb-2dcf-4d5f-a62b-fdcb34861a3d"
+          },
+          "scope": {
+            "kind": "user",
+            "principal": {
+              "kind": "pam",
+              "identity": "aimee",
+              "verified_by": "5619f0e1-9a84-4de6-80bb-75d4efd9c65f"
+            }
+          },
+          "record_owner": "e43c2fd9-e68c-4f97-9d77-8beba6920924",
+          "account_count": 1,
+          "scope_count": 0
+        },
+        "after": {
+          "producer": {
+            "extraction": "aimee-ordinary-processing-v1",
+            "synthesis_model": "gemma-4-E4B-it/reviewer",
+            "embedding_generation": "9a1775cb-2dcf-4d5f-a62b-fdcb34861a3d"
+          },
+          "scope": {
+            "kind": "user",
+            "principal": {
+              "kind": "pam",
+              "identity": "aimee",
+              "verified_by": "5619f0e1-9a84-4de6-80bb-75d4efd9c65f"
+            }
+          },
+          "record_owner": "e43c2fd9-e68c-4f97-9d77-8beba6920924",
+          "account_count": 3,
+          "scope_count": 0
+        }
+      },
+      "kb": {
+        "before": {
+          "producer": {
+            "extraction": "aimee-ordinary-processing-v1",
+            "synthesis_model": "gemma-4-E4B-it/reviewer",
+            "embedding_generation": "cc4ea6e0-fbae-45e9-afa9-c62ee973b44d"
+          },
+          "scope": {
+            "kind": "global"
+          },
+          "record_owner": "92fdcf20-3c91-4e75-bf1f-d59e9ed02fd4",
+          "account_count": 1,
+          "scope_count": 3
+        },
+        "after": {
+          "producer": {
+            "extraction": "aimee-ordinary-processing-v1",
+            "synthesis_model": "gemma-4-E4B-it/reviewer",
+            "embedding_generation": "cc4ea6e0-fbae-45e9-afa9-c62ee973b44d"
+          },
+          "scope": {
+            "kind": "global"
+          },
+          "record_owner": "92fdcf20-3c91-4e75-bf1f-d59e9ed02fd4",
+          "account_count": 1,
+          "scope_count": 2
+        }
+      }
+    }
+  },
+  "fixed_defects": [
+    "KB runtime schema minimum stayed at 45, so installed databases skipped the retired-function cleanup. Bumped both runtime and SQL marker to 46; actual previous-image upgrade and seeded-v45 recreation pass.",
+    "Bootstrap supervision now accepts only verified signed descendants of its pinned ontology root, retaining namespace, signature, authority and history validation. Unrelated roots remain refused.",
+    "Rebuilding unchanged processing inputs preserves the existing producer identity when served accounts or supported access policy change; actual pipeline changes retain Native baseline enforcement."
   ],
+  "focused_validation": {
+    "public_lint_checks_passed": 76,
+    "bootstrap_tests_passed": 52,
+    "bootstrap_tests_ignored": 1,
+    "real_sdk_tests_passed": 2,
+    "core_governance_tests_passed": 24,
+    "packaging_ontology_tests_passed": 5,
+    "processing_tests_passed": 19,
+    "public_provision_tests_passed": 19,
+    "strict_clippy": [
+      "SDK all targets",
+      "bootstrap all targets"
+    ]
+  },
   "retention_cleanup": {
     "checks_passed": 160,
     "checks_failed": 0,
@@ -42,70 +170,45 @@
       "Stale versions, malformed IDs and wrong-project mutations are refused."
     ]
   },
-  "native_async_checks": {
-    "T2": 95,
-    "T3": 87
-  },
-  "fixed_defects": [
-    "KB runtime schema minimum stayed at 45, so installed databases skipped the retired-function cleanup. Bumped both runtime and SQL marker to 46; actual previous-image upgrade and seeded-v45 recreation pass."
-  ],
-  "post_promotion_restart": {
-    "application": "aimee-e2e-server-f468c900b0-aimee-server-1",
-    "checks": [
-      {
-        "name": "promoted ontology survives application restart",
-        "passed": false
-      }
-    ],
-    "elapsed_seconds": 183.0,
-    "health": "starting",
-    "bootstrap_package_refusal_count": 535,
-    "refusal": "ontology startup refuses a different active package"
-  },
-  "test_followup": [
-    "Server E2B failed request construction after a successful graph tool in two initial attempts. All four settled queries then passed on the same stack. A fresh run passed all 17 graph/promotion checks with zero retries. The exact internal refusal cause is not proven.",
-    "The E2E now bounds fresh full-read retries for that exact continuation failure; it still requires both provider requests.",
-    "Keeping the successful E2B stack revealed bootstrap package refusal after automatic ontology promotion. The new permanent restart assertion reproduces this failure."
-  ],
   "coverage_limits": [
-    "Plain storage only; privileged LUKS remains a separate CI requirement.",
-    "The additional Server post-promotion restart check fails. KB post-promotion restart is not independently qualified.",
-    "No image was published or release promoted. Required GitHub checks remain separate."
+    "Plain storage qualified; privileged LUKS remains a separate required CI gate.",
+    "Required public and private GitHub checks remain separate.",
+    "No image published and no release promoted."
   ],
   "release_blockers": [
-    "The supervised Native bootstrap pins the original ontology package and refuses the automatically promoted active package. Server does not become healthy after restart. Correct authorized-successor validation is required; the integrity guard was not weakened.",
-    "Complete required GitHub checks, including privileged LUKS, before promotion."
+    "Complete required public and private GitHub checks, including privileged LUKS, before promotion."
   ],
   "documented_functional_limits": [
     "Typed facts are not pre-injected.",
     "Automatic evidence-based demotion is not ported.",
     "Only the Server runtime account receives typed-fact processing."
   ],
-  "evidence_archive": "retention-qualification-evidence.tar.gz",
-  "evidence_archive_sha256": "0f075d020f5298a34ddda4cb4f958577d4b2eed6bd378db63075a57ba2687058",
-  "evidence_handling": "Successful and failed runs retained. Credential fields redacted, raw credential diagnostics and network override YAML excluded, all 121 exported file hashes verified, final secret scan passed.",
+  "evidence_archive": "ontology-fix-evidence.tar.gz",
+  "evidence_archive_sha256": "2adff1b8545e02f541e66810f22ff87125500c2bdfdbbbf2e8604ca0c1d85ec4",
+  "evidence_handling": "Successful and failed runs retained. Credential fields redacted; raw diagnostics and network override YAML excluded. All 96 exported file hashes verified; secret scan passed.",
   "cleanup": {
     "proxmox_host": "192.168.1.253",
     "vmid": 9474,
-    "hostname": "aimee-retention-e2e",
+    "hostname": "aimee-ontology-fix",
     "deleted": true,
-    "confirmation": "Root disk removed; /etc/pve/lxc/9474.conf absent."
+    "confirmation": "Root disk removed; /etc/pve/lxc/9474.conf and /dev/storage/vm-9474-disk-0 absent."
   },
   "retention_policy": "Records and history are retained; invalid or retired data becomes unavailable. Subject erasure is not a feature to implement. The obsolete destructive coordinator is removed.",
-  "historical_pre_cleanup_qualification": {
-    "recorded_at": "2026-11-13T16:13:10.843083+00:00",
+  "historical_blocked_qualification": {
+    "recorded_at": "2026-11-13T20:16:56.106602+00:00",
     "release": "1.1.0 candidate",
     "release_ready": false,
-    "application_image_id": "sha256:37f8af1884f2ae63ae4e65f7298646d5fb7eb5424396c60df492ccf0a37a19c5",
-    "postgres_image_id": "sha256:473985fb32bdba24d72dcdcb7d89a7c7edec0757a3d0ca4edf88aa5c159b814e",
-    "memory_bundle_sha256": "1625395f3fd6a658e29731de5ff26bc6cd29b15e3a7c11cd27d3fd573d5a32b0",
+    "application_source_commit": "bba508b86562324278613789368759dad32f0465",
+    "validation_followup_commit": "cc9827b7f3f909cf5374fc43f014c233f82bb6bb",
+    "application_image_id": "sha256:70b18c031fe9be57c903e6c7cbb11580afdf3911e7c449d07ddb887dbcf8d28b",
+    "postgres_image_id": "sha256:45d1babc536a0f14c83812284f49cac44eff49cd1dff8cee94ef0a6f3a4d27da",
+    "memory_bundle_sha256": "296caa7f6c677d52f56ec19d56712dc5f9c086be84b05b8d9a6b25319a5fe5d3",
     "memory_source_commit": "75bf4a16cc113e78287b128b43c63816da2f93d4",
     "gate_command": "scripts/validation/release-candidate.sh",
     "gates_passed": [
       "kb-typed-facts-e4b",
       "kb-typed-facts-e2b",
       "server-typed-facts-e4b",
-      "server-typed-facts-e2b",
       "T1",
       "T2",
       "T3",
@@ -114,32 +217,126 @@
       "postgres-plain",
       "kb-upgrade-plain"
     ],
-    "gates_failed": [],
+    "gates_failed": [
+      "server-typed-facts-e2b: added post-promotion restart regression"
+    ],
+    "retention_cleanup": {
+      "checks_passed": 160,
+      "checks_failed": 0,
+      "read_only_journal_snapshots": 10,
+      "scopes": [
+        "Server personal",
+        "KB global",
+        "KB project"
+      ],
+      "verified": [
+        "Actual previous-image upgrade preserves owner and record versions.",
+        "All eleven obsolete callable SQL routines are absent after upgrade.",
+        "Legacy SQL payload, retained historical revision, session and receipt fixtures survive startup and restart.",
+        "Original and replacement journal entries remain byte-identical prefixes after retirement and restart.",
+        "Retired records stay unavailable to reads/search and cannot be reactivated by old creation retries.",
+        "Stale versions, malformed IDs and wrong-project mutations are refused."
+      ]
+    },
     "native_async_checks": {
       "T2": 95,
       "T3": 87
     },
-    "coverage_limits": [
-      "This historical full image run predates the subsequent removal of obsolete SQL subject-erasure plumbing. A final image must be rebuilt and qualified against the cleaned release source.",
-      "LUKS requires the separate privileged GitHub CI gate; the disposable LXC supports plain storage only.",
-      "Full public and private GitHub suites were still running at evidence capture."
+    "fixed_defects": [
+      "KB runtime schema minimum stayed at 45, so installed databases skipped the retired-function cleanup. Bumped both runtime and SQL marker to 46; actual previous-image upgrade and seeded-v45 recreation pass."
     ],
-    "earlier_run_failures": [
-      "T2 stable native multi-turn run refused source release; final run passed without a production guard relaxation.",
-      "T3 ungraceful restart missed its health deadline; final run recovered and preserved receipts. Root cause of the earlier failure remains undiagnosed.",
-      "Private verifier and egress runner initially lacked Go on PATH; corrected in the final launcher."
+    "post_promotion_restart": {
+      "application": "aimee-e2e-server-f468c900b0-aimee-server-1",
+      "checks": [
+        {
+          "name": "promoted ontology survives application restart",
+          "passed": false
+        }
+      ],
+      "elapsed_seconds": 183.0,
+      "health": "starting",
+      "bootstrap_package_refusal_count": 535,
+      "refusal": "ontology startup refuses a different active package"
+    },
+    "test_followup": [
+      "Server E2B failed request construction after a successful graph tool in two initial attempts. All four settled queries then passed on the same stack. A fresh run passed all 17 graph/promotion checks with zero retries. The exact internal refusal cause is not proven.",
+      "The E2E now bounds fresh full-read retries for that exact continuation failure; it still requires both provider requests.",
+      "Keeping the successful E2B stack revealed bootstrap package refusal after automatic ontology promotion. The new permanent restart assertion reproduces this failure."
+    ],
+    "coverage_limits": [
+      "Plain storage only; privileged LUKS remains a separate CI requirement.",
+      "The additional Server post-promotion restart check fails. KB post-promotion restart is not independently qualified.",
+      "No image was published or release promoted. Required GitHub checks remain separate."
     ],
     "release_blockers": [
-      "Complete all required GitHub checks and qualify the final image before promotion."
+      "The supervised Native bootstrap pins the original ontology package and refuses the automatically promoted active package. Server does not become healthy after restart. Correct authorized-successor validation is required; the integrity guard was not weakened.",
+      "Complete required GitHub checks, including privileged LUKS, before promotion."
     ],
     "documented_functional_limits": [
       "Typed facts are not pre-injected.",
       "Automatic evidence-based demotion is not ported.",
       "Only the Server runtime account receives typed-fact processing."
     ],
-    "evidence_archive": "release-qualification-evidence.tar.gz",
-    "evidence_archive_sha256": "11e0c2814971b2b6763041f3f77326a43bb9915210c7698908512a5de0d4445c",
-    "evidence_handling": "Includes successful and earlier failed runs. Credential fields in synthetic custody evidence are redacted; secret scan passed. Network override files and raw application logs are excluded.",
-    "retention_policy": "Records and history are retained; invalid or retired data becomes unavailable. Subject erasure is not a feature to implement. The obsolete destructive coordinator is removed."
+    "evidence_archive": "retention-qualification-evidence.tar.gz",
+    "evidence_archive_sha256": "0f075d020f5298a34ddda4cb4f958577d4b2eed6bd378db63075a57ba2687058",
+    "evidence_handling": "Successful and failed runs retained. Credential fields redacted, raw credential diagnostics and network override YAML excluded, all 121 exported file hashes verified, final secret scan passed.",
+    "cleanup": {
+      "proxmox_host": "192.168.1.253",
+      "vmid": 9474,
+      "hostname": "aimee-retention-e2e",
+      "deleted": true,
+      "confirmation": "Root disk removed; /etc/pve/lxc/9474.conf absent."
+    },
+    "retention_policy": "Records and history are retained; invalid or retired data becomes unavailable. Subject erasure is not a feature to implement. The obsolete destructive coordinator is removed.",
+    "historical_pre_cleanup_qualification": {
+      "recorded_at": "2026-11-13T16:13:10.843083+00:00",
+      "release": "1.1.0 candidate",
+      "release_ready": false,
+      "application_image_id": "sha256:37f8af1884f2ae63ae4e65f7298646d5fb7eb5424396c60df492ccf0a37a19c5",
+      "postgres_image_id": "sha256:473985fb32bdba24d72dcdcb7d89a7c7edec0757a3d0ca4edf88aa5c159b814e",
+      "memory_bundle_sha256": "1625395f3fd6a658e29731de5ff26bc6cd29b15e3a7c11cd27d3fd573d5a32b0",
+      "memory_source_commit": "75bf4a16cc113e78287b128b43c63816da2f93d4",
+      "gate_command": "scripts/validation/release-candidate.sh",
+      "gates_passed": [
+        "kb-typed-facts-e4b",
+        "kb-typed-facts-e2b",
+        "server-typed-facts-e4b",
+        "server-typed-facts-e2b",
+        "T1",
+        "T2",
+        "T3",
+        "private-verifier",
+        "egress-vault",
+        "postgres-plain",
+        "kb-upgrade-plain"
+      ],
+      "gates_failed": [],
+      "native_async_checks": {
+        "T2": 95,
+        "T3": 87
+      },
+      "coverage_limits": [
+        "This historical full image run predates the subsequent removal of obsolete SQL subject-erasure plumbing. A final image must be rebuilt and qualified against the cleaned release source.",
+        "LUKS requires the separate privileged GitHub CI gate; the disposable LXC supports plain storage only.",
+        "Full public and private GitHub suites were still running at evidence capture."
+      ],
+      "earlier_run_failures": [
+        "T2 stable native multi-turn run refused source release; final run passed without a production guard relaxation.",
+        "T3 ungraceful restart missed its health deadline; final run recovered and preserved receipts. Root cause of the earlier failure remains undiagnosed.",
+        "Private verifier and egress runner initially lacked Go on PATH; corrected in the final launcher."
+      ],
+      "release_blockers": [
+        "Complete all required GitHub checks and qualify the final image before promotion."
+      ],
+      "documented_functional_limits": [
+        "Typed facts are not pre-injected.",
+        "Automatic evidence-based demotion is not ported.",
+        "Only the Server runtime account receives typed-fact processing."
+      ],
+      "evidence_archive": "release-qualification-evidence.tar.gz",
+      "evidence_archive_sha256": "11e0c2814971b2b6763041f3f77326a43bb9915210c7698908512a5de0d4445c",
+      "evidence_handling": "Includes successful and earlier failed runs. Credential fields in synthetic custody evidence are redacted; secret scan passed. Network override files and raw application logs are excluded.",
+      "retention_policy": "Records and history are retained; invalid or retired data becomes unavailable. Subject erasure is not a feature to implement. The obsolete destructive coordinator is removed."
+    }
   }
 }
