@@ -279,6 +279,14 @@ def exercise(stack, check, diagnostics, extraction_seconds):
     check('a fact under the promoted relation is published', NOVEL in facts and name in facts)
 
 
+def promoted_ontology_restart(stack, check):
+    # Promotion is only usable if the supervised bootstrap accepts the active
+    # successor on the next process start. A successful graph read alone can
+    # miss the bootstrap repeatedly refusing the newly promoted package.
+    matrix.command('docker', 'restart', stack.application)
+    check('promoted ontology survives application restart', wait_healthy(stack.application, 180))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
@@ -318,6 +326,7 @@ def main():
             token.write_text(stack.env['AIMEE_KB_API_BEARER_TOKEN'])
             token.chmod(0o600)
         (exercise if args.role == 'kb' else exercise_server)(stack, check, diagnostics, args.extraction_seconds)
+        promoted_ontology_restart(stack, check)
     except (RuntimeError, OSError, ValueError, KeyError, IndexError, subprocess.SubprocessError):
         checks.append(dict(name='KB typed facts completed', passed=False))
         print('FAIL KB typed facts completed', flush=True)
