@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test schema 45 against persisted erasure states in a disposable replay DB.
+"""Test schema 46 against persisted erasure states in a disposable replay DB.
 
 Requires initialized AIMEE_KB_STORE_REPLAY_URL. All fixture changes roll back.
 """
@@ -53,7 +53,7 @@ def main():
                             input=migration_test_sql(), text=True, env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     print(('PASS' if result.returncode == 0 else 'FAIL') +
-          ' schema 45 migration, reapply, saved counts and retired routine removal')
+          ' schema 46 migration, reapply, saved counts and retired routine removal')
     if result.returncode:
         print('PostgreSQL connection failed' if result.returncode == 2 else
               'PostgreSQL rejected the schema upgrade regression transaction')

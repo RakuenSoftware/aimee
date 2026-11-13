@@ -19352,10 +19352,10 @@ INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', '__EMBED_DIM__'
 -- still refuses until every content row has an exact projects.kb_project.
 INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
--- schema_version: BUMP in lockstep with AIMEE_KB_STORE_SCHEMA_VERSION in kb_store/db_schema.h
+-- schema_version: BUMP in lockstep with AIMEE_KB_STORE_SCHEMA_VERSION in db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '45')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '46')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- Utility horizon anchors are protected change events. Exact per-record probes
