@@ -2621,10 +2621,23 @@
         "kb_client_memory_scope_context_set",
         "server_module_memory_data"
       ],
-      "sha256": "91d9c7047d999c4d242348aa025fd92bd6bf25c37f76c63faeea3f7df55cde71",
-      "boundary_change": "2026-11-13: search_graph and get_entity_edges also read the account's own typed facts through memory_user_typed_command (server_memory.c, the existing user-memory runtime transport with the verified account context) and append those rows after the KB's; with no KB answer they show the local rows. The KB request, its scope context and its refusal handling are unchanged. No memory policy, eligibility or fallback is implemented in C: the memory module owns typed-fact generation and answers.",
-      "boundary_review": "2026-11-13 typed facts on the Server: reviewed the two MCP graph consumers; the only new memory call is the existing personal runtime transport with operations user-search-graph/user-entity-edges. Covered by unit-test-server-memory-domain (merge and KB-unavailable cases). This is source-boundary analysis, not independent release approval.",
+      "sha256": "59692ba15b32a0696c43976db47aa6d2c80e5c0c8542170f62b23d5b12a06de3",
+      "boundary_change": "2026-11-13: mechanical clang-format 19 formatting of the Server typed-fact row merge.",
+      "boundary_review": "2026-11-13: reviewed the formatting-only diff; memory policy, source selection and host transport remain unchanged. This is source-boundary analysis, not independent release approval.",
       "source_revisions": [
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "kb_client_memory_audit_note",
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_set",
+            "server_module_memory_data"
+          ],
+          "sha256": "91d9c7047d999c4d242348aa025fd92bd6bf25c37f76c63faeea3f7df55cde71",
+          "boundary_change": "2026-11-13: search_graph and get_entity_edges also read the account's own typed facts through memory_user_typed_command (server_memory.c, the existing user-memory runtime transport with the verified account context) and append those rows after the KB's; with no KB answer they show the local rows. The KB request, its scope context and its refusal handling are unchanged. No memory policy, eligibility or fallback is implemented in C: the memory module owns typed-fact generation and answers.",
+          "boundary_review": "2026-11-13 typed facts on the Server: reviewed the two MCP graph consumers; the only new memory call is the existing personal runtime transport with operations user-search-graph/user-entity-edges. Covered by unit-test-server-memory-domain (merge and KB-unavailable cases). This is source-boundary analysis, not independent release approval."
+        },
         {
           "disposition": "host-transport",
           "symbols": [

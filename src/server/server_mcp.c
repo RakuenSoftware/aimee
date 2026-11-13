@@ -586,7 +586,7 @@ static char *mcp_merge_local_rows(char *raw, cJSON *local, const char *key)
    }
    cJSON *row;
    cJSON_ArrayForEach(row, cJSON_GetObjectItemCaseSensitive(local, key))
-      cJSON_AddItemToArray(rows, cJSON_Duplicate(row, 1));
+       cJSON_AddItemToArray(rows, cJSON_Duplicate(row, 1));
    char *merged = cJSON_PrintUnformatted(response);
    cJSON_Delete(response);
    if (!merged)
@@ -609,8 +609,8 @@ cJSON *tool_search_graph(cJSON *args)
    cJSON_AddNumberToObject(request, "limit", limit > 20 ? 20 : limit);
    char *raw = kb_v1_action_request("memory.search_graph", request);
    mcp_memory_scope_end();
-   cJSON *local =
-       mcp_local_typed_rows("user-search-graph", "query", value, limit > 20 ? 20 : limit, "relations");
+   cJSON *local = mcp_local_typed_rows("user-search-graph", "query", value, limit > 20 ? 20 : limit,
+                                       "relations");
    raw = mcp_merge_local_rows(raw, local, "relations");
    cJSON_Delete(local);
    if (!raw)
