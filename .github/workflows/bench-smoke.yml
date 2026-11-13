@@ -33,6 +33,9 @@ jobs:
       - name: Benchmark suite unit tests
         run: python3 -m unittest discover -s benchmarks/tests -p 'test_*.py'
 
+      - name: Benchmark adapter, dataset and judge contract tests
+        run: PYTHONPATH=. python3 -m unittest discover -s tests/benchmarks -p 'test_*.py'
+
       - name: Install dependencies
         run: |
           sudo apt-get update -q
