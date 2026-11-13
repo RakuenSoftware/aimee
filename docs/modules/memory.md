@@ -54,6 +54,7 @@ The one-shot `aimee-memory-init` service in `compose.yaml` runs `aimee-memory-pr
 - later boots: it verifies the installation and changes nothing;
 - after an image update, or when the requested accounts or embedding provider change: it prepares
   the installation again under the same identity and keeps the owner key and the stored memory.
+  Adding a browser login also keeps the runtime account's existing typed-fact processing identity.
   An image update is refused while the application is running; a changed account list, shared
   scope or embedder found while it runs keeps the current installation until the next start.
 

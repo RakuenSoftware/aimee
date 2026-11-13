@@ -348,7 +348,7 @@ def policy_changes(recorded: dict, desired: dict) -> list[str]:
     return changes
 
 
-def write_inputs(role: str, inputs: Path, desired: dict, health: dict | None, node: str | None) -> None:
+def write_inputs(role: str, inputs: Path, desired: dict, health: dict | None, node: str | None, previous: Path | None = None) -> None:
     """Generate operator inputs into a directory that must not exist yet."""
     argv = [str(BUNDLE / 'provision/operator_inputs.py'), '--role', role, '--namespace-prefix', NAMESPACE_PREFIX,
             '--output', str(inputs)]
@@ -382,6 +382,8 @@ def write_inputs(role: str, inputs: Path, desired: dict, health: dict | None, no
                 # generation of inputs.
                 '--ontology-key', str(inputs.parent / f'typed-facts-{role}.key'),
                 '--graph-file', str(inputs.parent / f'typed-facts-{role}.graph')]
+        if previous is not None:
+            argv += ['--previous-inputs', str(previous)]
         for key in ('ca_file', 'cert_file', 'key_file'):
             if selection.get(key):
                 argv += ['--' + key.replace('_', '-'), selection[key]]
@@ -509,7 +511,7 @@ def provision(role: str, health: dict | None = None) -> str:
         regenerated = parent / f'inputs-{role}.new'
         if regenerated.exists():
             shutil.rmtree(regenerated)
-        write_inputs(role, regenerated, desired, health, recorded['node'])
+        write_inputs(role, regenerated, desired, health, recorded['node'], inputs)
     retired = ROOT / f'.retired-{role}'
     if retired.exists():
         shutil.rmtree(retired)
