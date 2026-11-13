@@ -1,19 +1,19 @@
 {
   "platforms": {
     "linux-amd64": {
-      "aimee_commit": "a72c46ba71ed83f9f7e58621110dfd6369464912",
+      "aimee_commit": "193a7b51f8006dff53ec7b5f198caa1b4c5824fa",
       "aims_db_commit": "75bf4a16cc113e78287b128b43c63816da2f93d4",
       "archive": "linux-amd64.tar.xz",
-      "bytes": 26694924,
+      "bytes": 26891128,
       "public_headers": {
         "src/core/codec/include/aimee/core/codec/base64.h": "cd2a11f93c6c515ab03ac489fa0dbf34fa1f193f0b67dedfbd1519bda9fe2fce",
         "src/db1_client/caches.h": "127e251b55faa57b0a74d2d71d092ed0b79bb1b0dca8af9ba06f1b30888b5827",
         "src/db1_client/checkpoints.h": "bbd927edbc84c856dbf16c4621d66b4f02e0233fcea6684dfad9ee506109512b",
-        "src/db1_client/db1_module_api.h": "158e4bb1793db35824b0d37873d1a966ec022a624b63426c0033921ba55f9626",
+        "src/db1_client/db1_module_api.h": "ba33bc8ec6a977f936d45b843c609cc0a9958d81eb9784d91ccdb7e1be5607e9",
         "src/db1_client/decisions.h": "98d424711dae9b85c46da8537713f51be76c7c645dab925afb0fd6922c4b008c",
         "src/db1_client/original_input_plan.h": "23164ac552c8620a7f84ea875b4c489c52b816a8a0113394cc94022e18c30c7f",
         "src/db1_client/primary_sessions.h": "9057c53c24e642e15a9725b101f59bf91bc38f25762ef200926e7be884c04024",
-        "src/db1_client/server_sessions.h": "38e916526c8969bcc1054f75607c231add8aec70f33540a725c9a65a4cbfc820",
+        "src/db1_client/server_sessions.h": "7fa8164d4242c0de3f3629f448c547fba8e1a241a2956b45581b4ddb3dce4c9f",
         "src/db1_client/transport.h": "e7916f808f5901ec0494ca40080dcfa404f62ff93791663a2c08d80776d1cacd",
         "src/harness_memory_audit.h": "9a410706133107131b27c708a0ec971a79e622b4f74d4ed292ec839bc215d230",
         "src/harness_memory_common.h": "49ec0f5b0070cd955f6a34c6a3d8a695eaff6d3c82ff4cc4e2d8ced59572940f",
@@ -52,7 +52,7 @@
         "src/headers/request_context.h": "95ab1320fb10c32fbb1085ed2306f3af755d37690dc4929042659ce780c9108b",
         "src/headers/responses_history_owner.h": "71f1891426b72a18e12baac64628a7e15a79b8e39b31901310050ec017987d0e",
         "src/headers/sandbox.h": "114c278bbf8f887855176714b84a75e86a482ab5461bccc36840e69daa3673f9",
-        "src/headers/server.h": "b59355440ff88467ade584718429c5663dfdac391f2bc3a6b14b655cbead75cf",
+        "src/headers/server.h": "e45c15023f4c4a4a8a833508fef15d35ec04f1b1ae28df74f1b15a52b08577e3",
         "src/headers/server_http.h": "dbc3d19737d7d7ca3d65250269dbcd1c0599d62c2f1011f5b68a14cfe48d19ff",
         "src/headers/server_http_identity.h": "25c54d4134c3a3f31d9c9b908dcf14fbf5b62882bb85e737c7eea5772aefe6ac",
         "src/headers/server_session_capture.h": "34578f89a6f052a3f52eeace6bf0289ef962516e193c2702fda34a6c153d1b5c",
@@ -69,7 +69,7 @@
         "src/modules/kb/c/rules.h": "1af72008c913fe126dd5caeee5bdd92c0cb28587f67d77e587290130275d1f1d",
         "src/modules/kb/c/tasks.h": "be08375eb5ea718c0935499ee6c46332bebae336f445666ec9bc772b1390be8a",
         "src/modules/kb/include/aimee/kb/index_observer.h": "2b238ad2d39119db5622584c2a111a8fc8d206fdf52f21979f938b1cb97d24c0",
-        "src/modules/kb_client/kb_client.h": "1547cbc2a826e49e0c642d0f872f3e55eae420694657fe633424baa7181b9c93",
+        "src/modules/kb_client/kb_client.h": "871b6e31ad6afc7e450723bc34faa799010b226533d0d045c60ba9ebb2b9c170",
         "src/modules/learning/include/aimee/learning/learning.h": "de589bc1f77fb23e901d9d65b6f35255453d54b22c31ec0048a927269659fc10",
         "src/modules/tools/include/aimee/tools/agent_tools.h": "5f6aa5a6523bc1840d118287c2c810cae470f81367b29f96ff31168c35ec3c44",
         "src/modules/tools/include/aimee/tools/module_api.h": "a1107367a6bf92e4db92be9d006ce41ab81c19c9b540d2262618c5f38ad743c5",
@@ -86,7 +86,7 @@
         "src/vendor/cJSON.c": "ce880e1f26f9a10f54a5b8d534604b6159fdebb83075a522779bb7f7322aa37b",
         "src/vendor/headers/cJSON.h": "0e390c0955c04baf5c2eca34839a17b4f01bb2d9a51c05ef8198cd9c37aa9718"
       },
-      "sha256": "1625395f3fd6a658e29731de5ff26bc6cd29b15e3a7c11cd27d3fd573d5a32b0"
+      "sha256": "296caa7f6c677d52f56ec19d56712dc5f9c086be84b05b8d9a6b25319a5fe5d3"
     }
   },
   "schema_version": 1

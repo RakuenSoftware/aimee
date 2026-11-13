@@ -274,11 +274,8 @@ func TestOwnedDeliveryRetention(t *testing.T) {
 	key := deliveryHash("retention intent")
 	intent := deliveryIntent(key, "retention-prepared")
 	batch := ownedInputBatch(ownedInputUUID, "safe retained input", "opaque")
-	for _, sid := range []string{"ret-pending", "ret-done", "ret-legacy", "ret-exp-pending", "ret-exp-done", "ret-sub-pending", "ret-sub-done"} {
+	for _, sid := range []string{"ret-pending", "ret-done", "ret-legacy", "ret-exp-pending", "ret-exp-done"} {
 		owner := "retention-alice"
-		if sid == "ret-sub-pending" || sid == "ret-sub-done" {
-			owner = "retention-subject"
-		}
 		if _, e := p.Exec(ctx, `INSERT INTO server_sessions(id,principal) VALUES($1,$2)`, sid, owner); e != nil {
 			t.Fatal(e)
 		}
@@ -287,7 +284,7 @@ func TestOwnedDeliveryRetention(t *testing.T) {
 			continue
 		}
 		c := ownedInputExpect(t, db, store.StatusOK, 58, sid, ownedInputUUID, "turn", owner, batch, intent)
-		if sid == "ret-done" || sid == "ret-exp-done" || sid == "ret-sub-done" {
+		if sid == "ret-done" || sid == "ret-exp-done" {
 			ownedInputExpect(t, db, store.StatusOK, 61, c[5], "source-owner", owner, key, "delivered", `{"known_fixture_result":true}`)
 		}
 	}

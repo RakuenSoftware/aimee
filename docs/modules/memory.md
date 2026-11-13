@@ -84,10 +84,15 @@ host surfaces that dispatch to whatever the implementation declares.
 
 ## Data and migrations
 
+Memory records and their history are retained. Invalidation or retirement makes a record
+unavailable for current use; it does not physically delete its payload or earlier revisions.
+The legacy `memory.delete` name denotes retained retirement. The retired SQL subject-erasure
+coordinator is not part of the memory contract and must not be ported to the new owner.
+
 The implementation keeps its records in its own database under `private-memory/<role>/state` in
 the home volume, next to its configuration and owner key; one backup of the home volume covers
 them. The `aimee-memory` volume holds only prepared artifacts and can be regenerated. Canonical
-source producers, access, erasure and replay records remain with DB1 under
+source producers, access and historical replay records remain with DB1 under
 `server-go/modules/aimee/families/`.
 
 The 1.0.x memory tables (`user_memories` on a Server, `memories` on a KB) are retained by an
