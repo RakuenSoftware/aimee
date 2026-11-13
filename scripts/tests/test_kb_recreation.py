@@ -19,9 +19,30 @@ class Stack:
         self.starts = 0
         self.downs = 0
         self.defect = defect
+        self.postgres = 'fixture-postgres'
+        self.schema_version = '46'
+        self.retired = False
 
     def start(self):
         self.starts += 1
+        if self.starts > 1 and self.defect != 'stale-schema':
+            self.schema_version = '46'
+            if self.defect != 'retired-routines':
+                self.retired = False
+
+    def sql(self, *args, data):
+        assert args[:4] == ('docker', 'exec', '-i', self.postgres)
+        if data.startswith("UPDATE kb_meta SET value='45'"):
+            self.schema_version = '45'
+            self.retired = True
+            return ''
+        if data.startswith('SELECT bool_and(to_regprocedure(signature) IS NOT NULL)'):
+            return 't' if self.retired else 'f'
+        if data.startswith('SELECT bool_and(to_regprocedure(signature) IS NULL)'):
+            return 'f' if self.retired else 't'
+        if data == "SELECT value FROM kb_meta WHERE key='schema_version'":
+            return self.schema_version
+        raise AssertionError('unexpected fixture SQL')
 
     def compose(self, action):
         assert action == 'down'
@@ -65,13 +86,20 @@ class KBRecreationTests(unittest.TestCase):
         def check(name, passed):
             if not passed:
                 raise AssertionError(name)
-        with patch.object(gate.matrix, 'application_metadata_is_private', return_value=True):
+        with patch.object(gate.matrix, 'application_metadata_is_private', return_value=True), \
+             patch.object(gate.matrix, 'command', side_effect=stack.sql):
             gate.exercise(stack, check)
 
     def test_current_store_survives_two_recreations(self):
         stack = Stack()
         self.run_gate(stack)
         self.assertEqual((stack.starts, stack.downs, len(stack.records)), (3, 2, 4))
+
+    def test_missing_schema_migration_fails_the_gate(self):
+        for defect, message in (('stale-schema', 'applies schema 46'),
+                                ('retired-routines', 'removes every retired SQL routine')):
+            with self.subTest(defect=defect), self.assertRaisesRegex(AssertionError, message):
+                self.run_gate(Stack(defect))
 
     def test_data_or_authority_loss_fails_the_gate(self):
         for defect in ('lost-content', 'authority'):
