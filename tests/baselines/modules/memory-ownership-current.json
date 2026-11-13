@@ -3582,15 +3582,15 @@
   "generated_files": {
     "src/schema_data.h": {
       "disposition": "protocol-catalog",
-      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
+      "boundary_review": "KB schema 46 raises the minimum runtime schema so installed v45 databases execute the already-reviewed obsolete erasure-function drops. This changes upgrade admission and the version marker only; retained SQL payloads, history and receipts remain intact. The shipped-image upgrade regression seeds all seven retired routine signatures and verifies their removal.",
       "symbols": [
         "aimee_memory_hygiene",
         "kb_store_memory_find_facts_like"
       ],
-      "sha256": "49d46deff27cdabd4fcc88c03e2c21ca26b90189a9374ec0301fd9ab050ae2da",
+      "sha256": "ef6e8b69082b8eaa2a598ffd81ceb299865b6c393bce5da8cc129b2c25243c4c",
       "inputs": {
         "src/gen_schema.py": "594e22f8c740edeab764e881f22bf4b1fb044bcefe9eb1079ae41ffaa971f3c6",
-        "src/modules/kb/c/schema.sql": "01add100fd201d58e87dbaca9033bb03fa19b120d453c817bb3960974456acb9",
+        "src/modules/kb/c/schema.sql": "908bac8bb72720585ae1011246cd3b0af1179482f6ccf916c07e24525d4f9048",
         "src/modules/kb/c/schema_sqlite.sql": "c57604a89ffbf7668e0c2f4c68fcdfe911d8f0cfc1c9140640859fb3ac4473ca"
       },
       "source_revisions": [
@@ -3619,6 +3619,20 @@
           "inputs": {
             "src/gen_schema.py": "594e22f8c740edeab764e881f22bf4b1fb044bcefe9eb1079ae41ffaa971f3c6",
             "src/modules/kb/c/schema.sql": "51ad55b0e43c932fab8b3729dbe7af4c03915fb99d98747054beb1d44e6343e8",
+            "src/modules/kb/c/schema_sqlite.sql": "c57604a89ffbf7668e0c2f4c68fcdfe911d8f0cfc1c9140640859fb3ac4473ca"
+          }
+        },
+        {
+          "disposition": "protocol-catalog",
+          "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
+          "symbols": [
+            "aimee_memory_hygiene",
+            "kb_store_memory_find_facts_like"
+          ],
+          "sha256": "49d46deff27cdabd4fcc88c03e2c21ca26b90189a9374ec0301fd9ab050ae2da",
+          "inputs": {
+            "src/gen_schema.py": "594e22f8c740edeab764e881f22bf4b1fb044bcefe9eb1079ae41ffaa971f3c6",
+            "src/modules/kb/c/schema.sql": "01add100fd201d58e87dbaca9033bb03fa19b120d453c817bb3960974456acb9",
             "src/modules/kb/c/schema_sqlite.sql": "c57604a89ffbf7668e0c2f4c68fcdfe911d8f0cfc1c9140640859fb3ac4473ca"
           }
         }

@@ -28,6 +28,8 @@ spec = importlib.util.spec_from_file_location('matrix', ROOT / 'tests/e2e/deploy
 matrix = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(matrix)
 
+GRAPH_CONTINUATION_RETRIES = 0
+
 MODELS = ('gemma-4-E4B-it', 'gemma-4-E2B-it')  # the supported synthesis models
 # Simple undated statements. The memory module keeps only candidates grounded
 # in the note and in the active ontology, and a small CPU model gets some of
@@ -101,14 +103,28 @@ def server_request(stack, path, body):
 
 def server_tool_text(stack, tool, arguments):
     helper = (ROOT / 'tests/e2e/typed-facts-native-query.py').read_text()
-    result = subprocess.run(['docker', 'exec', '-i', '-u', '1000', '-e', 'AIMEE_TYPED_FACTS_NATIVE_FIXTURE=1',
-                             stack.application, 'python3', '-c', helper],
-                            input=json.dumps(dict(tool=tool, arguments=dict(arguments, store='user'))),
-                            capture_output=True, text=True, timeout=150)
-    try:
-        body = json.loads(result.stdout.strip().splitlines()[-1])
-    except (ValueError, IndexError):
-        return ''
+    global GRAPH_CONTINUATION_RETRIES
+    # Publication can precede the final source-index update. A continuation
+    # refusal is never success: repeat the whole graph read with fresh custody,
+    # then still require both real provider requests below. Bound this narrowly
+    # so a persistent request-builder or custody failure remains a failed gate.
+    for attempt in range(4):
+        result = subprocess.run(['docker', 'exec', '-i', '-u', '1000', '-e', 'AIMEE_TYPED_FACTS_NATIVE_FIXTURE=1',
+                                 stack.application, 'python3', '-c', helper],
+                                input=json.dumps(dict(tool=tool, arguments=dict(arguments, store='user'))),
+                                capture_output=True, text=True, timeout=150)
+        try:
+            body = json.loads(result.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            return ''
+        refused = (body.get('status') == 'failed' and body.get('provider_requests') == 1 and
+                   body.get('outputs') == [] and body.get('error') ==
+                   dict(code='server_error', message='failed to build request'))
+        if not refused or attempt == 3:
+            break
+        GRAPH_CONTINUATION_RETRIES += 1
+        print('WAIT native graph continuation refused; retrying the full read with fresh custody', flush=True)
+        time.sleep(10)
     if body.get('status') != 'completed' or body.get('provider_requests') != 2:
         print('Native graph query diagnostic: ' + json.dumps(body), flush=True)
         raise RuntimeError('native graph query did not complete its two provider requests')
@@ -313,6 +329,7 @@ def main():
                 except (RuntimeError, OSError, ValueError, subprocess.SubprocessError):
                     pass
     finally:
+        diagnostics['graph_continuation_retries'] = GRAPH_CONTINUATION_RETRIES
         (args.output / 'kb-typed-facts.json').write_text(
             json.dumps(dict(checks=checks, diagnostics=diagnostics), indent=2) + '\n')
         if stack and not args.keep:
