@@ -37,7 +37,11 @@ def api(path, body=None):
 
 
 def main():
+    if os.environ.get('AIMEE_TYPED_FACTS_NATIVE_FIXTURE') != '1':
+        raise RuntimeError('requires the disposable typed-facts launcher')
     query = json.load(sys.stdin)
+    if query.get('tool') not in ('search_graph', 'get_entity_edges'):
+        raise RuntimeError('the fixture only exercises typed graph reads')
     prefix = 'typed-graph-' + uuid.uuid4().hex[:10]
     outputs, requests = [], []
 

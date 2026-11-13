@@ -101,7 +101,8 @@ def server_request(stack, path, body):
 
 def server_tool_text(stack, tool, arguments):
     helper = (ROOT / 'tests/e2e/typed-facts-native-query.py').read_text()
-    result = subprocess.run(['docker', 'exec', '-i', '-u', '1000', stack.application, 'python3', '-c', helper],
+    result = subprocess.run(['docker', 'exec', '-i', '-u', '1000', '-e', 'AIMEE_TYPED_FACTS_NATIVE_FIXTURE=1',
+                             stack.application, 'python3', '-c', helper],
                             input=json.dumps(dict(tool=tool, arguments=dict(arguments, store='user'))),
                             capture_output=True, text=True, timeout=150)
     try:
