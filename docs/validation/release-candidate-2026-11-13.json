@@ -171,12 +171,14 @@
     ]
   },
   "coverage_limits": [
-    "Plain storage qualified; privileged LUKS remains a separate required CI gate.",
-    "Required public and private GitHub checks remain separate.",
-    "No image published and no release promoted."
+    "The original 11-gate run used plain storage; additional_qualification separately pins the successful LUKS, browser, concurrent-retention and onboarding runs.",
+    "The additional candidate build includes runtime-web and omits code-server, matching E2E CI.",
+    "Required CI includes two unresolved failures recorded in additional_qualification; no image publication or release promotion."
   ],
   "release_blockers": [
-    "Complete required public and private GitHub checks, including privileged LUKS, before promotion."
+    "integration-tests: The independently graded execution and scoped reuse journey fails. The cause is not established by this LXC qualification.",
+    "live-auth-rigs: Nine enforcement assertions fail with unavailable writes. The KB log also reports hardened schema verification failure: no recorded embedding dimension and a runtime role unable to migrate.",
+    "Required public and private checks must pass on the final candidate before promotion."
   ],
   "documented_functional_limits": [
     "Typed facts are not pre-injected.",
@@ -337,6 +339,167 @@
       "evidence_archive_sha256": "11e0c2814971b2b6763041f3f77326a43bb9915210c7698908512a5de0d4445c",
       "evidence_handling": "Includes successful and earlier failed runs. Credential fields in synthetic custody evidence are redacted; secret scan passed. Network override files and raw application logs are excluded.",
       "retention_policy": "Records and history are retained; invalid or retired data becomes unavailable. Subject erasure is not a feature to implement. The obsolete destructive coordinator is removed."
+    }
+  },
+  "additional_qualification": {
+    "recorded_at": "2026-11-13T22:39:52.690788+00:00",
+    "release_ready": false,
+    "inputs": {
+      "application_source_commit": "fcecd3761eb8da3dba27679a738e6b4d53ce10c2",
+      "application_archive_sha256": "6544ce92e977738126faa22e4ebd8f3ec22bd0a0db97dbbaf55c91ed1860c6dd",
+      "test_metadata_followup_commit": "b3f57f44d04a65ef6780f290d369e4df7dd4f10e",
+      "test_archive_sha256": "d2af0807fa684f73207dd9e6d8167589e43442fcb6d7d32ee76801724e573a69",
+      "memory_source_commit": "5bdbad7a4c8498024ba10b686474b352b335ef64",
+      "memory_bundle_sha256": "d0fb57cb2dd4cb9a5797b3c065991bb14cb333bab2628d4afca0733575489cda",
+      "private_adversarial_test_commit": "c7c08421660c4935e9709532d60db108366b71d9",
+      "application_image_id": "sha256:76436d0ca96c44f6a728619badbbb2b7a0a33b7f86282d83d50cdb35ac290f85",
+      "build_args": {
+        "WITH_VSCODE": "0",
+        "AIMEE_VERSION": "1.1.0-fcecd3761"
+      },
+      "host": "192.168.1.253",
+      "vmid": 9474,
+      "hostname": "aimee-release-continued",
+      "address": "192.168.0.166/23",
+      "privileged": true,
+      "resources": {
+        "cores": 24,
+        "memory_mib": 32768,
+        "root_disk_gib": 180
+      },
+      "harness_sha256": {
+        "concurrency-diagnostic.py": "b680b2999189f5bf32ac8d0d2c0df2e02bed9e167fe3ecf250135b93141315ad",
+        "client-pairing-configured-owner.py": "b63ad1e0df473a6dac5a1517a068e63da0afb65014859475bfe6b6a6ec459e46",
+        "export-evidence.py": "182bf95e7288b5b5c6b9c5209c6ba42d49f333cd7909811e6e5c58cf7181f59a",
+        "account-onboarding-recovery.py": "7cb8ce5b918700667fa1fa5d022fdb27db468e1121601f757dd9ec0d388cdfb0",
+        "concurrent-retention.py": "e2b63cda0ac5beb8cb5745e48c3a4cf31a52487357da39ef6a9cb46d863942bb",
+        "client-pairing-continued.py": "dd94b53f9be133d2a5b4c01650970c9693f3dce744544d81a35c8888afc30678"
+      }
+    },
+    "image_identities": [
+      {
+        "reference": "aimee:continued",
+        "Id": "sha256:76436d0ca96c44f6a728619badbbb2b7a0a33b7f86282d83d50cdb35ac290f85",
+        "RepoDigests": [],
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Created": "2026-11-13T22:19:20.034868137Z"
+      },
+      {
+        "reference": "aimee-postgres:continued",
+        "Id": "sha256:616f891afe00a3b390f10ff7806fbc07c44b111f4fdec8d893926789596c2aae",
+        "RepoDigests": [],
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Created": "2026-11-13T22:17:19.946364204Z"
+      },
+      {
+        "reference": "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:ceb4ad977fdd7062b425f0cd6e67c358302889be3b9793eb8825923d9718767a",
+        "Id": "sha256:76ebc2420959fdb9cdb18c6ae2e5c3cc419d713f1dd708a359573418e0fd3638",
+        "RepoDigests": [
+          "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:ceb4ad977fdd7062b425f0cd6e67c358302889be3b9793eb8825923d9718767a"
+        ],
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Created": "2026-10-31T21:26:27.368535201Z"
+      },
+      {
+        "reference": "postgres:18-bookworm",
+        "Id": "sha256:ce679a28809b6d048dc4838e925826fcda6bc0f491eb8d697b6c07108315ff55",
+        "RepoDigests": [
+          "postgres@sha256:ece55f7868da684e400f82f1030a050718adbdd65c23aa500c486f6e2950dc0f"
+        ],
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Created": "2026-11-12T20:53:30.610568907Z"
+      },
+      {
+        "reference": "ghcr.io/rakuensoftware/aimee-llm-e4b@sha256:756c5952edba8ddb38e9d8b476519763533da9aba70b7c48154d3deb382f52a1",
+        "Id": "sha256:46c711bd580c5bb89ca3317ae98a177d49306028692870c3969fdff4ab5e7f32",
+        "RepoDigests": [
+          "ghcr.io/rakuensoftware/aimee-llm-e4b@sha256:756c5952edba8ddb38e9d8b476519763533da9aba70b7c48154d3deb382f52a1"
+        ],
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Created": "2026-09-07T10:09:26.84947583Z"
+      }
+    ],
+    "checks_passed": {
+      "linked_luks_boot": 5,
+      "luks_fresh_recovery": 11,
+      "luks_legacy_migration": 13,
+      "kb_luks_recreation": 20,
+      "server_encrypted_facts": 19,
+      "kb_encrypted_facts": 19,
+      "concurrent_retention_and_recovery": 30,
+      "browser_account_prepared_restart": 10,
+      "independent_client_pairing_and_browser": 69,
+      "thin_client_proxy_with_real_codex": 30
+    },
+    "checks_failed": 0,
+    "check_counts_are_named_assertions_not_independent_journeys": true,
+    "memory_owner_recovery_seconds": {
+      "server_memory_owner_recovery_seconds": 1.22,
+      "kb_memory_owner_recovery_seconds": 1.21
+    },
+    "verified": [
+      "Fresh encrypted PostgreSQL, migration, clean restart, crash recovery and missing/corrupt Vault key refusal.",
+      "No plaintext database canary in the LUKS image; retained legacy source remains unchanged.",
+      "Schema 46 removes every obsolete callable SQL routine during encrypted KB recreation while preserving scoped canaries.",
+      "Both roles promote ontology and remain healthy with promoted-fact reads after restart on LUKS-backed PostgreSQL.",
+      "Concurrent commits, duplicate retries and retirement preserve canonical record identity; stale creation retries cannot reactivate retired data.",
+      "All 23 surviving records in each role retain exact contents and versions after forced restart.",
+      "Configured-owner device pairing, browser Settings, invitation expiry/replay and revocation persist across restart.",
+      "New browser account remains unavailable until prepared restart; that restart preserves the node and original runtime record contents and version."
+    ],
+    "public_lint_checks_passed": 76,
+    "ci_followup": {
+      "source_commit": "b3f57f44d04a65ef6780f290d369e4df7dd4f10e",
+      "script_regression_suite": "passed",
+      "go_unit_tests": "passed",
+      "remaining_failures": [
+        {
+          "job": "integration-tests",
+          "url": "https://github.com/RakuenSoftware/aimee/actions/runs/43518560154/job/132206935206",
+          "observed": "The independently graded execution and scoped reuse journey fails. The cause is not established by this LXC qualification."
+        },
+        {
+          "job": "live-auth-rigs",
+          "url": "https://github.com/RakuenSoftware/aimee/actions/runs/43518560154/job/132206934878",
+          "observed": "Nine enforcement assertions fail with unavailable writes. The KB log also reports hardened schema verification failure: no recorded embedding dimension and a runtime role unable to migrate."
+        }
+      ]
+    },
+    "resolved_ci_defects": [
+      "The Aimee module ownership descriptor still referenced the removed erasure test and omitted its replacement queryer test and retained-history cleanup SQL. Ownership and application source locks were refreshed without changing runtime behavior.",
+      "The KB recreation unit fixture lacked the new v45 SQL setup. It now models the migration and refuses stale schema or retained obsolete functions, as well as content or authority loss."
+    ],
+    "expected_boundary_and_harness_corrections": [
+      "The first pairing run attempted personal memory for a newly created browser account before a prepared restart. This is documented as unavailable. A separate recovery run verifies the required prepared restart, unchanged node and existing record versions, and continued access from the already paired device.",
+      "The positive pairing/browser lifecycle run explicitly configured pairingowner in AIMEE_MEMORY_ACCOUNTS before first start.",
+      "The first concurrency fixture used idempotency keys shorter than the supported 16-character minimum; all were correctly refused. The final fixture uses full UUID keys.",
+      "The initial owner-kill probe used the retired process basename. The final probe targets the actual shipped aimee-memory-module process.",
+      "The onboarding policy reader initially used a nonexistent fixture path; it was corrected to OPERATOR_POLICY_SAFE.json. These harness failures are retained alongside successful runs."
+    ],
+    "coverage_limits": [
+      "Linux amd64 Docker inside a privileged Debian 13 LXC; the host kernel supplies dm-crypt and loop devices.",
+      "The application build includes runtime-web and omits code-server, matching the E2E CI build profile.",
+      "The additional model runs use E4B with LUKS-backed PostgreSQL; both model variants were qualified in the prior plain-storage run.",
+      "LUKS checks qualify PostgreSQL storage and do not claim that the separate Native memory home volume is LUKS-backed.",
+      "No image publication, merge or release promotion. Required GitHub checks still determine release readiness."
+    ],
+    "evidence_archive": "continued-evidence.tar.gz",
+    "evidence_archive_sha256": "699120703b6c72e3b4bfeecb2c89fcbcc805e9f90c26ca56ce7c55eea62f98b9",
+    "evidence_files_verified": 68,
+    "secret_scan": "passed; two initial manifest-filename/hash false positives resolved by renaming fixture evidence files",
+    "cleanup": {
+      "proxmox_host": "192.168.1.253",
+      "vmid": 9474,
+      "hostname": "aimee-release-continued",
+      "deleted": true,
+      "config_absent": true,
+      "root_disk_absent": true,
+      "host_crypt_mappings_and_loop_attachments_empty": true
     }
   }
 }
