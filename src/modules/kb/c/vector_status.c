@@ -29,7 +29,8 @@ cJSON *pgvec_vector_status_json(void)
    else if (kb_ready <= 0)
    {
       cJSON_AddStringToObject(vector, "status", "degraded");
-      cJSON_AddStringToObject(vector, "message", "pgvector table exists but its ANN index is missing");
+      cJSON_AddStringToObject(vector, "message",
+                              "pgvector table exists but its ANN index is missing");
    }
    else
    {

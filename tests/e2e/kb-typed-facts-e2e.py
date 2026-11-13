@@ -56,6 +56,18 @@ def operator_lines(stack):
             if 'typed facts:' in line]
 
 
+def wait_publications(stack, count, seconds):
+    # Receipt-bearing native reads revalidate the selected inventory before the
+    # next provider send. Wait for this fixture's writes to finish rather than
+    # racing extraction and treating a correct stale-source refusal as success.
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if sum(line.startswith('typed facts: published ') for line in operator_lines(stack)) >= count:
+            return True
+        time.sleep(2)
+    return False
+
+
 def wait_facts(stack, name, seconds, needle=''):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -88,8 +100,20 @@ def server_request(stack, path, body):
 
 
 def server_tool_text(stack, tool, arguments):
-    status, body = server_request(stack, '/v1/mcp/call', dict(tool=tool, arguments=arguments))
-    return json.dumps(body) if status == 200 else ''
+    helper = (ROOT / 'tests/e2e/typed-facts-native-query.py').read_text()
+    result = subprocess.run(['docker', 'exec', '-i', '-u', '1000', stack.application, 'python3', '-c', helper],
+                            input=json.dumps(dict(tool=tool, arguments=dict(arguments, store='user'))),
+                            capture_output=True, text=True, timeout=150)
+    try:
+        body = json.loads(result.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return ''
+    if body.get('status') != 'completed' or body.get('provider_requests') != 2:
+        print('Native graph query diagnostic: ' + json.dumps(body), flush=True)
+        raise RuntimeError('native graph query did not complete its two provider requests')
+    if 'source_custody_unavailable' in json.dumps(body.get('outputs', [])):
+        raise RuntimeError('native graph tool refused source custody')
+    return json.dumps(body.get('outputs', []))
 
 
 def wait_tool(stack, tool, arguments, needles, seconds):
@@ -111,12 +135,14 @@ def exercise_server(stack, check, diagnostics, extraction_seconds):
     for index, content in enumerate(FACTS.values()):
         status, stored = server_request(stack, '/v1/memory/store', dict(key=f'typed-facts-e2e-{index}', content=content))
         check(f'Server stores personal fact {index + 1}', status == 200 and stored.get('status') == 'ok')
+    check('the processing worker finishes the four personal notes',
+          wait_publications(stack, len(FACTS), extraction_seconds))
     started, subject_name, text = time.monotonic(), '', ''
     deadline = started + extraction_seconds
     while time.monotonic() < deadline and not text:
         for name in FACTS:
             text = server_tool_text(stack, 'search_graph', dict(query=name))
-            if name in text and 'graph relation' in text:
+            if name in text and 'aims-parent-typed-graph/v1' in text:
                 subject_name = name
                 break
             text = ''
@@ -130,7 +156,7 @@ def exercise_server(stack, check, diagnostics, extraction_seconds):
     check('search_graph serves the personal typed fact', bool(text) and subject_name in text)
     diagnostics['first_typed_subject'] = subject_name
     edges = server_tool_text(stack, 'get_entity_edges', dict(entity=subject_name))
-    check('get_entity_edges serves the edges of that subject', subject_name in edges and 'Edges for' in edges)
+    check('get_entity_edges serves the edges of that subject', subject_name in edges and 'aims-parent-typed-graph/v1' in edges)
     for index, content in enumerate(NOVEL_NOTES):
         status, stored = server_request(stack, '/v1/memory/store', dict(key=f'typed-facts-novel-{index}', content=content))
         check(f'Server stores novel-relation note {index + 1}', status == 200 and stored.get('status') == 'ok')
@@ -142,9 +168,12 @@ def exercise_server(stack, check, diagnostics, extraction_seconds):
             time.sleep(15)
     diagnostics['operator'] = operator_lines(stack)[-40:]
     check(f'the operator promotes {NOVEL} after three distinct notes', promoted)
+    published = sum(line.startswith('typed facts: published ') for line in operator_lines(stack))
     name, content = NOVEL_PROBE
     status, stored = server_request(stack, '/v1/memory/store', dict(key='typed-facts-novel-probe', content=content))
     check('Server stores a note under the promoted relation', status == 200 and stored.get('status') == 'ok')
+    check('the processing worker finishes the personal probe',
+          wait_publications(stack, published + 1, extraction_seconds))
     text = wait_tool(stack, 'search_graph', dict(query=name), [name, NOVEL], extraction_seconds)
     diagnostics['operator'] = operator_lines(stack)[-40:]
     check('a personal fact under the promoted relation is published', bool(text))

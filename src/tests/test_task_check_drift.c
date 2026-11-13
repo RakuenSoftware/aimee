@@ -61,7 +61,7 @@ static int drifted(const char *file, const char *command)
    int d = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(r, "drifted"));
    const char *message = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "message"));
    assert(message && (d ? strstr(message, "Fix the parser") != NULL
-                         : !strcmp(message, "Action overlaps the active task scope")));
+                        : !strcmp(message, "Action overlaps the active task scope")));
    cJSON_Delete(r);
    return d;
 }

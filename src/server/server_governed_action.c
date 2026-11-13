@@ -345,7 +345,8 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
        * round trips outlast it, the policy asks for fresh evidence, never a
        * replay: renew it once and retry this step. The intent's evidence,
        * context and revocation commitments must be unchanged. */
-      if (!refreshed && !strcmp(action_text(decision, "reason"), "freshness_or_authority_unavailable"))
+      if (!refreshed &&
+          !strcmp(action_text(decision, "reason"), "freshness_or_authority_unavailable"))
       {
          refreshed = 1;
          ingress_preinject_release_send_guard(guard);

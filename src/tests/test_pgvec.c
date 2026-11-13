@@ -65,7 +65,7 @@ static void test_collection_names(void)
 static void test_collection_readiness_accepts_supported_ann_indexes(void)
 {
    assert(pgvec_table_ready(PGVEC_CODE_TABLE) == 1); /* HNSW */
-   assert(pgvec_table_ready(PGVEC_KB_TABLE) == 1);     /* DiskANN */
+   assert(pgvec_table_ready(PGVEC_KB_TABLE) == 1);   /* DiskANN */
    /* Existing indexes satisfy ensure without trying to create a redundant
     * second ANN index (SQLite cannot execute either backend's DDL). */
    assert(pgvec_ensure_index(PGVEC_CODE_TABLE, 4, 0) == 0);

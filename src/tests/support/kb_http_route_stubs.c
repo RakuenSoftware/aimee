@@ -123,6 +123,17 @@ int kb_http_servers_route_ex(const char *method, const char *path, const char *q
    return kb_http_servers_route(method, path, query_string, out_buf, out_cap);
 }
 
+int kb_http_servers_owner_trust(const char *method, const char *scope_kind, const char *body,
+                                int body_len, char *out_buf, int out_cap)
+{
+   (void)method;
+   (void)scope_kind;
+   (void)body;
+   (void)body_len;
+   snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory owner unavailable\"}");
+   return 503;
+}
+
 int g_test_registry_heartbeat_allow;
 char g_test_registry_server_id[128], g_test_registry_issuer[601], g_test_registry_serial[129],
     g_test_registry_fingerprint[65];

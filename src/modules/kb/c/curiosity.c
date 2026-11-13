@@ -410,8 +410,7 @@ int kb_store_curiosity_rescore_all(const kb_store_curiosity_memory_t *memory)
 
       const char *needle =
           r->target_topic[0] ? r->target_topic : (r->target_entity[0] ? r->target_entity : "");
-      int coverage =
-          memory && needle[0] ? memory_signal(memory->coverage, memory->ctx, needle) : 0;
+      int coverage = memory && needle[0] ? memory_signal(memory->coverage, memory->ctx, needle) : 0;
       double novelty = 1.0 / (1.0 + (double)coverage);
 
       double progress = 0.0;

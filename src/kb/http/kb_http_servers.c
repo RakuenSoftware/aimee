@@ -1,4 +1,6 @@
 #include "kb_http_servers.h"
+#include "kb_http_common.h"
+#include "kb_scope.h"
 #include "../../modules/kb/c/server_registry.h"
 #include "modules/kb/c/kb_store_tenant.h"
 #include "kb_mgmt_endpoint.h"
@@ -612,4 +614,29 @@ int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const
 int kb_http_servers_route(const char *m, const char *p, const char *qs, char *out, int cap)
 {
    return kb_http_servers_route_ex(m, p, qs, NULL, 0, out, cap);
+}
+
+/* The verified enrolled Server service transport exchanges pinned memory owner
+ * identities here. The optional memory implementation owns validation. */
+extern int aimee_module_memory_owner_identity(char *out, int cap) __attribute__((weak));
+extern int aimee_module_memory_owner_trust_add(const char *peer_json) __attribute__((weak));
+int kb_http_servers_owner_trust(const char *method, const char *scope_kind, const char *body,
+                                int body_len, char *out_buf, int out_cap)
+{
+   if (strcmp(method, "POST") != 0)
+      return kb_http_error(out_buf, out_cap, 405, "method not allowed");
+   if (strcmp(scope_kind, KB_SCOPE_KIND_SERVICE) != 0)
+      return kb_http_error(out_buf, out_cap, 403, "enrolled Server service identity required");
+   if (!aimee_module_memory_owner_trust_add || !aimee_module_memory_owner_identity)
+      return kb_http_error(out_buf, out_cap, 503, "memory owner unavailable");
+   if (!body || body_len <= 0 || body_len > 4096)
+      return kb_http_error(out_buf, out_cap, 400, "bounded owner identity required");
+   char peer[4097];
+   memcpy(peer, body, (size_t)body_len);
+   peer[body_len] = '\0';
+   if (aimee_module_memory_owner_trust_add(peer) < 0)
+      return kb_http_error(out_buf, out_cap, 409, "owner identity refused");
+   if (aimee_module_memory_owner_identity(out_buf, out_cap) != 0)
+      return kb_http_error(out_buf, out_cap, 503, "memory owner identity unavailable");
+   return 200;
 }

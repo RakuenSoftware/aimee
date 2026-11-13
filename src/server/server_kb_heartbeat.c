@@ -128,8 +128,8 @@ static int memory_owner_trust_exchange(void)
    if (aimee_module_memory_owner_identity(identity, sizeof identity) != 0)
       return 0;
    int status = -1;
-   char *reply = kb_client_mtls_request_timeout("POST", "/v1/memory/owner-trust", identity, 10000,
-                                                &status);
+   char *reply =
+       kb_client_mtls_request_timeout("POST", "/v1/memory/owner-trust", identity, 10000, &status);
    int done = 0;
    if (status == 200 && reply && aimee_module_memory_owner_trust_add(reply) >= 0)
    {
