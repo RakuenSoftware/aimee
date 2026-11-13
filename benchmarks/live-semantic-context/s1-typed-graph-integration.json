@@ -1,0 +1,20 @@
+{
+  "reviewed_base_commit": "53e5ccf2b6b5093ecf904a279d36d2f9f31c973f",
+  "review": "Exact reversible native typed-graph routing through the existing source-custody renderer, plus get_entity_edges catalog admission. No LSP implementation, provider fixtures, signatures, or thresholds change. Every remaining byte is compared with the frozen candidate.",
+  "paths": {
+    "src/server/server_mcp_call_table.c": [
+      {
+        "release_text": "{\n   return tool_memory_ask(c->jargs, c->structured);\n}\nextern int aimee_module_tool_source_mode(const char *) __attribute__((weak));\nstatic cJSON *mcph_served_memory(struct mcp_call *c, int card);\nstatic cJSON *mcph_search_graph(struct mcp_call *c)\n{\n   return aimee_module_tool_source_mode && aimee_module_tool_source_mode(c->tool) != 0\n              ? mcph_served_memory(c, 0)\n              : tool_search_graph(c->jargs);\n}\nstatic cJSON *mcph_get_episode(struct mcp_call *c)\n{\n",
+        "frozen_text": "{\n   return tool_memory_ask(c->jargs, c->structured);\n}\nstatic cJSON *mcph_search_graph(struct mcp_call *c)\n{\n   return tool_search_graph(c->jargs);\n}\nstatic cJSON *mcph_get_episode(struct mcp_call *c)\n{\n"
+      },
+      {
+        "release_text": "}\nstatic cJSON *mcph_get_entity_edges(struct mcp_call *c)\n{\n   return aimee_module_tool_source_mode && aimee_module_tool_source_mode(c->tool) != 0\n              ? mcph_served_memory(c, 0)\n              : tool_get_entity_edges(c->jargs);\n}\nstatic cJSON *mcph_get_context_block(struct mcp_call *c)\n{\n",
+        "frozen_text": "}\nstatic cJSON *mcph_get_entity_edges(struct mcp_call *c)\n{\n   return tool_get_entity_edges(c->jargs);\n}\nstatic cJSON *mcph_get_context_block(struct mcp_call *c)\n{\n"
+      },
+      {
+        "release_text": "    {\"search_graph\", mcph_search_graph, \"core,review_indexed\"},\n    {\"get_episode\", mcph_get_episode, NULL},\n    {\"get_entity\", mcph_get_entity, NULL},\n    {\"get_entity_edges\", mcph_get_entity_edges, \"core\"},\n    {\"get_context_block\", mcph_get_context_block, \"core,review_indexed\"},\n    {\"memory_get\", mcph_memory_get, NULL},\n    {\"list_facts\", mcph_list_facts, NULL},\n",
+        "frozen_text": "    {\"search_graph\", mcph_search_graph, \"core,review_indexed\"},\n    {\"get_episode\", mcph_get_episode, NULL},\n    {\"get_entity\", mcph_get_entity, NULL},\n    {\"get_entity_edges\", mcph_get_entity_edges, NULL},\n    {\"get_context_block\", mcph_get_context_block, \"core,review_indexed\"},\n    {\"memory_get\", mcph_memory_get, NULL},\n    {\"list_facts\", mcph_list_facts, NULL},\n"
+      }
+    ]
+  }
+}

@@ -447,6 +447,22 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         ):
             self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
 
+    def test_release_validator_only_allows_exact_typed_graph_integration(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        for path, blocks in validator.REVIEWED_TYPED_GRAPH_INTEGRATIONS.items():
+            current = (ROOT / path).read_text()
+            frozen = validator.git_output("show", f"{candidate}:{path}")
+            self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+            for block in blocks:
+                release = block["release_text"]
+                for drift in (current.replace(release, "", 1), current + release,
+                              current.replace(release, release + "/* unreviewed */", 1),
+                              current.replace("lsp", "unreviewed_lsp", 1)):
+                    with self.subTest(path=path, block=release[:40]):
+                        self.assertNotEqual(current, drift)
+                        self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
     def test_release_validator_only_allows_exact_source_custody_integration(self) -> None:
         validator = load_release_validator()
         candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
