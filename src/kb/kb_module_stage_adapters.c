@@ -408,10 +408,8 @@ void kb_module_stage_adapters_configure(void)
 
 int kb_module_memory_reset_derived(void)
 {
-   const char *backend = config_memory_backend_current();
-   if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
-       strcmp(backend, "aimee-native") == 0)
-      return 0;
+   /* Every memory owner must acknowledge cleanup. The retired built-in owner
+    * shared the host's SQL deletion; a separate native owner does not. */
    cJSON *request = cJSON_CreateObject();
    if (!request)
       return -1;
@@ -427,10 +425,8 @@ int kb_module_memory_reset_derived(void)
 int kb_module_memory_erase_subject(const char *request_id, const char *subject,
                                    const cJSON *sessions)
 {
-   const char *backend = config_memory_backend_current();
-   if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
-       strcmp(backend, "aimee-native") == 0)
-      return 0;
+   /* Every memory owner must acknowledge cleanup. The retired built-in owner
+    * shared the host's SQL deletion; a separate native owner does not. */
    if (!subject || !subject[0])
       return -1;
    cJSON *request = cJSON_CreateObject();

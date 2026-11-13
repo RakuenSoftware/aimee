@@ -119,8 +119,7 @@ static void test_memory_reset_backend(const char *engine, int from_snapshot)
       g_required_budget_ms = 6500;
       g_reply = "{\"records\":[],\"deleted\":true}";
       assert(server_module_memory_reset_derived() == 0);
-      assert(g_calls == (native ? 0 : 1));
-      if (!native)
+      assert(g_calls == 1);
       {
          assert(strstr(g_body, "\"operation\":\"reset-derived\""));
          assert(strstr(g_body, "\"scope\":{\"type\":\"user\"}"));
@@ -129,6 +128,25 @@ static void test_memory_reset_backend(const char *engine, int from_snapshot)
          g_result = OURO_MODULE_CALL_CAPABILITY_ABSENT;
          assert(server_module_memory_reset_derived() == -1);
       }
+      /* Native now lives in a separate owner too: unsupported erasure must
+       * fail rather than certifying the host's partial SQL cleanup. */
+      g_required_budget_ms = 0;
+      g_result = OURO_MODULE_CALL_OK;
+      g_reply = "{\"deleted\":true}";
+      cJSON *sessions = cJSON_CreateArray();
+      cJSON_AddItemToArray(sessions, cJSON_CreateString("session-fixture"));
+      assert(server_module_memory_erase_subject("request-fixture", "subject-fixture", sessions) ==
+             0);
+      assert(strstr(g_body, "\"operation\":\"erase-backend\""));
+      assert(strstr(g_body, "\"backend_subject\":\"subject-fixture\""));
+      assert(strstr(g_body, "session-fixture"));
+      g_reply = "{\"status\":\"error\",\"kind\":\"unsupported_operation\"}";
+      assert(server_module_memory_erase_subject("request-fixture", "subject-fixture", sessions) ==
+             -1);
+      g_result = OURO_MODULE_CALL_CAPABILITY_ABSENT;
+      assert(server_module_memory_erase_subject("request-fixture", "subject-fixture", sessions) ==
+             -1);
+      cJSON_Delete(sessions);
       /* Later saves and environment edits cannot reroute the running owner. */
       g_saved_backend = native ? "hillock" : "native";
       assert(setenv("AIMEE_MEMORY_BACKEND", g_saved_backend, 1) == 0);
@@ -137,7 +155,7 @@ static void test_memory_reset_backend(const char *engine, int from_snapshot)
       g_reply = "{\"records\":[],\"deleted\":true}";
       g_calls = 0;
       assert(server_module_memory_reset_derived() == 0);
-      assert(g_calls == (native ? 0 : 1));
+      assert(g_calls == 1);
       exit(0);
    }
    int status;
