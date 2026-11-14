@@ -86,17 +86,14 @@ def main():
 
     def historical_source_count():
         # Read-only SQL in the owned database; its own credential stays inside it.
-        code = '''import os,subprocess
-import json,sys
-p=json.load(sys.stdin)
-env=dict(os.environ,PGPASSWORD=os.environ['AIMEE_STORE_RUNTIME_PASSWORD'],PGSSLMODE='require')
-r=subprocess.run(['psql','-h','127.0.0.1','-U','aimee_store_runtime','-d','aimee_store','-X','-At','-v','ON_ERROR_STOP=1','-c',"BEGIN READ ONLY; SELECT count(*) FROM server_code_file_versions WHERE project='"+p['project']+"' AND fingerprint=encode(sha256(convert_to('"+p['content'].replace("'","''")+"','UTF8')),'hex'); COMMIT;"],env=env,capture_output=True,text=True)
-if r.returncode:raise SystemExit(1)
-print(json.dumps([int(x) for x in r.stdout.splitlines() if x.isdigit()]))
-'''
-        values = json.loads(matrix.command('docker', 'exec', '-i', args.store_db, 'python3', '-c',
-                            code, data=json.dumps(dict(project=project, content=first))))
-        return values[0]
+        sql = ("BEGIN READ ONLY; SELECT count(*) FROM server_code_file_versions WHERE project='" +
+               project + "' AND fingerprint=encode(sha256(convert_to('" +
+               first.replace("'", "''") + "','UTF8')),'hex'); COMMIT;")
+        command = ('export PGPASSWORD="$AIMEE_STORE_RUNTIME_PASSWORD" PGSSLMODE=require; '
+                   'exec psql -h 127.0.0.1 -U aimee_store_runtime -d aimee_store '
+                   '-X -At -v ON_ERROR_STOP=1')
+        result = matrix.command('docker', 'exec', '-i', args.store_db, 'sh', '-c', command, data=sql)
+        return next(int(line) for line in result.splitlines() if line.isdigit())
 
     try:
         if owned:
@@ -155,6 +152,34 @@ for a in [('add','.'),('commit','-qm','changed source'),('update-ref','refs/remo
         check('superseded symbol unavailable in current definition index', not query('find', identifier='release_engine').get('hits'))
         check('superseded original code bytes remain in SQL history', historical_source_count() >= before)
         check('code publication never changes personal memory', control_memory() == memory_before)
+        embedder = expected_label + '-aimee-embedder-1'
+        label = matrix.command('docker', 'inspect', '--format',
+                               '{{index .Config.Labels "com.docker.compose.project"}}', embedder)
+        check('embedding outage is confined to the owned project', label == expected_label)
+        matrix.command('docker', 'stop', embedder)
+        try:
+            third = second + '/* provider_outage_probe */\n'
+            fixture('from pathlib import Path\nimport subprocess\np=Path(' + repr(root) +
+                    ');(p/"engine.c").write_text(' + repr(third) + ')\n' +
+                    'for a in [("add","."),("commit","-qm","provider outage source"),'
+                    '("update-ref","refs/remotes/origin/main","HEAD")]: '
+                    'subprocess.run(["git","-C",str(p),*a],check=True,capture_output=True)\n')
+            eventually('source publishes while embeddings are unavailable',
+                       lambda: 'provider_outage_probe' in query('span', file_path='engine.c',
+                           line_start=1, line_end=3).get('span', {}).get('content', ''), 240)
+            degraded = query('hybrid', query='provider_outage_probe').get('results', [{}])[0].get('result', {})
+            check('embedding outage preserves lexical retrieval with explicit degradation',
+                  degraded.get('dense_state') == 'unavailable' and
+                  any(h.get('file_path') == 'engine.c' for h in degraded.get('results', [])))
+        finally:
+            matrix.command('docker', 'start', embedder)
+        def dense_recovered():
+            result = query('hybrid', query='provider_outage_probe').get('results', [{}])[0].get('result', {})
+            return (result.get('dense_state') == 'query_executed' and
+                    bool(result.get('index_generations')) and
+                    all(g.get('readiness') == 'ready' for g in result['index_generations']))
+        eventually('provider recovery rebuilds missing vectors at the same Git commit', dense_recovered, 240)
+        check('embedding recovery retains original source history', historical_source_count() >= before)
         matrix.command('docker', 'stop', args.store_db)
         try:
             status, failed = api('/v1/sessions/create', dict(client_type='index-readiness-outage'))
