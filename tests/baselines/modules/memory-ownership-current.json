@@ -3199,7 +3199,7 @@
       "symbols": [
         "kb_client_memory_recall_shared_json"
       ],
-      "sha256": "46d3f78c321aa9111c3cdcf3b43e62792d25a2b1c3ef97031e02ec1e6d5358c9"
+      "sha256": "0a3b81ba2670db1935d61c1419eab2ad1b67dfed56fa2f63027e15c9f3c754f6"
     },
     "src/tests/test_mcp_memory_answer.c": {
       "disposition": "host-fixture",
@@ -3414,7 +3414,7 @@
       "symbols": [
         "kb_client_memory_audit_note"
       ],
-      "sha256": "5ca2def52ef329e8a08dc089c4d56e0df51506182d74238515fad8dd660e45ac"
+      "sha256": "16c90e959154eb175a5cab3191706d46e6f9f7b14b1f86aa4492ef6b260fad9f"
     },
     "src/tests/test_session_memory_transport.c": {
       "disposition": "host-fixture",
