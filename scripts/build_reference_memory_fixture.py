@@ -17,7 +17,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "tests/fixtures/legacy-memory-owner.json"
 COMPATIBILITY = ROOT / "tests/fixtures/reference-memory-retention.json"
-COMPATIBILITY_SHA256 = "94ad07715de94900c2b67824a3f01a049ceca30b1d6568f3a1fdf880b414149d"
+COMPATIBILITY_SHA256 = "940d12c33d49c9af5edfcf7ec3e0ffe62e56e41e13b87072ace0208d346faaee"
 SOURCE_COMMIT = "0e29dd14f8c96de8f8366d763dfe56992aedc2b0"
 SOURCE_TREE = "2ed04ea2d796ba20c61b2d104582d6224942cb0d"
 

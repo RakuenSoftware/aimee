@@ -64,7 +64,7 @@ class ReferenceMemoryFixtureTests(unittest.TestCase):
             builder.apply_retention_compatibility(root)
             updated = target.read_text()
             self.assertNotIn("user_memory_replay_erasure_intents()", updated)
-            self.assertIn("SELECT count(*) FROM user_memory", updated)
+            self.assertIn("SELECT count(*) FROM user_memories", updated)
             with self.assertRaises(ValueError):
                 builder.apply_retention_compatibility(root)
 

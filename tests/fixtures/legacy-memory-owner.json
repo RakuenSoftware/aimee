@@ -7,5 +7,5 @@
   "binary_basename": "aimee-module-memory",
   "go_version": "go1.26.10",
   "purpose": "external-reference-not-shipped",
-  "compatibility_patch_sha256": "94ad07715de94900c2b67824a3f01a049ceca30b1d6568f3a1fdf880b414149d"
+  "compatibility_patch_sha256": "940d12c33d49c9af5edfcf7ec3e0ffe62e56e41e13b87072ace0208d346faaee"
 }

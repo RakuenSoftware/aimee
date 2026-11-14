@@ -14,7 +14,7 @@
     ],
     [
       "SELECT user_memory_replay_erasure_intents()",
-      "SELECT count(*) FROM user_memory"
+      "SELECT count(*) FROM user_memories"
     ],
     [
       "var removed int64",

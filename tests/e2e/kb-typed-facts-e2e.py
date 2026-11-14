@@ -279,6 +279,13 @@ def exercise(stack, check, diagnostics, extraction_seconds):
     subject = relations[0].get('src_entity', '')
     status, edges = stack.kb_request('/v1/actions/memory.entity_edges', dict(entity=subject))
     rows = edges.get('edges') or []
+    if not (status == 200 and rows and
+            all(subject in (row.get('src_entity'), row.get('dst_entity')) for row in rows)):
+        screen_status, screen = stack.kb_request('/v1/actions/memory.screen_content', dict(content=subject))
+        diagnostics['entity_edges'] = dict(http_status=status, result_status=edges.get('status'),
+            error_kind=edges.get('kind'), rows=len(rows), subject_characters=len(subject),
+            subject_is_vault_reference=bool(re.fullmatch(r'(?:\[\[)?vault:v1:[0-9a-f-]{36}(?:\]\])?', subject)),
+            screen_status=screen_status, screen_changes_subject=screen.get('redacted', subject) != subject)
     check('entity_edges serves the edges of that subject', status == 200 and rows and
           all(subject in (row.get('src_entity'), row.get('dst_entity')) for row in rows))
 
