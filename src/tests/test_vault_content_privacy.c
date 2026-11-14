@@ -168,6 +168,15 @@ int main(void)
       free(safe);
       safe = NULL;
    }
+   assert(!vault_content_protect_json(
+              "{\"operation\":\"memory-query\",\"query\":{\"kind\":\"search_graph\","
+              "\"arguments\":{\"query\":\"Patricia Rivera\",\"store\":\"user\"}},"
+              "\"expected_owner\":\"abcdef01-2345-6789-abcd-123456789012\"}",
+              &safe) &&
+          safe);
+   assert(!strstr(safe, "Patricia Rivera") && strstr(safe, "abcdef01-2345-6789-abcd-123456789012"));
+   free(safe);
+   safe = NULL;
    const char *json = "{\"content\":\"contact+fixture@example.invalid\",\"old_id\":"
                       "9007199254740993,\"expected_version\":{\"sequence\":18446744073709551615}}";
    assert(!vault_content_protect_json(json, &safe) && safe);

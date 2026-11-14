@@ -276,7 +276,8 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
                    !strcmp(verb_copy, "search_graph") || !strcmp(verb_copy, "entity_edges") ||
                    !strcmp(verb_copy, "serve") || !strcmp(verb_copy, "claim_card") ||
                    (!strcmp(verb_copy, "runtime") && operation &&
-                    (!strncmp(operation, "user-", 5) || !strncmp(operation, "shared-", 7)));
+                    (!strncmp(operation, "user-", 5) || !strncmp(operation, "shared-", 7) ||
+                     !strcmp(operation, "memory-query")));
       if (event_kind == AIMEE_MEMORY_EVENT_COMMAND && intake && vault_content_protect_json)
       {
          char *safe = NULL;

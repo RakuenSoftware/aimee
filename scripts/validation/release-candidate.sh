@@ -22,10 +22,10 @@ ck() {
 }
 export AIMEE_POSTGRES_STORAGE=plain
 ck privacy-custody python3 tests/e2e/privacy-custody-e2e.py --output "$O/privacy-custody"
-ck kb-typed-facts-e4b env AIMEE_LLM_IMAGE=ghcr.io/rakuensoftware/aimee-llm-e4b:latest python3 tests/e2e/kb-typed-facts-e2e.py --model gemma-4-E4B-it --output "$O/kb-typed-facts-e4b"
-ck kb-typed-facts-e2b env AIMEE_LLM_IMAGE=ghcr.io/rakuensoftware/aimee-llm-e2b:latest python3 tests/e2e/kb-typed-facts-e2e.py --model gemma-4-E2B-it --output "$O/kb-typed-facts-e2b"
-ck server-typed-facts-e4b env AIMEE_LLM_IMAGE=ghcr.io/rakuensoftware/aimee-llm-e4b:latest python3 tests/e2e/kb-typed-facts-e2e.py --role server --model gemma-4-E4B-it --output "$O/server-typed-facts-e4b"
-ck server-typed-facts-e2b env AIMEE_LLM_IMAGE=ghcr.io/rakuensoftware/aimee-llm-e2b:latest python3 tests/e2e/kb-typed-facts-e2e.py --role server --model gemma-4-E2B-it --output "$O/server-typed-facts-e2b"
+ck kb-typed-facts-e4b env AIMEE_LLM_IMAGE="${AIMEE_LLM_E4B_IMAGE:-ghcr.io/rakuensoftware/aimee-llm-e4b:latest}" python3 tests/e2e/kb-typed-facts-e2e.py --model gemma-4-E4B-it --output "$O/kb-typed-facts-e4b"
+ck kb-typed-facts-e2b env AIMEE_LLM_IMAGE="${AIMEE_LLM_E2B_IMAGE:-ghcr.io/rakuensoftware/aimee-llm-e2b:latest}" python3 tests/e2e/kb-typed-facts-e2e.py --model gemma-4-E2B-it --output "$O/kb-typed-facts-e2b"
+ck server-typed-facts-e4b env AIMEE_LLM_IMAGE="${AIMEE_LLM_E4B_IMAGE:-ghcr.io/rakuensoftware/aimee-llm-e4b:latest}" python3 tests/e2e/kb-typed-facts-e2e.py --role server --model gemma-4-E4B-it --output "$O/server-typed-facts-e4b"
+ck server-typed-facts-e2b env AIMEE_LLM_IMAGE="${AIMEE_LLM_E2B_IMAGE:-ghcr.io/rakuensoftware/aimee-llm-e2b:latest}" python3 tests/e2e/kb-typed-facts-e2e.py --role server --model gemma-4-E2B-it --output "$O/server-typed-facts-e2b"
 ck T1 python3 tests/e2e/deployment-matrix.py --topology T1 --output "$O/T1"
 ck T2 python3 tests/e2e/deployment-matrix.py --topology T2 --skip-kb-gates --skip-kb-free-gate --output "$O/T2"
 ck T3 python3 tests/e2e/deployment-matrix.py --topology T3 --output "$O/T3"
