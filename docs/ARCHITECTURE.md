@@ -2,8 +2,11 @@
 
 aimee is a local-first runtime between AI tools, model providers, code, and durable knowledge. It
 keeps the thin client separate from stateful services and sends module events through each
-instance's bounded bus. Server assists one human and owns durable personal memory; an optional KB
-owns a shared corpus. [Server and KB](SERVER_AND_KB.md) is the canonical ownership guide.
+instance's bounded bus. Server assists one human; an optional KB serves a shared corpus. Durable
+memory in either role is served by a separate implementation behind the generic memory contract.
+Its source is private; the image carries it as a vendored binary bundle and each deployment
+provisions its own installation ([Memory boundary](MEMORY.md)).
+[Server and KB](SERVER_AND_KB.md) is the canonical ownership guide.
 
 ## Processes
 
@@ -16,16 +19,17 @@ activation. A Go process identity is not a claim that every adjacent C resource 
 Both containers use the same application image. A Go `server` or `kb` composition module
 establishes the immutable first-boot identity and supervises the standard module processes.
 Core's event bus rejects duplicate or conflicting roles. Both compositions deploy the same
-PostgreSQL and memory implementations with independent databases, local Vaults, and model
-identities. The existing C resource hosts remain during the transition of their domain handlers
-into Go modules.
+PostgreSQL provider with independent databases, local Vaults, and model identities. Every module
+process is Go. Each role runs the memory implementation provisioned for it, through a module manifest
+and executable grants generated at provisioning; without one the public unavailable adapter runs. The existing
+C resource hosts remain during the transition of their domain handlers into Go modules.
 
 | Process | Owns | Does not own |
 | --- | --- | --- |
 | `aimee` | CLI parsing, local hooks, MCP/ACP stdio, client filesystem access | databases, server policy, provider credentials |
-| Server composition | personal memory and code, sessions, agents, tools, policy, Vault, provider calls, `/v1` resource plane | shared KB corpus; `aimee-wfe` owns workflow lifecycle |
+| Server composition | private code, sessions, agents, tools, policy, Vault, provider calls, `/v1` resource plane, the host side of the personal memory contract | memory records and retrieval policy (the installed memory implementation); shared KB corpus; `aimee-wfe` owns workflow lifecycle |
 | `aimee-wfe` | workflow definitions, scheduling, artifacts, retries, gates, worktrees, forge lifecycle | agent credentials, KB data, general chat |
-| KB composition | shared memory, documents, code graph, retrieval, curation, and its model services | Server personal memory, workflow state, another KB's corpus |
+| KB composition | shared documents, code graph, retrieval, curation, its model services, the host side of the shared memory contract | memory records and retrieval policy (the installed memory implementation); Server personal memory, workflow state, another KB's corpus |
 | `aimee-runtime-web` | browser auth, session proxying, UI delivery | product databases and workflow decisions |
 
 `aimee-server` and `aimee-wfe` run as supervised peers in the server image. If either exits, the
@@ -85,7 +89,7 @@ External communication is banned from every module, with two structural doors: c
 initiated from outside arrives over the event bus through C, and communication a module
 initiates leaves through the `egress` module. Direction selects the door; it never grants a
 module the right to open a connection itself. The required `egress` module now owns governed outbound HTTP/SSE for Go process modules,
-including providers, embeddings, forge, roundtable, MCP and the Cognee adapter. PostgreSQL and
+including providers, embeddings, forge, roundtable and MCP. PostgreSQL and
 sandbox transports retain their declared resource-owner boundaries. Transitional C resource paths
 remain explicit owners; their existence is not permission for a Go module to dial directly.
 See [egress](modules/egress.md).
@@ -136,11 +140,13 @@ See [Event bus](EVENT_BUS.md).
 ## Storage
 
 Server and KB retain independent PostgreSQL stores. Within Server, the `aimee` domain module owns
-runtime state and the Server placement of `memory` owns personal memory and private code. Within
-KB, the KB placement of `memory` and other knowledge domains own the shared corpus.
+runtime state, including the canonical session log and the source producers, access, erasure and
+replay records that a memory implementation reads. Within KB, the knowledge domains own the shared
+corpus. Memory records, revisions and vectors belong to the installed memory implementation and its
+own datastore; the public application neither creates nor migrates them.
 
 The Go `postgres` module owns connections, transactions, and migration transport for both roles.
-Go memory calls it over the local bus; native KB algorithms use session capabilities. Neither
+Go modules call it over the local bus; native KB algorithms use session capabilities. Neither
 native resource host links libpq. Thin clients and browser clients open no database. Cross-instance
 knowledge operations use authenticated `/v1`, not SQL.
 
@@ -155,18 +161,32 @@ chain asynchronously. Bus observations, committed mutation intent, and chain del
 milestones. See [Storage ownership](STORAGE_TIERS.md) and [WORM worker](WORM_WORKER.md).
 
 Standard compositions each deploy a separate PostgreSQL container with ordinary storage by default
-and opt-in LUKS2. Local embedding is a separate service; synthesis is optional. Personal rows and
-vectors stay on Server even when a shared KB is connected.
+and opt-in LUKS2. Local embedding is a separate service; synthesis is optional. Personal memory
+stays with the Server's own memory implementation even when a shared KB is connected.
 
-## Memory engine boundary
+## Memory boundary
 
-![Memory owner retains authorization and canonical records while native and Cognee implement the generic contract](images/architecture/memory-backends.svg)
+The public source keeps the generic memory SDK, the host/module transport and the host-side
+obligations of a provider-bound request: context pre-injection, source release and revalidation,
+the send guard and provider receipts. It contains no memory datastore. The implementation is built
+from a private repository and vendored as a binary bundle under `vendor/aims-memory`: bridge
+objects linked into `aimee-server` and `aimee-kb`, a database process, a memory module process and
+provisioning scripts.
 
-The native engine is the default. The replaceable-memory implementation in
-[PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005) adds Cognee as an alternative retrieval
-engine; published 0.4.6 does not include it. Factories plug into the existing memory owner rather
-than adding a provider supervisor or authority process. Extended native operations retain their
-own contracts. See the [memory contract](modules/memory.md#memory-backend-contract).
+At first start the one-shot `aimee-memory-init` service provisions the installation for the
+instance's role: it generates a memory identity, exact executable grants and an owner key, and
+prepares `/opt/aims-memory/<role>`, which the application mounts read-only. Only the
+configuration, state and runtime directories are writable, and they live under `private-memory/`
+in the home volume. After an image update the installation is prepared again under the same
+identity and the stored memory is kept. The implementation declares the public `memory.*`
+commands it serves (for example store, search and `memory.verify_receipt`); a command it does not
+declare returns `404` from `/v1/commands/`.
+
+Without a provisioned installation the public unavailable adapter runs: it exits before bus
+attachment and declares no commands, and the instance reports `missing_module: memory` and is not
+ready. Public CI tests the adapter, the SDK, the canonical DB1 producers, the PostgreSQL provider,
+the bundle check and the provisioning decisions; it does not build the implementation. See
+[Memory boundary](MEMORY.md) and the [memory module](modules/memory.md).
 
 ## Request paths
 
@@ -193,25 +213,40 @@ The client opens no database and starts no daemon. Warm state stays in `aimee-se
 ### Personal memory write and recall
 
 1. A client calls Server's ordinary memory API with omitted `store` or `store=user`.
-2. The host authenticates the caller and dispatches to the local Go memory owner.
-3. The Server placement validates user scope and uses its local PostgreSQL provider.
-4. Personal rows, revisions, proposals, and vectors stay in Server storage.
-5. Go returns the complete record or budgeted recall envelope. A missing record or owner outage
-   never causes a shared-store fallback.
+2. The host authenticates the caller and dispatches the command over the local bus to the memory
+   implementation selected in the Server's module manifest.
+3. That implementation applies user scope, authority and lifecycle policy in its own datastore.
+4. It returns the complete record or a budgeted recall envelope. A missing record, an undeclared
+   command or an implementation outage never causes a shared-store fallback.
 
 ### Shared memory write and recall
 
 1. A client explicitly selects `store=kb` and supplies the intended project/workspace context.
 2. Server authorizes the request and calls the configured KB's typed endpoint.
-3. The KB host establishes verified caller context; the Go memory owner applies shared scope,
-   authority, lifecycle, and retrieval policy through its local PostgreSQL provider.
-4. A KB memory mutation and its required audit outbox intent commit together. The WORM worker
-   delivers the intent to the chain separately.
+3. The KB host establishes verified caller context and dispatches to the memory implementation
+   selected in the KB's module manifest, which applies shared scope, authority, lifecycle and
+   retrieval policy.
+4. A KB-owned knowledge mutation and its required audit outbox intent commit together. The WORM
+   worker delivers the intent to the chain separately.
 5. Recall returns scoped evidence. Explicit shared-only recall skips personal composition; Server
    owns any separate context path that combines shared evidence with private identity/preferences.
 
 Correction listing/review retains a KB default and needs explicit `store=user` for personal
 proposals. Store selection is operation-specific; neither a numeric ID nor a failed lookup changes it.
+
+### Provider-bound request with memory
+
+1. A frontend (`/v1/chat/completions`, `/v1/messages`, `/v1/responses` or the browser) is decoded
+   into canonical IR.
+2. Ingress pre-injection asks the memory implementation for context and a source release, bounded
+   by the request's receipt deadline. A refusal marks the request context refused; nothing is
+   substituted.
+3. The wire fence applies the deployment and caller byte budget to the exact provider bytes,
+   revalidates the released sources, and acquires the send guard. A request that overflows the
+   budget is refused as `request_budget_exceeded` (HTTP 413) even when the memory implementation
+   had already refused it, so the same input is classified the same way with any implementation.
+4. One provider translation happens at the edge. Prepared and observed provider receipts are
+   appended to the host's WORM ledger; the response is persisted to the canonical session log.
 
 ### Delegate turn
 
@@ -276,7 +311,7 @@ PostgreSQL and models remain separate service containers.
 - `src/modules/`: owned C modules and public headers.
 - `src/server/`: C resource plane and `/v1` handlers.
 - `src/kb/`: KB resource host, knowledge adapters, and public routes.
-- `server-go/`: role composition, memory and PostgreSQL owners, domain modules, workflow engine, and Go bus client.
+- `server-go/`: role composition, the generic memory SDK and unavailable adapter, the PostgreSQL provider, domain modules, workflow engine, and Go bus client.
 - `runtime-web/`: browser-facing Go service.
 - `frontend/`: browser application.
 - `api/`: OpenAPI sources and generated SDKs.

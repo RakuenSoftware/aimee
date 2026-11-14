@@ -62,7 +62,6 @@ BASELINE_DRIFT = {
     "create_prospective_memory",
     "dashboard_metrics",
     "get_entity",
-    "get_entity_edges",
     "get_episode",
     "get_help",
     "get_host",

@@ -2,7 +2,7 @@ package families
 
 import store "github.com/JBailes/aimee/server-go/modules/aimee"
 
-// The agent-work family: the cognify queue, the agent log, trigger runs,
+// The agent-work family: the agent log, trigger runs,
 // coordination jobs and their tasks, and cron jobs.
 //
 // Bodies live in agent_work_log.go, agent_work_coord.go and
@@ -14,12 +14,8 @@ const (
 	StageAgentWork uint32 = 4
 )
 
+// Ops 1-4 were the retired 1.0 memory cognify queue; their numbers stay unused.
 const (
-	opCognifyEnqueue   = 1
-	opCognifyStatus    = 2
-	opCognifyClaimNext = 3
-	opCognifyMark      = 4
-
 	opAgentLogInsert             = 5
 	opAgentLogListRecent         = 6
 	opAgentLogListBySession      = 7
@@ -80,12 +76,6 @@ var AgentWork = store.Family{
 	Event: EventAgentWork,
 	Stage: StageAgentWork,
 	Ops: map[uint32]store.Op{
-		// --- the cognify queue ---
-		opCognifyEnqueue:   {Name: "cognify_enqueue", Args: 1, Tx: true, Run: cognifyEnqueue},
-		opCognifyStatus:    {Name: "cognify_status", Cells: 5, Args: 0, Run: cognifyStatus},
-		opCognifyClaimNext: {Name: "cognify_claim_next", Cells: 9, Args: 0, Tx: true, Run: cognifyClaimNext},
-		opCognifyMark:      {Name: "cognify_mark", Args: 3, Tx: true, Run: cognifyMark},
-
 		// --- the agent log ---
 		opAgentLogInsert: {Name: "agent_log_insert", Args: 11, Tx: true, Run: agentLogInsert},
 		opAgentLogListRecent: {

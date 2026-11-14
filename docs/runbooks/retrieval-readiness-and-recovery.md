@@ -76,7 +76,8 @@ Do not delete queues, DB volumes, benchmark artifacts, or breaker evidence as a
 recovery shortcut. Escalate if the breaker repeatedly reopens or the last successful
 ingest/query timestamps do not advance after the dependency is healthy.
 
-For Cognee, also verify the selected URL, Vault credential, governed egress and derived cleanup
-state. Startup replays canonical erasure and resets the selected provider before admitting memory
-work. Provider recovery must pass both scoped retrieval and erasure verification; a green HTTP
-listener alone is insufficient. See the [backend setup and recovery contract](../modules/memory.md#memory-backend-contract).
+Memory itself is served by the implementation provisioned from the image. `missing_module: memory`
+in `/v1/ready` means none is attached: start the stack through `scripts/compose-local.sh` and read
+its `[memory-provision]` lines. After restoring the home volume, a start re-prepares the
+installation around the restored records. Its recovery must pass both scoped retrieval and erasure verification; a green HTTP
+listener alone is insufficient. See [Memory boundary](../MEMORY.md).

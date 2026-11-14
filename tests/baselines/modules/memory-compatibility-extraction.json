@@ -381,7 +381,7 @@
     {
       "target": "unit-test-kb-http-routes",
       "source": "src/tests/test_kb_http_routes.c",
-      "sha256": "1031f26550f730f300382dbda94d26dc4c003ac01158be5e4a62b6fad1d52153",
+      "sha256": "6c3daafb7afd3383077bd6e9b19bf02c57df94c55b7d0865033d7c17421f11bb",
       "assert_calls": 1291,
       "test_functions": [
         "test_health",
@@ -749,6 +749,10 @@
             "test_maintenance_repair_queues_too",
             "test_content_read_identity_boundary"
           ]
+        },
+        {
+          "sha256": "fa2faaac175da1cc4a2e680217280822a7c42ef7db0901b202cce31cd7839a48",
+          "reason": "Before obsolete subject-erasure route removal"
         }
       ],
       "merge_review": "Ouroboros ring names, current route fixtures and removed stale stubs reviewed; current assertion count stays 1291. Exact pre-merge source and assertion inventory remain recorded.",
@@ -758,7 +762,8 @@
         "path": "src/tests/test_kb_http_routes.c",
         "sha256": "7a81904c468d0d805eeb70718826128cf21067a6c85bcc9ab40c5bfe445db2be",
         "meaning": "Exact pre-merge source is retained in Git; current fixture follows current canonical/ring interfaces and explicit retired API exclusions."
-      }
+      },
+      "boundary_review": "Only removed obsolete deletion assertions/stubs and added a focused absence check for the retired routes. Existing memory compatibility assertions remain opt-in and otherwise unchanged."
     },
     {
       "target": "unit-test-workflow-transport",

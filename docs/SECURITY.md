@@ -231,10 +231,13 @@ Core services do not enable telemetry by default. Configured providers, git host
 vulnerability checks, MCP servers, model fetches, and other integrations can make outbound calls;
 consult the deployment egress policy before enabling them.
 
-Memory and document ingestion can retain sensitive source text. Scope the KB, apply the retention
-and erasure rules in [Data governance](DATA_GOVERNANCE.md), and avoid sending restricted evidence to
-an external synthesis provider. Memory audit uses fingerprints for keys that can contain personal
-data.
+PII belongs in Vault, with opaque references in memory and derived material. The current
+candidate's bounded detector and optional protected intake do not establish that every ordinary
+write or canonical input follows that contract. Raw source text can still reach earlier capture,
+transcript or provider boundaries; these are release defects to verify, not successful protection
+through refusal. Apply the retained-history and storage boundaries in
+[Data governance](DATA_GOVERNANCE.md). Vault custody does not encrypt every other store, and its
+default co-located software key does not protect a complete unencrypted backup against theft.
 
 ## Non-goals
 

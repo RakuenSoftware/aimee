@@ -69,7 +69,7 @@ protect against an administrator replacing files on disk.
 
 ## Supported journeys
 
-A KB-free Server keeps personal memories through the local Go memory and PostgreSQL modules. Connecting an optional KB adds shared-memory access without changing the Server identity. Ordinary Docker storage is the default; the explicit LUKS
+A KB-free Server serves personal memory through the memory implementation installed for the Server role and keeps runtime state through the Go PostgreSQL module. Connecting an optional KB adds shared-memory access without changing the Server identity. Ordinary Docker storage is the default; the explicit LUKS
 Compose overlay is a PostgreSQL deployment option, independent of `server`
 identity. See `docs/DEPLOYMENT.md` for the deployment topology and storage choices.
 

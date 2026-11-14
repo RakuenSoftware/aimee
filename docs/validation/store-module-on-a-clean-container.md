@@ -1,5 +1,25 @@
 # The store module on a machine that never built it
 
+The historical runs below describe the pre-1.1 store migration. Their one-off
+host scripts were retired during release cleanup; they are not evidence for 1.1.
+
+## Current release candidate gate (2026-11-13)
+
+### `scripts/validation/release-candidate.sh` -- 11 checks
+
+This is the current reproducible shipped-image gate. Supply the application,
+PostgreSQL and embedder image identities and a persistent `AIMEE_EVIDENCE_DIR`.
+It checks typed facts on both roles with E4B and E2B, T1/T2/T3 deployment,
+the real Docker private verifier, egress/Vault, plain storage and KB upgrade.
+Individual drivers clean up their disposable stacks. LUKS remains a separate
+privileged-runner gate. The image run passed all 11 checks. See the
+[qualification record](release-candidate-2026-11-13.json) for exact image and bundle
+identities, earlier failed runs, and coverage limits. The later legacy-erasure cleanup needs image qualification. The obsolete deletion
+workflow is removed rather than ported; current memory retirement retains records.
+Remaining GitHub checks and final image qualification still gate promotion.
+
+## Historical store-module runs
+
 Record of running aimee-server, aimee-kb and the module fleet on a container
 that received only binaries, against a PostgreSQL that already existed.
 
@@ -21,7 +41,7 @@ Reproduce with `scripts/e2e-252-full.sh` inside the container, after
 
 ## Result
 
-### `scripts/e2e-252-full.sh` -- 10 checks
+### Historical probe `scripts/e2e-252-full.sh` -- 10 checks
 
 **Eight ran. Two never executed**, and the summary line below does not say so:
 `PASS=8 FAIL=0` reads as a complete passing run, and it is a partial one. The

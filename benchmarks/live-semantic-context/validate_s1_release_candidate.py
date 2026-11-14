@@ -246,7 +246,18 @@ REVIEWED_SOURCE_CUSTODY_INTEGRATIONS = json.loads(
 )["paths"]
 
 
+# The graph tools reuse the reviewed memory renderer and receipt attachment.
+# Reverse these exact independent additions before the older custody layer.
+REVIEWED_TYPED_GRAPH_INTEGRATIONS = json.loads(
+    Path(__file__).with_name("s1-typed-graph-integration.json").read_text()
+)["paths"]
+
+
 def source_custody_integration_base(path: str, current: str) -> str:
+    graph_blocks = REVIEWED_TYPED_GRAPH_INTEGRATIONS.get(path, [])
+    if graph_blocks and all(current.count(block["release_text"]) == 1 for block in graph_blocks):
+        for block in graph_blocks:
+            current = current.replace(block["release_text"], block["frozen_text"], 1)
     blocks = REVIEWED_SOURCE_CUSTODY_INTEGRATIONS.get(path, [])
     if blocks and all(current.count(block["release_text"]) == 1 for block in blocks):
         for block in blocks:

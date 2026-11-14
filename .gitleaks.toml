@@ -13,3 +13,10 @@ condition = "AND"
 paths = ['''(^|/)tests/baselines/modules/memory-ownership-current\.json$''']
 regexTarget = "line"
 regexes = ['''^\s*"(?:src/gen_openapi_server\.py|api/openapi-server-v1\.yaml|src/server/openapi_server_data\.h|src/tests/test_kb_vault_protected_secret\.c|src/modules/vault/vault_server_key\.[ch])": "[a-f0-9]{64}",?\s*$''']
+
+[[rules.allowlists]]
+description = "Public header SHA-256 fingerprints in the vendored memory bundle manifest"
+condition = "AND"
+paths = ['''(^|/)vendor/aims-memory/bundle\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"src/[^"\r\n]+\.h": "[a-f0-9]{64}",?\s*$''']

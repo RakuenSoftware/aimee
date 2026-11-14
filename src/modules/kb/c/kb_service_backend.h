@@ -47,7 +47,6 @@ extern "C"
       kb_store_kb_service_async_queue_stats_t queue;
    } kb_store_kb_service_project_status_t;
 
-   int kb_store_kb_service_memory_record_exists(int64_t record_id);
    int kb_store_kb_service_kb_document_exists(int64_t document_id);
    /* Graph-derived code-health audit: dead exports, import cycles, clones. */
    int kb_store_code_audit_edge_target_like(const char *relation, const char *project, char *out,
@@ -59,7 +58,8 @@ extern "C"
                                                     double importance, double novelty,
                                                     const char *source_session);
    cJSON *kb_store_kb_service_curiosity_sweep_json(void);
-   cJSON *kb_store_kb_service_curiosity_rescore_json(void);
+   /* memory: a kb_store_curiosity_memory_t (curiosity.h), or NULL. */
+   cJSON *kb_store_kb_service_curiosity_rescore_json(const void *memory);
    cJSON *kb_store_kb_service_curiosity_get_json(int64_t id);
    cJSON *kb_store_kb_service_curiosity_update_state_json(int64_t id, const char *new_state);
    /* Pull the top-N open curiosity items, route each into an epistemic
@@ -100,6 +100,14 @@ extern "C"
                                                         const char *tool_error_pattern);
    cJSON *kb_store_kb_service_agent_hint_consume_json(const char *role, const char *prompt);
    cJSON *kb_store_kb_service_task_list_json(const char *state, const char *session_id, int limit);
+   /* Does file_path/command overlap the task's scope (its title and subtask
+    * titles)? {status:ok, task_id, task_title, drifted, message}; an unknown task
+    * yields {status:ok} with no verdict, NULL on a store error. */
+   cJSON *kb_store_kb_service_task_check_drift_json(int64_t task_id, const char *file_path,
+                                                    const char *command);
+   /* Pure overlap test used above; exposed for tests. */
+   int kb_task_scope_overlaps(const char *const *titles, int n, const char *file_path,
+                              const char *command);
    cJSON *kb_store_kb_service_task_create_json(const char *title, const char *session_id,
                                                int64_t parent_id);
    cJSON *kb_store_kb_service_task_update_state_json(int64_t id, const char *state);

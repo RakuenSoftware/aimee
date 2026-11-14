@@ -18,18 +18,17 @@
 #include "../modules/kb/c/kb_store_internal.h"
 #include "../modules/kb/c/lifecycle.h" /* kb_store_set_embedding_dim */
 #include "../modules/kb/c/pgvec_transport.h"
-#include "../modules/kb/c/memory_vectors.h"
 #include "../modules/kb/c/kb_vectors.h"
 
 static void test_collection_names(void)
 {
-   const char *mem = PGVEC_MEMORY_TABLE;
+   const char *mem = PGVEC_CODE_TABLE;
    const char *kb = pgvec_kb_vector_collection_name();
    assert(mem && mem[0]);
    assert(kb && kb[0]);
    assert(strcmp(mem, kb) != 0);
    /* The new curator_entity_vectors table is a sibling collection, not
-    * the same as memory or kb. Verify it is its own non-empty name and
+    * the same as code or kb. Verify it is its own non-empty name and
     * distinct from the other two. */
    const char *cur = PGVEC_CURATOR_ENTITY_TABLE;
    assert(cur && cur[0]);
@@ -65,11 +64,11 @@ static void test_collection_names(void)
 
 static void test_collection_readiness_accepts_supported_ann_indexes(void)
 {
-   assert(pgvec_table_ready(PGVEC_MEMORY_TABLE) == 1); /* HNSW */
-   assert(pgvec_table_ready(PGVEC_KB_TABLE) == 1);     /* DiskANN */
+   assert(pgvec_table_ready(PGVEC_CODE_TABLE) == 1); /* HNSW */
+   assert(pgvec_table_ready(PGVEC_KB_TABLE) == 1);   /* DiskANN */
    /* Existing indexes satisfy ensure without trying to create a redundant
     * second ANN index (SQLite cannot execute either backend's DDL). */
-   assert(pgvec_ensure_index(PGVEC_MEMORY_TABLE, 4, 0) == 0);
+   assert(pgvec_ensure_index(PGVEC_CODE_TABLE, 4, 0) == 0);
    assert(pgvec_ensure_index(PGVEC_KB_TABLE, 4, 0) == 0);
    printf("pgvec: HNSW and DiskANN both satisfy collection readiness OK\n");
 }
@@ -78,10 +77,6 @@ static void test_upsert_graceful_on_no_db(void)
 {
    /* Under the sqlite shim, vector SQL fails — must not crash. */
    float vec[4] = {0.1f, 0.2f, 0.3f, 0.4f};
-   int rc;
-
-   rc = pgvec_memory_upsert(1, vec, 4, "{\"record_type\":\"memory\",\"kind\":\"fact\"}");
-   (void)rc; /* -1 expected under shim; 0 if somehow succeeds */
 
    /* curator_entity_upsert should return the same kind of value the existing
     * kb_upsert does under the shim: it either succeeds (0) or fails (-1),
@@ -116,8 +111,6 @@ static void test_upsert_graceful_on_no_db(void)
    assert(rc_cl == 0 || rc_cl == -1);
    assert(rc_ccu == 0 || rc_ccu == -1);
 
-   int rc_mem_del = pgvec_memory_delete(1);
-   (void)rc_mem_del;
    int rc_kb_del = pgvec_kb_delete(1);
    int rc_ce_del = pgvec_curator_entity_delete(1);
    int rc_cn_del = pgvec_curator_narrative_delete(1);
@@ -204,7 +197,7 @@ static void test_scroll_graceful_on_no_db(void)
    int64_t ids[8];
    int64_t next = -1;
    int done = 0;
-   int n = pgvec_scroll(PGVEC_MEMORY_TABLE, -1, ids, 8, &next, &done);
+   int n = pgvec_scroll(PGVEC_CODE_TABLE, -1, ids, 8, &next, &done);
    /* Under shim: table doesn't exist, n < 0 or n = 0 */
    (void)n;
    printf("pgvec: scroll graceful on no-vector-db OK\n");

@@ -1,9 +1,10 @@
 #include "aimee/kb/index_observer.h"
 /* Private code indexing: reuse the shipping collector and language extractors;
- * persist through the existing memory and PostgreSQL modules. */
+ * persist immutable snapshots through the runtime and PostgreSQL modules. */
 #include "server_code_index.h"
+#include "server_code_index_embedding.h"
 #include "code_span.h"
-#include "module_stage_adapters.h"
+#include "db1_client/runtime_code_index.h"
 #include "aimee.h"
 #include "index.h"
 #include "kb_client.h"
@@ -73,6 +74,7 @@ static cJSON *extract_file(const cJSON *file)
          cJSON_AddItemToArray(array, cJSON_CreateString(identity));
       free(imports[i]);
    }
+   server_code_index_embed_file(path, content, out);
    return out;
 }
 
@@ -81,9 +83,7 @@ static cJSON *call_code(const char *route, const cJSON *body, const cJSON *file)
    if (aimee_kb_index_observer_required())
       return NULL; /* independent legacy user-code owner is not source-qualified */
 
-   cJSON *request = cJSON_CreateObject();
-   cJSON_AddStringToObject(request, "operation", "code-index");
-   cJSON *index = cJSON_AddObjectToObject(request, "code_index");
+   cJSON *index = cJSON_CreateObject();
    cJSON_AddStringToObject(index, "route", route);
    const char *fields[] = {"project", "root_path", "phase", "scan_id", "file_path"};
    for (unsigned i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i)
@@ -107,11 +107,15 @@ static cJSON *call_code(const char *route, const cJSON *body, const cJSON *file)
       cJSON *files = cJSON_AddArrayToObject(index, "files");
       cJSON_AddItemToArray(files, extract_file(file));
    }
-   cJSON *reply = server_module_memory_data(request);
-   cJSON_Delete(request);
-   cJSON *payload = cJSON_DetachItemFromObjectCaseSensitive(reply, "payload");
-   cJSON_Delete(reply);
-   return payload;
+   if (!file)
+      server_code_index_embed_query(route, index);
+   char *request = cJSON_PrintUnformatted(index);
+   cJSON_Delete(index);
+   char *response = request ? db1_runtime_code_index(request) : NULL;
+   free(request);
+   cJSON *reply = response ? cJSON_Parse(response) : NULL;
+   free(response);
+   return reply;
 }
 
 static cJSON *local_code_span(const char *project, const char *path, int start, int end, int max)
@@ -193,9 +197,24 @@ typedef struct
    char sha[64];
    ino_t inode;
    time_t created;
+   int vectors_ready;
 } scanned_repo_t;
 static scanned_repo_t scanned_repos[512];
 static int scanned_count;
+
+static int vectors_ready(const char *project)
+{
+   cJSON *body = cJSON_CreateObject();
+   cJSON_AddStringToObject(body, "project", project);
+   cJSON *reply = call_code("/v1/code/project-stats", body, NULL);
+   cJSON_Delete(body);
+   const cJSON *files = cJSON_GetObjectItemCaseSensitive(reply, "files");
+   const cJSON *embeddings = cJSON_GetObjectItemCaseSensitive(reply, "embeddings");
+   int ready = cJSON_IsNumber(files) && cJSON_IsNumber(embeddings) &&
+               files->valuedouble == embeddings->valuedouble;
+   cJSON_Delete(reply);
+   return ready;
+}
 
 static void scan_repo(const char *root, void *base_v)
 {
@@ -214,7 +233,8 @@ static void scan_repo(const char *root, void *base_v)
          slot = i;
          if (stable && scanned_repos[i].inode == root_stat.st_ino &&
              scanned_repos[i].created == root_stat.st_ctime &&
-             strcmp(scanned_repos[i].sha, sha) == 0)
+             strcmp(scanned_repos[i].sha, sha) == 0 &&
+             (scanned_repos[i].vectors_ready || !server_code_index_embedding_available()))
             return;
          break;
       }
@@ -246,6 +266,7 @@ static void scan_repo(const char *root, void *base_v)
             snprintf(scanned_repos[slot].sha, sizeof(scanned_repos[slot].sha), "%s", sha);
             scanned_repos[slot].inode = root_stat.st_ino;
             scanned_repos[slot].created = root_stat.st_ctime;
+            scanned_repos[slot].vectors_ready = vectors_ready(ref);
          }
       }
    }

@@ -577,104 +577,6 @@ void kb_store_kb_documents_delete_for_file(const char *project, const char *file
    aimee_pg_finalize(st);
 }
 
-int kb_store_subject_erasure_begin(const char *request_id, const char *subject,
-                                   const char *sessions_json, int64_t *memory_count,
-                                   int64_t *document_count, int *already_done)
-{
-   if (memory_count)
-      *memory_count = 0;
-   if (document_count)
-      *document_count = 0;
-   if (already_done)
-      *already_done = 0;
-   void *conn = kb_store_conn();
-   if (!conn || !request_id || !request_id[0] || !subject || !subject[0] || !sessions_json)
-      return -1;
-   char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
-                                          "SELECT deleted_memories,deleted_documents,already_done"
-                                          " FROM kb_subject_erasure_begin(?1,?2,?3::jsonb)",
-                                          err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", request_id);
-   aimee_pg_bind_text(st, "?2", subject);
-   aimee_pg_bind_text(st, "?3", sessions_json);
-   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW;
-   if (ok)
-   {
-      if (memory_count)
-         *memory_count = aimee_pg_column_int64(st, 0);
-      if (document_count)
-         *document_count = aimee_pg_column_int64(st, 1);
-      if (already_done)
-         *already_done = aimee_pg_column_int(st, 2) != 0;
-   }
-   aimee_pg_finalize(st);
-   return ok ? 0 : -1;
-}
-
-int kb_store_subject_erasure_complete(const char *request_id, const char *actor, int64_t db1_count,
-                                      int *event_created)
-{
-   if (event_created)
-      *event_created = 0;
-   void *conn = kb_store_conn();
-   if (!conn || !request_id || !request_id[0] || !actor || !actor[0] || db1_count < 0)
-      return -1;
-   char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, "SELECT kb_subject_erasure_complete(?1,?2,?3)", err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", request_id);
-   aimee_pg_bind_text(st, "?2", actor);
-   aimee_pg_bind_int64(st, "?3", db1_count);
-   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW;
-   if (ok && event_created)
-      *event_created = aimee_pg_column_int(st, 0) != 0;
-   aimee_pg_finalize(st);
-   return ok ? 0 : -1;
-}
-
-int kb_store_subject_erasure_ack(const char *request_id, const char *actor, const char *transport,
-                                 int64_t db1_count, int *event_created, int *coverage_complete,
-                                 int64_t *pending_owners)
-{
-   if (event_created)
-      *event_created = 0;
-   if (coverage_complete)
-      *coverage_complete = 0;
-   if (pending_owners)
-      *pending_owners = 0;
-   void *conn = kb_store_conn();
-   if (!conn || !request_id || !actor || !transport || db1_count < 0)
-      return -1;
-   char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
-                                          "SELECT event_created,coverage_complete,pending_owners "
-                                          "FROM kb_subject_erasure_ack(?1,?2,?3,?4)",
-                                          err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", request_id);
-   aimee_pg_bind_text(st, "?2", actor);
-   aimee_pg_bind_text(st, "?3", transport);
-   aimee_pg_bind_int64(st, "?4", db1_count);
-   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW;
-   if (ok)
-   {
-      if (event_created)
-         *event_created = aimee_pg_column_int(st, 0) != 0;
-      if (coverage_complete)
-         *coverage_complete = aimee_pg_column_int(st, 1) != 0;
-      if (pending_owners)
-         *pending_owners = aimee_pg_column_int64(st, 2);
-   }
-   aimee_pg_finalize(st);
-   return ok ? 0 : -1;
-}
-
 int64_t kb_store_kb_documents_insert_chunk(const char *project, const char *file_path,
                                            const char *file_hash, int chunk_index,
                                            const char *heading_path, int line_start, int line_end,
@@ -1201,27 +1103,6 @@ int kb_store_kb_pdf_search_chunks(const char *project, const char *query, int ma
 
    if (ans_out)
       kbp_compute_answerability(query, out, n, ans_out);
-   return n;
-}
-
-int kb_store_kb_async_count_kind_pending(const char *kind)
-{
-   if (!kind || !*kind)
-      return -1;
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-   char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT COUNT(*) FROM kb_async_jobs WHERE kind = ?1 AND status = 'pending'", err,
-       sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", kind);
-   int n = -1;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      n = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
    return n;
 }
 

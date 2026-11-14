@@ -131,7 +131,7 @@ class ReferenceMemoryFixtureTests(unittest.TestCase):
                 source = kwargs["cwd"]
                 self.assertFalse(source.is_relative_to(ROOT))
                 self.assertEqual((source / "go.mod").read_text(), "module frozen-test\n")
-                for key, value in {"CGO_ENABLED": "0", "GOTOOLCHAIN": "local",
+                for key, value in {"CGO_ENABLED": "0", "GOTOOLCHAIN": builder.fixture_manifest()["go_version"],
                                    "GOWORK": "off", "GOFLAGS": "-mod=readonly"}.items():
                     self.assertEqual(kwargs["env"][key], value)
                 binary = Path(command[3])

@@ -14,7 +14,6 @@
 #include "modules/kb/c/kb_service_backend.h"
 #include "modules/kb/c/demotion.h" /* kb_store_demotion_retrieval_event_write_turn (auditable-correctness P1) */
 #include "modules/kb/c/evidence_lifecycle.h" /* P5 outcome history on provenance export */
-#include "modules/kb/c/memory_query.h"
 #include "modules/kb/c/fact_mutation.h"
 #include "modules/kb/c/code_index_ops.h" /* kb_store_code_file_hash (auditable-correctness P1.5 code provenance) */
 #include "kb_service_memory.h"
@@ -585,4 +584,16 @@ int kb_handle_task_list(int fd, cJSON *req)
 
    cJSON *resp = kb_store_kb_service_task_list_json(state, sid, limit);
    return kb_reply_or_error(fd, resp, "failed to list tasks");
+}
+
+/* task.check_drift: whether a file or command falls outside the active task. */
+int kb_handle_task_check_drift(int fd, cJSON *req)
+{
+   int64_t task_id = 0;
+   if (!jo_read_i64_exact(cJSON_GetObjectItemCaseSensitive(req, "task_id"), &task_id) ||
+       task_id <= 0)
+      return kb_send_error(fd, "task.check_drift requires task_id");
+   cJSON *resp = kb_store_kb_service_task_check_drift_json(task_id, jo_str(req, "file_path", ""),
+                                                           jo_str(req, "command", ""));
+   return kb_reply_or_error(fd, resp, "failed to check task drift");
 }

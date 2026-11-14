@@ -973,6 +973,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       return strcmp(method, "POST") == 0
                  ? kb_intel_bandit_promote_http(body, body_len, out_buf, out_cap)
                  : json_body_error(out_buf, out_cap, 405, "method not allowed");
+   if (strcmp(path, "/v1/memory/owner-trust") == 0)
+      return kb_http_servers_owner_trust(method, vr.scope_kind, body, body_len, out_buf, out_cap);
    if (strncmp(path, "/v1/actions/", 12) == 0)
    {
       if (strcmp(method, "POST") != 0)
@@ -983,10 +985,6 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       return kb_dispatch_action_json(action, body, body_len, out_buf, out_cap);
    }
 
-   int erasure_status =
-       kb_http_subject_erasure_route(method, path, body, !vr.scope_kind[0], out_buf, out_cap);
-   if (erasure_status >= 0)
-      return erasure_status;
    /* POST /v1/implements {"topic": "..."} — deep-curator doc<->code bridge. */
    if (strcmp(path, "/v1/implements") == 0)
    {
@@ -1998,8 +1996,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       int dry_run = kb_http_json_bool(body, "dry_run", 0);
       pgvec_kb_service_reconcile_result_t reconcile;
       memset(&reconcile, 0, sizeof(reconcile));
-      if (pgvec_kb_service_reconcile_orphans(kb_store_kb_service_memory_record_exists,
-                                             kb_store_kb_service_kb_document_exists, dry_run,
+      if (pgvec_kb_service_reconcile_orphans(kb_store_kb_service_kb_document_exists, dry_run,
                                              &reconcile) != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"reconcile failed\"}");
@@ -2007,10 +2004,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       }
       snprintf(out_buf, (size_t)out_cap,
                "{\"status\":\"ok\",\"rc\":%d,\"dry_run\":%s,"
-               "\"memory\":{\"kept\":%lld,\"pruned\":%lld},"
                "\"kb\":{\"kept\":%lld,\"pruned\":%lld}}",
-               reconcile.rc, dry_run ? "true" : "false", (long long)reconcile.mem_kept,
-               (long long)reconcile.mem_pruned, (long long)reconcile.kb_kept,
+               reconcile.rc, dry_run ? "true" : "false", (long long)reconcile.kb_kept,
                (long long)reconcile.kb_pruned);
       return 200;
    }

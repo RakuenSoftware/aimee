@@ -1,2 +1,0 @@
-/dev/loop0
-/dev/loop1

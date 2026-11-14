@@ -84,6 +84,59 @@ class ComposeVaultTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.main(['--migrate-store-connections', 'config'])
 
+    def composition(self, embedder, identity_output=b"", mode="on"):
+        """Run main() against a model with the memory service; return (events, provisioned identities)."""
+        events, provisioned = [], []
+        def run(argv, **kwargs):
+            events.append(argv)
+            model = fixture(); model['services']['aimee-memory-init'] = {'environment': {"AIMEE_MEMORY_PROVISION": mode}}
+            if embedder: model['services']['aimee-embedder'] = {}
+            if 'config' in argv: return module.json.dumps(model).encode()
+            return identity_output if 'aimee-embedder' in argv else b''
+        def provision(compose, identity):
+            events.append(['provision', *compose]); provisioned.append(identity)
+        with patch.object(module, 'run', run), patch.object(module, 'provision_memory', provision):
+            self.assertEqual(module.main(['-p', 'isolated', 'up', '-d']), 0)
+        return events, provisioned
+
+    def test_memory_is_provisioned_before_the_application_image_runs(self):
+        events, provisioned = self.composition(embedder=False)
+        self.assertEqual(provisioned, [b''])  # no local embedder service: no identity to pin
+        order = [event[0] if event[0] == 'provision' else ('vault' if '--bootstrap-vault-stdin' in event else None)
+                 for event in events]
+        self.assertEqual([step for step in order if step], ['provision', 'vault'])
+
+    def test_embedder_identity_is_read_from_the_image_and_handed_to_provisioning(self):
+        identity = {'status': 'ok', 'dim': 4, 'embedding_identity': {'model': 'm'}, 'embedding_identity_digest': 'sha256:x'}
+        events, provisioned = self.composition(
+            embedder=True, identity_output=b'loader chatter\n' + module.json.dumps(identity).encode() + b'\n')
+        reader = next(event for event in events if 'aimee-embedder' in event)
+        self.assertEqual(reader[-3:], [module.EMBEDDER_PYTHON, 'aimee-embedder', '-'])
+        self.assertIn('--no-deps', reader)
+        self.assertEqual(module.json.loads(provisioned[0]), identity)
+
+    def test_provisioning_off_does_not_need_the_embedder_identity(self):
+        events, provisioned = self.composition(embedder=True, identity_output=b"no identity here", mode="off")
+        self.assertEqual(provisioned, [b''])
+        self.assertFalse([event for event in events if 'aimee-embedder' in event])
+
+    def test_embedder_without_an_identity_stops_startup(self):
+        for output in (b'{"status": "ok"}\n', b'', b'Traceback: AttributeError\n'):
+            with self.assertRaises(module.MemoryStartup) as raised:
+                self.composition(embedder=True, identity_output=output)
+            self.assertIn('embedder image of this release', str(raised.exception))
+
+    def test_failed_provisioning_shows_its_message_and_stops(self):
+        completed = subprocess.CompletedProcess([], 1, b'[memory-provision] fatal: stop the application\nnoise\n', b'')
+        with patch.object(module.subprocess, 'run', return_value=completed) as called, \
+                patch.object(module.sys, 'stderr') as stderr, self.assertRaises(module.MemoryStartup):
+            module.provision_memory(['docker', 'compose'], b'{}')
+        self.assertEqual(called.call_args.args[0][-1], 'aimee-memory-init')
+        self.assertEqual(called.call_args.kwargs['input'], b'{}')
+        shown = ''.join(call.args[0] for call in stderr.write.call_args_list)
+        self.assertIn('stop the application', shown)
+        self.assertNotIn('noise', shown)
+
     def test_secret_packet_is_stdin_only(self):
         calls = []
         def run(argv, **kwargs):

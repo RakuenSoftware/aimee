@@ -4,8 +4,8 @@
 # synthesis publish separately from their model inputs and receive release tags
 # through the same approved release workflow.
 #
-# Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
-# merge-manifest pattern, on native runners (no QEMU emulation of the C build).
+# linux/amd64 only, via the build-by-digest then merge-manifest pattern on a
+# native runner. Server deployment is not built for arm64.
 #
 # This workflow is deliberately reusable-only. auto-release.yml calls it with
 # publish=true after release approval; main-merge-approval.yml calls the same
@@ -72,7 +72,6 @@ jobs:
           - { name: aimee-css-render, dockerfile: deploy/css-render/Dockerfile, context: deploy/css-render }
         platform:
           - { arch: amd64, runner: ubuntu-latest }
-          - { arch: arm64, runner: ubuntu-24.04-arm }
     runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 90
     steps:
@@ -165,14 +164,13 @@ jobs:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
-      # Match ONLY this image's per-arch digests. A trailing `-*` would be greedy
-      # whenever one image name is a prefix of another, pulling another image's
-      # digests into this manifest and breaking the push. Anchor on the exact arch
-      # suffixes instead (brace expansion, no wildcard across `-`).
+      # Match ONLY this image's digest. A trailing `-*` would be greedy whenever
+      # one image name is a prefix of another, pulling another image's digest
+      # into this manifest and breaking the push. Anchor on the exact arch suffix.
       - name: Download this image's digests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          pattern: digest-${{ matrix.image }}-{amd64,arm64}
+          pattern: digest-${{ matrix.image }}-amd64
           path: /tmp/digests
           merge-multiple: true
 
@@ -200,9 +198,8 @@ jobs:
       - name: Create + push the multi-arch manifest
         working-directory: /tmp/digests
         run: |
-          # Assemble the list of source digests for this image. Expect exactly the
-          # per-arch builds (amd64 + arm64); fail loudly on a mismatch rather than
-          # pushing a partial or cross-image manifest.
+          # Assemble the source digest for this image (the linux/amd64 build);
+          # fail loudly on a mismatch rather than pushing a cross-image manifest.
           srcs=""
           count=0
           for f in *; do

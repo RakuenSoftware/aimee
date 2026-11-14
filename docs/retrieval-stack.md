@@ -6,8 +6,9 @@ qualification. See [current memory ownership](modules/memory.md). Historical sou
 pinned and do not describe an installed memory engine in the current public build.
 
 Retrieval runs in the instance that owns the selected data. Server serves personal memory and private
-code; KB serves its shared corpus. They use the same Go memory implementation with different tables,
-scopes, and capabilities. See [Server and KB](SERVER_AND_KB.md).
+code; KB serves its shared corpus. Memory in each instance is served by that instance's installed
+memory implementation, which owns its own retrieval; the KB's document and code retrieval below is
+part of this tree. See [Server and KB](SERVER_AND_KB.md).
 
 ## Historical memory path
 
@@ -55,14 +56,14 @@ matter to the vector space. A same-width replacement can still invalidate the co
 
 ### Memory generations
 
-Go memory stores versioned embedding generations, including model identity, dimensions, source
+The retired Go memory owner stored versioned embedding generations, including model identity, dimensions, source
 revision, and input fingerprint. Shared whole-record and derived-unit lanes require a pinned active
 version. They discard stale parent/unit vectors and invalid dimensions before ranking. One query
 embedding is reused across the qualifying shared semantic channels.
 
 Memory's generation columns are unconstrained `vector` columns with dimensions tracked per version.
-A KB fixed-width dimension reset does not own or drop these generations. Rebuild and cutover stay
-with Go memory. See [memory module](modules/memory.md) and
+A KB fixed-width dimension reset does not own or drop these generations. Rebuild and cutover stayed
+with that owner; an installed implementation manages its own vectors. See [memory module](modules/memory.md) and
 [shared semantic retrieval](https://github.com/RakuenSoftware/aimee/blob/3e828ce51d55fb9730e3aee272b56ca89c095c11/server-go/modules/memory/shared_recall.go).
 
 ### KB document and code vectors

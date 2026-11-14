@@ -1,9 +1,171 @@
 # Upgrading
 
+## Upgrade from 1.0.2
+
+This section covers an existing 1.0.x Server or KB moving to 1.1.0. The
+procedure and every outcome below were run against a 1.0.2 Server and a 1.0.2 KB that held
+memories, upgraded in place on their existing volumes.
+
+### What changes
+
+- **Memory is a separate implementation that ships in the image.** 1.0.2 served memory from a
+  built-in owner. From 1.1.0 the application image carries a memory implementation as a binary
+  bundle and provisions it for each deployment ([Memory boundary](MEMORY.md),
+  [Deployment](DEPLOYMENT.md#memory)). The first start of the new images runs the one-shot
+  `aimee-memory-init` service, which creates the installation; no separate install step exists.
+- **A KB serves global and every project and workspace by default, as 1.0.x did.**
+  `AIMEE_MEMORY_SHARED_SCOPES` can restrict it to an exact list. See the KB note under the
+  procedure.
+- **Existing memories are kept but not served.** The upgrade does not drop or rewrite the
+  1.0.x memory tables: a Server's personal memories stay in `user_memories` and a KB's shared
+  memories stay in `memories`. The new implementation starts with its own empty store and never
+  reads those tables, so memory list, search and recall are empty until the records are imported
+  with `scripts/upgrade/migrate-memory.py`.
+- **PII belongs in Vault, with an opaque reference in memory.** Raw PII must not be
+  stored in ordinary memory, derived facts, embeddings or model context. Refusing a
+  memory write is not a completed Vault-backed write. The candidate's ordinary write
+  path does not yet implement that contract: its bounded detector refuses some
+  recognized values and misses others. The optional protected-intake route is not a
+  claim that ordinary writes automatically vault PII. Treat this as a release blocker;
+  do not mistake a refused import for a successful protected migration.
+- **The Compose files change.** `compose.yaml` and `compose.kb.yaml` gain the `aimee-memory-init`
+  service, an `aimee-memory` volume, and mounts of `private-memory/<role>` from the home volume
+  into the application. Use the files from this release; a deployment kept on its 1.0.2 Compose
+  file starts the new image without memory (`missing_module: memory`, not ready). These mounts
+  need Docker Engine 26 or later and Compose 2.26 or later.
+- **Use this release's embedder image.** Memory pins the embedding provider by identity. The
+  embedder image published with 1.0.2 does not report one, and startup stops with a message
+  saying so. The default image tag of this release does.
+- **The image is `linux/amd64` for memory.** The memory bundle exists for that platform only. An
+  image for another platform has no memory and its provisioning service fails with a message.
+- **Memory commands are declared by the implementation.** The fixed `/v1/memory/*` routes used
+  by 1.0.2 clients are unchanged. `/v1/commands/memory.<verb>`, which answered `no such command`
+  in 1.0.2, now reaches every memory command the implementation declares on the RPC surface, and
+  returns `404` for one it does not declare.
+- **Oversized provider requests are classified by the host.** A request that overflows the
+  deployment or caller byte budget is refused as `request_budget_exceeded` (HTTP 413).
+
+The project, volumes, role identity, Vault and PostgreSQL layout are reused. The checks in
+[Upgrade to the 1.0.0 deployment](#upgrade-to-the-100-deployment) still apply to a database older
+than the current layout.
+
+### Procedure
+
+Run it once per instance. A Server and a KB are upgraded separately, each in its own Compose
+project. The examples use a Server; the KB differences are listed after them.
+
+1. **Back up.** Stop writers and back up the application home, Vault, PostgreSQL, workspaces and
+   audit evidence as a matched set, and record the 1.0.2 image digests. The new version applies
+   schema migrations, so going back means restoring this backup onto the 1.0.2 images.
+
+2. **Export the existing memories.** The export is read-only and can run before or after the
+   image change, as long as PostgreSQL is up. It writes a private snapshot (mode 0600) and
+   refuses to overwrite one:
+
+   ```sh
+   python3 scripts/upgrade/migrate-memory.py export --placement server \
+     --psql "docker compose -p <project> -f compose.yaml exec -T aimee-store-db psql -U postgres -d aimee_store" \
+     --file /secure/personal-memory.jsonl
+   ```
+
+   Only active, unexpired records with no erasure intent are exported. Retired, merged, expired
+   and erased memories stay behind on purpose.
+
+3. **Stop the stack, then start the new images on the same project and volumes** with this
+   release's Compose files:
+
+   ```sh
+   docker compose -p <project> -f compose.yaml down
+   scripts/compose-local.sh -p <project> -f compose.yaml up -d
+   ```
+
+   Use the project name, environment file and overrides the deployment already has, including
+   the LUKS overlay for an encrypted store. `down` without `-v` keeps every volume. The helper
+   prints `[memory-provision]` lines; the last one reads
+   `memory installation created for server`.
+
+4. **Wait for readiness.** `GET /v1/ready` must report `"ready": true` with an empty
+   `missing_module`. On a KB, read `GET /v1/health`; `memory_ready` must be true. Memory is
+   working and empty at this point.
+
+5. **Import.** Run the import where the instance's local API is reachable, as the runtime user.
+   Do a dry run first:
+
+   ```sh
+   docker compose -p <project> -f compose.yaml cp scripts/upgrade/migrate-memory.py aimee-server:/tmp/
+   docker compose -p <project> -f compose.yaml cp /secure/personal-memory.jsonl aimee-server:/tmp/
+   docker compose -p <project> -f compose.yaml exec -u 0 aimee-server chown aimee /tmp/personal-memory.jsonl
+   docker compose -p <project> -f compose.yaml exec -u aimee aimee-server \
+     python3 /tmp/migrate-memory.py import --placement server --file /tmp/personal-memory.jsonl --dry-run
+   docker compose -p <project> -f compose.yaml exec -u aimee aimee-server \
+     python3 /tmp/migrate-memory.py import --placement server --file /tmp/personal-memory.jsonl
+   ```
+
+   The summary line counts records stored, already imported, failed and not placeable, and the
+   command exits non-zero if any record failed. Every record carries an idempotency key derived
+   from its old id and revision, so an interrupted or partly failed import is simply run again;
+   records that already arrived are reported as already imported and are not duplicated.
+
+6. **Verify, then remove the copies.** List and search memory, and check that a chat recalls an
+   imported fact. Delete the snapshot copies from the container and from the host when the
+   import is confirmed; they contain private memory. The old tables are left untouched by both
+   steps. Keep them, and the backup, until the upgraded deployment has been accepted.
+
+For a **KB**, use `--placement kb`, the `compose.kb.yaml` project and the `aimee-kb` service. The
+export reads `memories`; the import calls the KB's authenticated loopback API and needs its API
+bearer token in `AIMEE_KB_API_BEARER_TOKEN` or `--token-file`. A KB serves every project and
+workspace by default, so the snapshot's scopes need no preparation. If the KB restricts
+`AIMEE_MEMORY_SHARED_SCOPES` to an exact list, include the scopes the snapshot uses before step 3:
+
+```sh
+python3 scripts/upgrade/migrate-memory.py scopes --file /secure/shared-memory.jsonl
+# prints, for example: global,project:apollo,workspace:/srv/ws
+```
+
+A project or workspace outside a restricted list cannot be written or read; the import reports
+its records as failed, and running it again after adding the scope and restarting the KB places
+them. A record in any scope other than global, project or workspace is reported as not placeable
+and left for a manual decision.
+
+### What the import does and does not carry
+
+| Carried | Not carried |
+| --- | --- |
+| key, content, kind, tier, confidence | record ids (the implementation assigns new ones) |
+| scope (personal; global, project, workspace on a KB) | revision history and correction proposals |
+| KB `use_cases` | use counts and last-used times |
+| authority: user-stated and human-reviewed records are stored with user authority, all others with model authority | embeddings and derived indexes, which the implementation rebuilds |
+
+A 1.0.2 deployment that had selected **Cognee or Hillock** as its memory backend kept its records
+in that backend's catalog, not in these PostgreSQL tables. Both adapters are removed in this
+release and `migrate-memory.py` does not read their catalogs. Keep the catalog files and their
+`erasures.json`; moving those records is a separate, backend-specific conversion that must map
+identities and retained erasure authority before the records are served again.
+
+The import uses only the public `memory.store` and `memory.list` commands. If the implementation
+refuses a record, the failure is printed
+with its kind and message and nothing is lost: the snapshot and the old table still hold it.
+
+### Later image updates
+
+From 1.1.0 onward a memory installation belongs to the image that prepared it. To move to a newer
+image, stop the stack and start it again through the helper:
+
+```sh
+docker compose -p <project> -f compose.yaml down
+scripts/compose-local.sh -p <project> -f compose.yaml up -d
+```
+
+Provisioning notices the changed image, prepares the installation again under the same memory
+identity and keeps the owner key and stored memory; it prints
+`memory installation for server re-prepared; stored memory kept`. It refuses to do this while the
+application is still running, with a message saying to stop it first. The same happens when the
+accounts it serves, `AIMEE_MEMORY_SHARED_SCOPES` or the embedder image change.
+
 ## Upgrade to the 1.0.0 deployment
 
-The 1.0.0 release target follows published 0.4.6 and the earlier 0.4.2 topology transition.
-The current implementation additionally retires the native DB2 provider and removes automatic
+The 1.0.0 release followed published 0.4.6 and the earlier 0.4.2 topology transition.
+It additionally retired the native DB2 provider and removed automatic
 legacy database/role reconciliation. A new image is not a database-layout migration.
 
 Back up the application home, Vault, PostgreSQL, workspaces and audit evidence as a matched set.
@@ -62,9 +224,9 @@ persistent custodian of the volume key; losing it can make the database unrecove
 ### Verify before retiring the old deployment
 
 Check application and database readiness, client enrollment, personal store/get/search, private code,
-shared KB access when configured, workflow recovery and audit verification. New memory-backend
-configuration is documented in the [memory contract](modules/memory.md#memory-backend-contract);
-Cognee is newer than 0.4.6 and adds its own live derived-store cleanup obligations.
+shared KB access when configured, workflow recovery and audit verification. From 1.1.0 memory is
+served by the implementation provisioned from the image; see
+[Upgrade from 1.0.2](#upgrade-from-102).
 
 Retain the original home, database, snapshots and image until the cutover and restore checks pass.
 Encryption of the new volume does not encrypt old backups or discarded storage blocks. Sanitize

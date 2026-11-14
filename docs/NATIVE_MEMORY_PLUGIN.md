@@ -90,5 +90,6 @@ The server needs `POST /v1/native/primitive` plus unique, bounded source export.
 smokes. PR #3013 changed documentation and artifacts, so it required no new application image.
 Application 1.0.1 publication follows the regular release process; the files in this PR are signed plugin bundles.
 
-Storage and retrieval remain selected through the [memory backend contract](modules/memory.md#memory-backend-contract).
-Changing native/Cognee retrieval and installing a model attention plugin are separate operations.
+Storage and retrieval belong to the memory implementation installed behind the
+[memory boundary](MEMORY.md). Installing or replacing that implementation and installing a model
+attention plugin are separate operations.

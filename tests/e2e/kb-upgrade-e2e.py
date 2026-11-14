@@ -34,9 +34,37 @@ def exercise(stack, check):
         record = result.get('memory', {})
         check('KB reads ' + scope + ' canary', status == 200 and record.get('content') == content)
         fixtures.append((scope, read, record))
+    # Simulate an installed v45 store. A same-version fresh/recreation test
+    # would miss a forgotten schema bump because startup only migrates when
+    # the runtime's required version is newer. These inert stubs are never run.
+    retired = [
+        'kb_subject_erasure_begin(text,text,jsonb)',
+        'kb_subject_erasure_complete(text,text,bigint)',
+        'kb_subject_erasure_ack(text,text,text,bigint)',
+        'kb_subject_erasure_require_owners(text)',
+        'kb_memory_retention_reap(integer)',
+        'kb_memory_sensitivity_retention_reap(text,integer)',
+        'kb_document_retention_reap(integer)',
+    ]
+    def sql(statement):
+        return matrix.command('docker', 'exec', '-i', stack.postgres, 'psql',
+                              '-U', 'postgres', '-d', 'aimee_store', '-X', '-qAt',
+                              '-v', 'ON_ERROR_STOP=1', data=statement)
+    sql("UPDATE kb_meta SET value='45' WHERE key='schema_version';\n" + '\n'.join(
+        'CREATE FUNCTION ' + signature + " RETURNS void LANGUAGE plpgsql AS $$ "
+        "BEGIN RAISE EXCEPTION 'obsolete fixture must never execute'; END $$;"
+        for signature in retired))
+    check('persisted v45 fixture contains every retired routine', sql(
+        'SELECT bool_and(to_regprocedure(signature) IS NOT NULL) FROM unnest(ARRAY[' +
+        ','.join("'" + signature + "'" for signature in retired) + ']) signature') == 't')
     for attempt in range(2):
         stack.compose('down')
         stack.start()
+        check(f'recreation {attempt + 1} applies schema 46', sql(
+            "SELECT value FROM kb_meta WHERE key='schema_version'") == '46')
+        check(f'recreation {attempt + 1} removes every retired SQL routine', sql(
+            'SELECT bool_and(to_regprocedure(signature) IS NULL) FROM unnest(ARRAY[' +
+            ','.join("'" + signature + "'" for signature in retired) + ']) signature') == 't')
         for scope, read, before in fixtures:
             status, result = stack.kb_request('/v1/actions/memory.get', read)
             after = result.get('memory', {})

@@ -37,6 +37,31 @@ module_pid=""
 # inherited first-boot secrets either.
 ulimit -c 0 2>/dev/null || true
 
+# Activate the provisioned memory installation for this role. The memory-init
+# service wrote it to the read-only /opt/aims-memory volume; its launcher checks
+# the installation and then runs the resource binary it was prepared with, so it
+# takes the place of the image's own resource executable for every later call.
+# Without a provisioned volume the image's executable runs unchanged and memory
+# stays unavailable (`missing_module: memory`).
+_memory_role="${AIMEE_INSTANCE_ROLE:-server}"
+case "$_memory_role" in
+    server|kb)
+        _memory_launch="/opt/aims-memory/$_memory_role/bin/launch-resource"
+        if [ "$(id -u)" -eq 0 ] && [ -f "$_memory_launch" ] && [ ! -L "$_memory_launch" ]; then
+            install -m 0755 -o root -g root "$_memory_launch" "/usr/local/bin/aimee-$_memory_role"
+            # The installation's module manifest, grants and bridge configuration
+            # replace the image's public ones for every process started below.
+            export AIMEE_MODULE_BUS_SOCKET="$AIMEE_HOME/$_memory_role-module-bus.sock"
+            export AIMEE_MODULE_MANIFEST="/opt/aims-memory/$_memory_role/etc/modules"
+            # Composed at each start from the installation's grants and the
+            # operator's plugin grants in $AIMEE_HOME/modules.d/<role>.
+            export AIMEE_MODULE_POLICY_DIR="/opt/aims-memory/$_memory_role/run/grants"
+            export AIMEE_MODULE_RUNTIME_BIN="/usr/local/libexec/aimee-modules/aimee-module-$_memory_role"
+            export AIMS_MEMORY_BRIDGE_CONFIG="/opt/aims-memory/$_memory_role/etc/bridge.json"
+        fi
+        ;;
+esac
+
 # Consume deployment credentials before invoking any unrelated child process.
 # Kubernetes/Docker environment injection is accepted only as first-boot
 # transport: the short-lived server seals it into Vault, then this PID removes

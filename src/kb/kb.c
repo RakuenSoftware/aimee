@@ -10,7 +10,6 @@
 #include "modules/kb/c/db_postgres.h"
 #include "modules/kb/c/kb_store_tenant.h"
 #include "modules/kb/c/kb_service_backend.h"
-#include "modules/kb/c/memory_query.h"
 #include "modules/kb/c/vector_index_ops.h"
 #include "modules/kb/c/kb_runtime_state.h" /* kb_store_kb_purge_fence_active: ingest fence checks */
 #include "modules/kb/c/sketch.h"

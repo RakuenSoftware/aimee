@@ -10,7 +10,6 @@
 #include "modules/kb/c/evidence_lifecycle.h"
 #include "modules/kb/c/management_identity_journal.h"
 #include "memory.h"
-#include "modules/kb/c/memory_query.h"
 #include "modules/kb/c/write_tier_grant.h"
 #include "kb_oidc_token_exchange.h"
 #include "vault_service.h"
@@ -24,16 +23,6 @@ static int g_enrollment_authority = 1;
 void test_kb_enrollment_authority_set(int status)
 {
    g_enrollment_authority = status;
-}
-
-int kb_store_memory_review_list(const char *state, int limit, kb_store_memory_review_row_t *out,
-                                int max)
-{
-   (void)state;
-   (void)limit;
-   (void)out;
-   (void)max;
-   return 0;
 }
 
 int kb_store_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
@@ -132,6 +121,17 @@ int kb_http_servers_route_ex(const char *method, const char *path, const char *q
    (void)body;
    (void)body_len;
    return kb_http_servers_route(method, path, query_string, out_buf, out_cap);
+}
+
+int kb_http_servers_owner_trust(const char *method, const char *scope_kind, const char *body,
+                                int body_len, char *out_buf, int out_cap)
+{
+   (void)method;
+   (void)scope_kind;
+   (void)body;
+   (void)body_len;
+   snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory owner unavailable\"}");
+   return 503;
 }
 
 int g_test_registry_heartbeat_allow;

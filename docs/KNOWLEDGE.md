@@ -1,9 +1,13 @@
 # Knowledge and memory
 
-Server keeps one human's durable personal memory and private code. An optional KB turns shared
-sessions, documents, code, and explicit facts into a scoped corpus with source evidence, retrieval,
-and curation. Both use the same Go memory implementation in separate placements.
-[Server and KB](SERVER_AND_KB.md) defines this boundary.
+Server keeps one human's private code and serves that human's personal memory. An optional KB
+turns shared sessions, documents, code, and explicit facts into a scoped corpus with source
+evidence, retrieval, and curation. Memory records in either placement are served by the memory
+implementation that ships in the application image and is provisioned per deployment
+([Memory boundary](MEMORY.md)). Statements below about memory records, revisions and recall
+describe the contract the public commands expose, which the installed implementation fulfils;
+the KB's own document, code and fact pipelines are part of this tree.
+[Server and KB](SERVER_AND_KB.md) defines the placement boundary.
 
 ## Choose personal or shared memory
 
@@ -165,11 +169,10 @@ separate current implementation from remaining qualification and improvement wor
 
 ## Memory engine and model delivery
 
-The [generic memory contract](modules/memory.md#memory-backend-contract) lets an implementation
-replace baseline storage/retrieval behavior under the existing Aimee owner. Native is the default;
-Cognee is the first alternative retrieval adapter in PR #3005, newer than release 0.4.6. Its selected
-results resolve back to canonical Aimee records, and erasure must clean the managed derived store
-before completion. Extended fact, document, code and learning operations retain their own contracts.
+Memory storage and retrieval are provided by the implementation an operator installs and selects
+in the role module manifest ([memory module](modules/memory.md)). The host keeps caller
+authentication, source revalidation at provider dispatch and receipts. Extended fact, document,
+code and learning operations retain their own contracts.
 
 The separate [native-memory plugin](NATIVE_MEMORY_PLUGIN.md) delivers selected personal source
 records to supported local vLLM models. It does not choose which canonical owner or audience a

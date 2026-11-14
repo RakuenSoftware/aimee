@@ -34,15 +34,27 @@ def strings(value):
             yield from strings(child)
 
 
+# Profiles whose Server has no shared-memory owner client: the frozen 1.0
+# reference owner, and shipped aims-db memory, where an enrolled KB is reached
+# over HTTPS and that link never carries memory.
+NO_SHARED_OWNER_PROFILES = ('public-reference', 'no-shared-owner')
+# The shipped 1.1 memory: an enrolled Server reaches its KB's shared memory over
+# the mTLS link. The 1.0 owner's collection-head scenarios do not apply.
+KB_LINK_PROFILE = 'kb-link'
+PROFILES = ('owner-client', KB_LINK_PROFILE, *NO_SHARED_OWNER_PROFILES)
+
+
 def shared_lane_enabled(profile, remote, api, check):
-    if profile not in ('owner-client', 'public-reference'):
+    if profile not in PROFILES:
         raise ValueError('unknown shared memory qualification profile')
     if profile == 'owner-client':
         return remote
-    # This declared profile has no Server shared-memory owner client. A failed
+    if profile == KB_LINK_PROFILE:
+        return False
+    # These declared profiles have no Server shared-memory owner client. A failed
     # owner-client request never switches profiles or turns into a passing skip.
     status, reply = api('/v1/memory/recall', dict(store='kb', query='native-profile-boundary', scope='all'))
-    check('public-reference Server shared recall is explicitly unavailable without data',
+    check(profile + ' Server shared recall is explicitly unavailable without data',
           status == 200 and reply.get('status') == 'unavailable'
           and reply.get('message') == 'memory bus service unavailable or unsupported'
           and reply.get('retryable') is True and reply.get('dependency') == 'kb'
@@ -72,6 +84,8 @@ def inside(output, shared_profile='owner-client'):
     previous_kb_mode = None
     shared_remote_refusal_qualified = False
     exploration_session = None
+    # Readings kept only when a check fails, for diagnosis.
+    diagnostics = {}
     fixture_files = tempfile.TemporaryDirectory(prefix=prefix + '-')
     fixture_read_root = Path(fixture_files.name)
     for turn in range(1, 6):
@@ -290,7 +304,12 @@ def inside(output, shared_profile='owner-client'):
                     elapsed_seconds=time.monotonic()-started, provider_requests=len(captures)-before,
                     provider_request_bytes=request_sizes[before:],
                     refusal_kinds=[kind for kind in ('request_budget_exceeded', 'request_budget_unavailable', 'unavailable', 'stale_context')
-                                   if any(kind in text for text in strings(events))]))
+                                   if any(kind in text for text in strings(events))],
+                    # Short closed refusal strings only: codes and fixed prose,
+                    # never the memory or tool content the run carried.
+                    refusal_texts=sorted({text for text in strings(events) if len(text) <= 160 and
+                                          any(k in text for k in ('unavailable', 'stale', 'refus'))})[:12]
+                                  if result['status'] == 'failed' else []))
                 return result, events
             time.sleep(0.1)
         runs.append(dict(name=name, run_id=run_id, status='fixture_timeout',
@@ -307,11 +326,12 @@ def inside(output, shared_profile='owner-client'):
             if not path.name.isdigit():
                 continue
             try:
-                if (path / 'cmdline').read_bytes().split(b'\0')[0].endswith(b'/aimee-module-memory'):
+                # 1.0 Go owner or the shipped aims-db memory frontend.
+                if (path / 'cmdline').read_bytes().split(b'\0')[0].endswith((b'/aimee-module-memory', b'/aimee-memory-module')):
                     found.append(int(path.name))
             except OSError:
                 pass
-        check('native fixture identifies exactly one Go memory owner', len(found) == 1)
+        check('native fixture identifies exactly one memory owner', len(found) == 1)
         return found[0]
 
     def recover():
@@ -367,20 +387,37 @@ def inside(output, shared_profile='owner-client'):
         version_status, versioned = api('/v1/memory/get', dict(id=str(memory_id), include_version=True))
         observed_version = versioned.get('memory', {}).get('version')
         check('native fixture reads its private source version', version_status == 200 and isinstance(observed_version, dict))
-        if shared_profile == 'public-reference' and shared_remote:
+        if shared_profile == KB_LINK_PROFILE and shared_remote:
+            # A shared fact stored through this Server lands on the KB, comes
+            # back through Server recall, and reaches the provider as context.
+            shared_fact = 'Shared KB link fact ' + prefix + ': deployments need two reviewers.'
+            status, stored_shared = api('/v1/memory/store', dict(store='kb', scope='all', key=prefix + '-kb-link',
+                                                                 content=shared_fact, tier='L2', kind='fact'))
+            check('kb-link Server stores shared memory on its KB',
+                  status == 200 and stored_shared.get('status') == 'ok')
+            status, recalled = api('/v1/memory/recall', dict(store='kb', query=prefix, scope='all'))
+            check('kb-link Server recalls its KB shared memory',
+                  status == 200 and recalled.get('status') == 'ok' and shared_fact in json.dumps(recalled))
+            before = len(captures)
+            result, _ = run('kb-link shared native context')
+            check('kb-link native run completes with KB shared context',
+                  result.get('status') == 'completed' and len(captures) == before + 1)
+            check('kb-link provider receives the KB shared fact',
+                  any(shared_fact in text for text in strings(captures[-1])))
+        if shared_profile in NO_SHARED_OWNER_PROFILES and shared_remote:
             before = len(captures)
             result, events = run('unavailable shared native context')
-            check('public-reference remote native context refuses the missing shared owner client',
+            check(shared_profile + ' remote native context refuses the missing shared owner client',
                   result.get('status') == 'failed' and
                   any('unavailable' in text for text in strings(events)))
-            check('public-reference shared context refusal sends zero provider requests', len(captures) == before)
+            check(shared_profile + ' shared context refusal sends zero provider requests', len(captures) == before)
             shared_remote_refusal_qualified = True
             # This declared profile qualifies the real private owner separately;
             # a remote configuration correctly requires the absent shared client.
             # Use the existing explicit private-only mode, not a failed-read fallback.
             previous_kb_mode = config('get', 'kb_mode')['value']
             config('set', 'kb_mode', 'none')
-            check('public-reference explicitly selects private-only native context',
+            check(shared_profile + ' explicitly selects private-only native context',
                   config('get', 'kb_mode')['value'] == 'none')
         before = len(captures)
         result, _ = run('healthy native run')
@@ -396,15 +433,42 @@ def inside(output, shared_profile='owner-client'):
               verification.get('evidence', {}).get('binding_commitment') == 'matched' and
               verification.get('evidence', {}).get('payload_correspondence') == 'matched' and
               verification.get('evidence', {}).get('source_commitment') == 'matched')
-        check('native receipt binds the retained private revision and fresh source check',
-              verification.get('source_coverage') == 'retained_versioned_inputs' and
-              len(prepared['binding'].get('source_check_id', '')) == 32 and
-              any(ref.get('source_version', {}).get('record_kind') == 'user_memory_record' and
-                  ref.get('source_version', {}).get('version') == observed_version
-                  for ref in prepared['binding'].get('sources', [])))
-        check('native receipt retains the private collection dependency', any(
-            ref.get('source_version', {}).get('record_kind') == 'user_memory_collection'
-            for ref in prepared['binding'].get('sources', [])))
+        sources = prepared['binding'].get('sources', [])
+        contract = sources.get('contract') if isinstance(sources, dict) else None
+        if contract in ('aims-projected-evidence/v1', 'aims-projected-evidence/v2'):
+            # The shipped implementation binds native projected evidence: its
+            # owner and, per projection, a digest and the exact source versions.
+            # v2 is the multi-owner form: each projection names its owner, and
+            # a foreign (KB) projection carries that owner's signed attestation.
+            projections = sources.get('projections') or []
+            private_owner = observed_version.get('owner_id')
+            if contract == 'aims-projected-evidence/v1':
+                private = projections if sources.get('owner') == private_owner else []
+            else:
+                private = [p for p in projections if p.get('owner') == private_owner]
+                check('multi-owner receipt is anchored at the private context owner',
+                      sources.get('context_owner') == private_owner)
+                foreign = [p for p in projections if p.get('owner') != private_owner]
+                check('every KB projection in the receipt carries its owner attestation',
+                      all(isinstance(p.get('owner_attestation'), dict) for p in foreign))
+                if shared_profile == KB_LINK_PROFILE and shared_remote:
+                    check('kb-link receipt binds the KB shared source', bool(foreign))
+            check('native receipt binds the retained private revision',
+                  verification.get('source_coverage') == 'retained_native_versioned_inputs' and
+                  any(str(source.get('belief')) == str(observed_version.get('record_revision'))
+                      for projection in private for source in projection.get('sources', [])))
+            check('native receipt retains a digest for every projected source group', bool(projections) and all(
+                len(projection.get('digest', [])) == 32 and projection.get('sources') for projection in projections))
+        else:
+            check('native receipt binds the retained private revision and fresh source check',
+                  verification.get('source_coverage') == 'retained_versioned_inputs' and
+                  len(prepared['binding'].get('source_check_id', '')) == 32 and
+                  any(ref.get('source_version', {}).get('record_kind') == 'user_memory_record' and
+                      ref.get('source_version', {}).get('version') == observed_version
+                      for ref in sources))
+            check('native receipt retains the private collection dependency', any(
+                ref.get('source_version', {}).get('record_kind') == 'user_memory_collection'
+                for ref in sources))
         check('supplied receipt does not claim producer or chain authentication',
               verification.get('evidence', {}).get('authenticated_producer') == 'unavailable' and
               verification.get('evidence', {}).get('chain_included') == 'not_checked' and
@@ -498,11 +562,22 @@ def inside(output, shared_profile='owner-client'):
         check('recovered provider retains complete Go memory', any(content in text for text in strings(captures[-1])))
         before = len(captures)
         result, events = run('native stable context refresh', mode='refresh-stable')
+        if result.get('status') != 'completed':
+            # This fixture contains only synthetic file/tool text. Preserve the
+            # actual failed-run details rather than losing the refusal behind
+            # the generic multi-turn assertion.
+            diagnostics['stable_refresh_failure'] = dict(result=result, events=events)
         check('native multi-turn run completes after five tool calls', result.get('status') == 'completed' and
               len(captures) == before + 6)
-        check('native refresh follows five real file reads', all(
-            any(f'Native refresh evidence {turn}: {prefix}' in text for text in strings(captures[-1]))
-            for turn in range(1, 6)))
+        refreshed = all(any(f'Native refresh evidence {turn}: {prefix}' in text for text in strings(captures[-1]))
+                        for turn in range(1, 6))
+        if not refreshed:
+            # Keep what the provider actually received for each read: the
+            # tool results are fixture files and host refusals, never secrets.
+            diagnostics['refresh_tool_results'] = [
+                [message.get('content') for message in body.get('messages', []) if message.get('role') == 'tool']
+                for body in captures[before:]]
+        check('native refresh follows five real file reads', refreshed)
         before = len(captures)
         result, events = run('native context refresh', mode='refresh-update')
         check('native refresh fixture commits its memory update', not provider_errors and refresh_id is not None)
@@ -655,7 +730,7 @@ def inside(output, shared_profile='owner-client'):
                 source_contracts=[entry['binding'].get('sources', []) for entry, _ in receipt_captures if entry is not None],
                 receipt_attempts=[entry['attempt_id'] for entry, _ in receipt_captures if entry is not None],
                 unresolved_attempts=sorted(expected_unresolved),
-                refresh_stop_ordinal=refresh_stop_ordinal), indent=2) + '\n')
+                refresh_stop_ordinal=refresh_stop_ordinal, diagnostics=diagnostics), indent=2) + '\n')
     return 0
 
 
@@ -664,7 +739,7 @@ def main():
     parser.add_argument('--server')
     parser.add_argument('--output', required=True)
     parser.add_argument('--inside', action='store_true', help=argparse.SUPPRESS)
-    parser.add_argument('--shared-profile', choices=('owner-client', 'public-reference'), default='owner-client')
+    parser.add_argument('--shared-profile', choices=PROFILES, default='owner-client')
     args = parser.parse_args()
     if args.inside:
         return inside(args.output, args.shared_profile)
@@ -750,6 +825,24 @@ print(json.dumps(rows))
                 recovered = True
                 break
             time.sleep(1)
+        if not recovered:
+            # Keep the container's readings in the matrix's fixed diagnostic
+            # grammar only (the stack is removed after a failure). Raw Docker
+            # output can carry bootstrap credentials and never leaves here.
+            import importlib.util
+            spec = importlib.util.spec_from_file_location('deployment_matrix', Path(__file__).with_name('deployment-matrix.py'))
+            matrix = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(matrix)
+            state = subprocess.run(['docker', 'inspect', '--format', '{{json .State}}', args.server],
+                                   capture_output=True, text=True)
+            logs = subprocess.run(['docker', 'logs', '--tail', '2000', args.server], capture_output=True, text=True)
+            try:
+                parsed = json.loads(state.stdout)
+            except ValueError:
+                parsed = {}
+            evidence.setdefault('diagnostics', {})['ungraceful_restart'] = dict(
+                state=matrix.safe_container_state(parsed),
+                log_summary=matrix.safe_startup_log_summary(logs.stdout + logs.stderr))
         def record(name, passed):
             evidence['checks'].append(dict(name=name, passed=bool(passed)))
             Path(args.output).write_text(json.dumps(evidence, indent=2) + '\n')

@@ -27,6 +27,36 @@ services:
       retries: 20
     stop_grace_period: 60s
 
+  # One-shot memory provisioning. On first boot it generates this deployment's
+  # memory identity, keys and configuration into the aimee-memory volume and the
+  # private-memory subtree of the home volume; afterwards it only verifies them.
+  # The application mounts the result read-only. scripts/compose-local.sh runs
+  # it before sealing startup credentials, and a plain `up` runs it here.
+  aimee-memory-init:
+    restart: 'no'
+    image: ${AIMEE_APPLICATION_IMAGE:-ghcr.io/rakuensoftware/aimee:${AIMEE_IMAGE_TAG:-latest}}
+    user: root
+    network_mode: none
+    entrypoint: [/usr/local/bin/aimee-memory-provision]
+    environment:
+      AIMEE_INSTANCE_ROLE: server
+      AIMEE_MEMORY_ACCOUNTS: ${AIMEE_MEMORY_ACCOUNTS:-aimee}
+      # KB only: the shared scopes it serves. `global` always; by default every
+      # project and workspace. List project:NAME / workspace:NAME to restrict it.
+      AIMEE_MEMORY_SHARED_SCOPES: ${AIMEE_MEMORY_SHARED_SCOPES:-global,project:*,workspace:*}
+      # `off` creates only the mount points; the instance then runs without
+      # memory and reports missing_module: memory.
+      AIMEE_MEMORY_PROVISION: ${AIMEE_MEMORY_PROVISION:-on}
+      # KB only: with a synthesis model the KB derives typed facts from its
+      # shared memory, through the managed sidecar identity its own client uses.
+      # A Server never processes shared memory, so these change nothing there.
+      AIMEE_MODEL_SERVICES_ENABLED: '1'
+      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
+      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
+    volumes:
+      - aimee-memory:/opt/aims-memory
+      - aimee-server-home:/var/lib/aimee
+
   aimee-server:
     restart: unless-stopped
     build:
@@ -37,6 +67,8 @@ services:
     depends_on:
       aimee-store-db:
         condition: service_started
+      aimee-memory-init:
+        condition: service_completed_successfully
     ulimits:
       stack: 67108864
       memlock: 1073741824
@@ -68,6 +100,13 @@ services:
       - aimee-model-tls:/run/aimee-model-tls
       - aimee-embedding-tls:/run/aimee-model-tls/embedding/server
       - aimee-synthesis-tls:/run/aimee-model-tls/synthesis/server
+      # Provisioned memory artifacts are immutable to the running application;
+      # only its configuration, state and runtime directories are writable, and
+      # those live in the home volume so one backup covers them.
+      - {type: volume, source: aimee-memory, target: /opt/aims-memory, read_only: true, volume: {nocopy: true}}
+      - {type: volume, source: aimee-server-home, target: /opt/aims-memory/server/etc, volume: {nocopy: true, subpath: private-memory/server/etc}}
+      - {type: volume, source: aimee-server-home, target: /opt/aims-memory/server/state, volume: {nocopy: true, subpath: private-memory/server/state}}
+      - {type: volume, source: aimee-server-home, target: /opt/aims-memory/server/run, volume: {nocopy: true, subpath: private-memory/server/run}}
     healthcheck:
       test: [CMD-SHELL, 'body=$$(curl -sS --max-time 4 --unix-socket /var/lib/aimee/aimee-http.sock http://localhost/v1/ready) && printf "%s" "$$body" | grep -q ''"ready":true''']
       interval: 10s
@@ -109,6 +148,7 @@ volumes:
   aimee-store-tls:
   aimee-server-home:
   aimee-server-workspaces:
+  aimee-memory:
   aimee-model-tls:
     driver_opts:
       type: tmpfs

@@ -22,6 +22,9 @@ int request_context_refuse_assembly(const char *kind)
 static cJSON *stored_intent;
 static int calls, dispatched, outcomes, guard_held, guard_released;
 static int fail_resource, fail_verify, fail_store, memory_required, stale;
+/* Refuse this step once as stale; count evidence requests; change commitments. */
+static const char *expire_once, *expire_next;
+static int evidence_calls, changed_evidence;
 static const char *replay_state;
 static int nested_ids;
 static char last_outcome_action[64];
@@ -145,10 +148,15 @@ int aimee_module_commands_dispatch_internal_caller_timeout(const char *method, c
    assert(!strcmp(method, "memory.runtime") && !strcmp(text(args, "operation"), "action-evidence"));
    assert(guard_held);
    assert(!strcmp(text(args, "principal"), "alice"));
+   evidence_calls++;
    *reply = cJSON_Parse(stale ? "{\"status\":\"unavailable\"}"
-                              : "{\"status\":\"ok\",\"evidence_sha256\":\"evidence\",\"context_"
-                                "receipt\":\"receipt\",\"revocation_generation\":\"revision\","
-                                "\"memory_guard\":\"guard\",\"memory_required\":true}");
+                        : changed_evidence && evidence_calls > 1
+                            ? "{\"status\":\"ok\",\"evidence_sha256\":\"other\",\"context_"
+                              "receipt\":\"receipt\",\"revocation_generation\":\"revision\","
+                              "\"memory_guard\":\"guard\",\"memory_required\":true}"
+                            : "{\"status\":\"ok\",\"evidence_sha256\":\"evidence\",\"context_"
+                              "receipt\":\"receipt\",\"revocation_generation\":\"revision\","
+                              "\"memory_guard\":\"guard\",\"memory_required\":true}");
    return 1;
 }
 /* An unbound internal call cannot supply the retained ticket's verified host.
@@ -226,10 +234,18 @@ int db1_governed_action_apply(const char *principal, const char *sid, const char
       cJSON_AddItemToObject(receipt, "intent", cJSON_Duplicate(stored_intent, 1));
       cJSON_AddStringToObject(receipt, "state", "outcome_unknown");
    }
+   if (expire_once && !strcmp(op, expire_once))
+   {
+      expire_once = expire_next;
+      expire_next = NULL;
+      cJSON_ReplaceItemInObject(r, "allowed", cJSON_CreateFalse());
+      cJSON_AddStringToObject(r, "reason", "freshness_or_authority_unavailable");
+      goto reply;
+   }
    if (!strcmp(op, "admit") || !strcmp(op, "dispatch"))
    {
       if (memory_required)
-         assert(guard_held && !guard_released);
+         assert(guard_held);
       if (!strcmp(op, "dispatch"))
       {
          if (replay_state)
@@ -255,6 +271,7 @@ int db1_governed_action_apply(const char *principal, const char *sid, const char
       assert(!strcmp(text(o, "state"), fail_verify ? "outcome_unknown" : "effect_confirmed"));
       assert(strcmp(text(o, "object_version"), "forged"));
    }
+reply:;
    char *raw = cJSON_PrintUnformatted(r);
    snprintf(reply, cap, "%s", raw);
    free(raw);
@@ -372,9 +389,60 @@ static void test_nested_action_receipt_ownership(void)
    cJSON_Delete(inner);
 }
 
+/* A proof that expired in transit is renewed once, never replayed; changed
+ * commitments refuse instead of dispatching under the old intent. */
+static void test_stale_freshness_is_renewed_once(void)
+{
+   const char *steps[] = {"admit", "dispatch"};
+   for (size_t i = 0; i < 2; i++)
+   {
+      calls = dispatched = outcomes = guard_held = guard_released = evidence_calls = 0;
+      policy_action_attempt("attempt");
+      cJSON *args = input();
+      expire_once = steps[i];
+      assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) == 0);
+      assert(evidence_calls == 2 && dispatched == 1 && !expire_once);
+      assert(guard_released == 2 && !guard_held);
+      int is_error = 1;
+      char *result = policy_action_finish("ok", strdup("saved"), &is_error);
+      assert(!is_error);
+      free(result);
+      cJSON_Delete(args);
+   }
+   calls = dispatched = outcomes = guard_held = guard_released = evidence_calls = 0;
+   policy_action_attempt("attempt");
+   cJSON *args = input();
+   expire_once = "admit";
+   changed_evidence = 1;
+   assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) == -1);
+   assert(evidence_calls == 2 && dispatched == 0 && !guard_held);
+   int refused = 0;
+   char *refusal = policy_action_finish("refused", strdup("error: not executed"), &refused);
+   assert(refused && strstr(refusal, "current_memory_evidence_unavailable"));
+   free(refusal);
+   changed_evidence = 0;
+   /* A second stale answer after the renewal is reported, not retried again. */
+   calls = dispatched = guard_held = guard_released = evidence_calls = 0;
+   policy_action_attempt("attempt");
+   expire_once = "admit";
+   expire_next = "dispatch";
+   assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) == -1);
+   assert(evidence_calls == 2 && dispatched == 0 && !guard_held && !expire_once);
+   refusal = policy_action_finish("refused", strdup("error: not executed"), &refused);
+   assert(refused && strstr(refusal, "freshness_or_authority_unavailable"));
+   free(refusal);
+   cJSON_Delete(args);
+}
 int main(void)
 {
    test_nested_action_receipt_ownership();
+   memory_required = 1;
+   snprintf(context.principal, sizeof(context.principal), "alice");
+   snprintf(context.request_id, sizeof(context.request_id), "request");
+   snprintf(context.memory_source_release, sizeof(context.memory_source_release), "ticket");
+   test_stale_freshness_is_renewed_once();
+   memory_required = 0;
+   memset(context.memory_source_release, 0, sizeof(context.memory_source_release));
    calls = dispatched = outcomes = guard_held = guard_released = 0;
    snprintf(context.principal, sizeof(context.principal), "alice");
    snprintf(context.request_id, sizeof(context.request_id), "request");

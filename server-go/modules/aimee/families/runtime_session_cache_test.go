@@ -55,7 +55,7 @@ func TestSessionCachePostgresConcurrentNonceCASIsolationDeletion(t *testing.T) {
 			return 0, nil, e
 		}
 		defer tx.Rollback(ctx)
-		s, c, e := f(ctx, erasureReplayQueryer{traceReplayQueryer{tx}}, args)
+		s, c, e := f(ctx, cacheReplayQueryer{traceReplayQueryer{tx}}, args)
 		if e == nil {
 			e = tx.Commit(ctx)
 		}

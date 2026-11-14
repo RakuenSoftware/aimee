@@ -67,6 +67,13 @@ A remote client uploads file content. A server never treats a client path as a p
 
 ## Memory
 
+Memory commands are served by the memory implementation that ships in the application image and
+is provisioned for each instance at first start. An instance without a provisioned installation
+returns `503` for every memory command and is not ready. Which commands, record kinds and
+retrieval behaviour are available is that implementation's contract; this section describes the
+selectors and ownership rules the host applies. See
+[Memory boundary](docs/MEMORY.md).
+
 Memory has two separate stores. The server store belongs to the local user and can hold
 personal memories and PII. The KB holds shared knowledge across projects and workspaces.
 The same numeric ID can exist in both stores.
@@ -122,19 +129,20 @@ Do not use working memory for team facts. It is local, session-scoped DB1 state.
 
 See [Knowledge](docs/KNOWLEDGE.md) and [Retrieval](docs/retrieval-stack.md).
 
-### Select a memory engine
+### Memory provisioning
 
-Native Aimee memory is the default. The 1.0.0 work adds Cognee 1.6.2 through the
-[generic memory contract](docs/modules/memory.md#memory-backend-contract). Selecting an engine
-does not change the personal/shared selector, record identity, authorization or correction review.
-Aimee retains canonical records and validates provider results against their current revisions.
-
-Configure the selected backend on each instance that will use it, using the documented URL and
-Vault credential transport. Restart the memory owner after changing the selection. Cognee's first
-adapter refuses scopes above 256 eligible records; its derived cleanup must succeed before
-subject-erasure completion. Test a scoped read, search, mutation and erasure before reopening traffic.
+Memory needs no separate installation. Starting the stack through `scripts/compose-local.sh` runs
+the one-shot `aimee-memory-init` service, which creates the instance's memory installation on first
+start, verifies it on later starts, and prepares it again after an image update while keeping the
+stored memory. Provisioning does not change the personal/shared selector, caller authentication or
+the host's provider-send checks. The instance reports `missing_module: memory` in `/v1/ready` when
+no installation is attached. A Server serves personal memory for `aimee` and every browser login (plus
+any account in `AIMEE_MEMORY_ACCOUNTS`), re-evaluated at each start; a KB serves the shared scopes
+in `AIMEE_MEMORY_SHARED_SCOPES`. See
+[Deployment](docs/DEPLOYMENT.md#memory) for storage and backup, and
+[Upgrading](docs/UPGRADING.md#upgrade-from-102) to carry memories forward from a 1.0.x deployment.
 The [native attention plugin](docs/NATIVE_MEMORY_PLUGIN.md) separately consumes selected records
-on a supported inference host; it does not choose the storage engine.
+on a supported inference host; it does not choose the memory implementation.
 
 ## Code intelligence
 

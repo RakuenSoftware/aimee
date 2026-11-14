@@ -96,8 +96,28 @@ announce_project() {
     fi
 }
 
+# The application mounts the provisioned memory subtree of its home volume, so
+# provisioning (idempotent, prints no secret) must precede any application run.
+# Memory pins its embedding provider by identity, read here from the embedder
+# image itself because the embedder cannot serve before the application runs.
+provision_memory() {
+    services=$(compose config --services 2>/dev/null) || return 0
+    printf '%s\n' "$services" | grep -qx aimee-memory-init || return 0
+    identity=
+    if printf '%s\n' "$services" | grep -qx aimee-embedder; then
+        identity=$(compose run --rm --no-deps -T --entrypoint /opt/aimee/embedder-venv/bin/python \
+            aimee-embedder - < "$(dirname -- "$0")/embedder-identity.py" 2>/dev/null | tail -n 1)
+        case "$identity" in
+            *embedding_identity*) ;;
+            *) printf 'error: the embedder image reports no embedding identity\n' >&2; exit 1 ;;
+        esac
+    fi
+    printf '%s' "$identity" | compose run --rm --no-deps -T aimee-memory-init
+}
+
 bootstrap_server() {
     announce_project
+    provision_memory
     printf '%s\n' 'Sealing server first-boot credentials into Vault (values are not logged or stored in container metadata).'
     env -0 | compose run --rm --no-deps -T \
         --entrypoint /usr/sbin/runuser aimee-server \
@@ -106,6 +126,7 @@ bootstrap_server() {
 
 bootstrap_kb() {
     announce_project
+    provision_memory
     printf '%s\n' 'Sealing KB first-boot credentials into Vault (values are not logged or stored in container metadata).'
     env -0 | compose run --rm --no-deps -T \
         --entrypoint /usr/sbin/runuser aimee-kb \

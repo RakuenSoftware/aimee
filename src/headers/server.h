@@ -534,7 +534,7 @@ int handle_kb_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -727,6 +727,10 @@ cJSON *action_receipt_command(cJSON *input);
 int handle_action_receipt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 cJSON *task_projection_command(cJSON *input);
 cJSON *memory_task_promotion_command(const cJSON *req);
+/* The account's typed facts over its personal memory: operation is user-facts,
+ * user-search-graph or user-entity-edges. Owned ok reply, or NULL when the
+ * memory module is unavailable or refuses. */
+cJSON *memory_user_typed_command(const char *operation, const cJSON *req);
 int handle_task_projection(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 #endif /* DEC_SERVER_H */

@@ -417,7 +417,9 @@ def inside(output, budget_benchmark=False):
                 executable = (process / 'cmdline').read_bytes().split(b'\0')[0]
             except (FileNotFoundError, PermissionError, ProcessLookupError):
                 continue
-            if executable.endswith(b'/aimee-module-memory'):
+            # The frozen 1.0 owner runs as aimee-module-memory; the shipped
+            # implementation's memory frontend as aimee-memory-module.
+            if executable.endswith((b'/aimee-module-memory', b'/aimee-memory-module')):
                 memory_pids.append(int(process.name))
         check('provider refusal fixture identifies one real memory owner', len(memory_pids) == 1)
         owner_pid = memory_pids[0]
@@ -446,6 +448,13 @@ def inside(output, budget_benchmark=False):
             os.kill(owner_pid, signal.SIGTERM)
             deadline = time.monotonic() + 75
             while True:
+                # A resumed owner may answer a read before SIGTERM finishes; that
+                # is not evidence that its supervised replacement is ready.
+                if Path('/proc', str(owner_pid)).exists():
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('paused memory owner did not exit after SIGTERM')
+                    time.sleep(0.1)
+                    continue
                 status, recovered = api('/v1/memory/get', dict(id=str(memory_id)))
                 if status == 200 and recovered.get('memory', {}).get('content') == content:
                     break

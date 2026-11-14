@@ -7,8 +7,10 @@ without a KB. See [Server and KB](SERVER_AND_KB.md) for deployment and request s
 | Data domain | Behavior owner | Store | Contents |
 | --- | --- | --- | --- |
 | Server runtime, historically DB1 | `aimee`; `aimee-wfe` owns workflow lifecycle | Server PostgreSQL | Sessions, working memory, jobs, workflows, policy, caches |
-| Personal memory and private code | Server placement of `memory` | Server PostgreSQL + pgvector | `user_memories`, retained revisions, correction proposals, private code and vectors |
-| Shared knowledge | KB placement of `memory` and KB knowledge domains | KB PostgreSQL + pgvector | `memories`, facts, documents, shared code, evidence, curation queues |
+| Private code | Server | Server PostgreSQL + pgvector | Private code index and vectors |
+| Personal memory | Memory implementation, Server placement | Its own database under `private-memory/server` in the home volume | Personal records, revisions and vectors. The 1.0.x `user_memories` tables are retained in Server PostgreSQL after an upgrade but are no longer read; see [Upgrading](UPGRADING.md#upgrade-from-102) |
+| Shared knowledge | KB knowledge domains | KB PostgreSQL + pgvector | Facts, documents, shared code, evidence, curation queues |
+| Shared memory | Memory implementation, KB placement | Its own database under `private-memory/kb` in the home volume | Shared records in global, workspace and project scopes. The 1.0.x `memories` table is retained in KB PostgreSQL after an upgrade but is no longer read |
 | Server WORM | Server audit owner | Separate SQLite ledger | Append-only evidence chain and checkpoints |
 | KB WORM | `aimee-kb-worm` | Separate SQLite ledger | Append-only KB evidence chain and checkpoints |
 
@@ -39,7 +41,7 @@ The same Go executable enforces both placements. A scope or record ID cannot cha
 ordinary memory operations require explicit `store=kb` to leave Server's personal store.
 
 Dense vectors remain with their source rows. Each instance configures its own embedder and optional
-synthesis endpoint. Go memory uses versioned embedding generations; KB document/code vector
+synthesis endpoint. An installed memory implementation manages its own vectors; KB document/code vector
 maintenance has its own schema and rebuild contract. See [Retrieval](retrieval-stack.md).
 
 ## Audit evidence
@@ -65,6 +67,7 @@ Back up each instance's home, Vault, PostgreSQL data, workspaces, and audit evid
 Use consistent PostgreSQL dumps or coordinated snapshots, and preserve the original identity when
 restoring. Follow [Deployment](DEPLOYMENT.md#volumes-and-backup) and [WORM worker](WORM_WORKER.md).
 
-With the replaceable-memory build, Cognee holds derived retrieval datasets while canonical records
-remain in the selected Aimee instance. Its live-store reset and vendor backup retention are separate
-obligations; see the [memory contract](modules/memory.md#memory-backend-contract).
+The memory implementation keeps its records, configuration and owner key under `private-memory/`
+in the instance's home volume, so the home backup covers them; restore it together with the Vault
+and PostgreSQL store. The `aimee-memory` volume holds prepared artifacts only and is regenerated at
+the next start. See [Deployment](DEPLOYMENT.md#memory).

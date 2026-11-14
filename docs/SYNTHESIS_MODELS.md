@@ -62,10 +62,10 @@ inventing a measurement. E4B's 0.81 is unaffected: that image is unchanged.
 
 Be careful reading the Q6/Q4 result as "Q4 is free for E2B". It is measured to be
 *indistinguishable*, which is a weaker claim than equal and is a statement about the set as much as
-the model, and `QUANT_DECISION.md` argues the opposite call on a directional
+the model, and `SYNTHESIS_QUANT_DECISION.md` argues the opposite call on a directional
 prior (pooled P(Q6 > Q4) = 0.946). The full six-arm table, the memory figures, and what
 would resolve the E2B half are in
-[`bench/tier-a/QUANT_DECISION.md`](../bench/tier-a/QUANT_DECISION.md).
+[`SYNTHESIS_QUANT_DECISION.md`](SYNTHESIS_QUANT_DECISION.md).
 
 E4B's F1 above is its shipped quant at strict F1 on that set, measured on
 GPU so throughput is not a confound. The throughput figures are `llama-bench` at

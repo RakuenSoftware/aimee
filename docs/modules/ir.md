@@ -296,7 +296,7 @@ the next execution adopts canonical history afresh. Durable capture refusal
 prevents accepting an unrecorded compaction observation.
 
 
-## Shared Go canonical contract infrastructure
+### Shared Go canonical contract infrastructure
 
 The shared `server-go/ir` package remains application infrastructure, alongside
 its existing request/session/interruption/verification contracts. It is not

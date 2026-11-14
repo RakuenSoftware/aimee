@@ -23,10 +23,4 @@ int server_module_skill_should_fire(int hook_count, int interval, int *fire);
  * Returns a newly allocated JSON reply, or NULL when the module did not answer. */
 cJSON *server_module_memory_data(const cJSON *request);
 
-/* Complete configured derived-memory cleanup before acknowledging erasure. */
-int server_module_memory_reset_derived(void);
-
-int server_module_memory_erase_subject(const char *request_id, const char *subject,
-                                       const cJSON *sessions);
-
 #endif

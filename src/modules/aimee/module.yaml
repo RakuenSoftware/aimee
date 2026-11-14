@@ -105,9 +105,12 @@
     "server-go/modules/aimee/families/session_history_timing.go",
     "server-go/modules/aimee/families/session_input_delivery.go",
     "server-go/modules/aimee/families/session_input_plan.go",
-    "server-go/modules/aimee/families/session_ir_history_batch.go"
+    "server-go/modules/aimee/families/session_ir_history_batch.go",
+    "server-go/modules/aimee/families/server_code_index.go",
+    "server-go/modules/aimee/families/server_code_query.go"
   ],
   "go_tests": [
+    "server-go/modules/aimee/families/postgres_queryer_test.go",
     "server-go/modules/aimee/aimee_test.go",
     "server-go/modules/aimee/family_timeout_test.go",
     "server-go/modules/aimee/family_changed_test.go",
@@ -159,7 +162,6 @@
     "server-go/modules/aimee/families/sessions_test.go",
     "server-go/modules/aimee/families/session_legacy_text_test.go",
     "server-go/modules/aimee/families/status_separation_test.go",
-    "server-go/modules/aimee/families/subject_erasure_live_test.go",
     "server-go/modules/aimee/families/task_projection_test.go",
     "server-go/modules/aimee/families/trace_pagination_test.go",
     "server-go/modules/aimee/families/variadic_bounds_test.go",
@@ -208,7 +210,8 @@
     "server-go/modules/aimee/families/session_input_plan_test.go",
     "server-go/modules/aimee/families/session_ir_history_batch_live_test.go",
     "server-go/modules/aimee/families/session_ir_history_batch_test.go",
-    "server-go/modules/aimee/families/session_ir_history_page_completion_test.go"
+    "server-go/modules/aimee/families/session_ir_history_page_completion_test.go",
+    "server-go/modules/aimee/families/server_code_index_test.go"
   ],
   "docs": [
     "docs/modules/aimee.md"
@@ -251,6 +254,7 @@
     "server-go/modules/aimee/families/schema_personal_memory_send_guards.sql",
     "server-go/modules/aimee/families/schema_personal_memory_versions.sql",
     "server-go/modules/aimee/families/schema_pki.sql",
+    "server-go/modules/aimee/families/schema_retire_subject_erasure.sql",
     "server-go/modules/aimee/families/schema_roundtable.sql",
     "server-go/modules/aimee/families/schema_runtime.sql",
     "server-go/modules/aimee/families/schema_session_exploration.sql",
@@ -269,6 +273,7 @@
     "server-go/modules/aimee/families/schema_legacy_primary_text.sql",
     "server-go/modules/aimee/families/schema_original_input_deliveries.sql",
     "server-go/modules/aimee/families/schema_original_input_plans.sql",
-    "server-go/modules/aimee/families/schema_session_cache.sql"
+    "server-go/modules/aimee/families/schema_session_cache.sql",
+    "server-go/modules/aimee/families/schema_server_code_index.sql"
   ]
 }

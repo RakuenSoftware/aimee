@@ -245,6 +245,24 @@ transaction-local schema that is rolled back, preserving other fixtures.
 
 ## Shared-memory qualification profiles
 
+By default the Docker matrix qualifies the shipped memory implementation with
+`shipped-memory-e2e.py`, through public surfaces only: the Server's HTTP socket
+for personal memory (receipts, replay, get, search, recall, refusal of a raw
+sensitive value, delete) and the KB's authenticated actions for shared memory
+(global, project and workspace placement, isolation between projects,
+statistics, hygiene). The KB bearer arrives as `AIMEE_E2E_KB_BEARER`.
+
+`memory-placement-e2e.py` asserts the frozen 1.0 owner's PostgreSQL tables and
+runs only when the matrix is given `--reference-memory-owner`.
+
+`memory-native-async-e2e.py` takes the same choice through `--shared-profile`.
+The shipped Server has no shared-memory owner client (an enrolled KB is reached
+over HTTPS, which never carries memory), so the matrix selects
+`no-shared-owner`, or `public-reference` with the reference owner. Both assert
+the Server's typed, retryable unavailable answer for shared recall and, with
+`kb_mode` `remote`, the refused native context, before continuing private-only.
+`owner-client` remains for a Server that has a shared owner client.
+
 `memory-placement-e2e.py --kb ...` defaults to `--shared-profile owner-client`.
 That profile retains the Server HTTP, CLI and MCP forwarding, cwd/scope,
 restart, outage, privacy and authority assertions. It requires a compatible

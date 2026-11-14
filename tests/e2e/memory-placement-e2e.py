@@ -1232,8 +1232,12 @@ class Gate:
         finally:
             # A paused process can lose its bus lease. Let the existing image
             # supervisor replace it so recovery follows the production path.
+            # Wait for the old process to exit: a resumed process may answer
+            # before SIGTERM finishes, which proves nothing about recovery.
             self.docker('exec', self.args.kb, 'python3', '-c',
-                'import os,signal,sys; p=int(sys.argv[1]); os.kill(p,signal.SIGCONT); os.kill(p,signal.SIGTERM)', str(pid))
+                'import os,signal,sys,time; p=int(sys.argv[1]); os.kill(p,signal.SIGCONT); os.kill(p,signal.SIGTERM)\n'
+                'end=time.monotonic()+60\nwhile os.path.exists("/proc/%d" % p) and time.monotonic()<end: time.sleep(0.1)\n'
+                'sys.exit(os.path.exists("/proc/%d" % p))', str(pid))
         self.good('KB memory process recovers', self.wait('get', dict(id=mid, store='kb', scope='all')))
         self.good('local retirement', self.call('delete', dict(id=mid)))
         code, body = self.call('get', dict(id=mid))

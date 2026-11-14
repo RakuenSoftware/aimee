@@ -20,7 +20,7 @@ The `postgres` module remains the transport provider. SQL stays at principal 28,
 stage 2, event 11266, with unchanged opcodes, typed values, checksums, and transaction
 handles. Moving code does not grant a caller migration privileges.
 
-The server-domain module and KB/server memory use this same client. The domain
+The server-domain module uses this client. The domain
 caller contract is now `server-go/aimee` (formerly `server-go/db1`), and session
 ownership uses `SessionDirectory` rather than a numbered database directory.
 The workflow engine's domain facade and live fixture are now

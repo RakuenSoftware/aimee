@@ -216,6 +216,7 @@ SERVER_CONTAINER_FILES = frozenset(
         "deploy/container/core-storage.sh",
         "deploy/container/server-entrypoint.sh",
         "deploy/container/aimee-server.yaml",
+        "deploy/container/memory-provision.py",
     )
 )
 
@@ -263,6 +264,9 @@ def consumers(path: str) -> frozenset[str]:
     if path.startswith("runtime-web/"):
         return SERVER
     if path.startswith("config/"):
+        return SERVER
+    if path.startswith("vendor/aims-memory/") or path == "scripts/check_memory_bundle.py":
+        # The memory bundle is verified, linked and copied by the application image only.
         return SERVER
 
     if path == "api/openapi-server-v1.yaml":

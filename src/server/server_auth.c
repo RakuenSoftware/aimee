@@ -225,7 +225,6 @@ const method_policy_t method_registry[] = {
     {"kb.docs.push", CAP_INDEX_ADMIN, "push documents into the knowledge base (ingest)"},
     {"kb.ingest.status", CAP_INDEX_READ, "knowledge-base ingest status (read)"},
     {"kb.reembed", CAP_INDEX_ADMIN, "reset and re-embed the vector store (dim change)"},
-    {"kb.erase-subject", CAP_SESSION_ADMIN, "erase one subject's mutable content graph"},
     {"memory.embed", CAP_INDEX_ADMIN, "(re)generate memory embeddings"},
     /* Code index/graph rebuilds (mutating) — distinct from the index.* reads. */
     {"index.scan", CAP_INDEX_ADMIN, "scan / re-index the codebase"},
