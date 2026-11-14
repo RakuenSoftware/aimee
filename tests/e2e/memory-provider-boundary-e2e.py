@@ -407,7 +407,8 @@ def inside(output, budget_benchmark=False):
                 input='FOLLOWUP_MEMORY_BOUNDARY', instructions=new_policy,
                 previous_response_id=responses_ids[protocol], max_output_tokens=32))
             check(name + ' continuation completes', status == 200 and
-                  any('MEMORY_BOUNDARY_OK' in text for text in strings(response)))
+                  any('MEMORY_BOUNDARY_OK' in text for text in strings(response)),
+                  request_outcome(status, response, len(captures) - before) if status != 200 else None)
             selected = captures[before:]
             check(name + ' continuation dispatches once', len(selected) == 1)
             values = list(strings(selected[0][2]))
