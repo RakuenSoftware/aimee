@@ -129,8 +129,21 @@ owns `local_procedure_events` and payload-free `local_procedure_erasure_intents`
 These are observation metadata, independent of KB knowledge/artifact storage.
 Full admitted JSON survives the typed interface without the legacy 4096-byte DTO.
 
-Subject erasure captures surviving event-identity digests, removes local rows and
-fences old snapshots through the existing erasure epoch. Startup replay also
-cleans rows resurrected by content-only restores. Runtime roles cannot erase the
-control metadata. No process-success observation becomes a verified task grade.
-This path does not implement autonomous synthesis or independent grading.
+Subject invalidation retains historical rows and marks observations unavailable.
+Migration 57 retires the former physical-erasure procedures. No process-success
+observation becomes a verified task grade. This path does not implement
+autonomous synthesis or independent grading.
+
+### Standalone repository index
+
+Host-only runtime operation 67 owns repository indexing independently of memory
+storage. Migration 58 retains immutable source snapshots and atomically publishes
+a complete scan. Aborted and superseded scans remain retained; retiring a project
+only makes it unavailable. Database triggers reject physical deletion, truncation,
+and modification of retained source versions.
+
+The existing extractors and source-observer guard remain in force. Embeddings use
+the Native Stage 3 provider with verified serving identity, document/query polarity,
+and an explicit extraction policy. Retrieval excludes mismatched or incomplete
+vector generations and keeps lexical retrieval available during embedding outages.
+A recovered provider permits rebuilding missing vectors even at the same Git commit.

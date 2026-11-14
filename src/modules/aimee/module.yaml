@@ -105,7 +105,9 @@
     "server-go/modules/aimee/families/session_history_timing.go",
     "server-go/modules/aimee/families/session_input_delivery.go",
     "server-go/modules/aimee/families/session_input_plan.go",
-    "server-go/modules/aimee/families/session_ir_history_batch.go"
+    "server-go/modules/aimee/families/session_ir_history_batch.go",
+    "server-go/modules/aimee/families/server_code_index.go",
+    "server-go/modules/aimee/families/server_code_query.go"
   ],
   "go_tests": [
     "server-go/modules/aimee/families/postgres_queryer_test.go",
@@ -208,7 +210,8 @@
     "server-go/modules/aimee/families/session_input_plan_test.go",
     "server-go/modules/aimee/families/session_ir_history_batch_live_test.go",
     "server-go/modules/aimee/families/session_ir_history_batch_test.go",
-    "server-go/modules/aimee/families/session_ir_history_page_completion_test.go"
+    "server-go/modules/aimee/families/session_ir_history_page_completion_test.go",
+    "server-go/modules/aimee/families/server_code_index_test.go"
   ],
   "docs": [
     "docs/modules/aimee.md"
@@ -270,6 +273,7 @@
     "server-go/modules/aimee/families/schema_legacy_primary_text.sql",
     "server-go/modules/aimee/families/schema_original_input_deliveries.sql",
     "server-go/modules/aimee/families/schema_original_input_plans.sql",
-    "server-go/modules/aimee/families/schema_session_cache.sql"
+    "server-go/modules/aimee/families/schema_session_cache.sql",
+    "server-go/modules/aimee/families/schema_server_code_index.sql"
   ]
 }

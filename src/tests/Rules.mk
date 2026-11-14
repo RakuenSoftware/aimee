@@ -893,6 +893,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-memory-source-ref-provenance \
                 $(TESTPREFIX)/unit-test-memory-reference-transport \
                 $(TESTPREFIX)/unit-test-learning-memory-transport
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-ready
+TEST_TARGETS += $(TESTPREFIX)/unit-test-db1-store-probe
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-dispatch
 TEST_TARGETS += $(TESTPREFIX)/unit-test-token-audit-load
 
@@ -5207,6 +5208,9 @@ $(TESTPREFIX)/unit-test-server-cert-grant: $(OBJDIR)/tests/test_server_cert_gran
                               $(OBJDIR)/modules/vault/vault_capability.o \
                               $(OBJDIR)/modules/vault/vault_principal.o \
                               $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-db1-store-probe: $(OBJDIR)/tests/test_db1_store_probe.o $(OBJDIR)/db1_store_probe.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-ready: $(OBJDIR)/tests/test_server_ready.o \

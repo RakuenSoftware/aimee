@@ -2658,13 +2658,6 @@
       ],
       "sha256": "1c4cba0637c22fafacd2d79f9b7919b49e7b3203e7711ea8867ba13a0fbde2b7"
     },
-    "src/server/server_code_index.c": {
-      "disposition": "host-transport",
-      "symbols": [
-        "server_module_memory_data"
-      ],
-      "sha256": "e7cb541559ecb39a34148ab94ff152e2b92a8778b59e7300a8e3f20578ac3d1d"
-    },
     "src/server/server_dispatch_defs_data.h": {
       "disposition": "protocol-catalog",
       "symbols": [
@@ -3577,6 +3570,15 @@
         }
       ],
       "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+    },
+    "src/server/server_code_index_embedding.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "AIMEE_MEMORY_EVENT_EMBED",
+        "AIMEE_MEMORY_STAGE_EMBED"
+      ],
+      "sha256": "0950fbc021a6e42b917b1909c80ca52e8f403b0cb3aa819394da16728472f1d3",
+      "reason": "Generic identity-checked query/document embedding requests only; selected Native provider owns all model execution. Repository snapshots, SQL publication and code ranking belong to runtime business state."
     }
   },
   "generated_files": {
@@ -4517,5 +4519,21 @@
         "src/tests/test_server_session_delivery_conflict.c"
       ]
     }
+  },
+  "current_repository_index_owner_review": {
+    "reason": "Repository persistence moved to runtime business state with retained immutable scan generations. The C collector no longer sends code-index to a memory owner. Model execution stays in the declared Native embedding provider; no local memory implementation or source-witness fallback was added.",
+    "removed_memory_transport": {
+      "src/server/server_code_index.c": {
+        "disposition": "host-transport",
+        "symbols": [
+          "server_module_memory_data"
+        ],
+        "sha256": "e7cb541559ecb39a34148ab94ff152e2b92a8778b59e7300a8e3f20578ac3d1d"
+      }
+    },
+    "evidence": [
+      "server-go/modules/aimee/families/server_code_index_test.go",
+      "src/tests/test_db1_store_probe.c"
+    ]
   }
 }

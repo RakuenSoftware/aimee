@@ -301,7 +301,7 @@ DB1_OBJS = $(DB1_SRCS:%.c=$(OBJDIR)/%.o)
 # client rather than the domain. The domain itself still builds -- the module
 # process compiles it from the descriptor -- it just no longer sits inside this
 # binary. See src/db1_client/git_ownership.c.
-DB1_CLIENT_SRCS = db1_client/transport.c db1_client/jti_replay.c db1_client/lifecycle.c db1_client/mgmt_jwks.c db1_client/mgmt_nonce.c db1_client/pki.c db1_client/git_ownership.c db1_client/conversation.c db1_client/agent_work.c db1_client/delegation.c db1_client/sessions.c db1_client/runtime.c db1_client/telemetry.c db1_client/guardrail_state.c db1_client/ensemble.c db1_client/workflow.c db1_client/roundtable.c db1_client/identity.c
+DB1_CLIENT_SRCS = db1_client/transport.c db1_client/jti_replay.c db1_client/lifecycle.c db1_client/mgmt_jwks.c db1_client/mgmt_nonce.c db1_client/pki.c db1_client/git_ownership.c db1_client/conversation.c db1_client/agent_work.c db1_client/delegation.c db1_client/sessions.c db1_client/runtime.c db1_client/runtime_code_index.c db1_client/telemetry.c db1_client/guardrail_state.c db1_client/ensemble.c db1_client/workflow.c db1_client/roundtable.c db1_client/identity.c
 
 DB1_CLIENT_OBJS = $(DB1_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
 # The opt-in plan client validates canonical IR JSON; keep that dependency out
@@ -516,7 +516,7 @@ SERVER_SRCS = server/server_http_module_console.c server/server_http_owned_sourc
               server/server_workflow_api.c
 SERVER_SRCS += server/agent_result_cache.c server/server_compute_lifetime.c
 SERVER_SRCS += server/server_governed_action.c server/server_clean_retry.c
-SERVER_SRCS += server/server_code_index.c
+SERVER_SRCS += server/server_code_index.c server/server_code_index_embedding.c
 SERVER_SRCS += server/server_mcp_project.c
 SERVER_SRCS += server/server_runtime_identity.c
 # The command catalogue the thin client renders (served via /v1/cli/manifest).

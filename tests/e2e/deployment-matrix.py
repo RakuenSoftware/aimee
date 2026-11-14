@@ -1729,6 +1729,11 @@ def main():
                 '--shared-profile', 'public-reference' if args.reference_memory_owner else 'kb-link',
                 '--output', str(args.output / 'native-async.json'), timeout=600)
             check('Live asynchronous native memory refusal and recovery gate', True)
+            if args.topology == 'T3' and not args.reference_memory_owner:
+                command('python3', str(ROOT / 'tests/e2e/standalone-index-release-e2e.py'),
+                    '--server', server.application, '--store-db', server.postgres,
+                    '--output', str(args.output / 'standalone-index'), timeout=900)
+                check('Standalone repository indexing, retained snapshots and SQL outage readiness', True)
             if env.get('AIMEE_MEMORY_HEALTH_FIXTURE') == '1':
                 command('python3', str(ROOT / 'tests/e2e/memory-health-e2e.py'),
                     '--server', server.application, '--output', str(args.output / 'memory-health.json'), timeout=600)

@@ -29739,6 +29739,44 @@
         ],
         "max_bytes": 66000
       }
+    },
+    {
+      "family": "runtime",
+      "id": 67,
+      "name": "runtime_code_index",
+      "c_name": "db1_runtime_code_index",
+      "c_params": [
+        "request_json"
+      ],
+      "c_returns": "json",
+      "wire_format": "db1-fields-v2",
+      "scope": "server",
+      "transaction": "none",
+      "idempotency": "conditional",
+      "host_only": true,
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "result_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 1048576
+      }
     }
   ]
 }
