@@ -135,6 +135,21 @@ int main(void)
    assert(!vault_content_protect_text("Ordinary retained control 界 🦊", &safe) && !safe);
    assert(!vault_content_protect_text("std::string and 2030-01-02", &safe) && !safe);
    assert(!vault_content_protect_text(
+              "<memory_data>{\"timestamps\":{\"min\":1794672000,\"max\":1794758400},"
+              "\"version\":9007199254740993}</memory_data>",
+              &safe) &&
+          !safe);
+   assert(
+       !vault_content_protect_text("{\"phone\":\"+1 202 555 0198\",\"time\":1794672000}", &safe));
+   assert(safe && strstr(safe, "1794672000") && !strstr(safe, "+1 202 555 0198"));
+   free(safe);
+   safe = NULL;
+   assert(
+       !vault_content_protect_text("abcdef01-2345-6789-abcd-123456789012@example.invalid", &safe));
+   assert(safe && !strstr(safe, "@example.invalid"));
+   free(safe);
+   safe = NULL;
+   assert(!vault_content_protect_text(
               "{\"id\":\"1234567890123456789\",\"uuid\":\"abcdef01-2345-6789-abcd-123456789012\"}",
               &safe) &&
           !safe);

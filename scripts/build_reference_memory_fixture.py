@@ -16,6 +16,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "tests/fixtures/legacy-memory-owner.json"
+COMPATIBILITY = ROOT / "tests/fixtures/reference-memory-retention.json"
+COMPATIBILITY_SHA256 = "94ad07715de94900c2b67824a3f01a049ceca30b1d6568f3a1fdf880b414149d"
 SOURCE_COMMIT = "0e29dd14f8c96de8f8366d763dfe56992aedc2b0"
 SOURCE_TREE = "2ed04ea2d796ba20c61b2d104582d6224942cb0d"
 
@@ -60,6 +62,7 @@ def fixture_manifest() -> dict:
         "source_tree": SOURCE_TREE, "source_path": "server-go",
         "build_package": "./cmd/aimee-module", "binary_basename": "aimee-module-memory",
         "go_version": "go1.26.10", "purpose": "external-reference-not-shipped",
+        "compatibility_patch_sha256": COMPATIBILITY_SHA256,
     }:
         raise ValueError("reference fixture manifest differs from its reviewed frozen pin")
     return manifest
@@ -79,6 +82,25 @@ def verify_reference_fixture(path: Path) -> dict:
             receipt.get("binary_sha256") != hashlib.sha256(path.read_bytes()).hexdigest()):
         raise ValueError("reference owner does not match its frozen provenance")
     return receipt
+
+
+def apply_retention_compatibility(directory: Path) -> None:
+    """Apply only the reviewed transformation to the exact frozen source file."""
+    if hashlib.sha256(COMPATIBILITY.read_bytes()).hexdigest() != COMPATIBILITY_SHA256:
+        raise ValueError("reference compatibility patch differs from its reviewed pin")
+    patch = json.loads(COMPATIBILITY.read_text())
+    if patch.get("path") != "server-go/modules/memory/process.go":
+        raise ValueError("unexpected reference compatibility path")
+    target = directory / patch["path"]
+    original = target.read_bytes()
+    if hashlib.sha256(original).hexdigest() != patch["source_sha256"]:
+        raise ValueError("reference compatibility source hash differs")
+    text = original.decode()
+    for before, after in patch["replacements"]:
+        if text.count(before) != 1:
+            raise ValueError("reference compatibility replacement is not unique")
+        text = text.replace(before, after)
+    target.write_text(text)
 
 
 def build(output: Path) -> dict:
@@ -101,6 +123,7 @@ def build(output: Path) -> dict:
     with tempfile.TemporaryDirectory(prefix="aimee-memory-reference-", dir=output.parent) as temporary:
         directory = Path(temporary)
         extract_source(archive, directory)
+        apply_retention_compatibility(directory)
         binary = directory / "aimee-module-memory"
         subprocess.run(["go", "build", "-o", str(binary), "./cmd/aimee-module"],
                        cwd=directory / "server-go", env=env, check=True)

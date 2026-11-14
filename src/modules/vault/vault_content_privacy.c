@@ -183,6 +183,47 @@ done:
    }
    return rc;
 }
+/* Serialized memory context contains protocol counters and timestamps. Keep
+ * JSON numeric tokens byte-exact, just as the outer JSON intake does. String
+ * values remain subject to the recognizers; parsing grants no authority. */
+static unsigned char *json_number_bytes(const char *text, size_t n)
+{
+   unsigned char *numbers = calloc(n ? n : 1, 1);
+   if (!numbers)
+      return NULL;
+   for (size_t i = 0; i < n; ++i)
+   {
+      if (text[i] != '{' && text[i] != '[')
+         continue;
+      const char *end = NULL;
+      cJSON *value = cJSON_ParseWithOpts(text + i, &end, 0);
+      if (!value || !end)
+      {
+         cJSON_Delete(value);
+         continue;
+      }
+      cJSON_Delete(value);
+      size_t limit = (size_t)(end - text);
+      int quoted = 0;
+      for (size_t k = i; k < limit; ++k)
+      {
+         if (text[k] == '\\' && quoted)
+            ++k;
+         else if (text[k] == '"')
+            quoted = !quoted;
+         else if (!quoted && (isdigit((unsigned char)text[k]) || text[k] == '-'))
+         {
+            do
+            {
+               numbers[k++] = 1;
+            } while (k < limit && strchr("0123456789.eE+-", text[k]));
+            --k;
+         }
+      }
+      i = limit - 1;
+   }
+   return numbers;
+}
 int vault_content_protect_text(const char *text, char **safe)
 {
    if (!safe)
@@ -199,6 +240,12 @@ int vault_content_protect_text(const char *text, char **safe)
    char *out = malloc(TEXT_MAX + 1);
    if (!out)
       return -1;
+   unsigned char *numbers = json_number_bytes(text, n);
+   if (!numbers)
+   {
+      free(out);
+      return -1;
+   }
    int changed = 0;
    while (at < n)
    {
@@ -213,7 +260,8 @@ int vault_content_protect_text(const char *text, char **safe)
             if (i == 0)
                while (b > a && strchr(".!?", text[b - 1]))
                   --b;
-            int valid = b > a && !inside_locator(text, a) && !inside_uuid(text, a);
+            int numeric = i == 4 || i == 5 || i == 6 || i == 10;
+            int valid = b > a && !inside_locator(text, a) && !(numeric && inside_uuid(text, a));
             if (i == 4 || i == 5)
             {
                unsigned char address[16];
@@ -238,7 +286,7 @@ int vault_content_protect_text(const char *text, char **safe)
                /* E.164 phone numbers stop at 15 digits. Longer protocol IDs
                 * must retain their bytes; grouped payment cards have their
                 * own recognizer rather than borrowing the phone rule. */
-               valid = valid && digits >= 9 && digits <= 15;
+               valid = valid && digits >= 9 && digits <= 15 && !numbers[a];
             }
             if (valid && (a < first || (a == first && b > end)))
             {
@@ -274,12 +322,14 @@ int vault_content_protect_text(const char *text, char **safe)
       }
    }
    out[used] = 0;
+   free(numbers);
    if (changed)
       *safe = out;
    else
       free(out);
    return 0;
 fail:
+   free(numbers);
    OPENSSL_cleanse(out, TEXT_MAX + 1);
    free(out);
    return -1;

@@ -53,6 +53,21 @@ class ReferenceMemoryFixtureTests(unittest.TestCase):
             self.assertIn('frozen provenance', result.stderr)
             self.assertEqual(owner.read_bytes(), b'tampered')
 
+    def test_retention_compatibility_is_exact_and_removes_replay(self):
+        source = subprocess.check_output(["git", "show", builder.SOURCE_COMMIT +
+            ":server-go/modules/memory/process.go"], cwd=ROOT)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "server-go/modules/memory/process.go"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(source)
+            builder.apply_retention_compatibility(root)
+            updated = target.read_text()
+            self.assertNotIn("user_memory_replay_erasure_intents()", updated)
+            self.assertIn("SELECT count(*) FROM user_memory", updated)
+            with self.assertRaises(ValueError):
+                builder.apply_retention_compatibility(root)
+
     def test_fresh_absolute_external_output_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -104,6 +119,7 @@ class ReferenceMemoryFixtureTests(unittest.TestCase):
             output = Path(temporary) / "aimee-module-memory"
             with mock.patch.object(builder.subprocess, "check_output", side_effect=[
                     builder.SOURCE_TREE, "go version go1.26.10 linux/amd64", archive()]), \
+                    mock.patch.object(builder, "apply_retention_compatibility"), \
                     mock.patch.object(builder.subprocess, "run", side_effect=
                                       subprocess.CalledProcessError(1, ["go", "build"])):
                 with self.assertRaises(subprocess.CalledProcessError):
@@ -139,6 +155,7 @@ class ReferenceMemoryFixtureTests(unittest.TestCase):
                 binary.chmod(0o755)
 
             with mock.patch.object(builder.subprocess, "check_output", check_output), \
+                    mock.patch.object(builder, "apply_retention_compatibility"), \
                     mock.patch.object(builder.subprocess, "run", compile_fixture):
                 receipt = builder.build(output)
             self.assertTrue(output.is_file())

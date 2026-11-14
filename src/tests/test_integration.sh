@@ -1248,6 +1248,12 @@ if [ -n "$DB1_MODULE_PID" ]; then
         PASS=$((PASS + 1)) # server.health notices the store is gone
         ;;
     esac
+    # Exercise a real missing local owner, rather than assuming no KB is an outage.
+    RESP=$(srv_req '{"method":"index.investigate","query":"where is the shared date helper","project":"integration-scope"}') || true
+    check_output "index.investigate names the dependency that failed" '"dependency":"local_code"' echo "$RESP"
+    check_output "index.investigate reports an outage, not empty evidence" \
+        'not an index with no evidence' echo "$RESP"
+    check_output "index.investigate marks the outage retryable" '"retryable":true' echo "$RESP"
     # Put it back: every check after this one needs a store.
     start_db1_module
     for _i in $(seq 1 50); do
@@ -1263,16 +1269,11 @@ fi
 RESP=$(srv_req '{"method":"index.investigate","query":"where is the shared date helper"}') || true
 check_output "index.investigate refuses without a project scope" 'scope_required' echo "$RESP"
 
-# With a scope, it must distinguish an OUTAGE from an index with no evidence.
-# This isolated server has neither a KB connection nor a memory module, so this is
-# exactly the condition that used to answer "no evidence" and send the agent off
-# to search the tree by hand. It is the call the session guidance tells every
-# agent to make FIRST, so a silent outage costs the whole opening move.
+# The standalone local index is healthy without a remote KB. An unindexed
+# project is empty evidence; the stopped-owner check above proves a real outage.
 RESP=$(srv_req '{"method":"index.investigate","query":"where is the shared date helper","project":"integration-scope"}') || true
-check_output "index.investigate names the dependency that failed" '"dependency":"local_code"' echo "$RESP"
-check_output "index.investigate reports an outage, not empty evidence" \
-    'not an index with no evidence' echo "$RESP"
-check_output "index.investigate marks the outage retryable" '"retryable":true' echo "$RESP"
+check_output "standalone index.investigate is healthy without a KB" '"status":"ok"' echo "$RESP"
+check_output "standalone index.investigate reports empty evidence" '"result_status":"empty"' echo "$RESP"
 
 # The /v1 HTTP surface is the only transport now (the NDJSON RPC socket was
 # removed). Confirm the local /v1 UDS is bound and an allowlisted read returns a
@@ -1407,21 +1408,12 @@ fi
 
 check_output "local version long flag" "aimee" $AIMEE --version
 
-# This harness intentionally has no KB process. A reachable route is not a
-# successful empty index: the client must preserve the dependency failure and
-# exit non-zero so automation cannot mistake an outage for "no projects".
+# The local index remains available with no remote KB selected.
 INDEX_OVERVIEW=$($AIMEE --json index overview 2>&1) && INDEX_RC=0 || INDEX_RC=$?
-if [ "$INDEX_RC" -eq 1 ]; then
-    PASS=$((PASS + 1))
-else
-    echo "FAIL: index overview route (expected exit 1 without KB, got $INDEX_RC)"
-    dump_server_log
-    FAIL=$((FAIL + 1))
-fi
-check_output "index overview reports KB outage" '"status":"unavailable"' echo "$INDEX_OVERVIEW"
-check_output "index overview maps KB outage to HTTP 503" '"http_status":503' echo "$INDEX_OVERVIEW"
+check "standalone index overview succeeds without a KB" test "$INDEX_RC" -eq 0
+check_output "standalone index overview has an empty project list" '^\[\]$' echo "$INDEX_OVERVIEW"
 # Optional external-owner compatibility starts only after the explicit index
-# outage cases. With no selection, unavailable is the required public contract.
+# availability cases. With no memory selection, unavailable is required.
 [ -z "$LEGACY_MEMORY_OWNER" ] || MEMORY_MODULE_ENABLED=1
 start_memory_module
 for attempt in $(seq 1 100); do
