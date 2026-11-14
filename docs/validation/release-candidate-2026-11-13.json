@@ -180,7 +180,9 @@
     "Raw PII reaches Native journals, real embedding inputs, controlled model requests, SQL/capture persistence and backups.",
     "The default software Vault silently generates a different master key when the original is missing beside existing ciphertext.",
     "Source audit: legacy Vault delete/retirement can remove encrypted values, conflicting with retained-history policy. No delete was invoked.",
-    "Current CI fails e2e-docker (T2), integration-tests and live-auth-rigs; required public/private checks must pass before promotion."
+    "Latest completed CI (43595095611) passes T1, T2, T2-luks and T3, but still fails integration-tests and live-auth-rigs; required checks must pass before promotion.",
+    "Healthy standalone Server code indexing remains unavailable even after actual workspace registration (HTTP 503, dependency local_code).",
+    "Readiness reports db1:ok and ready:true during a SQL outage that makes actual canonical session creation fail with HTTP 502."
   ],
   "documented_functional_limits": [
     "Typed facts are not pre-injected.",
@@ -521,5 +523,38 @@
     "runtime_fixes_implemented": false,
     "lxc_deleted": true,
     "evidence_archive_sha256": "2cd2e264505925304bc7a0931d48b46d0a577756558ead4e2690d4e931645a58"
+  },
+  "general_release_qualification": {
+    "report": "general-e2e-2026-11-14.json",
+    "qualification_completed": true,
+    "release_ready": false,
+    "application_source_commit": "d137610e88a9ac652414cdb0f4d6c43667eebd31",
+    "application_image_id": "sha256:b435b8f022a3400c89d85dd9cb64ded5218e8f6590e372b9ac7877fe1159de38",
+    "T2_passed": true,
+    "native_export_checks_passed": 19,
+    "new_blockers": [
+      "standalone-code-index-unavailable",
+      "readiness-misreports-sql-dependency"
+    ],
+    "latest_completed_ci_run": 43595095611,
+    "ci_failures": [
+      "integration-tests",
+      "live-auth-rigs"
+    ],
+    "cleanup": {
+      "completed": true,
+      "ct_config_absent": true,
+      "root_disk_absent": true,
+      "other_workloads_modified": false
+    },
+    "evidence": {
+      "archive": "general-e2e-evidence.tar.gz",
+      "sha256": "09fa51232f3a3b028998b8e44468a2964f695fd135fe1f977b16a322e8ea9b64",
+      "files": 41,
+      "hashes_verified": true,
+      "secret_scan": "passed",
+      "local_directory": "/home/virant/dev/aimee-general-e2e-20261114",
+      "receipt_capabilities_exported": false
+    }
   }
 }

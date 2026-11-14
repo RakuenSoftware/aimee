@@ -1,0 +1,175 @@
+{
+  "recorded_at": "2026-11-14T13:11:36.790028+00:00",
+  "release_ready": false,
+  "qualification_completed": true,
+  "application_source_commit": "d137610e88a9ac652414cdb0f4d6c43667eebd31",
+  "application_image_id": "sha256:b435b8f022a3400c89d85dd9cb64ded5218e8f6590e372b9ac7877fe1159de38",
+  "postgres_image_id": "sha256:c46a1a3f378fbc1cc4c08480e38764149c4f893987c25202b6994a089b63d7da",
+  "memory_source_commit": "5bdbad7a4c8498024ba10b686474b352b335ef64",
+  "runtime_production_code_changed": false,
+  "environment": {
+    "host": "192.168.1.253",
+    "ct_id": 9474,
+    "hostname": "aimee-general-e2e",
+    "guest_ip": "192.168.0.192",
+    "unprivileged": true,
+    "cores": 24,
+    "memory_mib": 32768,
+    "root_disk_gib": 150,
+    "memlock_bytes": 1073741824,
+    "postgres_storage": "plain",
+    "build_args": {
+      "WITH_VSCODE": "0",
+      "WITH_RUNTIME_WEB": "1",
+      "AIMEE_VERSION": "1.1.0-d137610e8"
+    }
+  },
+  "results": {
+    "T2": {
+      "native-async.json": {
+        "passed": 95,
+        "failed": 0
+      },
+      "topology.json": {
+        "passed": 41,
+        "failed": 0
+      },
+      "local-memory.json": {
+        "passed": 9,
+        "failed": 0
+      },
+      "shared-memory.json": {
+        "passed": 17,
+        "failed": 0
+      },
+      "identity.json": {
+        "passed": 6,
+        "failed": 0
+      },
+      "provider-boundary.json": {
+        "passed": 353,
+        "failed": 0
+      }
+    },
+    "T2_total_reported_checks": 521,
+    "T2_aggregate_gate_verdicts_in_total": 41,
+    "native_primitive_final": {
+      "passed": 19,
+      "failed": 0
+    },
+    "exploratory_raw": {
+      "passed": 28,
+      "failed": 14
+    },
+    "exploratory_valid_cases": {
+      "passed": 27,
+      "failed": 11
+    },
+    "exploratory_excluded_harness_assumptions": {
+      "installed CLI memory list": "Successful empty arrays were incorrectly tested with bool(array).",
+      "installed CLI config get graph_fusion": "The probe used an unknown key; corrected to config show.",
+      "workflow refuses malformed graph": "Validation correctly returns HTTP 200 with valid=false; invalid save returns HTTP 400.",
+      "indexed hybrid succeeds": "The outer response is not evidence that the requested source was retrieved."
+    },
+    "corrected_cli_and_workspace_followup": {
+      "passed": 8,
+      "failed": 1
+    },
+    "readiness_independent_repeat": {
+      "passed": 5,
+      "failed": 1
+    }
+  },
+  "new_release_blockers": [
+    {
+      "id": "standalone-code-index-unavailable",
+      "verified": true,
+      "description": "Healthy standalone Server returns HTTP 503 dependency local_code for source lookup/project inventory; automatic discovery and explicit workspace registration do not publish the fixture. Expected symbols remain unavailable after 180 seconds and a later changed-commit wait of 150 seconds.",
+      "evidence": [
+        "exploratory.json",
+        "cli-followup.json",
+        "readiness-probe.json"
+      ],
+      "root_cause": "Not established. The production local-code path crosses server_code_index.c and the memory data boundary; a source-observer guard exists but was not shown to be active. No guard was disabled."
+    },
+    {
+      "id": "readiness-misreports-sql-dependency",
+      "verified": true,
+      "description": "Canonical session creation succeeds before/after SQL outage and returns HTTP 502 during it, while /v1/ready returns HTTP 200 ready:true with db1:ok immediately and after another 20 seconds. Original exploratory outage also retained ready:true for its 70-second observation window.",
+      "evidence": [
+        "readiness-probe.json",
+        "exploratory.json"
+      ]
+    }
+  ],
+  "harness_repairs": [
+    "Native-export requests now run as provisioned uid 1000, rather than root, which has no personal memory store.",
+    "Native correction export is compared to mutation_receipt.version, the actual committed response contract."
+  ],
+  "ci": {
+    "source_commit": "d137610e88a9ac652414cdb0f4d6c43667eebd31",
+    "run_id": 43595095611,
+    "docker_topologies": {
+      "T1": "passed",
+      "T2": "passed",
+      "T2-luks": "passed",
+      "T3": "passed"
+    },
+    "failures": {
+      "integration-tests": {
+        "job_id": 132451733789,
+        "passed": 172,
+        "total": 173,
+        "failure": "actual independently graded execution and scoped reuse; full root cause unresolved"
+      },
+      "live-auth-rigs": {
+        "job_id": 132451733882,
+        "failed_enforcement_assertions": 9,
+        "observations": [
+          "Unavailable memory responses using the frozen external reference owner.",
+          "KB hardened schema lacks recorded embedding dimension.",
+          "Frozen reference repeatedly calls removed user_memory_replay_erasure_intents()."
+        ],
+        "root_cause": "These are concrete failing fixture boundaries, not a complete diagnosis of every failing assertion."
+      }
+    }
+  },
+  "existing_privacy_blockers_remain": true,
+  "privacy_report": "pii-vault-2026-11-14.json",
+  "coverage_limits": [
+    "Synthetic inputs and owned disposable services; no production installation was modified.",
+    "This round checks workflow definition validation/save/persistence, not a successful independently graded workflow execution.",
+    "Browser pairing, model synthesis, LUKS recovery and retention histories were covered in earlier reports; no new claim that those tests repair privacy routing.",
+    "VS Code was excluded from the image build. Hardware/KMS privacy custody was not tested.",
+    "Positive test results do not qualify the failed indexing, readiness or PII/Vault contracts."
+  ],
+  "harness_sha256": {
+    "exploratory.py": "058e277e33b4201b42d6df9a6910bafb98880a5172ea5045ac0a8733e5684c1a",
+    "cli-followup.py": "1fc0a6900e045e67831b34473c7c5f202447af9d857741d0494355aab76dbade",
+    "readiness-probe.py": "928496f886737cea512da114b288a44b06545c27db17bc2e8182218c55a1837c",
+    "run-gates.sh": "8777bc914de62a2567ae972a9090430d913ee4bc3a24187b090b6ac8b9ad25a8",
+    "export-evidence.py": "ee5a60fba6ec0dfd7ace1b04da33cb2c90804386e0c3ca9796231cd6084d1596",
+    "native-primitive.py": "6f9001b439adf742da65e2b16e018cc781548a1d5bdf31f2bd17cd21c00c54d6"
+  },
+  "cleanup": {
+    "completed": true,
+    "ct_config_absent": true,
+    "root_disk_absent": true,
+    "other_workloads_modified": false
+  },
+  "evidence": {
+    "archive": "general-e2e-evidence.tar.gz",
+    "sha256": "09fa51232f3a3b028998b8e44468a2964f695fd135fe1f977b16a322e8ea9b64",
+    "files": 41,
+    "hashes_verified": true,
+    "secret_scan": "passed",
+    "local_directory": "/home/virant/dev/aimee-general-e2e-20261114",
+    "receipt_capabilities_exported": false
+  },
+  "focused_validation": {
+    "lint_checks_passed": 76,
+    "documentation_check_passed": true,
+    "python_driver_syntax_passed": true,
+    "git_diff_check_passed": true
+  }
+}
