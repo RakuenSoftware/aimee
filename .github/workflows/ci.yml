@@ -719,7 +719,7 @@ jobs:
           # Runner image metadata is outside the repository's control. Install
           # deterministic root-owned copies so the positive path exercises the
           # production trust walk without depending on /usr/bin ownership/mode.
-          sudo install -d -o root -g root -m 0755 /opt/aimee-test-helpers
+          sudo install -d -o root -g root -m 0755 /aimee-ci-test-helpers
           # Built from the repo, not copied from /usr/bin: the helper is exec'd
           # by descriptor, which Ubuntu 26.04's multi-call coreutils refuses.
           for helper in cat env yes true; do
@@ -727,23 +727,23 @@ jobs:
               -o "$RUNNER_TEMP/aimee-fixture-$helper" \
               src/tests/support/workload_helper_fixture.c
             sudo install -o root -g root -m 0755 "$RUNNER_TEMP/aimee-fixture-$helper" \
-              "/opt/aimee-test-helpers/$helper"
+              "/aimee-ci-test-helpers/$helper"
           done
-          sudo stat -Lc '%U:%G %a %n' /opt/aimee-test-helpers \
-            /opt/aimee-test-helpers/cat /opt/aimee-test-helpers/env \
-            /opt/aimee-test-helpers/yes /opt/aimee-test-helpers/true
+          sudo stat -Lc '%U:%G %a %n' / /opt /run /aimee-ci-test-helpers \
+            /aimee-ci-test-helpers/cat /aimee-ci-test-helpers/env \
+            /aimee-ci-test-helpers/yes /aimee-ci-test-helpers/true
           printf '%s\n' 'deterministic root-owned test fixture' | \
-            sudo tee /opt/aimee-test-helpers/root-file >/dev/null
-          sudo chown root:root /opt/aimee-test-helpers/root-file
-          sudo chmod 0644 /opt/aimee-test-helpers/root-file
-          sudo stat -Lc '%U:%G %a %n' /opt/aimee-test-helpers/root-file
+            sudo tee /aimee-ci-test-helpers/root-file >/dev/null
+          sudo chown root:root /aimee-ci-test-helpers/root-file
+          sudo chmod 0644 /aimee-ci-test-helpers/root-file
+          sudo stat -Lc '%U:%G %a %n' /aimee-ci-test-helpers/root-file
           # Fail at fixture setup if the filesystem/loader cannot execute it.
-          /opt/aimee-test-helpers/true
-          export AIMEE_TEST_TRUSTED_CAT=/opt/aimee-test-helpers/cat
-          export AIMEE_TEST_TRUSTED_ENV=/opt/aimee-test-helpers/env
-          export AIMEE_TEST_TRUSTED_YES=/opt/aimee-test-helpers/yes
-          export AIMEE_TEST_TRUSTED_TRUE=/opt/aimee-test-helpers/true
-          export AIMEE_TEST_TRUSTED_ROOT_FILE=/opt/aimee-test-helpers/root-file
+          /aimee-ci-test-helpers/true
+          export AIMEE_TEST_TRUSTED_CAT=/aimee-ci-test-helpers/cat
+          export AIMEE_TEST_TRUSTED_ENV=/aimee-ci-test-helpers/env
+          export AIMEE_TEST_TRUSTED_YES=/aimee-ci-test-helpers/yes
+          export AIMEE_TEST_TRUSTED_TRUE=/aimee-ci-test-helpers/true
+          export AIMEE_TEST_TRUSTED_ROOT_FILE=/aimee-ci-test-helpers/root-file
           ccache --max-size=750M
           ccache --zero-stats
           cd src
@@ -869,7 +869,7 @@ jobs:
           # Same deterministic root-owned helpers the sqlite shards install: the
           # trust-walk tests assert on ownership and mode, which runner image
           # metadata does not guarantee.
-          sudo install -d -o root -g root -m 0755 /opt/aimee-test-helpers
+          sudo install -d -o root -g root -m 0755 /aimee-ci-test-helpers
           # Built from the repo, not copied from /usr/bin: the helper is exec'd
           # by descriptor, which Ubuntu 26.04's multi-call coreutils refuses.
           for helper in cat env yes true; do
@@ -877,17 +877,17 @@ jobs:
               -o "$RUNNER_TEMP/aimee-fixture-$helper" \
               src/tests/support/workload_helper_fixture.c
             sudo install -o root -g root -m 0755 "$RUNNER_TEMP/aimee-fixture-$helper" \
-              "/opt/aimee-test-helpers/$helper"
+              "/aimee-ci-test-helpers/$helper"
           done
           printf '%s\n' 'deterministic root-owned test fixture' | \
-            sudo tee /opt/aimee-test-helpers/root-file >/dev/null
-          sudo chown root:root /opt/aimee-test-helpers/root-file
-          sudo chmod 0644 /opt/aimee-test-helpers/root-file
-          export AIMEE_TEST_TRUSTED_CAT=/opt/aimee-test-helpers/cat
-          export AIMEE_TEST_TRUSTED_ENV=/opt/aimee-test-helpers/env
-          export AIMEE_TEST_TRUSTED_YES=/opt/aimee-test-helpers/yes
-          export AIMEE_TEST_TRUSTED_TRUE=/opt/aimee-test-helpers/true
-          export AIMEE_TEST_TRUSTED_ROOT_FILE=/opt/aimee-test-helpers/root-file
+            sudo tee /aimee-ci-test-helpers/root-file >/dev/null
+          sudo chown root:root /aimee-ci-test-helpers/root-file
+          sudo chmod 0644 /aimee-ci-test-helpers/root-file
+          export AIMEE_TEST_TRUSTED_CAT=/aimee-ci-test-helpers/cat
+          export AIMEE_TEST_TRUSTED_ENV=/aimee-ci-test-helpers/env
+          export AIMEE_TEST_TRUSTED_YES=/aimee-ci-test-helpers/yes
+          export AIMEE_TEST_TRUSTED_TRUE=/aimee-ci-test-helpers/true
+          export AIMEE_TEST_TRUSTED_ROOT_FILE=/aimee-ci-test-helpers/root-file
           ccache --max-size=750M
           ccache --zero-stats
           cd src

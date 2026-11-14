@@ -489,6 +489,11 @@
     {
       "make": true,
       "module": "vault",
+      "test": "src/tests/test_vault_content_privacy.c"
+    },
+    {
+      "make": true,
+      "module": "vault",
       "test": "src/tests/test_vault_create_once.c"
     },
     {

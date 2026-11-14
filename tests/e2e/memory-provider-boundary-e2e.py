@@ -8,6 +8,8 @@ limits or durable receipts.
 No credentials, prompt bodies or provider headers are written to the result.
 """
 import argparse
+import difflib
+import re
 import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,6 +34,24 @@ def strings(value):
         for child in value.values():
             yield from strings(child)
 
+
+
+def projection_change_shapes(expected, values):
+    """Failure metadata only: never serialize source bytes or receipt tokens."""
+    if not values:
+        return dict(changes=[])
+    actual = max(values, key=lambda text: difflib.SequenceMatcher(None, expected, text).ratio())
+    changes = []
+    for operation, left, right, observed_left, observed_right in difflib.SequenceMatcher(None, expected, actual, autojunk=False).get_opcodes():
+        if operation == 'equal':
+            continue
+        value = expected[left:right]
+        kind = ('digits' if value.isdecimal() else 'uuid' if re.fullmatch(r'[a-f0-9-]{36}', value)
+                else 'words' if re.fullmatch(r'[A-Za-z -]+', value) else 'other')
+        syntax = lambda text: ''.join('D' if c.isdigit() else 'L' if c.isalpha() else '*' if ord(c)>127 else c for c in text[:100])
+        changes.append(dict(operation=operation, source_characters=len(value), shape=kind,
+                            source_syntax=syntax(value), observed_syntax=syntax(actual[observed_left:observed_right])))
+    return dict(changes=changes[:16])
 
 
 def request_outcome(status, response, provider_requests):
@@ -263,7 +283,9 @@ def inside(output, budget_benchmark=False):
                           isinstance(sent.get('messages'), list) and
                           all(t.get('type') == 'function' and 'function' in t for t in sent.get('tools', [])))
                 values = list(strings(sent))
-                check(name + ' preserves the complete Go memory projection', any(context in text for text in values))
+                preserved = any(context in text for text in values)
+                check(name + ' preserves the complete Go memory projection', preserved,
+                      projection_change_shapes(context, values) if not preserved else None)
                 check(name + ' preserves the user constraint', any(policy in text for text in values))
                 check(name + ' includes the tool schema in the final request', tool['name'] in values and
                       tool['description'] in values and 'record_id' in json.dumps(sent.get('tools')))

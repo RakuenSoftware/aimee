@@ -20,3 +20,13 @@ condition = "AND"
 paths = ['''(^|/)vendor/aims-memory/bundle\.json$''']
 regexTarget = "line"
 regexes = ['''^\s*"src/[^"\r\n]+\.h": "[a-f0-9]{64}",?\s*$''']
+
+[[rules]]
+id = "aws-access-token"
+
+[[rules.allowlists]]
+description = "Exact non-credential AWS canary in the Vault custody regression"
+condition = "AND"
+paths = ['''(^|/)src/tests/test_vault_content_privacy\.c$''']
+regexTarget = "secret"
+regexes = ['''^AKIAABCDEFGHIJKLMNOP$''']

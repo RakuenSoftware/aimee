@@ -14,18 +14,21 @@ char *kb_client_last_result_json(const char *message)
    (void)message;
    return strdup("unavailable");
 }
-int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
+int vault_content_protect_text(const char *text, char **safe)
 {
-   assert(strcmp(method, "memory.screen_content") == 0);
+   /* This consumer fixture supplies host custody; real encryption and raw-value
+    * bus exclusion are covered by test_vault_content_privacy and image E2E. */
+   *safe = NULL;
    if (!screen_available)
-      return 0;
-   const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "content"));
-   *result = cJSON_CreateObject();
-   cJSON_AddStringToObject(*result, "status", "ok");
-   cJSON_AddStringToObject(*result, "verdict", strstr(text, "secret") ? "redact" : "allow");
-   cJSON_AddStringToObject(*result, "redacted", "[redacted]");
-   return 1;
+      return -1;
+   if (strstr(text, "secret"))
+   {
+      *safe = strdup("[redacted]");
+      return *safe ? 0 : -1;
+   }
+   return 0;
 }
+
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
    sent++;

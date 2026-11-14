@@ -20,13 +20,13 @@ class Stack:
         self.downs = 0
         self.defect = defect
         self.postgres = 'fixture-postgres'
-        self.schema_version = '46'
+        self.schema_version = '47'
         self.retired = False
 
     def start(self):
         self.starts += 1
         if self.starts > 1 and self.defect != 'stale-schema':
-            self.schema_version = '46'
+            self.schema_version = '47'
             if self.defect != 'retired-routines':
                 self.retired = False
 
@@ -96,7 +96,7 @@ class KBRecreationTests(unittest.TestCase):
         self.assertEqual((stack.starts, stack.downs, len(stack.records)), (3, 2, 4))
 
     def test_missing_schema_migration_fails_the_gate(self):
-        for defect, message in (('stale-schema', 'applies schema 46'),
+        for defect, message in (('stale-schema', 'applies schema 47'),
                                 ('retired-routines', 'removes every retired SQL routine')):
             with self.subTest(defect=defect), self.assertRaisesRegex(AssertionError, message):
                 self.run_gate(Stack(defect))
