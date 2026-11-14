@@ -176,9 +176,11 @@
     "Required CI includes two unresolved failures recorded in additional_qualification; no image publication or release promotion."
   ],
   "release_blockers": [
-    "integration-tests: The independently graded execution and scoped reuse journey fails. The cause is not established by this LXC qualification.",
-    "live-auth-rigs: Nine enforcement assertions fail with unavailable writes. The KB log also reports hardened schema verification failure: no recorded embedding dimension and a runtime role unable to migrate.",
-    "Required public and private checks must pass on the final candidate before promotion."
+    "PII must be vaulted with opaque memory references. Ordinary writes meet this in 0/36 tested cases: 18 store raw PII and 18 refuse without Vault custody.",
+    "Raw PII reaches Native journals, real embedding inputs, controlled model requests, SQL/capture persistence and backups.",
+    "The default software Vault silently generates a different master key when the original is missing beside existing ciphertext.",
+    "Source audit: legacy Vault delete/retirement can remove encrypted values, conflicting with retained-history policy. No delete was invoked.",
+    "Current CI fails e2e-docker (T2), integration-tests and live-auth-rigs; required public/private checks must pass before promotion."
   ],
   "documented_functional_limits": [
     "Typed facts are not pre-injected.",
@@ -501,5 +503,23 @@
       "root_disk_absent": true,
       "host_crypt_mappings_and_loop_attachments_empty": true
     }
+  },
+  "privacy_vault_qualified": false,
+  "privacy_vault_audit": {
+    "record": "pii-vault-2026-11-14.json",
+    "report": "pii-vault-2026-11-14.md",
+    "audit_completed": true,
+    "qualified": false,
+    "content_cases": 36,
+    "vault_and_reference_successes": 0,
+    "raw_memory_cases": 18,
+    "refused_without_vault_cases": 18,
+    "raw_phone_observed_in_real_embedding": true,
+    "raw_original_input_observed_in_provider_and_persistence": true,
+    "missing_master_replaced": true,
+    "documentation_corrected": true,
+    "runtime_fixes_implemented": false,
+    "lxc_deleted": true,
+    "evidence_archive_sha256": "2cd2e264505925304bc7a0931d48b46d0a577756558ead4e2690d4e931645a58"
   }
 }
