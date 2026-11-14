@@ -171,5 +171,11 @@
     "documentation_check_passed": true,
     "python_driver_syntax_passed": true,
     "git_diff_check_passed": true
+  },
+  "followup_resolution": {
+    "report": "index-readiness-fix-2026-11-14.json",
+    "both_new_blockers_fixed": true,
+    "historical_results_preserved": true,
+    "release_ready": false
   }
 }

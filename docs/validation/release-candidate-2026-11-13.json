@@ -556,5 +556,130 @@
       "local_directory": "/home/virant/dev/aimee-general-e2e-20261114",
       "receipt_capabilities_exported": false
     }
+  },
+  "index_readiness_fix_qualification": {
+    "requested_defects_fixed": true,
+    "application_runtime_commit": "87710a802f12effe3549773c64ff35e3bb86d086",
+    "qualification_harness_commit": "4d94516bac147da3c59d01d70f13bd39799a6ed3",
+    "application_image_id": "sha256:e56a2305f48bd17735f2245bed5b4ca907a8ba6ae8148329bfe7cec4cacaddbc",
+    "memory_source_commit": "9be71b7679e13fe3adfd03f7fca3b3433ca7909f",
+    "release_ready": false,
+    "cleanup": {
+      "completed": true,
+      "ct_config_absent": true,
+      "root_disk_absent": true,
+      "unrelated_ct9473_running": true,
+      "other_workloads_modified": false
+    },
+    "report": "index-readiness-fix-2026-11-14.json",
+    "results": {
+      "T2-final": {
+        "identity.json": {
+          "passed": 6,
+          "failed": 0
+        },
+        "local-memory.json": {
+          "passed": 9,
+          "failed": 0
+        },
+        "native-async.json": {
+          "passed": 60,
+          "failed": 1
+        },
+        "provider-boundary.json": {
+          "passed": 353,
+          "failed": 0
+        },
+        "shared-memory.json": {
+          "passed": 17,
+          "failed": 0
+        },
+        "topology.json": {
+          "passed": 40,
+          "failed": 1
+        }
+      },
+      "T2-repeat": {
+        "identity.json": {
+          "passed": 6,
+          "failed": 0
+        },
+        "local-memory.json": {
+          "passed": 9,
+          "failed": 0
+        },
+        "native-async.json": {
+          "passed": 95,
+          "failed": 0
+        },
+        "provider-boundary.json": {
+          "passed": 353,
+          "failed": 0
+        },
+        "shared-memory.json": {
+          "passed": 17,
+          "failed": 0
+        },
+        "topology.json": {
+          "passed": 41,
+          "failed": 0
+        }
+      },
+      "T3-final": {
+        "local-memory.json": {
+          "passed": 9,
+          "failed": 0
+        },
+        "native-async.json": {
+          "passed": 87,
+          "failed": 0
+        },
+        "provider-boundary.json": {
+          "passed": 353,
+          "failed": 0
+        },
+        "standalone-index/standalone-index.json": {
+          "passed": 34,
+          "failed": 0
+        },
+        "topology.json": {
+          "passed": 6,
+          "failed": 0
+        }
+      },
+      "standalone-final-r3": {
+        "standalone-index.json": {
+          "passed": 34,
+          "failed": 0
+        }
+      },
+      "server-e4b-final": {
+        "kb-typed-facts.json": {
+          "passed": 19,
+          "failed": 0
+        }
+      },
+      "kb-e4b-final": {
+        "kb-typed-facts.json": {
+          "passed": 19,
+          "failed": 0
+        }
+      }
+    },
+    "evidence": {
+      "archive": "index-readiness-evidence.tar.gz",
+      "sha256": "5a6dceb5714584941f21ac1f22edbaf7c76a7fc188cad9986cc2db57b6a9c511",
+      "files": 44,
+      "hashes_verified": true,
+      "secret_scan": "passed",
+      "local_directory": "/home/virant/dev/aimee-index-readiness-fix-20261114",
+      "receipt_capabilities_exported": false,
+      "note": "Only verdicts, counts, public source hashes and build metadata exported. Scanner false positives on path-to-hash mappings were resolved by separating path and sha256 fields; no scanner allowlist was added."
+    },
+    "remaining_release_blockers": [
+      "PII/Vault routing and missing-master behavior remain unfixed; see pii-vault-2026-11-14.json.",
+      "Prior completed CI has integration-tests and live-auth-rigs failures. Final pushed revision requires its own checks.",
+      "The first T2 Native source-release refusal remains an intermittent qualification concern."
+    ]
   }
 }
