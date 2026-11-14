@@ -59,9 +59,10 @@ Limits of this release:
   subject-erasure command, HTTP routes, coordinator, destructive retention functions and
   startup deletion replay have been removed. Upgrades remove the old callable functions
   while keeping existing data and historical receipts.
-- Memory refuses a record whose text contains a raw sensitive value (an email address, phone
-  number, IP address, password or key) and says the value belongs in the vault. 1.0.x stored
-  such records and withheld them from injected context.
+- PII must be stored in Vault and represented by opaque references in memory. The
+  candidate's ordinary write path is not qualified for this contract: recognized
+  values can be refused instead of vaulted, while other PII is admitted raw.
+  This remains a release blocker, not a completed privacy feature.
 - Memory maintenance is the installation owner's operation. When aimee prunes ended sessions it
   folds each one's raw (L0) memories into a summary through `memory.compact_windows`, under a
   per-owner maintenance operator that only aimee's own in-process call can use; the folded

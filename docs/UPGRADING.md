@@ -21,11 +21,13 @@ memories, upgraded in place on their existing volumes.
   memories stay in `memories`. The new implementation starts with its own empty store and never
   reads those tables, so memory list, search and recall are empty until the records are imported
   with `scripts/upgrade/migrate-memory.py`.
-- **Memory no longer stores raw sensitive values.** A memory whose text contains an email
-  address, phone number, IP address, password or key is refused, with a message saying the value
-  belongs in the vault (`aimee vault`). 1.0.x stored such memories and withheld them from
-  injected context. The import reports these records as failed; keep the values in the vault
-  and import the rest.
+- **PII belongs in Vault, with an opaque reference in memory.** Raw PII must not be
+  stored in ordinary memory, derived facts, embeddings or model context. Refusing a
+  memory write is not a completed Vault-backed write. The candidate's ordinary write
+  path does not yet implement that contract: its bounded detector refuses some
+  recognized values and misses others. The optional protected-intake route is not a
+  claim that ordinary writes automatically vault PII. Treat this as a release blocker;
+  do not mistake a refused import for a successful protected migration.
 - **The Compose files change.** `compose.yaml` and `compose.kb.yaml` gain the `aimee-memory-init`
   service, an `aimee-memory` volume, and mounts of `private-memory/<role>` from the home volume
   into the application. Use the files from this release; a deployment kept on its 1.0.2 Compose

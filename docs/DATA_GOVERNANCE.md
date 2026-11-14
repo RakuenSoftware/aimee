@@ -1,30 +1,46 @@
-# Data governance, retention, and deletion
+# Data governance and retained history
 
-The deployment owner is the data controller for material stored in Aimee and must record purpose,
-lawful authority, geography, processors, and approved recipients before ingesting personal or
-restricted data. Aimee is not a substitute for legal review.
+PII belongs in Vault. Memory retains an opaque reference to the protected value, with the
+original provenance and applicable access policy. A reference identifies a value; it does not
+grant permission to resolve it. Raw PII must not be copied into ordinary memory, derived facts,
+embedding inputs, model requests, ordinary logs or content backups.
 
-| Class | Examples | Default maximum | Deletion | Backup treatment |
-| --- | --- | ---: | --- | --- |
-| transient request data | request bodies, temporary files | 24 hours | process/session cleanup | excluded |
-| conversation and workflow content | prompts, responses, work artifacts | 30 days | subject/project deletion | expires with source |
-| memory and ingested documents | memories, chunks, embeddings, derived facts | 90 days | source plus derived deletion | expires within one backup cycle |
-| operational logs | service and access logs | 30 days | scheduled rotation | expires within one backup cycle |
-| WORM security evidence | bounded action/verdict/identity records | 365 days | never row-deleted; legal hold may extend | immutable encrypted copy |
-| credentials | tokens, keys, certificates | shortest provider lifetime | revoke and cryptographically erase | vault-only; no plaintext backup |
+A refused write is not a successful protected write. A correct write first establishes encrypted,
+principal-bound Vault custody, then publishes the reference. Failure or an unknown result must
+not fall back to plaintext, another principal or an older credential. Retries must reconcile the
+same operation rather than creating unrelated custody entries. The current candidate's ordinary
+memory path does not yet satisfy this contract; its bounded screening and optional protected
+intake must not be represented as automatic PII protection.
 
-These are conservative policy defaults, not a claim that every current storage engine contains a
-built-in scheduler. Until a built-in reaper/subject-erasure command is available for a data family,
-the operator must enforce the maximum in the database/volume lifecycle and record evidence. A
-deployment that cannot do so must not ingest regulated personal data.
+## Retention and availability
 
-A subject request is authorized against the verified subject, assigned a non-content request ID,
-and applied to mutable source plus derived rows. The completion evidence contains only request ID,
-pseudonymous subject digest, store/count summary, policy revision, actor, time, and outcome. It must
-not copy deleted content. Existing WORM rows are not altered. Legal hold suspends mutable deletion
-only for the documented scope and expiry and requires Security plus Legal approval.
+Domain records and their history are retained. Retirement, invalidation, revocation and custody
+unavailability determine whether a record can be used. They do not authorize physical removal of
+payloads or history. There is no subject-erasure workflow to enable. Existing retained records
+must not become available again through old creation retries or backup restoration.
 
-DB1, KB_STORE, audit files, and backups require encryption at the volume/database layer; Vault custody
-does not encrypt those stores. Keys must be separate from the protected volume. Restore tests must
-prove an RPO of 24 hours and RTO of 8 hours at least quarterly; evidence records start/end time,
-snapshot identity, integrity checks, data loss, reviewer, and remediation.
+Keep access-policy changes, protected-reference generations, provenance and unavailable outcomes
+in the relevant history. WORM evidence remains append-only and must not copy protected values.
+Operational cleanup of a disposable test environment is separate from application record lifecycle.
+
+This is the required data contract, not a claim that every existing credential API already follows
+it. The Vault's legacy mutable delete/overwrite paths require separate review against retained
+history; the immutable custody contracts alone do not establish that every Vault entry is retained.
+
+## Storage and backups
+
+Vault encryption protects credential values; it does not encrypt Native memory journals, SQL,
+embeddings, canonical transcripts or ordinary log files. PostgreSQL's optional LUKS storage covers
+its own filesystem. Protect the other stores independently and do not infer encryption from the
+presence of a Vault.
+
+The default software-custody Vault root key is stored beside its ciphertext. A matched backup of
+that directory includes both. Such a backup supports recovery but does not protect itself against
+someone who can read it. Protect matched backups with independent encryption and custody of the
+backup recovery key. Do not describe an unencrypted complete backup as theft-protected merely
+because its credential values are ciphertext.
+
+Restore matched application home, Vault, Native state and PostgreSQL snapshots into an isolated
+instance with the original identity and keys. Verify reference ownership, current availability,
+record versions, integrity and failure behavior before using the restored copy. Do not regenerate
+missing keys as a recovery shortcut or reactivate retired data.

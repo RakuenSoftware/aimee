@@ -143,6 +143,13 @@ Back up the application home and PostgreSQL volume as a matched instance. In LUK
 Vault loses the LUKS key. Losing the application's own Vault root key also makes that Vault
 unreadable. Never regenerate either as a recovery shortcut.
 
+The default software-custody Vault stores its root key beside its encrypted entries. A complete
+backup therefore includes both key and ciphertext. Encrypt matched backups independently and
+keep that backup recovery key separate; an unencrypted matched copy is recoverable, not
+self-protecting against backup theft. Vault does not encrypt the separate Native memory home,
+canonical source history or all application logs. PII must reach those stores only as opaque
+Vault references; the candidate's ordinary write path is not yet qualified for that contract.
+
 Take PostgreSQL-native consistent dumps while the store is open, or stop writes and shut down the
 composition before taking matched volume snapshots. Protect plaintext dump exports separately.
 Include workspace files, audit ledgers, seals, and off-host witness state. Test restoring into an
