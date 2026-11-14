@@ -286,7 +286,11 @@ int vault_content_protect_text(const char *text, char **safe)
                /* E.164 phone numbers stop at 15 digits. Longer protocol IDs
                 * must retain their bytes; grouped payment cards have their
                 * own recognizer rather than borrowing the phone rule. */
-               valid = valid && digits >= 9 && digits <= 15 && !numbers[a];
+               int separated =
+                   (!a || (!isalnum((unsigned char)text[a - 1]) && text[a - 1] != '_')) &&
+                   (b == n || (!isalnum((unsigned char)text[b]) && text[b] != '_'));
+               valid = valid && digits >= 9 && digits <= 15 && !numbers[a] &&
+                       (text[a] == '+' || separated);
             }
             if (valid && (a < first || (a == first && b > end)))
             {

@@ -134,6 +134,14 @@ int main(void)
    assert(vault_content_protect_text("bad \xff email@example.invalid", &safe) == -1 && !safe);
    assert(!vault_content_protect_text("Ordinary retained control 界 🦊", &safe) && !safe);
    assert(!vault_content_protect_text("std::string and 2030-01-02", &safe) && !safe);
+   assert(!vault_content_protect_text("call+12025550198ext42", &safe));
+   assert(safe);
+   check_custody("+12025550198", safe);
+   free(safe);
+   safe = NULL;
+   assert(!vault_content_protect_text(
+              "response_abcd123456789abcd source_1234567890 sha256:abcd9876543210abcd", &safe) &&
+          !safe);
    assert(!vault_content_protect_text(
               "<memory_data>{\"timestamps\":{\"min\":1794672000,\"max\":1794758400},"
               "\"version\":9007199254740993}</memory_data>",
