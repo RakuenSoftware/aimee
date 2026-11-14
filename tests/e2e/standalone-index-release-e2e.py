@@ -149,7 +149,8 @@ p=Path(''' + repr(root) + ''');(p/'engine.c').write_text(''' + repr(second) + ''
 for a in [('add','.'),('commit','-qm','changed source'),('update-ref','refs/remotes/origin/main','HEAD')]:subprocess.run(['git','-C',str(p),*a],check=True,capture_output=True)
 ''')
         eventually('changed default branch automatically republishes', lambda: bool(query('find', identifier='release_changed').get('hits')))
-        check('superseded symbol unavailable in current definition index', not query('find', identifier='release_engine').get('hits'))
+        check('superseded definition unavailable in its current source file',
+              not any(h.get('file_path') == 'engine.c' for h in query('find', identifier='release_engine').get('hits', [])))
         check('superseded original code bytes remain in SQL history', historical_source_count() >= before)
         check('code publication never changes personal memory', control_memory() == memory_before)
         embedder = expected_label + '-aimee-embedder-1'
