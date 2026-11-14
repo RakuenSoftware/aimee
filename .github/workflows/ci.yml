@@ -2060,12 +2060,18 @@ jobs:
         run: |
           sudo --preserve-env=AIMEE_APPLICATION_IMAGE,AIMEE_POSTGRES_IMAGE,AIMEE_EMBEDDER_IMAGE \
             python3 tests/e2e/kb-upgrade-e2e.py --storage ${{ matrix.storage }} --output /tmp/aimee-e2e-evidence
-      - name: Upload regression verdicts
+      - name: Export content-free regression verdicts
+        id: e2e_verdicts
         if: always()
+        run: |
+          python3 scripts/validation/export-e2e-verdicts.py \
+            --source /tmp/aimee-e2e-evidence --output "$RUNNER_TEMP/aimee-e2e-verdicts"
+      - name: Upload regression verdicts
+        if: ${{ always() && steps.e2e_verdicts.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: deploy-${{ matrix.topology }}${{ matrix.suffix }}-verdicts
-          path: /tmp/aimee-e2e-evidence/*.json
+          path: ${{ runner.temp }}/aimee-e2e-verdicts/*.json
           if-no-files-found: error
 
   e2e-adoption:

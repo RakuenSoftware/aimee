@@ -34,6 +34,41 @@ def strings(value):
             yield from strings(child)
 
 
+def safe_event_summary(events):
+    """Bounded terminal evidence without event text, source frames or capabilities."""
+    labels = {'error', 'failed', 'cancelled', 'completed', 'unavailable', 'stale_context',
+              'request_budget_exceeded', 'request_budget_unavailable', 'tool_call',
+              'tool_result', 'execution', 'done', 'message', 'delta'}
+    counts, fingerprints = {}, []
+
+    def visit(value, error=False):
+        if isinstance(value, dict):
+            error = error or any(value.get(key) in ('error', 'failed')
+                                 for key in ('type', 'kind', 'status', 't'))
+            for key, child in value.items():
+                if key in ('type', 'kind', 'status', 'code', 't') and isinstance(child, str) and child in labels:
+                    counts[child] = counts.get(child, 0) + 1
+                visit(child, error or key == 'error')
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, error)
+        elif error and isinstance(value, str) and value not in labels and len(fingerprints) < 32:
+            raw = value.encode()
+            fingerprints.append(dict(bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest()))
+
+    visit(events)
+    if not fingerprints:
+        observed_labels = dict(counts)
+        # Older stream envelopes do not mark their terminal diagnostic as an
+        # error object. Commit only the bounded tail's string lengths/hashes.
+        tail = events[-8:] if isinstance(events, list) else [events]
+        for event in reversed(tail):
+            visit(event, True)
+        counts = observed_labels
+    return dict(event_count=len(events) if isinstance(events, list) else 1,
+                labels=counts, error_fingerprints=fingerprints, raw_data_exported=False)
+
+
 # Profiles whose Server has no shared-memory owner client: the frozen 1.0
 # reference owner, and shipped aims-db memory, where an enrolled KB is reached
 # over HTTPS and that link never carries memory.
@@ -520,8 +555,11 @@ def inside(output, shared_profile='owner-client'):
             provider_request_bytes=request_sizes[scenario_start:],
             refusal_kinds=[kind for kind in ('request_budget_exceeded', 'request_budget_unavailable', 'unavailable', 'stale_context')
                            if any(kind in text for text in strings(events))]))
-        check('primary session completes native indexed recovery', status == 200 and not provider_errors and
-              len(captures) == scenario_start + 4 and any('NATIVE_MEMORY_OK' in text for text in strings(events)))
+        primary_ok = status == 200 and not provider_errors and len(captures) == scenario_start + 4 and any(
+            'NATIVE_MEMORY_OK' in text for text in strings(events))
+        if not primary_ok:
+            diagnostics['primary_native_recovery'] = safe_event_summary(events)
+        check('primary session completes native indexed recovery', primary_ok)
         worktrees = subprocess.check_output(['git', '-C', fixture_files.name, 'worktree', 'list', '--porcelain'], text=True)
         roots = [line[9:] for line in worktrees.splitlines() if line.startswith('worktree ') and line[9:] != fixture_files.name]
         check('primary fixture resolves its host-isolated worktree', len(roots) == 1)
