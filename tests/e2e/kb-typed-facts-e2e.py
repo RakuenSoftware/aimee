@@ -239,6 +239,8 @@ def exercise(stack, check, diagnostics, extraction_seconds):
         status, stored = stack.kb_request('/v1/actions/memory.store', dict(key=f'typed-facts-e2e-{index}', content=content))
         check(f'KB stores shared fact {index + 1}', status == 200 and stored.get('status') == 'ok' and stored.get('id'))
         remember_protected_subject(stack, stored, content)
+    check('the processing worker finishes the four shared notes',
+          wait_publications(stack, len(FACTS), extraction_seconds))
     deadline = time.monotonic() + extraction_seconds
     facts, subject_name = '', ''
     started = time.monotonic()
@@ -285,7 +287,8 @@ def exercise(stack, check, diagnostics, extraction_seconds):
         diagnostics['entity_edges'] = dict(http_status=status, result_status=edges.get('status'),
             error_kind=edges.get('kind'), rows=len(rows), subject_characters=len(subject),
             subject_is_vault_reference=bool(re.fullmatch(r'(?:\[\[)?vault:v1:[0-9a-f-]{36}(?:\]\])?', subject)),
-            screen_status=screen_status, screen_changes_subject=screen.get('redacted', subject) != subject)
+            screen_status=screen_status, screen_verdict=screen.get('verdict'),
+            screen_changes_subject=bool(screen.get('redacted')) and screen['redacted'] != subject)
     check('entity_edges serves the edges of that subject', status == 200 and rows and
           all(subject in (row.get('src_entity'), row.get('dst_entity')) for row in rows))
 
