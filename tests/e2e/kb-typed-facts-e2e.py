@@ -19,6 +19,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -47,6 +48,26 @@ NOVEL = 'mentors'
 NOVEL_NOTES = ['Barbara Liskov mentors Andrew Myers.', 'Donald Knuth mentors Luis Trabb Pardo.',
                'Frances Allen mentors Vivek Sarkar.']
 NOVEL_PROBE = ('Ada Lovelace', 'Ada Lovelace mentors Mary Somerville.')
+
+# Names are Vault data. Query using the caller's original text, but require
+# facts/graph/model context to use the exact opaque subject in stored memory.
+SUBJECTS = {}
+
+def remember_protected_subject(stack, stored, content):
+    raw = content.split(' works at ', 1)[0].split(' mentors ', 1)[0]
+    path = '/v1/memory/get' if stack.role == 'server' else '/v1/actions/memory.get'
+    status, read = (server_request(stack, path, dict(id=str(stored['id'])))
+                    if stack.role == 'server' else stack.kb_request(path, dict(id=str(stored['id']))))
+    protected = read.get('memory', {}).get('content', '')
+    match = re.match(r'^(\[\[vault:v1:[0-9a-f-]{36}\]\]) ', protected)
+    if status != 200 or not match or raw in protected:
+        raise RuntimeError('typed-fact subject did not establish opaque Vault custody')
+    SUBJECTS[raw] = match.group(1)
+
+
+def subject_reference(name):
+    return SUBJECTS[name][2:-2]  # graph normalization removes the outer delimiter pair
+
 
 
 def operator_lines(stack):
@@ -152,6 +173,7 @@ def exercise_server(stack, check, diagnostics, extraction_seconds):
     for index, content in enumerate(FACTS.values()):
         status, stored = server_request(stack, '/v1/memory/store', dict(key=f'typed-facts-e2e-{index}', content=content))
         check(f'Server stores personal fact {index + 1}', status == 200 and stored.get('status') == 'ok')
+        remember_protected_subject(stack, stored, content)
     check('the processing worker finishes the four personal notes',
           wait_publications(stack, len(FACTS), extraction_seconds))
     started, subject_name, text = time.monotonic(), '', ''
@@ -159,7 +181,7 @@ def exercise_server(stack, check, diagnostics, extraction_seconds):
     while time.monotonic() < deadline and not text:
         for name in FACTS:
             text = server_tool_text(stack, 'search_graph', dict(query=name))
-            if name in text and 'aims-parent-typed-graph/v1' in text:
+            if subject_reference(name) in text and name not in text and 'aims-parent-typed-graph/v1' in text:
                 subject_name = name
                 break
             text = ''
@@ -170,10 +192,10 @@ def exercise_server(stack, check, diagnostics, extraction_seconds):
     check('the memory module publishes a typed fact for personal memory',
           any(line.startswith('typed facts: published ') and not line.startswith('typed facts: published 0 ')
               for line in operator_lines(stack)))
-    check('search_graph serves the personal typed fact', bool(text) and subject_name in text)
-    diagnostics['first_typed_subject'] = subject_name
+    check('search_graph serves the personal typed fact', bool(text) and subject_reference(subject_name) in text and subject_name not in text)
+    diagnostics['first_typed_subject_reference'] = subject_reference(subject_name)
     edges = server_tool_text(stack, 'get_entity_edges', dict(entity=subject_name))
-    check('get_entity_edges serves the edges of that subject', subject_name in edges and 'aims-parent-typed-graph/v1' in edges)
+    check('get_entity_edges serves the edges of that subject', subject_reference(subject_name) in edges and subject_name not in edges and 'aims-parent-typed-graph/v1' in edges)
     for index, content in enumerate(NOVEL_NOTES):
         status, stored = server_request(stack, '/v1/memory/store', dict(key=f'typed-facts-novel-{index}', content=content))
         check(f'Server stores novel-relation note {index + 1}', status == 200 and stored.get('status') == 'ok')
@@ -189,9 +211,10 @@ def exercise_server(stack, check, diagnostics, extraction_seconds):
     name, content = NOVEL_PROBE
     status, stored = server_request(stack, '/v1/memory/store', dict(key='typed-facts-novel-probe', content=content))
     check('Server stores a note under the promoted relation', status == 200 and stored.get('status') == 'ok')
+    remember_protected_subject(stack, stored, content)
     check('the processing worker finishes the personal probe',
           wait_publications(stack, published + 1, extraction_seconds))
-    text = wait_tool(stack, 'search_graph', dict(query=name), [name, NOVEL], extraction_seconds)
+    text = wait_tool(stack, 'search_graph', dict(query=name), [subject_reference(name), NOVEL], extraction_seconds)
     diagnostics['operator'] = operator_lines(stack)[-40:]
     check('a personal fact under the promoted relation is published', bool(text))
 
@@ -215,6 +238,7 @@ def exercise(stack, check, diagnostics, extraction_seconds):
     for index, content in enumerate(FACTS.values()):
         status, stored = stack.kb_request('/v1/actions/memory.store', dict(key=f'typed-facts-e2e-{index}', content=content))
         check(f'KB stores shared fact {index + 1}', status == 200 and stored.get('status') == 'ok' and stored.get('id'))
+        remember_protected_subject(stack, stored, content)
     deadline = time.monotonic() + extraction_seconds
     facts, subject_name = '', ''
     started = time.monotonic()
@@ -244,8 +268,8 @@ def exercise(stack, check, diagnostics, extraction_seconds):
                                    for key in (row.get('attributes') or {})})[:20])
     check('KB worker publishes a typed fact for the shared memory',
           facts.startswith('Source-bound typed facts') and 'not verified world truth' in facts and '\n- ' in facts)
-    check('typed fact names the stored subject', subject_name in facts)
-    diagnostics['first_typed_subject'] = subject_name
+    check('typed fact names the protected stored subject', subject_reference(subject_name) in facts and subject_name not in facts)
+    diagnostics['first_typed_subject_reference'] = subject_reference(subject_name)
     status, graph = stack.kb_request('/v1/actions/memory.search_graph', dict(query=subject_name))
     relations = graph.get('relations') or []
     check('search_graph serves the typed fact as a relation row', status == 200 and graph.get('status') == 'ok' and
@@ -274,9 +298,10 @@ def exercise(stack, check, diagnostics, extraction_seconds):
     status, stored = stack.kb_request('/v1/actions/memory.store', dict(key='typed-facts-novel-probe',
                                                                        content=content))
     check('KB stores a note under the promoted relation', status == 200 and stored.get('status') == 'ok')
+    remember_protected_subject(stack, stored, content)
     facts = wait_facts(stack, name, extraction_seconds, NOVEL)
     diagnostics['operator'] = operator_lines(stack)[-40:]
-    check('a fact under the promoted relation is published', NOVEL in facts and name in facts)
+    check('a fact under the promoted relation is published', NOVEL in facts and subject_reference(name) in facts and name not in facts)
 
 
 def promoted_ontology_restart(stack, check):
@@ -286,9 +311,9 @@ def promoted_ontology_restart(stack, check):
     matrix.command('docker', 'restart', stack.application)
     check('promoted ontology survives application restart', wait_healthy(stack.application, 180))
     name, _ = NOVEL_PROBE
-    text = (wait_tool(stack, 'search_graph', dict(query=name), [name, NOVEL], 180)
+    text = (wait_tool(stack, 'search_graph', dict(query=name), [subject_reference(name), NOVEL], 180)
             if stack.role == 'server' else wait_facts(stack, name, 180, NOVEL))
-    check('promoted fact remains available after restart', name in text and NOVEL in text)
+    check('promoted fact remains available after restart', subject_reference(name) in text and name not in text and NOVEL in text)
 
 
 def main():

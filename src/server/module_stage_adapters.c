@@ -1,6 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "module_stage_adapters.h"
+#include "vault_content_privacy.h"
+#pragma weak vault_content_protect_json
 #include "agent_exec.h"
 #include "module_commands.h"
 
@@ -104,6 +106,20 @@ cJSON *server_module_memory_data(const cJSON *request)
    cJSON_Delete(wire);
    if (!encoded)
       return NULL;
+   if (vault_content_protect_json)
+   {
+      char *safe = NULL;
+      if (vault_content_protect_json(encoded, &safe))
+      {
+         free(encoded);
+         return NULL;
+      }
+      if (safe)
+      {
+         free(encoded);
+         encoded = safe;
+      }
+   }
    size_t request_len = strlen(encoded);
    if (request_len == 0 || request_len > OURO_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
    {

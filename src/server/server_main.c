@@ -41,6 +41,7 @@
 #include "platform_random.h"
 #include "shutdown_forensics.h"
 #include "headers/server_cli_oauth.h"
+#include "vault_content_privacy.h"
 #include "vault_server_key.h"
 #include "vault_service.h"          /* VAULT_SERVER_PRINCIPAL (rotation target) */
 #include "vault_env_bootstrap.h"    /* first-boot credential env -> Vault */
@@ -233,6 +234,12 @@ static int run_server(const char *socket_path, log_level_t log_level)
         audit_worm_append("system", "server", "server.startup", "aimee-server", "ok", "{}") != 0))
    {
       startup_notify(notify_fd, "error: required audit key/WORM store unavailable\n");
+      audit_log_close();
+      return 1;
+   }
+   if (vault_content_privacy_ready())
+   {
+      startup_notify(notify_fd, "error: private content custody unavailable\n");
       audit_log_close();
       return 1;
    }

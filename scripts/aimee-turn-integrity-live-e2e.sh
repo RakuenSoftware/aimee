@@ -245,7 +245,7 @@ psql_store_url="$(sed -E \
   -e 's/[?&]$//' <<<"$store_url")"
 psql_env=()
 if [[ -n "$store_search_path" ]]; then
-  [[ "$store_search_path" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || \
+  [[ "$store_search_path" =~ ^[A-Za-z_][A-Za-z0-9_]*(,public)?$ ]] || \
     fail "invalid store search_path for psql"
   psql_env=(env "PGOPTIONS=-c search_path=$store_search_path")
 fi

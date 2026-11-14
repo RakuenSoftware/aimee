@@ -384,7 +384,7 @@ static void actual_master_rotation(void)
    char backup[1024], error[256];
    assert(!vault_server_key_rotate(VAULT_SERVER_PRINCIPAL, &principals, &credentials, backup,
                                    sizeof backup, error, sizeof error));
-   assert(principals == 2 && credentials == 2 && backup[0]);
+   assert(principals == 2 && credentials == 3 && backup[0]);
    assert(!vault_server_kek(key) && memcmp(old, key, sizeof old));
    int uses = 0;
    assert(vault_service_use_server_wrap_generation("uid:7391", "opaque-provider", "protected", pin,
@@ -497,16 +497,15 @@ static void immutable_lifecycle(void)
    assert(retired_root);
    const cJSON *retired_entry =
        cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(retired_root, "creds"), 0);
-   assert(cJSON_GetArraySize(retired_entry) == 4 &&
+   assert(cJSON_GetArraySize(retired_entry) == 8 &&
           cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(retired_entry, "immutable_retired_v1")));
    assert(!strcmp(cJSON_GetStringValue(
                       cJSON_GetObjectItemCaseSensitive(retired_entry, "immutable_generation_v1")),
                   original));
-   assert(!cJSON_HasObjectItem(retired_entry, "ciphertext") &&
-          !cJSON_HasObjectItem(retired_entry, "nonce") &&
-          !cJSON_HasObjectItem(retired_entry, "tag") &&
-          !cJSON_HasObjectItem(retired_entry, "wrapped_dek") &&
-          !cJSON_HasObjectItem(retired_entry, "wrapped_dek_server"));
+   assert(cJSON_HasObjectItem(retired_entry, "ciphertext") &&
+          cJSON_HasObjectItem(retired_entry, "nonce") &&
+          cJSON_HasObjectItem(retired_entry, "tag") &&
+          cJSON_HasObjectItem(retired_entry, "wrapped_dek_server"));
    unsigned before_retry = sync_calls;
    assert(create(p, "fixed", "fixed value") == VAULT_CREATE_ONCE_RETIRED && !generation[0]);
    assert(create(p, "fixed", "other value") == VAULT_CREATE_ONCE_RETIRED && !generation[0]);

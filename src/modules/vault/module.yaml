@@ -39,7 +39,8 @@
     "src/modules/vault/vault_witness_record.c",
     "src/modules/vault/vault_witness_signer.c",
     "src/modules/vault/vault_witness_signer_kek.c",
-    "src/modules/vault/vault_witness_verify.c"
+    "src/modules/vault/vault_witness_verify.c",
+    "src/modules/vault/vault_content_privacy.c"
   ],
   "private_headers": [
     "src/modules/vault/runtime_secret.h",
@@ -69,7 +70,8 @@
     "src/modules/vault/vault_witness_proof.h",
     "src/modules/vault/vault_witness_record.h",
     "src/modules/vault/vault_witness_signer.h",
-    "src/modules/vault/vault_witness_verify.h"
+    "src/modules/vault/vault_witness_verify.h",
+    "src/modules/vault/vault_content_privacy.h"
   ],
   "tests": [
     "src/tests/test_vault_capability.c",
@@ -86,7 +88,8 @@
     "src/tests/test_vault_server_key.c",
     "src/tests/test_vault_service.c",
     "src/tests/test_vault_store.c",
-    "src/tests/test_vault_tpm2.c"
+    "src/tests/test_vault_tpm2.c",
+    "src/tests/test_vault_content_privacy.c"
   ],
   "docs": [
     "docs/modules/vault.md"

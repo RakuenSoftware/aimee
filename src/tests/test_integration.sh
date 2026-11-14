@@ -523,12 +523,12 @@ start_db1_module() {
     if [ -z "${AIMEE_STORE_SCHEMA:-}" ]; then
         AIMEE_STORE_SCHEMA="integ_$$"
         case "$AIMEE_STORE_URL" in
-            *\?*) AIMEE_STORE_URL="$AIMEE_STORE_URL&search_path=$AIMEE_STORE_SCHEMA" ;;
-            *)    AIMEE_STORE_URL="$AIMEE_STORE_URL?search_path=$AIMEE_STORE_SCHEMA" ;;
+            *\?*) AIMEE_STORE_URL="$AIMEE_STORE_URL&search_path=$AIMEE_STORE_SCHEMA,public" ;;
+            *)    AIMEE_STORE_URL="$AIMEE_STORE_URL?search_path=$AIMEE_STORE_SCHEMA,public" ;;
         esac
         case "$AIMEE_STORE_MIGRATION_URL" in
-            *\?*) AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL&search_path=$AIMEE_STORE_SCHEMA" ;;
-            *)    AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL?search_path=$AIMEE_STORE_SCHEMA" ;;
+            *\?*) AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL&search_path=$AIMEE_STORE_SCHEMA,public" ;;
+            *)    AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL?search_path=$AIMEE_STORE_SCHEMA,public" ;;
         esac
         export AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL AIMEE_STORE_SCHEMA
     fi
@@ -1190,12 +1190,24 @@ check_output "api enable persisted the port" "8910" $AIMEE api status
 check_output "api disable turns the listener off" "disabled" $AIMEE api disable
 check_output "no-arg path remains local help" 'Server is started automatically' $AIMEE --json
 
-RESP=$(srv_req '{"method":"server.health"}') || true
+# Listener reconfiguration above can invalidate a background readiness snapshot.
+# Attachment alone does not attest SQL success; require actual bounded recovery.
+if [ -n "$DB1_MODULE_PID" ]; then
+    for i in $(seq 1 450); do
+        RESP=$(srv_req '{"method":"server.health"}') || true
+        if echo "$RESP" | grep -q '"state":"ok"'; then
+            break
+        fi
+        sleep 0.1
+    done
+else
+    RESP=$(srv_req '{"method":"server.health"}') || true
+fi
 check_output "server.health status" '"status":"ok"' echo "$RESP"
 check_output "server.health uptime" '"uptime"' echo "$RESP"
 # The DB1 state is the server's answer to "can I reach the store", and since
-# the store became a module that is a question about the module being
-# attached rather than about a file this process opened. When this run has a
+# the store became a module that requires a successful SQL probe, rather
+# than an attached process or a file this process opened. When this run has a
 # PostgreSQL DSN the module must be reachable. The documented no-DSN path above
 # deliberately skips it, so health must honestly report that degraded state
 # instead of pretending the store is available.

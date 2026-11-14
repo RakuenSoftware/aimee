@@ -64,6 +64,10 @@ func sharedTestDatabase(t *testing.T) *pgxpool.Pool {
 		t.Fatal("cannot initialize isolated test database")
 	}
 	t.Cleanup(pool.Close)
+	// Match the shipped database bootstrap before either domain migrates.
+	if _, err := pool.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public"); err != nil {
+		t.Fatal(err)
+	}
 	return pool
 }
 

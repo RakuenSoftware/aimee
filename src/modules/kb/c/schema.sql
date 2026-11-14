@@ -3909,6 +3909,25 @@ CREATE TABLE IF NOT EXISTS org_vault_current (
     REFERENCES org_vault_secret(principal, agent, cred, version)
 );
 
+-- A retired slot has no usable current version, while its pointer row and
+-- every encrypted version remain. Retirement events retain the former pointer.
+ALTER TABLE org_vault_current ALTER COLUMN version DROP NOT NULL;
+CREATE TABLE IF NOT EXISTS org_vault_retirement (
+  principal TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  cred TEXT NOT NULL,
+  version BIGINT NOT NULL,
+  retired_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  PRIMARY KEY(principal,agent,cred,version),
+  FOREIGN KEY(principal,agent,cred,version)
+    REFERENCES org_vault_secret(principal,agent,cred,version)
+);
+ALTER TABLE org_vault_retirement ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_vault_retirement_admin_read ON org_vault_retirement;
+CREATE POLICY p_vault_retirement_admin_read ON org_vault_retirement FOR SELECT
+  USING (kb_principal_is_admin());
+REVOKE ALL ON org_vault_retirement FROM PUBLIC;
+
 -- ENABLE (not FORCE) RLS on all three, mirroring P3a: the owner-scoped SECURITY
 -- DEFINER functions bypass RLS to read/write, while the non-owner NOBYPASSRLS runtime
 -- role's DIRECT table reads stay tenant-filtered by the SELECT policies below.
@@ -4121,7 +4140,7 @@ $$;
 CREATE OR REPLACE FUNCTION org_vault_list(p_principal TEXT)
 RETURNS TABLE(agent TEXT, cred TEXT)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT agent, cred FROM org_vault_current WHERE principal = p_principal ORDER BY agent, cred;
+  SELECT agent, cred FROM org_vault_current WHERE principal = p_principal AND version IS NOT NULL ORDER BY agent, cred;
 $$;
 
 -- org_vault_list_principals: distinct principals with at least one current slot.
@@ -4131,8 +4150,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT DISTINCT principal FROM org_vault_current ORDER BY principal;
 $$;
 
--- org_vault_delete: drop a slot (its pointer + every version row). Pointer first so the
--- version rows are no longer referenced by the FK.
+-- org_vault_delete: retire availability, retaining every encrypted value and pointer history.
 CREATE OR REPLACE FUNCTION org_vault_delete(p_principal TEXT, p_agent TEXT, p_cred TEXT) RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_rot BOOLEAN := false;
@@ -4147,20 +4165,21 @@ BEGIN
   IF v_rot THEN
     RAISE EXCEPTION 'org_vault_delete: active rotation conflict' USING ERRCODE='40001';
   END IF;
-  DELETE FROM org_vault_current WHERE principal = p_principal AND agent = p_agent AND cred = p_cred;
-  DELETE FROM org_vault_secret  WHERE principal = p_principal AND agent = p_agent AND cred = p_cred;
+  INSERT INTO org_vault_retirement(principal,agent,cred,version)
+    SELECT principal,agent,cred,version FROM org_vault_current
+     WHERE principal=p_principal AND agent=p_agent AND cred=p_cred AND version IS NOT NULL
+    ON CONFLICT DO NOTHING;
+  UPDATE org_vault_current SET version=NULL,updated_at=pg_now_text()
+   WHERE principal=p_principal AND agent=p_agent AND cred=p_cred AND version IS NOT NULL;
 END; $$;
 
--- org_vault_current_wraps: (agent, cred, version, wrapped_dek) for every current slot of
+-- org_vault_current_wraps: (agent, cred, version, wrapped_dek) for every retained version of
 -- a principal — the rekey read-side (re-wrap each DEK under a new KEK; ciphertext untouched).
 CREATE OR REPLACE FUNCTION org_vault_current_wraps(p_principal TEXT)
 RETURNS TABLE(agent TEXT, cred TEXT, version BIGINT, wrapped_dek BYTEA)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT s.agent, s.cred, s.version, s.wrapped_dek
-    FROM org_vault_current c
-    JOIN org_vault_secret s
-      ON s.principal = c.principal AND s.agent = c.agent AND s.cred = c.cred AND s.version = c.version
-   WHERE c.principal = p_principal;
+    FROM org_vault_secret s WHERE s.principal = p_principal;
 $$;
 
 -- org_vault_rewrap: replace the wrapped_dek of one current version row (rekey write-side;
@@ -19355,7 +19374,7 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_KB_STORE_SCHEMA_VERSION in db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '46')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '47')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- Utility horizon anchors are protected change events. Exact per-record probes

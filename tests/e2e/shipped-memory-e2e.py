@@ -7,7 +7,7 @@ API, never through a database: the shipped implementation keeps its records in
 its own store, and what an operator can rely on is the public contract.
 
 Personal (Server): store with a durable receipt, idempotent replay, get, search,
-recall, refusal of a raw sensitive value, delete. Shared (KB, when given):
+recall, Vault intake of a private value, retirement. Shared (KB, when given):
 global, project and workspace placement, scope isolation between projects,
 statistics and hygiene over the stored rows.
 """
@@ -91,17 +91,20 @@ class Gate:
         self.check('personal search finds the record', self.ok(found) and word in json.dumps(found[1]), found)
         recalled = self.server('recall', dict(query=word))
         self.check('personal recall includes the record', self.ok(recalled) and word in json.dumps(recalled[1]), recalled)
-        refused = self.server('store', dict(key=key + '-contact', content='My address is person@example.invalid'))
-        message = refused[1].get('message', '') if isinstance(refused[1], dict) else ''
-        self.check('a raw sensitive value is refused and pointed to the vault',
-                   refused[0] == 400 and refused[1].get('kind') == 'invalid_argument' and 'vault' in message, refused)
+        protected = self.server('store', dict(key=key + '-contact', content='My address is person@example.invalid'))
+        self.check('a private value is admitted with encrypted Vault custody', self.ok(protected), protected)
+        protected_get = self.server('get', dict(id=protected[1].get('id')))
+        self.check('private memory retains an opaque locator without the raw value', self.ok(protected_get)
+                   and '[[vault:v1:' in (protected_get[1].get('memory') or {}).get('content', '')
+                   and 'person@example.invalid' not in json.dumps(protected_get[1]), protected_get)
         searched = self.server('search', dict(keywords=['person@example.invalid'], limit=5))
-        self.check('a refused sensitive value is not stored', 'person@example.invalid' not in json.dumps(searched[1]),
+        self.check('private lookup finds protected content without exposing raw PII', self.ok(searched)
+                   and '[[vault:v1:' in json.dumps(searched[1]) and 'person@example.invalid' not in json.dumps(searched[1]),
                    searched)
         deleted = self.server('delete', dict(id=record))
-        self.check('personal delete succeeds', self.ok(deleted), deleted)
+        self.check('personal retirement succeeds', self.ok(deleted), deleted)
         after = self.server('search', dict(keywords=[word], limit=5))
-        self.check('a deleted record is no longer found', word not in json.dumps(after[1]), after)
+        self.check('a retired record is no longer found', word not in json.dumps(after[1]), after)
 
     def shared(self):
         word = 'OSPREY' + self.tag.upper()

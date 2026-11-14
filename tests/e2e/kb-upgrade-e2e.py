@@ -60,8 +60,8 @@ def exercise(stack, check):
     for attempt in range(2):
         stack.compose('down')
         stack.start()
-        check(f'recreation {attempt + 1} applies schema 46', sql(
-            "SELECT value FROM kb_meta WHERE key='schema_version'") == '46')
+        check(f'recreation {attempt + 1} applies schema 47', sql(
+            "SELECT value FROM kb_meta WHERE key='schema_version'") == '47')
         check(f'recreation {attempt + 1} removes every retired SQL routine', sql(
             'SELECT bool_and(to_regprocedure(signature) IS NULL) FROM unnest(ARRAY[' +
             ','.join("'" + signature + "'" for signature in retired) + ']) signature') == 't')

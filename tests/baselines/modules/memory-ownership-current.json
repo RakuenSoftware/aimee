@@ -2533,13 +2533,13 @@
         "AIMEE_MEMORY_STAGE_DATA",
         "server_module_memory_data"
       ],
-      "sha256": "1ed3793a9d67b8e7583db152800c6924991b886ffafa76fb0bca5d5bf5a2b7b9",
+      "sha256": "da81afc1fc06231c55abebacaf23c44f9705f6a4b753d297ea21013df141b8da",
       "evidence": [
         "server-go/modules/memory/personal_versions_test.go",
         "src/tests/test_module_json_call.c"
       ],
       "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
-      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
+      "boundary_review": "Vault host intake before memory data framing; preserve Native scope and write admission. No raw-value screening RPC or replacement memory owner.",
       "boundary_change": " Tools-only adapter registration is extracted with its production initialization order preserved. Tool classification consumes the existing full-name metadata wire; legacy wire serving remains intact. Memory stage registrations, scoped request forwarding and eligibility remain unchanged and Go-owned. This is boundary analysis, not independent reviewer approval.",
       "source_revisions": [
         {
@@ -2613,6 +2613,23 @@
           ],
           "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
           "boundary_review": "Require explicit separate-owner deletion acknowledgment for native and other backends; unsupported and unavailable cleanup fails. The fixture verifies the production JSON transport, erasure payload and refusal, without implementing memory policy in the host.",
+          "boundary_change": " Tools-only adapter registration is extracted with its production initialization order preserved. Tool classification consumes the existing full-name metadata wire; legacy wire serving remains intact. Memory stage registrations, scoped request forwarding and eligibility remain unchanged and Go-owned. This is boundary analysis, not independent reviewer approval.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+        },
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "AIMEE_MEMORY_EVENT_DATA",
+            "AIMEE_MEMORY_STAGE_DATA",
+            "server_module_memory_data"
+          ],
+          "sha256": "1ed3793a9d67b8e7583db152800c6924991b886ffafa76fb0bca5d5bf5a2b7b9",
+          "evidence": [
+            "server-go/modules/memory/personal_versions_test.go",
+            "src/tests/test_module_json_call.c"
+          ],
+          "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
+          "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
           "boundary_change": " Tools-only adapter registration is extracted with its production initialization order preserved. Tool classification consumes the existing full-name metadata wire; legacy wire serving remains intact. Memory stage registrations, scoped request forwarding and eligibility remain unchanged and Go-owned. This is boundary analysis, not independent reviewer approval.",
           "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
@@ -3579,21 +3596,32 @@
       ],
       "sha256": "0950fbc021a6e42b917b1909c80ca52e8f403b0cb3aa819394da16728472f1d3",
       "reason": "Generic identity-checked query/document embedding requests only; selected Native provider owns all model execution. Repository snapshots, SQL publication and code ranking belong to runtime business state."
+    },
+    "src/module_commands.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "AIMEE_MEMORY_EVENT_COMMAND"
+      ],
+      "sha256": "8891632888d221bd90abafa08d61dc6ed7db235d0228c6eb1af3081fded49446",
+      "reason": "Host Vault intake converts freeform ordinary memory command data before its first bus frame. Native memory admission, source/projection proofs, scope authority and response ownership remain with the selected Native owner; signed internal source operations are excluded. The screen DTO reports host redaction when the selected owner permits only the already protected text; it grants no custody capability.",
+      "evidence": [
+        "src/tests/test_vault_content_privacy.c"
+      ]
     }
   },
   "generated_files": {
     "src/schema_data.h": {
       "disposition": "protocol-catalog",
-      "boundary_review": "KB schema 46 raises the minimum runtime schema so installed v45 databases execute the already-reviewed obsolete erasure-function drops. This changes upgrade admission and the version marker only; retained SQL payloads, history and receipts remain intact. The shipped-image upgrade regression seeds all seven retired routine signatures and verifies their removal.",
+      "boundary_review": "KB schema 47 replaces organization Vault destruction with unavailable current pointers and retained encrypted versions/retirement events. Rotation includes retained versions. Existing v46 obsolete erasure-function drops and retained memory history are unchanged.",
       "symbols": [
         "aimee_memory_hygiene",
         "kb_store_memory_find_facts_like"
       ],
-      "sha256": "ef6e8b69082b8eaa2a598ffd81ceb299865b6c393bce5da8cc129b2c25243c4c",
+      "sha256": "0aa03169387cfff9377d8ae48f9ded0aa85f15b99dfe4450468933025ade4757",
       "inputs": {
         "src/gen_schema.py": "594e22f8c740edeab764e881f22bf4b1fb044bcefe9eb1079ae41ffaa971f3c6",
-        "src/modules/kb/c/schema.sql": "908bac8bb72720585ae1011246cd3b0af1179482f6ccf916c07e24525d4f9048",
-        "src/modules/kb/c/schema_sqlite.sql": "c57604a89ffbf7668e0c2f4c68fcdfe911d8f0cfc1c9140640859fb3ac4473ca"
+        "src/modules/kb/c/schema.sql": "5f03e8ab9ee221ff5db912e867c0a76d9623368f8fe04046dcf0439fac2d0e89",
+        "src/modules/kb/c/schema_sqlite.sql": "22ebbe2129622a62e69c0b0bcb9b4dd7b6adc719a131ae3b9bd5680ddf4190aa"
       },
       "source_revisions": [
         {

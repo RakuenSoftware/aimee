@@ -1,13 +1,16 @@
 # The store module on a machine that never built it
 
+> **HISTORICAL** — These runs precede the ordinary Vault intake gate added on
+> 2026-11-14. They do not qualify the current source or its expanded release gate.
+
 The historical runs below describe the pre-1.1 store migration. Their one-off
 host scripts were retired during release cleanup; they are not evidence for 1.1.
 
-## Current release candidate gate (2026-11-13)
+## Historical release candidate gate (2026-11-13)
 
 ### `scripts/validation/release-candidate.sh` -- 11 checks
 
-This is the current reproducible shipped-image gate. Supply the application,
+This was the reproducible shipped-image gate for the source recorded below. Supply the application,
 PostgreSQL and embedder image identities and a persistent `AIMEE_EVIDENCE_DIR`.
 It checks typed facts on both roles with E4B and E2B, T1/T2/T3 deployment,
 the real Docker private verifier, egress/Vault, plain storage and KB upgrade.

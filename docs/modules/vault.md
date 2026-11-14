@@ -42,6 +42,31 @@ qualification remain outstanding.
 
 The opt-in [conditional custody contract](../VAULT_CONDITIONAL_CUSTODY.md) provides per-principal create/replay/conflict with authenticated immutable generations, mutable-overwrite refusal and generation-checked trusted use. Its optional fenced-use operation holds the provider retirement fence through a bounded trusted callback; the earlier snapshot-use operation retains its snapshot semantics. Unsupported providers refuse without a snapshot fallback; the reserved instance/server namespace retains its separate existing API. The separate local-use guard holds the actual local key/seal generation for an independently authorized use; it grants no entry access and does not replace the existing primary-epoch admission for organizational key use. This generic Vault contract supplies custody primitives, not application sensitivity classification, native database authorization or a model-facing secret getter. `test_vault_create_once.c`, `test_vault_fenced_use.c` and `test_vault_local_use.c` cover generation, failure, retirement and seal races, callback bounds, reentry and rotation paths.
 
+### Ordinary content intake and retained history
+
+The Server and KB establish encrypted custody for recognized private text before a
+memory command enters the module bus. Server prompt intake runs before canonical
+capture and provider dispatch. Opaque locators are scoped to the authenticated
+principal and survive master rotation; they confer no read/use capability. Host
+content slots use immutable local Vault custody, including on a KB whose separate
+organization Vault uses PostgreSQL. Rotation enumerates both stores.
+
+The recognizers are local and bounded. The regression covers the tested credential,
+email, phone, IPv4/IPv6, identity, name and postal-address forms; it does not certify
+universal PII classification. Invalid UTF-8 and unavailable custody fail closed.
+Ordinary non-private text and exact JSON integer tokens retain their values.
+
+Updating a mutable local credential retains its old encrypted version. Retirement
+makes values unavailable while retaining ciphertext and key wraps. Organization
+Vault retirement likewise preserves encrypted SQL versions and records the former
+current pointer. Key rotation includes retained versions. Legacy value-free
+retirement markers remain unavailable; payloads erased by older builds cannot be
+reconstructed by this upgrade.
+
+An initialized Vault never replaces a missing master automatically. Restore the
+original key and matching Vault inventory from a protected backup. Retain the
+`.server-master.key.initialized` marker with that inventory.
+
 ## Public contracts
 
 Canonical implementation lives in `src/modules/vault`: the server-wrap retrieval path begins at

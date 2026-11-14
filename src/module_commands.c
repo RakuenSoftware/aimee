@@ -4,6 +4,8 @@
 #endif
 
 #include "headers/module_commands.h"
+#include "headers/memory_stage_contract.h"
+extern int vault_content_protect_json(const char *, char **) __attribute__((weak));
 #include <ouroboros/module_protocol.h>
 
 #include "aimee/audit/obs_bus.h"
@@ -219,6 +221,7 @@ static void wr_u16(unsigned char *p, uint16_t v)
 typedef struct
 {
    char *args_json;
+   char *privacy_redacted;
    char *context_json;
    unsigned char *request;
    unsigned char *response;
@@ -229,6 +232,7 @@ static void command_call_cleanup(void *opaque)
 {
    volatile command_call_scope_t *scope = opaque;
    free(scope->args_json);
+   free(scope->privacy_redacted);
    free(scope->context_json);
    free(scope->request);
    free(scope->response);
@@ -262,6 +266,56 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
       owned.args_json = cJSON_PrintUnformatted((cJSON *)args);
       if (!owned.args_json)
          goto done;
+      /* Host Vault intake precedes the first raw-value bus frame. Never rewrite
+       * signed source/projection operations or their authenticated context. */
+      const char *operation =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation"));
+      int intake = !strcmp(verb_copy, "store") || !strcmp(verb_copy, "supersede") ||
+                   !strcmp(verb_copy, "search") || !strcmp(verb_copy, "recall") ||
+                   !strcmp(verb_copy, "screen_content") || !strcmp(verb_copy, "facts") ||
+                   !strcmp(verb_copy, "search_graph") || !strcmp(verb_copy, "entity_edges") ||
+                   !strcmp(verb_copy, "serve") || !strcmp(verb_copy, "claim_card") ||
+                   (!strcmp(verb_copy, "runtime") && operation &&
+                    (!strncmp(operation, "user-", 5) || !strncmp(operation, "shared-", 7)));
+      if (event_kind == AIMEE_MEMORY_EVENT_COMMAND && intake && vault_content_protect_json)
+      {
+         char *safe = NULL;
+         if (vault_content_protect_json(owned.args_json, &safe))
+            goto done;
+         if (safe)
+         {
+            if (!strcmp(verb_copy, "screen_content"))
+            {
+               cJSON *intake = cJSON_ParseWithOpts(safe, NULL, 1);
+               const char *text =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(intake, "content"));
+               owned.privacy_redacted = text ? strdup(text) : NULL;
+               cJSON_Delete(intake);
+               if (!owned.privacy_redacted)
+               {
+                  free(safe);
+                  goto done;
+               }
+            }
+            free(owned.args_json);
+            owned.args_json = safe;
+         }
+         /* HTTP intake may already have transformed this text. A screen
+          * response must return that safe text rather than tell a caller to
+          * keep its original private input. Locators remain ordinary data. */
+         if (!strcmp(verb_copy, "screen_content") && !owned.privacy_redacted)
+         {
+            cJSON *screen = cJSON_ParseWithOpts(owned.args_json, NULL, 1);
+            const char *text =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(screen, "content"));
+            if (text && strstr(text, "[[vault:v1:"))
+               owned.privacy_redacted = strdup(text);
+            int failed = text && strstr(text, "[[vault:v1:") && !owned.privacy_redacted;
+            cJSON_Delete(screen);
+            if (failed)
+               goto done;
+         }
+      }
       args_len = strlen(owned.args_json);
    }
    owned.context_json = context && cJSON_IsObject(context) ? cJSON_PrintUnformatted(context) : NULL;
@@ -335,6 +389,37 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
       goto done;
    memcpy(owned.body, owned.response + INVOKE_RESPONSE_HEADER, body_len);
    owned.body[body_len] = '\0';
+   if (owned.privacy_redacted)
+   {
+      /* Preserve the screen API's combined result: the host established actual
+       * Vault custody, then the selected owner screened only the safe text. */
+      cJSON *screen = cJSON_ParseWithOpts(owned.body, NULL, 1);
+      const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(screen, "status"));
+      const char *verdict =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(screen, "verdict"));
+      if (status && !strcmp(status, "ok") && verdict && !strcmp(verdict, "allow"))
+      {
+         if (!cJSON_ReplaceItemInObjectCaseSensitive(screen, "verdict",
+                                                     cJSON_CreateString("redact")) ||
+             !cJSON_ReplaceItemInObjectCaseSensitive(screen, "redacted",
+                                                     cJSON_CreateString(owned.privacy_redacted)))
+         {
+            cJSON_Delete(screen);
+            goto done;
+         }
+         char *combined = cJSON_PrintUnformatted(screen);
+         if (!combined)
+         {
+            cJSON_Delete(screen);
+            goto done;
+         }
+         free(owned.body);
+         owned.body = combined;
+         body_len = (uint32_t)strlen(combined);
+      }
+      cJSON_Delete(screen);
+   }
+
    free(owned.response);
    owned.response = NULL;
    if (outcome)

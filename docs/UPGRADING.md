@@ -23,11 +23,13 @@ memories, upgraded in place on their existing volumes.
   with `scripts/upgrade/migrate-memory.py`.
 - **PII belongs in Vault, with an opaque reference in memory.** Raw PII must not be
   stored in ordinary memory, derived facts, embeddings or model context. Refusing a
-  memory write is not a completed Vault-backed write. The candidate's ordinary write
-  path does not yet implement that contract: its bounded detector refuses some
-  recognized values and misses others. The optional protected-intake route is not a
-  claim that ordinary writes automatically vault PII. Treat this as a release blocker;
-  do not mistake a refused import for a successful protected migration.
+  memory write is not a completed Vault-backed write. Host intake now seals recognized
+  private values before ordinary memory commands, provider requests and canonical capture,
+  and leaves stable, principal-scoped `[[vault:v1:…]]` locators in their place. These
+  locators are data, not permission to read a secret. The local detector covers the
+  tested email, phone, IP, identity, credential, name and postal-address forms; it is a
+  bounded recognizer, not a guarantee that arbitrary free text has been classified.
+  The optional protected-intake profile keeps its separate Native proof contract.
 - **The Compose files change.** `compose.yaml` and `compose.kb.yaml` gain the `aimee-memory-init`
   service, an `aimee-memory` volume, and mounts of `private-memory/<role>` from the home volume
   into the application. Use the files from this release; a deployment kept on its 1.0.2 Compose

@@ -641,6 +641,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-vault-kms-hwm-live \
                $(TESTPREFIX)/unit-test-kb-vault-rotation-live \
                $(TESTPREFIX)/unit-test-vault-service \
+               $(TESTPREFIX)/unit-test-vault-content-privacy \
                $(TESTPREFIX)/unit-test-vault-create-once \
                $(TESTPREFIX)/unit-test-vault-generation-retirement \
                $(TESTPREFIX)/unit-test-vault-fenced-use \
@@ -5019,6 +5020,13 @@ $(TESTPREFIX)/unit-test-vault-service: $(OBJDIR)/tests/test_vault_service.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-vault-content-privacy: $(OBJDIR)/tests/test_vault_content_privacy.o $(OBJDIR)/modules/vault/vault_content_privacy.o $(OBJDIR)/server/request_context.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-vault-create-once: $(OBJDIR)/tests/test_vault_create_once.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
@@ -6448,7 +6456,7 @@ $(filter-out $(TEST_KB_RUNTIME_TARGETS),$(TEST_TARGETS)): \
 # archive exists therefore never reached them, and on a cold tree each one fails
 # at the link with "cannot find build/obj/libaimee-core-connection.a" rather than
 # anything about the test. Give them the same edge, for the same reason.
-$(TEST_KB_RUNTIME_TARGETS): $(OBJDIR)/modules/audit/obs_bus.o $(OURO_RING_LIB) | \
+$(TEST_KB_RUNTIME_TARGETS): $(OBS_BUS_RUNTIME_OBJ) $(KB_MCP_OBJS) $(OURO_RING_LIB) | \
   $(CORE_CONNECTION_LIB)
 
 # ---------------------------------------------------------------- benchmark probes

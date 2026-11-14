@@ -219,9 +219,9 @@ BEGIN
   -- / admin) but its direct write grant from the ALL TABLES line above is REVOKED, so a
   -- compromised runtime session cannot forge or mutate vault rows out of band.
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON
-    org_vault_salt, org_vault_secret, org_vault_current FROM aimee_kb_runtime;
+    org_vault_salt, org_vault_secret, org_vault_current, org_vault_retirement FROM aimee_kb_runtime;
   GRANT SELECT ON
-    org_vault_salt, org_vault_secret, org_vault_current TO aimee_kb_runtime;
+    org_vault_salt, org_vault_secret, org_vault_current, org_vault_retirement TO aimee_kb_runtime;
   REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_vault_rotation FROM aimee_kb_runtime;
   REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_rotation_request
     FROM aimee_kb_runtime;
@@ -1219,6 +1219,8 @@ BEGIN
   ALTER TABLE public.kb_management_status_key OWNER TO aimee_kb_owner;
   ALTER TABLE public.org_vault_secret OWNER TO aimee_kb_owner;
   ALTER TABLE public.org_vault_current OWNER TO aimee_kb_owner;
+  ALTER TABLE public.org_vault_retirement OWNER TO aimee_kb_owner;
+  GRANT SELECT,INSERT ON public.org_vault_retirement TO aimee_kb_owner;
   ALTER TABLE public.org_vault_rotation OWNER TO aimee_kb_owner;
   GRANT EXECUTE ON FUNCTION public.org_vault_control_require_open(),
     public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_owner;
