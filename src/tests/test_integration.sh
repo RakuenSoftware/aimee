@@ -1411,7 +1411,7 @@ check_output "local version long flag" "aimee" $AIMEE --version
 # The local index remains available with no remote KB selected.
 INDEX_OVERVIEW=$($AIMEE --json index overview 2>&1) && INDEX_RC=0 || INDEX_RC=$?
 check "standalone index overview succeeds without a KB" test "$INDEX_RC" -eq 0
-check_output "standalone index overview has an empty project list" '^\[\]$' echo "$INDEX_OVERVIEW"
+check "standalone index overview has an empty project list" test "$INDEX_OVERVIEW" = '[]'
 # Optional external-owner compatibility starts only after the explicit index
 # availability cases. With no memory selection, unavailable is required.
 [ -z "$LEGACY_MEMORY_OWNER" ] || MEMORY_MODULE_ENABLED=1
