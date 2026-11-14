@@ -50,7 +50,7 @@ def projection_change_shapes(expected, values):
                 else 'words' if re.fullmatch(r'[A-Za-z -]+', value) else 'other')
         syntax = lambda text: ''.join('D' if c.isdigit() else 'L' if c.isalpha() else '*' if ord(c)>127 else c for c in text[:100])
         changes.append(dict(operation=operation, source_characters=len(value), shape=kind,
-                            source_syntax=syntax(value), observed_syntax=syntax(actual[observed_left:observed_right])))
+                            source_context=syntax(expected[max(0,left-50):min(len(expected),right+50)]), source_syntax=syntax(value), observed_syntax=syntax(actual[observed_left:observed_right])))
     return dict(changes=changes[:16])
 
 
