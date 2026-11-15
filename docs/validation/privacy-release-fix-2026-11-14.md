@@ -32,6 +32,12 @@ are excluded. Terminal recovery failures receive bounded hash-only diagnostics.
 
 ## Validation
 
+### `scripts/validation/release-candidate.sh` -- 12 checks, all passing
+
+The `release-r18/aggregate.json` evidence records all twelve named gates below.
+The recorded two-worker runner executes the canonical gate set with the
+fixture adjustments described below; it is not a claim of a serial invocation.
+
 - All 12 release gates pass: privacy custody; KB and Server with both pinned real
   E4B/E2B models; T1/T2/T3; real Docker private verifier; egress/Vault; ordinary
   PostgreSQL; and current-layout KB upgrade.
