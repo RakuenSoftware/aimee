@@ -221,17 +221,25 @@ class Staleness(unittest.TestCase):
             bundle, prefix, public = Path(work) / 'bundle', Path(work) / 'prefix', Path(work) / 'public-exe'
             (bundle / 'bin').mkdir(parents=True)
             prefix.mkdir()
+            (bundle / 'provision').mkdir()
+            (bundle / 'provision/prepare.py').write_bytes(b'provisioner')
             public.write_bytes(b'public')
             files = {}
             for relative, name in module.BUNDLE_COPIES.items():
                 (bundle / 'bin' / name).write_bytes(name.encode())
                 files[relative] = hashlib.sha256(name.encode()).hexdigest()
-            manifest = {'files': files, 'container_public_executables': {
+            manifest = {'files': files, 'container_provisioner_sha256': hashlib.sha256(b'provisioner').hexdigest(), 'container_public_executables': {
                 str(public): {'sha256': hashlib.sha256(b'public').hexdigest(), 'prepared_copy': 'x'}}}
             (prefix / 'overlay-manifest.json').write_text(json.dumps(manifest))
             reasons = module.stale_reasons(prefix, 'server', bundle)
             # Only the resource binary, which this fixture cannot place at its image path, may differ.
             self.assertEqual([reason for reason in reasons if 'aimee-server' not in reason], [])
+            (bundle / 'provision/prepare.py').write_bytes(b'new launcher')
+            self.assertIn('memory launcher provisioner differs', module.stale_reasons(prefix, 'server', bundle))
+            (bundle / 'provision/prepare.py').write_bytes(b'provisioner')
+            del manifest['container_provisioner_sha256']
+            (prefix / 'overlay-manifest.json').write_text(json.dumps(manifest))
+            self.assertIn('memory launcher provisioner differs', module.stale_reasons(prefix, 'server', bundle))
             (bundle / 'bin/aims-db-module').write_bytes(b'newer release')
             public.write_bytes(b'newer public')
             reasons = module.stale_reasons(prefix, 'server', bundle)

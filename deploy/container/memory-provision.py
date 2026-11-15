@@ -159,6 +159,8 @@ def stale_reasons(prefix: Path, role: str, bundle: Path = BUNDLE) -> list[str]:
     manifest = json.loads((prefix / 'overlay-manifest.json').read_text())
     files = manifest.get('files', {})
     reasons = []
+    if manifest.get('container_provisioner_sha256') != sha256(bundle / 'provision/prepare.py'):
+        reasons.append('memory launcher provisioner differs')
     for relative, name in BUNDLE_COPIES.items():
         if files.get(relative) != sha256(bundle / 'bin' / name):
             reasons.append(f'memory executable {name} differs')
