@@ -14,6 +14,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,6 +45,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             status, reply = 503, {'status': 'error', 'kind': 'unavailable', 'message': 'memory module unavailable'}
         elif self.path.endswith('list'):
             reply = {'status': 'ok', 'memories': []}
+        elif self.path.endswith('screen_content'):
+            content = body['content']
+            safe = content.replace('person@example.invalid', '[[vault:v1:0123456789abcdef0123456789abcdef]]')
+            reply = {'status': 'ok', 'verdict': 'redact' if safe != content else 'allow', 'redacted': safe}
         elif body['key'] in state['sensitive']:
             # The memory client screen answers a raw sensitive value with HTTP 400.
             status, reply = 400, {'status': 'error', 'kind': 'invalid_argument',
@@ -99,9 +104,18 @@ class MigrateMemoryTests(unittest.TestCase):
 
     def run_tool(self, *argv) -> int:
         previous = sys.argv
+        if argv[0] == 'import' and '--dry-run' not in argv:
+            argv = (*argv, '--psql', 'fixture-owner-psql')
         sys.argv = ['migrate-memory.py', *argv]
         try:
-            return tool.main()
+            # Transport/authority tests isolate SQL custody, which has separate
+            # real-Postgres transaction coverage. Keep real public screening.
+            def protect(command, placement, target, records, path, **kwargs):
+                safe = tool.memory_custody.protect_records(target, records)
+                tool.memory_custody.rewrite_snapshot(path, safe)
+                return safe, 0
+            with mock.patch.object(tool.memory_custody, 'protect_source', side_effect=protect):
+                return tool.main()
         finally:
             sys.argv = previous
 
@@ -176,6 +190,25 @@ class MigrateMemoryTests(unittest.TestCase):
         self.assertTrue(all('store' not in body for _, body, _ in stores))
         self.assertEqual(stores[1][1]['idempotency_key'], 'upgrade-1.0-kb-2-2')
 
+    def test_import_keeps_source_validity_bounds(self):
+        until = '2999-01-01T00:00:00Z'
+        server = tool.store_body(row(1,valid_until=until))
+        self.assertEqual(server['valid_until'],until)
+        shared = tool.store_body(row(2,'kb',valid_from='2998-01-01T00:00:00Z',valid_until=until))
+        self.assertEqual(shared['valid_from'],'2998-01-01T00:00:00Z')
+        self.assertEqual(shared['valid_until'],until)
+
+    def test_retained_json_screens_property_names_and_keeps_numeric_lexemes(self):
+        import argparse
+        target = tool.Target(argparse.Namespace(placement='server',socket=self.socket,address=self.address,token_file=None))
+        text = '{"person@example.invalid":"value", "id":9007199254740993,"confidence":0.1234567890123456789012345}'
+        safe = tool.memory_custody.protect_json(target,text)
+        self.assertNotIn('person@example.invalid',safe)
+        self.assertIn('[[vault:v1:',safe)
+        self.assertIn('9007199254740993',safe)
+        self.assertIn('0.1234567890123456789012345',safe)
+        self.assertEqual(len(json.loads(safe)),3)
+
     def test_scopes_names_what_a_kb_must_serve_before_import(self):
         path = self.snapshot([row(1, 'kb'), row(2, 'kb', scope_type='project', scope_value='zephyr'),
                               row(3, 'kb', scope_type='project', scope_value='apollo'),
@@ -189,16 +222,16 @@ class MigrateMemoryTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.run_tool('scopes', '--file', str(server))
 
-    def test_a_refused_sensitive_record_is_reported_and_the_rest_imported(self):
+    def test_sensitive_record_is_screened_to_vault_and_imported(self):
         path = self.snapshot([row(1), row(2, content='call me at person@example.invalid'), row(3)])
-        self.state['sensitive'] = {'key-2'}
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             self.assertEqual(self.run_tool('import', '--placement', 'server', '--file', str(path),
-                                           '--socket', self.socket), 1)
-        self.assertEqual(len(self.state['seen']), 2)
-        self.assertIn('FAILED', out.getvalue())
-        self.assertIn('vault', out.getvalue())
+                                           '--socket', self.socket), 0)
+        self.assertEqual(len(self.state['seen']), 3)
+        self.assertNotIn('person@example.invalid', path.read_text())
+        self.assertIn('[[vault:v1:', path.read_text())
+        self.assertNotIn('person@example.invalid', json.dumps(self.stores()))
 
     def test_import_refuses_the_wrong_placement_an_unready_instance_and_reports_failures(self):
         path = self.snapshot([row(1), row(2)])

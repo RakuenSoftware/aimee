@@ -54,7 +54,8 @@ type pamAccounts struct {
 	// Record the managed accounts after every mutation so they can be restored
 	// into a replaced container — see identity_persist.go. A seam because it
 	// reads /etc/shadow, which a unit test has no business doing.
-	persist func()
+	activateMemory func(string) error
+	persist        func()
 }
 
 // aimeeHome is where the appliance's persistent state lives. The entrypoint
@@ -83,13 +84,14 @@ func newPAMAccounts(service, group string) (*pamAccounts, error) {
 		return nil, fmt.Errorf("managed login group: %w", err)
 	}
 	p := &pamAccounts{
-		service:      service,
-		group:        group,
-		users:        users,
-		authenticate: auth.PAMAuthenticate,
-		setPassword:  auth.SetPassword,
-		lock:         lockSystemAccount,
-		usable:       systemAccountHasUsablePassword,
+		service:        service,
+		group:          group,
+		users:          users,
+		authenticate:   auth.PAMAuthenticate,
+		setPassword:    auth.SetPassword,
+		lock:           lockSystemAccount,
+		usable:         systemAccountHasUsablePassword,
+		activateMemory: activateNativeMemoryAccount,
 	}
 	p.persist = func() {
 		names, err := p.List()
@@ -221,6 +223,10 @@ func (p *pamAccounts) Create(username, password string) error {
 		return err
 	}
 	p.recordIdentities()
+	if err := p.ActivateMemoryAccount(username); err != nil {
+		_ = p.Delete(username)
+		return fmt.Errorf("%w: %v", errMemoryAccountActivation, err)
+	}
 	return nil
 }
 

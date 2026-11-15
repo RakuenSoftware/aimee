@@ -18,6 +18,12 @@ because the memory owner built into 1.0.x is replaced by a new, separate impleme
 - Aimee keeps the generic memory SDK, the module transport and the host-side guarantees of a
   provider-bound request: authenticated callers, context pre-injection, source release and
   revalidation, the byte budget, the send guard and provider receipts.
+- A KB refreshes an admission that expired in transport once before signing it. The refresh
+  revalidates the same source proof and retains its exact expiry; it does not acquire another
+  guard. Malformed replies, changed sources and cancellation still refuse the request.
+- Temporary current recall and assembled memory-context views use a bounded cache. An unused view may require a fresh
+  query before its maximum TTL. Active or uncertain guards pin their exact views until
+  completion; cache expiry leaves stored memories, history and caller grants intact.
 - The fixed `/v1/memory/*` routes are unchanged. `/v1/commands/memory.<verb>` reaches every command
   the implementation declares.
 
@@ -123,6 +129,9 @@ Read [Upgrading from 1.0.2](../../UPGRADING.md#upgrade-from-102) first. In short
   revision history and embeddings are not carried over.
 - Records held by a Cognee or Hillock backend selected in 1.0.2 are not in those tables and are
   not moved by that tool.
+  Import also protects retained legacy SQL payloads and the export snapshot with authenticated
+  Vault references, preserving rows, revisions and lifecycle state. See the upgrade guide for
+  the host-side `--psql` and container-side API transport commands.
 
 Release publication follows the protected main-merge and release approval workflows. These notes
 describe the prepared candidate; artifacts and deployment require those gates.

@@ -105,6 +105,9 @@ The 1.0.x memory tables (`user_memories` on a Server, `memories` on a KB) are re
 upgrade but are no longer read; `scripts/upgrade/migrate-memory.py` exports their active records
 and imports them through the public store command. See
 [Upgrading](../UPGRADING.md#upgrade-from-102).
+  Import also protects retained legacy SQL payloads and the export snapshot with authenticated
+  Vault references, preserving rows, revisions and lifecycle state. See the upgrade guide for
+  the host-side `--psql` and container-side API transport commands.
 
 ## Security and privacy
 

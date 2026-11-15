@@ -35,9 +35,14 @@ memories, upgraded in place on their existing volumes.
   into the application. Use the files from this release; a deployment kept on its 1.0.2 Compose
   file starts the new image without memory (`missing_module: memory`, not ready). These mounts
   need Docker Engine 26 or later and Compose 2.26 or later.
-- **Use this release's embedder image.** Memory pins the embedding provider by identity. The
-  embedder image published with 1.0.2 does not report one, and startup stops with a message
-  saying so. The default image tag of this release does.
+- **Keep the existing vector-space identity during an in-place upgrade.** Pin the running
+  embedder by its immutable image digest before changing application tags. The published
+  1.0.2 embedder reports the complete identity needed by this release. A newer embedder image
+  can have a different implementation identity even with the same model name and dimensions;
+  a KB containing existing vectors correctly refuses that change. Upgrade the application and
+  PostgreSQL while retaining the original embedder. Changing vector spaces is a separate
+  re-embedding operation, not an automatic part of this upgrade. Fresh deployments use this
+  release's default embedder.
 - **The image is `linux/amd64` for memory.** The memory bundle exists for that platform only. An
   image for another platform has no memory and its provisioning service fails with a message.
 - **Memory commands are declared by the implementation.** The fixed `/v1/memory/*` routes used
@@ -57,7 +62,9 @@ Run it once per instance. A Server and a KB are upgraded separately, each in its
 project. The examples use a Server; the KB differences are listed after them.
 
 1. **Back up.** Stop writers and back up the application home, Vault, PostgreSQL, workspaces and
-   audit evidence as a matched set, and record the 1.0.2 image digests. The new version applies
+   audit evidence as a matched set, and record the 1.0.2 image digests. Save the exact embedder
+   repository digest in the deployment environment as `AIMEE_EMBEDDER_IMAGE` and retain it
+   throughout these steps, including application and PostgreSQL image changes. The new version applies
    schema migrations, so going back means restoring this backup onto the 1.0.2 images.
 
 2. **Export the existing memories.** The export is read-only and can run before or after the
@@ -71,7 +78,7 @@ project. The examples use a Server; the KB differences are listed after them.
    ```
 
    Only active, unexpired records with no erasure intent are exported. Retired, merged, expired
-   and erased memories stay behind on purpose.
+   and unavailable memories remain retained and are not reactivated. Their payloads are protected during import.
 
 3. **Stop the stack, then start the new images on the same project and volumes** with this
    release's Compose files:
@@ -90,32 +97,51 @@ project. The examples use a Server; the KB differences are listed after them.
    `missing_module`. On a KB, read `GET /v1/health`; `memory_ready` must be true. Memory is
    working and empty at this point.
 
-5. **Import.** Run the import where the instance's local API is reachable, as the runtime user.
-   Do a dry run first:
+5. **Protect retained data and import.** Keep legacy writers stopped. Run the tool on the
+   host with the same PostgreSQL owner connection used for export, forwarding only the
+   public memory API into the application as the owning PAM user (`aimee` in this example).
+   Copy both transport files; do not copy the private snapshot into the container:
 
    ```sh
    docker compose -p <project> -f compose.yaml cp scripts/upgrade/migrate-memory.py aimee-server:/tmp/
-   docker compose -p <project> -f compose.yaml cp /secure/personal-memory.jsonl aimee-server:/tmp/
-   docker compose -p <project> -f compose.yaml exec -u 0 aimee-server chown aimee /tmp/personal-memory.jsonl
-   docker compose -p <project> -f compose.yaml exec -u aimee aimee-server \
-     python3 /tmp/migrate-memory.py import --placement server --file /tmp/personal-memory.jsonl --dry-run
-   docker compose -p <project> -f compose.yaml exec -u aimee aimee-server \
-     python3 /tmp/migrate-memory.py import --placement server --file /tmp/personal-memory.jsonl
+   docker compose -p <project> -f compose.yaml cp scripts/upgrade/memory_custody.py aimee-server:/tmp/
+   python3 scripts/upgrade/migrate-memory.py import --placement server \
+     --file /secure/personal-memory.jsonl \
+     --psql "docker compose -p <project> -f compose.yaml exec -T aimee-store-db psql -U postgres -d aimee_store" \
+     --api-command "docker compose -p <project> -f compose.yaml exec -T -u aimee aimee-server python3 /tmp/migrate-memory.py rpc --placement server" \
+     --dry-run
    ```
 
-   The summary line counts records stored, already imported, failed and not placeable, and the
-   command exits non-zero if any record failed. Every record carries an idempotency key derived
-   from its old id and revision, so an interrupted or partly failed import is simply run again;
-   records that already arrived are reported as already imported and are not duplicated.
+   Repeat that host command without `--dry-run` to apply it. A dry run checks placement and
+   readiness without sealing values or changing SQL. The actual import first screens the
+   snapshot and every retained legacy memory payload, including retired rows, personal
+   versions, correction proposals and shared rejection records. PII enters the authenticated
+   encrypted Vault; SQL and the snapshot retain opaque references. The protection transaction
+   preserves primary keys, revision numbers, lifecycle, authority and original proposal
+   digests. A proposal digest continues to attest the original payload recovered from Vault.
+   The append-only `aimee_legacy_memory_custody` index retains a Vault reference and SHA-256
+   for every exact original payload, including its JSON escaping, so original proposal
+   digests can still be verified after recovery. User triggers are disabled only under
+   exclusive locks inside that transaction and restored
+   to their original modes before commit; internal foreign-key triggers stay enabled. A
+   changed source or failed update aborts the transaction. Keep a matched encrypted backup.
 
-6. **Verify, then remove the copies.** List and search memory, and check that a chat recalls an
-   imported fact. Delete the snapshot copies from the container and from the host when the
-   import is confirmed; they contain private memory. The old tables are left untouched by both
-   steps. Keep them, and the backup, until the upgraded deployment has been accepted.
+   The tool rechecks snapshot metadata against the eligible source rows before writing; if
+   eligibility or authorship changed, export a fresh snapshot. Only eligible active snapshot
+   records enter the new memory implementation, retaining their validity bounds. Each carries
+   its old id and revision in an idempotency key, so interrupted imports can be retried.
+   A non-zero exit means migration is incomplete; it must not be treated as successful PII
+   custody. Use the intended owner's PAM name instead of `aimee` for their personal store.
+
+6. **Verify and retain.** List and search memory, confirm PII is represented by Vault
+   references, and verify authenticated recovery of the original value from the backed-up
+   Vault. Retain the protected snapshot and original SQL history. Keep the Vault, application
+   home and database backups together; opaque references require that exact Vault material.
 
 For a **KB**, use `--placement kb`, the `compose.kb.yaml` project and the `aimee-kb` service. The
 export reads `memories`; the import calls the KB's authenticated loopback API and needs its API
-bearer token in `AIMEE_KB_API_BEARER_TOKEN` or `--token-file`. A KB serves every project and
+bearer token in `AIMEE_KB_API_BEARER_TOKEN` or `--token-file` on the container-side `rpc` command.
+Pass the KB owner SQL connection to the host-side import as `--psql`, just as for a Server. A KB serves every project and
 workspace by default, so the snapshot's scopes need no preparation. If the KB restricts
 `AIMEE_MEMORY_SHARED_SCOPES` to an exact list, include the scopes the snapshot uses before step 3:
 
@@ -133,7 +159,7 @@ and left for a manual decision.
 
 | Carried | Not carried |
 | --- | --- |
-| key, content, kind, tier, confidence | record ids (the implementation assigns new ones) |
+| key, content, kind, tier, confidence, validity bounds | record ids (the implementation assigns new ones) |
 | scope (personal; global, project, workspace on a KB) | revision history and correction proposals |
 | KB `use_cases` | use counts and last-used times |
 | authority: user-stated and human-reviewed records are stored with user authority, all others with model authority | embeddings and derived indexes, which the implementation rebuilds |

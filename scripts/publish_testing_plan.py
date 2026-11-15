@@ -217,6 +217,8 @@ SERVER_CONTAINER_FILES = frozenset(
         "deploy/container/server-entrypoint.sh",
         "deploy/container/aimee-server.yaml",
         "deploy/container/memory-provision.py",
+        "deploy/container/memory-account-activate.py",
+        "deploy/container/application-health.sh",
     )
 )
 

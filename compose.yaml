@@ -108,9 +108,9 @@ services:
       - {type: volume, source: aimee-server-home, target: /opt/aims-memory/server/state, volume: {nocopy: true, subpath: private-memory/server/state}}
       - {type: volume, source: aimee-server-home, target: /opt/aims-memory/server/run, volume: {nocopy: true, subpath: private-memory/server/run}}
     healthcheck:
-      test: [CMD-SHELL, 'body=$$(curl -sS --max-time 4 --unix-socket /var/lib/aimee/aimee-http.sock http://localhost/v1/ready) && printf "%s" "$$body" | grep -q ''"ready":true''']
+      test: [CMD, /usr/local/bin/aimee-application-health]
       interval: 10s
-      timeout: 5s
+      timeout: 7s
       start_period: 120s
       retries: 10
 

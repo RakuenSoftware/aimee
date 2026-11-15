@@ -105,8 +105,8 @@ def embedder_identity(compose, model):
     except (RuntimeError, ValueError):
         identity = {}
     if not isinstance(identity, dict) or not isinstance(identity.get('embedding_identity'), dict):
-        raise MemoryStartup('the embedder image reports no embedding identity; memory needs the embedder image '
-                            'of this release (an embedder from 1.0.x does not report one)')
+        raise MemoryStartup('the embedder image reports no complete embedding identity; select a digest-pinned image '
+                            'that reports the full model, preprocessing and implementation identity')
     return json.dumps(identity).encode()
 
 

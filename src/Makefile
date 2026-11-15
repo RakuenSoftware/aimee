@@ -2049,6 +2049,10 @@ memory-bundle-check:
 	@python3 -I ../scripts/check_memory_bundle.py
 	@python3 -m unittest discover -s ../scripts/tests -p test_check_memory_bundle.py
 	@python3 -m unittest discover -s ../scripts/tests -p test_memory_provision.py
+	@python3 -m unittest discover -s ../scripts/tests -p test_application_health.py
+	@python3 -m unittest discover -s ../scripts/tests -p test_memory_account_activation.py
+	@python3 -m unittest discover -s ../scripts/tests -p test_upgrade_migrate_memory.py
+	@python3 -m unittest discover -s ../scripts/tests -p test_upgrade_memory_custody_pg.py
 
 module-egress-check:
 	@python3 -I -S ../scripts/check-module-egress.py
