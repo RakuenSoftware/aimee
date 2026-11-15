@@ -18,6 +18,9 @@ because the memory owner built into 1.0.x is replaced by a new, separate impleme
 - Aimee keeps the generic memory SDK, the module transport and the host-side guarantees of a
   provider-bound request: authenticated callers, context pre-injection, source release and
   revalidation, the byte budget, the send guard and provider receipts.
+- A KB refreshes an admission that expired in transport once before signing it. The refresh
+  revalidates the same source proof and retains its exact expiry; it does not acquire another
+  guard. Malformed replies, changed sources and cancellation still refuse the request.
 - The fixed `/v1/memory/*` routes are unchanged. `/v1/commands/memory.<verb>` reaches every command
   the implementation declares.
 
