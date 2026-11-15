@@ -21,6 +21,9 @@ because the memory owner built into 1.0.x is replaced by a new, separate impleme
 - A KB refreshes an admission that expired in transport once before signing it. The refresh
   revalidates the same source proof and retains its exact expiry; it does not acquire another
   guard. Malformed replies, changed sources and cancellation still refuse the request.
+- Temporary current recall views use a bounded cache. An unused view may require a fresh
+  query before its maximum TTL. Active or uncertain guards pin their exact views until
+  completion; cache expiry leaves stored memories, history and caller grants intact.
 - The fixed `/v1/memory/*` routes are unchanged. `/v1/commands/memory.<verb>` reaches every command
   the implementation declares.
 
