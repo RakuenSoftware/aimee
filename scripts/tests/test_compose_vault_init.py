@@ -124,7 +124,7 @@ class ComposeVaultTests(unittest.TestCase):
         for output in (b'{"status": "ok"}\n', b'', b'Traceback: AttributeError\n'):
             with self.assertRaises(module.MemoryStartup) as raised:
                 self.composition(embedder=True, identity_output=output)
-            self.assertIn('embedder image of this release', str(raised.exception))
+            self.assertIn('complete embedding identity', str(raised.exception))
 
     def test_failed_provisioning_shows_its_message_and_stops(self):
         completed = subprocess.CompletedProcess([], 1, b'[memory-provision] fatal: stop the application\nnoise\n', b'')
