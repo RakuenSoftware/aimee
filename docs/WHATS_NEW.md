@@ -34,6 +34,9 @@ deployment.
   same input the same way. Nothing is sent in either case.
 - **One `[DONE]` on streamed chat completions.** `/v1/chat/completions` with `stream: true`
   ended with two `data: [DONE]` events; it now ends with one.
+  Import also protects retained legacy SQL payloads and the export snapshot with authenticated
+  Vault references, preserving rows, revisions and lifecycle state. See the upgrade guide for
+  the host-side `--psql` and container-side API transport commands.
 
 ## Browser chat uses the canonical IR session log
 

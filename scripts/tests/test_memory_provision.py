@@ -66,6 +66,21 @@ class BrowserAccounts(unittest.TestCase):
             self.assertEqual(served[:3], ['aimee', 'vip', 'user00'])
 
 
+class LiveAccountPolicyUpgrade(unittest.TestCase):
+    def test_existing_inputs_require_account_policy_before_reprepare(self):
+        with tempfile.TemporaryDirectory() as work:
+            inputs = Path(work)
+            database = inputs / 'database.json'
+            original = {'host_subject_grants': {'aimee': {'installed': True}}}
+            database.write_text(json.dumps(original))
+            self.assertTrue(module.pam_registry_changed('server', inputs))
+            self.assertFalse(module.pam_registry_changed('kb', inputs))
+            updated = dict(original, pam_account_registry=module.pam_registry_policy())
+            database.write_text(json.dumps(updated))
+            self.assertFalse(module.pam_registry_changed('server', inputs))
+            self.assertEqual(json.loads(database.read_text())['host_subject_grants'], original['host_subject_grants'])
+
+
 class Policy(unittest.TestCase):
     RECORDED = {'accounts': ['aimee', 'alice'], 'embedding_provider_identity_digest': 'sha256:old', 'node': 'n'}
 
@@ -239,11 +254,7 @@ class RunningApplication(unittest.TestCase):
             self.assertFalse(module.application_running('server', home))  # stale socket file
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
-class RunningApplication(unittest.TestCase):
+class RunningApplicationProvision(unittest.TestCase):
     """A repeated `up` against a running application never fails for a policy-only change."""
 
     def setUp(self):
@@ -258,6 +269,9 @@ class RunningApplication(unittest.TestCase):
         (module.BUNDLE / 'provision/prepare.py').write_text('')
         (module.HOME / 'private-memory/server/installation.json').write_text('{}')
         (module.ROOT / 'server/overlay-manifest.json').write_text('{}')
+        inputs = module.HOME / 'private-memory/inputs-server'
+        inputs.mkdir()
+        (inputs / 'database.json').write_text(json.dumps({'pam_account_registry': module.pam_registry_policy()}))
         module.owned = lambda path: None
         import shutil, types
         self.saved_shutil = module.shutil
@@ -288,3 +302,7 @@ class RunningApplication(unittest.TestCase):
         with self.assertRaises(module.Refused):
             module.provision('server')
         self.assertEqual(self.prepared, [])
+
+
+if __name__ == '__main__':
+    unittest.main()

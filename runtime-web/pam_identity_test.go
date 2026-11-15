@@ -271,3 +271,32 @@ func TestCreateWithoutGroupUsesManagedUserInterface(t *testing.T) {
 		t.Fatalf("fallback Create did not reach managed user interface: %#v", users.created)
 	}
 }
+
+func TestCreatedPAMAccountHasMemoryBeforeReturning(t *testing.T) {
+	users := newFakeUsers()
+	p := newTestPAM(users, func(string, string, string) error { return nil })
+	var activated string
+	p.activateMemory = func(name string) error {
+		if !users.members[name] {
+			t.Fatal("activation preceded actual PAM account creation")
+		}
+		activated = name
+		return nil
+	}
+	if err := p.Create("newowner", "not-exported-test-password"); err != nil {
+		t.Fatal(err)
+	}
+	if activated != "newowner" {
+		t.Fatal("new owner was returned without memory activation")
+	}
+	p.activateMemory = func(string) error { return errors.New("operator roster unavailable") }
+	if err := p.Create("otherowner", "not-exported-test-password"); !errors.Is(err, errMemoryAccountActivation) {
+		t.Fatalf("activation error classification: %v", err)
+	}
+	if users.members["otherowner"] {
+		t.Fatal("failed setup left an authenticating account")
+	}
+	if !users.members["newowner"] {
+		t.Fatal("failure changed the existing owner")
+	}
+}

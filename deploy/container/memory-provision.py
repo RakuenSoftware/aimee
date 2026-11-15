@@ -270,6 +270,18 @@ def recorded_policy(inputs: Path) -> dict | None:
     return policy
 
 
+def pam_registry_policy() -> dict:
+    return dict(path=str(HOME / 'private-memory' / 'pam-accounts.json'),
+                user_template='aimee', maintenance_template='native-maintenance:aimee')
+
+
+def pam_registry_changed(role: str, inputs: Path) -> bool:
+    if role != 'server':
+        return False
+    configuration = json.loads((inputs / 'database.json').read_text())
+    return configuration.get('pam_account_registry') != pam_registry_policy()
+
+
 def desired_policy(role: str, recorded: dict | None, requested_accounts: str | None, health: dict | None,
                    requested_scopes: str | None = None) -> dict:
     """Accounts, shared scopes and embedding provider this run asks for; unspecified parts keep the recorded value."""
@@ -373,6 +385,13 @@ def write_inputs(role: str, inputs: Path, desired: dict, health: dict | None, no
     finally:
         if handed is not None:
             handed.unlink(missing_ok=True)
+    if role == 'server':
+        database = inputs / 'database.json'
+        configured = json.loads(database.read_text())
+        configured['pam_account_registry'] = pam_registry_policy()
+        database.write_text(json.dumps(configured, indent=2) + '\n')
+        database.chmod(0o600)
+        owned(database)
     selection = desired.get('typed_facts')
     if selection is not None:
         argv = [str(BUNDLE / 'provision/processing_kb_inputs.py'), '--inputs', str(inputs),
@@ -486,6 +505,9 @@ def provision(role: str, health: dict | None = None) -> str:
     prepared = (prefix / 'overlay-manifest.json').is_file()
     reasons = stale_reasons(prefix, role) if prepared else ['no prepared installation in the memory volume']
     reasons += [f'{change} changed' for change in policy_changes(recorded, desired)]
+    registry_changed = pam_registry_changed(role, inputs)
+    if registry_changed:
+        reasons.append('live PAM account activation policy changed')
     if not reasons:
         install_home(prefix)
         return 'current'
@@ -507,7 +529,7 @@ def provision(role: str, health: dict | None = None) -> str:
         raise Refused('the application is still running; stop it (docker compose down) and start again '
                       'so the memory installation can be updated')
     regenerated = None
-    if policy_changes(recorded, desired):
+    if policy_changes(recorded, desired) or registry_changed:
         regenerated = parent / f'inputs-{role}.new'
         if regenerated.exists():
             shutil.rmtree(regenerated)

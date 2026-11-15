@@ -413,7 +413,11 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.accounts.Create(req.Username, req.Password); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+		status := http.StatusBadRequest
+		if errors.Is(err, errMemoryAccountActivation) {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSONError(w, status, err.Error())
 		return
 	}
 	cleanupUser := true
@@ -499,6 +503,12 @@ func (s *server) retireBootstrapLogin(w http.ResponseWriter, r *http.Request, bo
 		return
 	}
 	caller := currentUser(r)
+	if activator, ok := s.accounts.(interface{ ActivateMemoryAccount(string) error }); ok {
+		if err := activator.ActivateMemoryAccount(caller); err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "private memory account activation unavailable")
+			return
+		}
+	}
 	rollback, err := writeReplacementMarker(s.setupAccountMarker(), caller)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "could not commit replacement account state")

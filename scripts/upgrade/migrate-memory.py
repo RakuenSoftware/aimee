@@ -26,7 +26,8 @@ indexes. Provenance is preserved as far as the store contract allows:
 user-stated and human-reviewed records are stored with user authority,
 everything else with model authority.
 
-Nothing is deleted from the old tables by either step.
+Import also protects retained source payloads and the snapshot with authenticated Vault references.
+Rows, revisions, eligibility and authority remain retained; nothing is deleted.
 """
 from __future__ import annotations
 
@@ -40,6 +41,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import memory_custody
+
 EXPORT_SQL = {
     'server': """
 BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
@@ -47,7 +51,7 @@ SELECT json_build_object(
   'placement', 'server', 'id', m.id, 'kind', m.kind, 'tier', m.tier, 'key', m.key,
   'content', m.content, 'confidence', m.confidence,
   'provenance_category', m.provenance_category, 'record_revision', m.record_revision,
-  'scope_type', 'user', 'scope_value', '_user', 'use_cases', '')
+  'scope_type', 'user', 'scope_value', '_user', 'use_cases', '', 'valid_until', m.valid_until)
 FROM user_memories m
 WHERE m.lifecycle_state = 'active'
   AND (m.valid_until IS NULL OR m.valid_until > now())
@@ -61,7 +65,8 @@ SELECT json_build_object(
   'placement', 'kb', 'id', m.id, 'kind', m.kind, 'tier', m.tier, 'key', m.key,
   'content', m.content, 'confidence', m.confidence,
   'provenance_category', m.provenance_category, 'record_revision', m.record_revision,
-  'scope_type', m.scope_type, 'scope_value', m.scope_value, 'use_cases', m.use_cases)
+  'scope_type', m.scope_type, 'scope_value', m.scope_value, 'use_cases', m.use_cases,
+  'valid_from', m.valid_from, 'valid_until', m.valid_until)
 FROM memories m
 WHERE m.lifecycle_state = 'active'
   AND m.merged_into = 0
@@ -122,11 +127,12 @@ class Target:
     """The running instance's memory API: a Server's local socket or a KB's loopback HTTP."""
 
     def __init__(self, args: argparse.Namespace):
+        self.api_command = getattr(args, 'api_command', None)
         self.placement = args.placement
         self.socket = args.socket
         self.address = args.address
         self.headers = {'Content-Type': 'application/json'}
-        if self.placement == 'kb':
+        if self.placement == 'kb' and not self.api_command:
             token = Path(args.token_file).read_text().strip() if args.token_file else os.environ.get(
                 'AIMEE_KB_API_BEARER_TOKEN', '')
             if not token:
@@ -134,13 +140,21 @@ class Target:
             self.headers['Authorization'] = 'Bearer ' + token
 
     def call(self, verb: str, body: dict) -> tuple[int, dict]:
+        if self.api_command:
+            result = subprocess.run(shlex.split(self.api_command), input=json.dumps({'verb': verb, 'body': body}),
+                                    text=True, capture_output=True, timeout=180)
+            if result.returncode:
+                fail('local API command failed; original data retained')
+            response = json.loads(result.stdout)
+            return response['status'], response['body']
         if self.placement == 'server':
             connection: http.client.HTTPConnection = LocalConnection(self.socket)
         else:
             host, _, port = self.address.rpartition(':')
             connection = http.client.HTTPConnection(host, int(port), timeout=120)
         try:
-            connection.request('POST', ROUTES[self.placement] + verb, json.dumps(body), self.headers)
+            route = '/v1/commands/memory.screen_content' if self.placement == 'server' and verb == 'screen_content' else ROUTES[self.placement] + verb
+            connection.request('POST', route, json.dumps(body), self.headers)
             response = connection.getresponse()
             raw = response.read()
         finally:
@@ -154,7 +168,7 @@ class Target:
         body = {'store': 'user', 'limit': 1} if self.placement == 'server' else {'limit': 1}
         status, reply = self.call('list', body)
         if status != 200 or not isinstance(reply.get('memories'), list):
-            fail(f'the instance cannot serve memory (HTTP {status}: {reply.get("message", reply.get("kind", ""))}); '
+            fail(f'the instance cannot serve memory (HTTP {status}); '
                  'install and select a memory implementation and wait for readiness before importing')
 
 
@@ -164,6 +178,8 @@ def load(path: Path, placement: str) -> list[dict]:
         if not line.strip():
             continue
         record = json.loads(line)
+        if type(record.get('id')) is not int or record['id'] <= 0 or type(record.get('record_revision')) is not int or record['record_revision'] <= 0:
+            fail(f'{path}:{number} has an invalid memory identity or revision')
         if any(name not in record for name in FIELDS):
             fail(f'{path}:{number} is not an exported memory record')
         if record['placement'] != placement:
@@ -178,6 +194,9 @@ def store_body(record: dict) -> dict | None:
             'confidence': record['confidence'],
             'authority': 'user' if record['provenance_category'] in USER_AUTHORITY else 'model',
             'idempotency_key': f'upgrade-1.0-{record["placement"]}-{record["id"]}-{record["record_revision"]}'}
+    for field in ('valid_from', 'valid_until'):
+        if record.get(field):
+            body[field] = record[field]
     if record['placement'] == 'server':
         body['store'] = 'user'
         return body
@@ -197,13 +216,21 @@ def import_(args: argparse.Namespace) -> int:
     records = load(Path(args.file), args.placement)
     target = Target(args)
     target.require_ready()
+    if not args.dry_run:
+        if not args.psql:
+            fail('import needs --psql for the retained source store; PII custody includes its history')
+        try:
+            records, protected_fields = memory_custody.protect_source(args.psql, args.placement, target, records, args.file, export_sql=EXPORT_SQL[args.placement])
+        except (ValueError, OSError) as error:
+            fail(str(error) if isinstance(error, ValueError) else 'retained source protection unavailable')
+        print(f'retained source custody complete: {protected_fields} payload fields protected; snapshot protected')
     stored = replayed = failed = unplaced = 0
     for record in records:
         body = store_body(record)
-        label = f'memory {record["id"]} ({record["kind"]}/{record["key"]})'
+        label = f'memory {record["id"]}'
         if body is None:
             unplaced += 1
-            print(f'NOT IMPORTED {label}: scope {record["scope_type"]}/{record["scope_value"]} has no '
+            print(f'NOT IMPORTED {label}: scope has no '
                   'project, workspace or global placement', file=sys.stderr)
             continue
         if args.dry_run:
@@ -217,7 +244,7 @@ def import_(args: argparse.Namespace) -> int:
                 stored += 1
         else:
             failed += 1
-            print(f'FAILED {label}: HTTP {status} {reply.get("kind", "")} {reply.get("message", "")}'.rstrip(),
+            print(f'FAILED {label}: HTTP {status}; memory API refused the protected record',
                   file=sys.stderr)
     verb = 'would store' if args.dry_run else 'stored'
     print(f'{verb} {stored}, already imported {replayed}, failed {failed}, not placeable {unplaced} '
@@ -241,6 +268,15 @@ def scopes(args: argparse.Namespace) -> int:
     return 0
 
 
+def rpc_call(args):
+    request = json.load(sys.stdin)
+    if set(request) != {'verb', 'body'} or request['verb'] not in ('list', 'store', 'screen_content'):
+        fail('unsupported local API operation')
+    status, body = Target(args).call(request['verb'], request['body'])
+    print(json.dumps({'status': status, 'body': body}))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -255,15 +291,23 @@ def main() -> int:
     need = commands.add_parser('scopes', help='print the AIMEE_MEMORY_SHARED_SCOPES value a KB snapshot needs')
     need.add_argument('--file', required=True, help='KB snapshot written by export')
     need.set_defaults(run=scopes)
-    into = commands.add_parser('import', help='store an exported snapshot through the running instance')
+    into = commands.add_parser('import', help='protect retained legacy payloads and import active records')
     into.add_argument('--placement', choices=('server', 'kb'), required=True)
     into.add_argument('--file', required=True, help='snapshot written by export')
     into.add_argument('--socket', default='/var/lib/aimee/aimee-http.sock', help='Server local HTTP socket')
     into.add_argument('--address', default='127.0.0.1:8741', help='KB loopback HTTP address')
     into.add_argument('--token-file', help='file holding the KB API bearer token '
                                            '(default: AIMEE_KB_API_BEARER_TOKEN)')
+    into.add_argument('--psql', help='owner psql command for the same retained legacy store used by export')
+    into.add_argument('--api-command', help='argv command for the local rpc subcommand inside the application container')
     into.add_argument('--dry-run', action='store_true', help='report what would be stored without writing')
     into.set_defaults(run=import_)
+    rpc = commands.add_parser('rpc', help='local API transport for an operator-run import')
+    rpc.add_argument('--placement', choices=('server', 'kb'), required=True)
+    rpc.add_argument('--socket', default='/var/lib/aimee/aimee-http.sock')
+    rpc.add_argument('--address', default='127.0.0.1:8741')
+    rpc.add_argument('--token-file')
+    rpc.set_defaults(run=rpc_call)
     args = parser.parse_args()
     return args.run(args)
 

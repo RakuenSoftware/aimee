@@ -123,6 +123,9 @@ Read [Upgrading from 1.0.2](../../UPGRADING.md#upgrade-from-102) first. In short
   revision history and embeddings are not carried over.
 - Records held by a Cognee or Hillock backend selected in 1.0.2 are not in those tables and are
   not moved by that tool.
+  Import also protects retained legacy SQL payloads and the export snapshot with authenticated
+  Vault references, preserving rows, revisions and lifecycle state. See the upgrade guide for
+  the host-side `--psql` and container-side API transport commands.
 
 Release publication follows the protected main-merge and release approval workflows. These notes
 describe the prepared candidate; artifacts and deployment require those gates.

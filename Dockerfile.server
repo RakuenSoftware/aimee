@@ -450,6 +450,8 @@ COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 # provisioning step reads; empty on a platform without a memory bundle.
 COPY --from=build /memory-image/ /opt/aimee/memory/
 COPY --chmod=0755 deploy/container/memory-provision.py /usr/local/bin/aimee-memory-provision
+COPY --chmod=0755 deploy/container/memory-account-activate.py /usr/local/bin/aimee-memory-activate-account
+COPY --chmod=0755 deploy/container/application-health.sh /usr/local/bin/aimee-application-health
 COPY --from=build /src/aimee-kb-worm /usr/local/bin/aimee-kb-worm
 COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
 COPY --from=build /module-runtime/grants/ /opt/aimee/module-grants/
@@ -524,14 +526,9 @@ EXPOSE 8740 8743 8443
 # case; hard stack defaults to unlimited). A runtime ulimit still works:
 #   docker run --ulimit stack=67108864 ...   (mirrors systemd LimitSTACK)
 
-# Health probe: every TCP /v1 request (including /v1/health) is authenticated,
-# so an unauthenticated probe gets 401 — which still proves the listener is up
-# and serving. Treat 200 (e.g. when the baked bearer happens to match) or 401 as
-# healthy; only a connection failure ("000") is unhealthy. This keeps the probe
-# independent of the random or operator-supplied Vault-held bearer.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -s -o /dev/null -w '%{http_code}' \
-        http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$'
+# Readiness includes the browser's TLS listener when the dashboard is enabled.
+HEALTHCHECK --interval=30s --timeout=7s --start-period=120s --retries=3 \
+    CMD /usr/local/bin/aimee-application-health
 
 # The entrypoint must consume and unset first-boot credentials before tini
 # becomes the long-lived PID-1 subreaper; it execs tini itself after that scrub.
