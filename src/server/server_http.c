@@ -47,6 +47,8 @@
 #include "shadow_mirror.h"        /* generic shadow-traffic mirror */
 #include "http_content_encoding.h"
 #include "cJSON.h"
+extern int vault_content_protect_json(const char *, char **) __attribute__((weak));
+extern int server_http_private_content_route(const char *);
 #include "server/host_original_submission.h"
 #include "server/owned_user_source.h"
 #include <aimee/ir/aimee_ir.h>
@@ -1910,12 +1912,32 @@ static void handle_conn_impl(int fd, int is_tcp, int is_management)
    /* Reject invalid JSON before streaming dispatch or completion mirroring. */
    if (strcmp(method, "POST") == 0 &&
        (shadow_mirror_is_mirrorable_path(path) || strcmp(path, "/v1/chat/stream") == 0 ||
-        strcmp(path, "/v1/modules/user-source") == 0) &&
+        strcmp(path, "/v1/modules/user-source") == 0 || server_http_private_content_route(path)) &&
        !server_http_json_body_is_single_value(body, body_len))
    {
       send_response(fd, 400, "{\"error\":\"invalid JSON body\"}", request_id);
       free(body);
       return;
+   }
+   /* Authenticate first, then establish Vault custody before canonical capture,
+    * provider dispatch, SQL persistence or shadow traffic sees private text. */
+   if (body && !strcmp(method, "POST") && vault_content_protect_json &&
+       server_http_private_content_route(path))
+   {
+      char *safe = NULL;
+      if (vault_content_protect_json(body, &safe))
+      {
+         send_response(fd, 503, "{\"error\":\"private content custody unavailable\"}", request_id);
+         free(body);
+         return;
+      }
+      if (safe)
+      {
+         memset(body, 0, (size_t)body_len);
+         free(body);
+         body = safe;
+         body_len = (int)strlen(body);
+      }
    }
    /* Mirror completion traffic; the inbound shadow header prevents loops. */
    if (strcmp(method, "POST") == 0 && shadow_mirror_is_mirrorable_path(path))

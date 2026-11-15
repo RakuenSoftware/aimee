@@ -3,6 +3,10 @@
 services:
   aimee-store-db:
     extends: {file: compose.yaml, service: aimee-store-db}
+  aimee-memory-init:
+    extends: {file: compose.yaml, service: aimee-memory-init}
+    environment:
+      AIMEE_INSTANCE_ROLE: kb
   aimee-kb:
     extends: {file: compose.yaml, service: aimee-server}
     environment:
@@ -10,9 +14,24 @@ services:
       AIMEE_RUNTIME_WEB_ENABLED: '0'
       AIMEE_KB_MTLS_PORT: '8745'
       AIMEE_KB_MTLS_HOST: ${AIMEE_KB_HOST:-localhost}
+    depends_on:
+      aimee-store-db: {condition: service_started}
+      aimee-memory-init: {condition: service_completed_successfully}
     ports: !override
       - '127.0.0.1:${AIMEE_KB_HEALTH_PORT:-8741}:8741'
       - '${AIMEE_KB_PORT:-8745}:8745'
+    # The Server list with the memory mounts of the KB role instead.
+    volumes: !override
+      - aimee-server-home:/var/lib/aimee
+      - aimee-server-workspaces:/var/lib/aimee-workspaces
+      - aimee-store-tls:/run/aimee-store-tls:ro
+      - aimee-model-tls:/run/aimee-model-tls
+      - aimee-embedding-tls:/run/aimee-model-tls/embedding/server
+      - aimee-synthesis-tls:/run/aimee-model-tls/synthesis/server
+      - {type: volume, source: aimee-memory, target: /opt/aims-memory, read_only: true, volume: {nocopy: true}}
+      - {type: volume, source: aimee-server-home, target: /opt/aims-memory/kb/etc, volume: {nocopy: true, subpath: private-memory/kb/etc}}
+      - {type: volume, source: aimee-server-home, target: /opt/aims-memory/kb/state, volume: {nocopy: true, subpath: private-memory/kb/state}}
+      - {type: volume, source: aimee-server-home, target: /opt/aims-memory/kb/run, volume: {nocopy: true, subpath: private-memory/kb/run}}
     healthcheck:
       test: [CMD-SHELL, 'curl -fsS --max-time 4 http://127.0.0.1:8741/v1/health >/dev/null']
   aimee-embedder:
@@ -28,6 +47,7 @@ volumes:
   aimee-store-tls:
   aimee-server-home:
   aimee-server-workspaces:
+  aimee-memory:
   aimee-model-tls:
     driver_opts: {type: tmpfs, device: tmpfs, o: 'size=1048576,uid=1000,gid=1000,mode=0700'}
   aimee-embedding-tls:

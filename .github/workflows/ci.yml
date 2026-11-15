@@ -719,7 +719,7 @@ jobs:
           # Runner image metadata is outside the repository's control. Install
           # deterministic root-owned copies so the positive path exercises the
           # production trust walk without depending on /usr/bin ownership/mode.
-          sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          sudo install -d -o root -g root -m 0755 /aimee-ci-test-helpers
           # Built from the repo, not copied from /usr/bin: the helper is exec'd
           # by descriptor, which Ubuntu 26.04's multi-call coreutils refuses.
           for helper in cat env yes true; do
@@ -727,21 +727,23 @@ jobs:
               -o "$RUNNER_TEMP/aimee-fixture-$helper" \
               src/tests/support/workload_helper_fixture.c
             sudo install -o root -g root -m 0755 "$RUNNER_TEMP/aimee-fixture-$helper" \
-              "/run/aimee-test-helpers/$helper"
+              "/aimee-ci-test-helpers/$helper"
           done
-          sudo stat -Lc '%U:%G %a %n' /run/aimee-test-helpers \
-            /run/aimee-test-helpers/cat /run/aimee-test-helpers/env \
-            /run/aimee-test-helpers/yes /run/aimee-test-helpers/true
+          sudo stat -Lc '%U:%G %a %n' / /opt /run /aimee-ci-test-helpers \
+            /aimee-ci-test-helpers/cat /aimee-ci-test-helpers/env \
+            /aimee-ci-test-helpers/yes /aimee-ci-test-helpers/true
           printf '%s\n' 'deterministic root-owned test fixture' | \
-            sudo tee /run/aimee-test-helpers/root-file >/dev/null
-          sudo chown root:root /run/aimee-test-helpers/root-file
-          sudo chmod 0644 /run/aimee-test-helpers/root-file
-          sudo stat -Lc '%U:%G %a %n' /run/aimee-test-helpers/root-file
-          export AIMEE_TEST_TRUSTED_CAT=/run/aimee-test-helpers/cat
-          export AIMEE_TEST_TRUSTED_ENV=/run/aimee-test-helpers/env
-          export AIMEE_TEST_TRUSTED_YES=/run/aimee-test-helpers/yes
-          export AIMEE_TEST_TRUSTED_TRUE=/run/aimee-test-helpers/true
-          export AIMEE_TEST_TRUSTED_ROOT_FILE=/run/aimee-test-helpers/root-file
+            sudo tee /aimee-ci-test-helpers/root-file >/dev/null
+          sudo chown root:root /aimee-ci-test-helpers/root-file
+          sudo chmod 0644 /aimee-ci-test-helpers/root-file
+          sudo stat -Lc '%U:%G %a %n' /aimee-ci-test-helpers/root-file
+          # Fail at fixture setup if the filesystem/loader cannot execute it.
+          /aimee-ci-test-helpers/true
+          export AIMEE_TEST_TRUSTED_CAT=/aimee-ci-test-helpers/cat
+          export AIMEE_TEST_TRUSTED_ENV=/aimee-ci-test-helpers/env
+          export AIMEE_TEST_TRUSTED_YES=/aimee-ci-test-helpers/yes
+          export AIMEE_TEST_TRUSTED_TRUE=/aimee-ci-test-helpers/true
+          export AIMEE_TEST_TRUSTED_ROOT_FILE=/aimee-ci-test-helpers/root-file
           ccache --max-size=750M
           ccache --zero-stats
           cd src
@@ -867,7 +869,7 @@ jobs:
           # Same deterministic root-owned helpers the sqlite shards install: the
           # trust-walk tests assert on ownership and mode, which runner image
           # metadata does not guarantee.
-          sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          sudo install -d -o root -g root -m 0755 /aimee-ci-test-helpers
           # Built from the repo, not copied from /usr/bin: the helper is exec'd
           # by descriptor, which Ubuntu 26.04's multi-call coreutils refuses.
           for helper in cat env yes true; do
@@ -875,17 +877,17 @@ jobs:
               -o "$RUNNER_TEMP/aimee-fixture-$helper" \
               src/tests/support/workload_helper_fixture.c
             sudo install -o root -g root -m 0755 "$RUNNER_TEMP/aimee-fixture-$helper" \
-              "/run/aimee-test-helpers/$helper"
+              "/aimee-ci-test-helpers/$helper"
           done
           printf '%s\n' 'deterministic root-owned test fixture' | \
-            sudo tee /run/aimee-test-helpers/root-file >/dev/null
-          sudo chown root:root /run/aimee-test-helpers/root-file
-          sudo chmod 0644 /run/aimee-test-helpers/root-file
-          export AIMEE_TEST_TRUSTED_CAT=/run/aimee-test-helpers/cat
-          export AIMEE_TEST_TRUSTED_ENV=/run/aimee-test-helpers/env
-          export AIMEE_TEST_TRUSTED_YES=/run/aimee-test-helpers/yes
-          export AIMEE_TEST_TRUSTED_TRUE=/run/aimee-test-helpers/true
-          export AIMEE_TEST_TRUSTED_ROOT_FILE=/run/aimee-test-helpers/root-file
+            sudo tee /aimee-ci-test-helpers/root-file >/dev/null
+          sudo chown root:root /aimee-ci-test-helpers/root-file
+          sudo chmod 0644 /aimee-ci-test-helpers/root-file
+          export AIMEE_TEST_TRUSTED_CAT=/aimee-ci-test-helpers/cat
+          export AIMEE_TEST_TRUSTED_ENV=/aimee-ci-test-helpers/env
+          export AIMEE_TEST_TRUSTED_YES=/aimee-ci-test-helpers/yes
+          export AIMEE_TEST_TRUSTED_TRUE=/aimee-ci-test-helpers/true
+          export AIMEE_TEST_TRUSTED_ROOT_FILE=/aimee-ci-test-helpers/root-file
           ccache --max-size=750M
           ccache --zero-stats
           cd src
@@ -1340,7 +1342,7 @@ jobs:
       - name: Set up pinned Go for the auth reference fixture
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
           cache-dependency-path: server-go/go.sum
       - name: Build the stack and the rig drivers
         id: build
@@ -1607,6 +1609,9 @@ jobs:
           exit 1
       - name: Provision separate store authorities
         run: |
+          # Match the shipped PostgreSQL bootstrap before non-superuser migrations.
+          docker exec aimee-integration-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_integration_ci -c \
+            "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public; CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;"
           docker exec aimee-integration-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_integration_ci -c \
             "CREATE ROLE aimee_store_migrator LOGIN PASSWORD 'migrator-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION; CREATE ROLE aimee_store_runtime LOGIN PASSWORD 'runtime-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;"
           docker exec aimee-integration-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_integration_ci -c \
@@ -2011,18 +2016,13 @@ jobs:
       - name: Configure optional encrypted storage
         if: matrix.storage == 'luks'
         run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
-      - name: Set up Go for external reference and configured tests
+      - name: Set up Go for configured tests
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
-      - name: Build the frozen external memory reference (test only)
-        run: |
-          git fetch --no-tags --depth=1 origin 0e29dd14f8c96de8f8366d763dfe56992aedc2b0
-          mkdir -p "$RUNNER_TEMP/reference-memory"
-          python3 scripts/build_reference_memory_fixture.py --output "$RUNNER_TEMP/reference-memory/aimee-module-memory"
-      - name: Run shipped deployment with explicitly selected external memory reference
-        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --reference-memory-owner "$RUNNER_TEMP/reference-memory/aimee-module-memory" --output /tmp/aimee-e2e-evidence
+      - name: Run the shipped deployment with its provisioned memory
+        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --output /tmp/aimee-e2e-evidence
       - name: Private configured tests use actual Docker custody and joined cleanup
         if: matrix.topology == 'T3'
         working-directory: server-go
@@ -2039,7 +2039,7 @@ jobs:
           go test -race -count=1 -v ./modules/delegates -run '^TestPrivateVerifierRealDocker$'
       - name: Installed Vault helper under hardened egress (both roles)
         if: matrix.topology == 'T3'
-        run: python3 tests/e2e/egress-vault-e2e.py --reference-memory-owner "$RUNNER_TEMP/reference-memory/aimee-module-memory" --output /tmp/aimee-e2e-evidence
+        run: python3 tests/e2e/egress-vault-e2e.py --output /tmp/aimee-e2e-evidence
       - name: Ordinary PostgreSQL persistence and storage mode boundaries
         if: matrix.topology == 'T3'
         run: |
@@ -2059,13 +2059,19 @@ jobs:
         if: matrix.topology == 'T1' || matrix.storage == 'luks'
         run: |
           sudo --preserve-env=AIMEE_APPLICATION_IMAGE,AIMEE_POSTGRES_IMAGE,AIMEE_EMBEDDER_IMAGE \
-            python3 tests/e2e/kb-upgrade-e2e.py --storage ${{ matrix.storage }} --reference-memory-owner "$RUNNER_TEMP/reference-memory/aimee-module-memory" --output /tmp/aimee-e2e-evidence
-      - name: Upload regression verdicts
+            python3 tests/e2e/kb-upgrade-e2e.py --storage ${{ matrix.storage }} --output /tmp/aimee-e2e-evidence
+      - name: Export content-free regression verdicts
+        id: e2e_verdicts
         if: always()
+        run: |
+          python3 scripts/validation/export-e2e-verdicts.py \
+            --source /tmp/aimee-e2e-evidence --output "$RUNNER_TEMP/aimee-e2e-verdicts"
+      - name: Upload regression verdicts
+        if: ${{ always() && steps.e2e_verdicts.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: deploy-${{ matrix.topology }}${{ matrix.suffix }}-verdicts
-          path: /tmp/aimee-e2e-evidence/*.json
+          path: ${{ runner.temp }}/aimee-e2e-verdicts/*.json
           if-no-files-found: error
 
   e2e-adoption:
@@ -2119,6 +2125,9 @@ jobs:
           exit 1
       - name: Provision separate store authorities
         run: |
+          # Extensions belong to the administrator, before non-superuser migrations.
+          docker exec aimee-adoption-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_adoption_ci -c \
+            "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public; CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;"
           docker exec aimee-adoption-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_adoption_ci -c \
             "CREATE ROLE aimee_store_migrator LOGIN PASSWORD 'migrator-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION; CREATE ROLE aimee_store_runtime LOGIN PASSWORD 'runtime-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;"
           docker exec aimee-adoption-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_adoption_ci -c \

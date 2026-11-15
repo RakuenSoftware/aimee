@@ -87,8 +87,8 @@ type EmbedRequest struct {
 	Operation string   `json:"operation,omitempty"`
 	MemoryID  int64    `json:"memory_id,omitempty"`
 	BaseURL   string   `json:"base_url"`
-	InputType string   `json:"input_type"`
-	Text      string   `json:"text"`
+	InputType string   `json:"input_type,omitempty"`
+	Text      string   `json:"text,omitempty"`
 	Texts     []string `json:"texts,omitempty"`
 	MaxDim    int      `json:"max_dim"`
 	Limit     int      `json:"limit,omitempty"`

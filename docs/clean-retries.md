@@ -2,7 +2,7 @@
 
 Clean retry tracking is an explicit, initially disabled capability of native
 `POST /v1/chat/stream` primary sessions. It uses the durable action lineage and
-current Go memory assembly. External provider CLIs and compaction requests refuse
+current memory assembly of the installed implementation. External provider CLIs and compaction requests refuse
 this option. Ordinary untracked turns retain their existing behavior.
 
 Enable `clean_retry` in the existing operator `policy.json`, for example:

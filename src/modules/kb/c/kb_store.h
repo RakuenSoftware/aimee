@@ -74,7 +74,6 @@ extern "C"
  * headers/memory.h to access kind_lifecycle_t and most consumers
  * already include memory.h. Callers include "kind_lifecycle.h"
  * directly when they need kb_store_kind_lifecycle_load. */
-#include "memory_payload.h"
 #include "notes.h"
 #include "rules.h"
 #include "stopwords.h"

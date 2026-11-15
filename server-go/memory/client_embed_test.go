@@ -26,6 +26,10 @@ func TestClientEmbedOperationShapes(t *testing.T) {
 		{"truncated dimension probe", "dimension", `{"dim":8,"vector":[1,2,3,4,5,6,7,8],"truncated":true}`, false},
 		{"single", "", `{"dim":3,"vector":[0.25,0.5,0.75]}`, false},
 		{"serving identity", "serving-id", `{"dim":0,"serving_id":"model-v1"}`, false},
+		{"Native serving identity", "serving-id", `{"dim":3,"serving_id":"model-v1","truncated":false}`, false},
+		{"missing serving identity", "serving-id", `{"dim":3}`, true},
+		{"serving identity over cap", "serving-id", `{"dim":9,"serving_id":"model-v1"}`, true},
+		{"serving identity with inference", "serving-id", `{"dim":3,"serving_id":"model-v1","vector":[1,2,3]}`, true},
 		{"repair counts", "repair-failed", `{"dim":0,"repaired":2,"failed":1}`, false},
 		{"batch missing row", "batch", `{"dim":3,"vectors":[[1,2,3]]}`, true},
 		{"batch ragged", "batch", `{"dim":3,"vectors":[[1,2,3],[4,5]]}`, true},
@@ -81,6 +85,24 @@ func TestClientEmbedPreservesBatchAndDimensionOutcomes(t *testing.T) {
 			}
 			if err != nil || !reflect.DeepEqual(got, want) {
 				t.Fatalf("%s: got %+v, %v; want %+v", operation, got, err, want)
+			}
+		}
+	}
+}
+
+func TestEmbeddingMetadataRequestOmitsInferenceFields(t *testing.T) {
+	for _, operation := range []string{"dimension", "serving-id"} {
+		raw, err := json.Marshal(EmbedRequest{Operation: operation, BaseURL: "https://fixed.example", MaxDim: 8})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err = json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"text", "texts", "input_type"} {
+			if _, exists := fields[name]; exists {
+				t.Fatalf("metadata request contains inference field %s", name)
 			}
 		}
 	}

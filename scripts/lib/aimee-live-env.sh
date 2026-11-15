@@ -314,8 +314,8 @@ live_env_pg_create() {
    # Server and KB keep separate namespaces, with distinct migration credentials.
    export LIVE_KB_STORE_URL="postgres://$LIVE_OWNER:$LIVE_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
    export LIVE_KB_MIGRATION_URL="postgres://$LIVE_MIGRATOR:$LIVE_MIGRATOR_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
-   export AIMEE_STORE_URL="$LIVE_KB_STORE_URL?search_path=aimee_private"
-   export AIMEE_STORE_MIGRATION_URL="$LIVE_KB_MIGRATION_URL?search_path=aimee_private"
+   export AIMEE_STORE_URL="$LIVE_KB_STORE_URL?search_path=aimee_private,public"
+   export AIMEE_STORE_MIGRATION_URL="$LIVE_KB_MIGRATION_URL?search_path=aimee_private,public"
    # The legacy knowledge SECURITY DEFINER functions require this fixed owner.
    # The login remains the separate migrator, with explicitly granted membership;
    # only its KB bootstrap session assumes the schema-owner role.

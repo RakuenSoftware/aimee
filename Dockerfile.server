@@ -29,7 +29,7 @@ RUN sh /tmp/build-audit-sqlite.sh /out
 # The module runtime is a static multicall binary. The canonical process
 # contracts decide which executable names are populated from it in the C build
 # stage below, so Docker never carries a second language-selection list.
-FROM golang:1.26.10-bookworm@sha256:fe3da92a5cb2881e4aa75e625cb0b7c50571632fb4cf340cbe53e6ccdcffdd51 AS module-go-build
+FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS module-go-build
 WORKDIR /src/server-go
 COPY server-go/go.mod server-go/go.sum ./
 RUN go mod download
@@ -77,10 +77,27 @@ ARG AIMEE_VERSION=""
 # `aimee hooks pre` is the PreToolUse guard. Without the binary in the image a
 # delegate has no aimee tools and no guard can run — it gets a bare shell and its
 # own credentials, which is the opposite of the intent.
+# Memory ships as a vendored binary bundle (vendor/aims-memory): prebuilt bridge
+# archives that are linked into the Server and KB resources here, and the memory
+# executables and provisioning scripts that go into the runtime image. The
+# bundle is verified against this tree before use. Images are built for
+# linux/amd64 only, the one platform the bundle exists for.
+ARG TARGETARCH
 RUN build_version="$AIMEE_VERSION" \
     && if [ -z "$build_version" ]; then build_version=$(cat src/core/VERSION); fi \
+    && if [ "${TARGETARCH:-amd64}" != amd64 ]; then echo "aimee images are built for linux/amd64 only (TARGETARCH=${TARGETARCH})" >&2; exit 1; fi \
     && sh scripts/fetch-treesitter.sh \
-    && make -C src ../aimee-server ../aimee-kb ../aimee-kb-worm ../aimee ../aimee-forwarder -j"$(nproc)" \
+    && memory_platform="linux-amd64" \
+    && memory_make="" \
+    && mkdir -p /memory-image \
+    && python3 -I scripts/check_memory_bundle.py --platform "$memory_platform" --unpack /memory-bundle \
+         && memory_make="-f Makefile -f /memory-bundle/link/overlay-link.mk AIMS_VENDOR=/memory-bundle" \
+         && install -d /memory-image/source/src/modules /memory-image/source/tests/baselines/modules \
+         && cp -a /memory-bundle/bin /memory-bundle/provision /memory-image/ \
+         && cp /memory-bundle/MANIFEST.json /memory-image/MANIFEST.json \
+         && cp src/modules/process-contracts.json /memory-image/source/src/modules/ \
+         && cp tests/baselines/modules/canonical-inventory.yaml /memory-image/source/tests/baselines/modules/ \
+    && make -C src $memory_make ../aimee-server ../aimee-kb ../aimee-kb-worm ../aimee ../aimee-forwarder -j"$(nproc)" \
          AIMEE_TREESITTER=1 GIT_VERSION="v$build_version" \
     && cmake -S . -B /thinclient-build \
          -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_INSTALL_PREFIX=/usr/local \
@@ -113,7 +130,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- webchat service: standalone Go browser server (cgo: legacy crypt migration + sqlite) ---
-FROM golang:1.26.10-bookworm@sha256:fe3da92a5cb2881e4aa75e625cb0b7c50571632fb4cf340cbe53e6ccdcffdd51 AS runtime-web-build
+FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS runtime-web-build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
@@ -139,7 +156,7 @@ RUN CGO_ENABLED=1 go build -o /out/aimee-runtime-web .
 # without putting C back in charge of workflow transitions. This is crash
 # containment, not an OS security boundary: both processes currently share the
 # appliance service identity for repository credentials and Unix-socket access.
-FROM golang:1.26.10-bookworm@sha256:fe3da92a5cb2881e4aa75e625cb0b7c50571632fb4cf340cbe53e6ccdcffdd51 AS wfe-build
+FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS wfe-build
 WORKDIR /src/server-go
 COPY server-go/go.mod server-go/go.sum ./
 RUN go mod download
@@ -167,7 +184,6 @@ FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe6
 ARG TARGETARCH
 ARG CODE_SERVER_VERSION=4.96.4
 ARG CODE_SERVER_SHA256_amd64=9062963bfa22664a2fb443343fbaa3ae39b4d12817c2002e0f550bcf4f3ffb2c
-ARG CODE_SERVER_SHA256_arm64=39f33b7ede6521cfdd769607ffa0db5984933a174eed8cd42a87a18cd82e1483
 # Release downloads go through GitHub/CDN edges that intermittently return 5xx
 # (a 504 here failed the whole T3 e2e-docker topology). `curl -fsSL` alone turns
 # that into a hard build failure, so retry with backoff. --retry-all-errors is
@@ -278,13 +294,10 @@ ARG TARGETARCH
 ARG DOCKER_CLI_VERSION=27.5.1
 ARG DOCKER_COMPOSE_VERSION=2.32.4
 ARG DOCKER_CLI_SHA256_amd64=4f798b3ee1e0140eab5bf30b0edc4e84f4cdb53255a429dc3bbae9524845d640
-ARG DOCKER_CLI_SHA256_arm64=e6b53725a73763ab3f988c73f8772eaed429754c1a579db5ff11f21990fd1817
 ARG DOCKER_COMPOSE_SHA256_amd64=ed1917fb54db184192ea9d0717bcd59e3662ea79db48bff36d3475516c480a6b
-ARG DOCKER_COMPOSE_SHA256_arm64=0c4591cf3b1ed039adcd803dbbeddf757375fc08c11245b0154135f838495a2f
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in \
       amd64) darch=x86_64; carch=x86_64 ;; \
-      arm64) darch=aarch64; carch=aarch64 ;; \
       *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     eval "docker_want=\${DOCKER_CLI_SHA256_${TARGETARCH:-amd64}}"; \
@@ -307,10 +320,9 @@ RUN set -eux; \
 # of the box with no app registration (git_oauth_gh.c).
 ARG GH_CLI_VERSION=2.96.0
 ARG GH_CLI_SHA256_amd64=83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60
-ARG GH_CLI_SHA256_arm64=06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909
 RUN set -eux; \
     gharch="${TARGETARCH:-amd64}"; \
-    case "$gharch" in amd64|arm64) ;; *) echo "unsupported TARGETARCH=${gharch}" >&2; exit 1 ;; esac; \
+    case "$gharch" in amd64) ;; *) echo "unsupported TARGETARCH=${gharch}" >&2; exit 1 ;; esac; \
     eval "want=\${GH_CLI_SHA256_${gharch}}"; \
     curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${gharch}.tar.gz" -o /tmp/gh.tar.gz; \
     echo "${want}  /tmp/gh.tar.gz" | sha256sum -c -; \
@@ -342,12 +354,10 @@ RUN set -eux; \
 # --retry does NOT retry.
 ARG AST_GREP_VERSION=0.45.1
 ARG AST_GREP_SHA256_amd64=76fb6555be6734fb5057dba8d2fb756430f374bb9e1af694cf1ce00e13238d63
-ARG AST_GREP_SHA256_arm64=9ee7ec49aada3dc05135d21977af089a33fc3154ada25bab102daca90b5098f2
 RUN set -eux; \
     agarch="${TARGETARCH:-amd64}"; \
     case "$agarch" in \
       amd64) agtriple="x86_64-unknown-linux-gnu" ;; \
-      arm64) agtriple="aarch64-unknown-linux-gnu" ;; \
       *) echo "unsupported TARGETARCH=${agarch}" >&2; exit 1 ;; \
     esac; \
     eval "want=\${AST_GREP_SHA256_${agarch}}"; \
@@ -436,6 +446,10 @@ VOLUME /var/lib/aimee-workspaces /mnt/media/cores
 COPY --from=build /src/aimee-server /usr/local/bin/aimee-server
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
+# Memory executables, provisioning scripts and the two public catalog files the
+# provisioning step reads; empty on a platform without a memory bundle.
+COPY --from=build /memory-image/ /opt/aimee/memory/
+COPY --chmod=0755 deploy/container/memory-provision.py /usr/local/bin/aimee-memory-provision
 COPY --from=build /src/aimee-kb-worm /usr/local/bin/aimee-kb-worm
 COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
 COPY --from=build /module-runtime/grants/ /opt/aimee/module-grants/

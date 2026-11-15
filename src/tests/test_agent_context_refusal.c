@@ -483,10 +483,11 @@ void policy_action_attempt(const char *attempt)
    (void)attempt;
 }
 
+static int accept_projection_refuses;
 int ingress_preinject_accept_native_projection(const cJSON *projection)
 {
    assert(cJSON_IsObject(projection));
-   return 0;
+   return accept_projection_refuses ? -1 : 0;
 }
 
 int ingress_preinject_prepare_attempt(const void *body, size_t length, const char *route,
@@ -1294,6 +1295,45 @@ int main(void)
    assert(!agent_rc_should_try_another(rc, result.error));
    agent_result_clear_response(&result);
    request_context_clear();
+   /* A later failed assembly in an already refused request reports the owner's
+    * first refusal, not the generic failure it causes afterwards. */
+   {
+      request_context_t refused_earlier = {0};
+      request_context_set(&refused_earlier);
+      assert(request_context_refuse_assembly("stale_context") == 0);
+      const char *before_reply = recall_reply;
+      recall_reply = "{\"status\":\"error\",\"kind\":\"unavailable\",\"message\":\"later\"}";
+      char stale_error[512] = "";
+      char *stale_text = context_text_view(&agent, &network, "review", "original prompt", 0,
+                                           stale_error, sizeof(stale_error));
+      assert(!stale_text);
+      assert(strcmp(stale_error, "memory context refused: stale_context") == 0);
+      recall_reply = before_reply;
+      request_context_clear();
+   }
+   /* The same holds when a valid projection then cannot be imported into the
+    * source ticket: the earlier owner refusal is the reason. Without one, the
+    * import failure itself is reported. */
+   for (int earlier = 0; earlier <= 1; earlier++)
+   {
+      request_context_t import_context = {0};
+      request_context_set(&import_context);
+      if (earlier)
+         assert(request_context_refuse_assembly("stale_context") == 0);
+      const char *before_reply = recall_reply;
+      recall_reply = "{\"status\":\"ok\",\"recall\":{}}";
+      accept_projection_refuses = 1;
+      char import_error[512] = "";
+      char *import_text = context_text_view(&agent, &network, "review", "original prompt", 0,
+                                            import_error, sizeof(import_error));
+      assert(!import_text);
+      const char *expected = earlier ? "memory context refused: stale_context"
+                                     : "memory context refused: source release unavailable";
+      assert(strcmp(import_error, expected) == 0);
+      accept_projection_refuses = 0;
+      recall_reply = before_reply;
+      request_context_clear();
+   }
    recalls = 0;
    rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(rc == 0 && result.success && !result.error[0]);

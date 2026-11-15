@@ -112,8 +112,8 @@ if [[ "$AIMEE_STORE_URL" != *"search_path="* && "$AIMEE_STORE_MIGRATION_URL" != 
   for name in AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL; do
     value="${!name}"
     case "$value" in
-      *\?*) value="${value}&search_path=${LIVE_STORE_SCHEMA}" ;;
-      *) value="${value}?search_path=${LIVE_STORE_SCHEMA}" ;;
+      *\?*) value="${value}&search_path=${LIVE_STORE_SCHEMA},public" ;;
+      *) value="${value}?search_path=${LIVE_STORE_SCHEMA},public" ;;
     esac
     export "$name=$value"
   done

@@ -489,6 +489,11 @@
     {
       "make": true,
       "module": "vault",
+      "test": "src/tests/test_vault_content_privacy.c"
+    },
+    {
+      "make": true,
+      "module": "vault",
       "test": "src/tests/test_vault_create_once.c"
     },
     {
@@ -574,11 +579,6 @@
     {
       "make": true,
       "module": "workflows",
-      "test": "src/tests/test_wfe_deliver.c"
-    },
-    {
-      "make": true,
-      "module": "workflows",
       "test": "src/tests/test_wfe_enforce.c"
     },
     {
@@ -595,11 +595,6 @@
       "make": true,
       "module": "workflows",
       "test": "src/tests/test_wfe_gate_reject.c"
-    },
-    {
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_manager_artifacts.c"
     },
     {
       "make": true,

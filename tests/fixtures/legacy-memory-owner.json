@@ -6,5 +6,6 @@
   "build_package": "./cmd/aimee-module",
   "binary_basename": "aimee-module-memory",
   "go_version": "go1.26.10",
-  "purpose": "external-reference-not-shipped"
+  "purpose": "external-reference-not-shipped",
+  "compatibility_patch_sha256": "940d12c33d49c9af5edfcf7ec3e0ffe62e56e41e13b87072ace0208d346faaee"
 }

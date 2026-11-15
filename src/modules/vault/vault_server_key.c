@@ -24,6 +24,8 @@
 #include <sys/mman.h>
 #endif
 #include <unistd.h>
+#include <dirent.h>
+#include "cJSON.h"
 
 /* Fixed, non-secret HKDF salt for the server KEK. Distinct from the random
  * per-principal salts the user vaults use, so the server KEK lives in its own
@@ -54,7 +56,7 @@ static int master_key_path(char *out, size_t cap)
 typedef enum
 {
    MK_READ_OK = 0,
-   MK_READ_ABSENT = 1, /* ENOENT: no key file yet — safe to mint */
+   MK_READ_ABSENT = 1, /* ENOENT: inventory must still prove first boot */
    MK_READ_BAD = -1,   /* exists but unreadable/wrong size — fail closed, do NOT mint */
 } mk_read_t;
 
@@ -132,6 +134,107 @@ static int master_key_write(const char *path, const uint8_t key[VAULT_ROOT_KEY_L
    return rc;
 }
 
+/* A missing key is first boot only if no previous server custody exists.
+ * The durable marker covers empty vaults; legacy encrypted wraps cover installs
+ * made before the marker. Unreadable or malformed inventories fail closed. */
+static int server_custody_present(const char *key_path)
+{
+   char marker[1400], dir[1280];
+   struct stat st;
+   if ((size_t)snprintf(marker, sizeof(marker), "%s.initialized", key_path) >= sizeof(marker))
+      return -1;
+   if (lstat(marker, &st) == 0)
+      return 1;
+   if (errno != ENOENT)
+      return -1;
+   snprintf(dir, sizeof(dir), "%s", key_path);
+   char *slash = strrchr(dir, '/');
+   if (!slash)
+      return -1;
+   *slash = 0;
+   DIR *d = opendir(dir);
+   if (!d)
+      return errno == ENOENT ? 0 : -1;
+   int result = 0;
+   struct dirent *entry;
+   while (!result && (entry = readdir(d)))
+   {
+      size_t len = strlen(entry->d_name);
+      if (len < 6 || strcmp(entry->d_name + len - 5, ".json"))
+         continue;
+      char path[1600];
+      if ((size_t)snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name) >= sizeof(path))
+      {
+         result = -1;
+         break;
+      }
+      int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+      if (fd < 0 || fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
+          st.st_size > 8 * 1024 * 1024)
+      {
+         if (fd >= 0)
+            close(fd);
+         result = -1;
+         break;
+      }
+      size_t n = (size_t)st.st_size, used = 0;
+      char *bytes = calloc(n + 1, 1);
+      while (bytes && used < n)
+      {
+         ssize_t got = read(fd, bytes + used, n - used);
+         if (got < 0 && errno == EINTR)
+            continue;
+         if (got <= 0)
+            break;
+         used += (size_t)got;
+      }
+      close(fd);
+      cJSON *root = bytes && used == n ? cJSON_ParseWithOpts(bytes, NULL, 1) : NULL;
+      const cJSON *creds = cJSON_GetObjectItemCaseSensitive(root, "creds");
+      if (!cJSON_IsObject(root) || !cJSON_IsArray(creds))
+         result = -1;
+      else
+      {
+         const cJSON *credential;
+         cJSON_ArrayForEach(credential, creds)
+         {
+            if (!cJSON_IsObject(credential))
+            {
+               result = -1;
+               break;
+            }
+            if (cJSON_HasObjectItem(credential, "wrapped_dek_server") ||
+                cJSON_HasObjectItem(credential, "immutable_generation_v1"))
+            {
+               result = 1;
+               break;
+            }
+         }
+      }
+      cJSON_Delete(root);
+      if (bytes)
+         OPENSSL_cleanse(bytes, n);
+      free(bytes);
+   }
+   closedir(d);
+   return result;
+}
+
+static int persist_custody_marker(const char *key_path)
+{
+   char path[1400];
+   if ((size_t)snprintf(path, sizeof(path), "%s.initialized", key_path) >= sizeof(path))
+      return -1;
+   int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+   if (fd < 0)
+      return errno == EEXIST ? 0 : -1;
+   int rc = write(fd, "1", 1) == 1 && fsync(fd) == 0 ? 0 : -1;
+   close(fd);
+   if (!rc)
+      fsync_parent_dir(path);
+   return rc;
+}
+
 /* Load-or-create the master key, derive the server KEK, cache it. Caller holds
  * g_kek_mu. */
 static int derive_and_cache(void)
@@ -146,20 +249,37 @@ static int derive_and_cache(void)
       return -1; /* present but unreadable — fail closed, NEVER overwrite (F1) */
    if (r == MK_READ_ABSENT)
    {
-      /* Genuinely no key file: mint a fresh master and persist it. A concurrent
-       * creator would lose the O_EXCL race; fall back to reading the winner's
-       * file (which must now be readable, else fail closed). */
-      if (vault_crypto_random(master, sizeof(master)) != 0)
-         return -1;
-      if (master_key_write(path, master, 0) != 0)
+      int present = server_custody_present(path);
+      if (present != 0)
       {
-         OPENSSL_cleanse(master, sizeof(master));
+         /* A first-boot winner may have published between our absent read
+          * and inventory check. Read that key; never mint a replacement. */
          if (master_key_read(path, master) != MK_READ_OK)
-         {
-            OPENSSL_cleanse(master, sizeof(master)); /* read-back failed — cleanse (F2) */
             return -1;
+      }
+      else
+      {
+         /* Genuinely no key file: mint a fresh master and persist it. A concurrent
+          * creator would lose the O_EXCL race; fall back to reading the winner's
+          * file (which must now be readable, else fail closed). */
+         if (vault_crypto_random(master, sizeof(master)) != 0)
+            return -1;
+         if (master_key_write(path, master, 0) != 0)
+         {
+            OPENSSL_cleanse(master, sizeof(master));
+            if (master_key_read(path, master) != MK_READ_OK)
+            {
+               OPENSSL_cleanse(master, sizeof(master)); /* read-back failed — cleanse (F2) */
+               return -1;
+            }
          }
       }
+   }
+
+   if (persist_custody_marker(path) != 0)
+   {
+      OPENSSL_cleanse(master, sizeof(master));
+      return -1;
    }
 
    int rc = vault_kek_derive(master, sizeof(master), SERVER_KEK_SALT, sizeof(SERVER_KEK_SALT),
@@ -318,6 +438,9 @@ static int file_rotate(void *ctx, const char *server_principal, int *out_princip
    mk_read_t r = master_key_read(path, old_master);
    if (r == MK_READ_ABSENT)
    {
+      if (server_custody_present(path) != 0)
+         ROT_FAIL(
+             "initialized Vault master key is missing — restore its original key and inventory");
       /* No master key yet — nothing to rotate (it is minted on first write). */
       if (out_principals)
          *out_principals = 0;

@@ -255,6 +255,13 @@ int handle_memory_hygiene(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* The runtime envelope quotes the owner's JSON so cJSON never rewrites its
  * integer tokens. Only the Go owner shapes private command results. */
+/* The account's own typed facts over its personal memory. */
+static int server_memory_typed_operation(const char *operation)
+{
+   return !strcmp(operation, "user-facts") || !strcmp(operation, "user-search-graph") ||
+          !strcmp(operation, "user-entity-edges");
+}
+
 static cJSON *user_memory_owner_command_as(const char *operation, const cJSON *req,
                                            memory_authority_t authority)
 {
@@ -317,7 +324,8 @@ static cJSON *user_memory_owner_command_as(const char *operation, const cJSON *r
    if (cJSON_IsObject(parsed) &&
        (!strcmp(status, "ok") ||
         (!strcmp(operation, "user-serve") && !strcmp(status, "degraded"))) &&
-       (!strcmp(operation, "user-search") || !strcmp(jo_cstr(parsed, "store"), "user")))
+       (!strcmp(operation, "user-search") || !strcmp(jo_cstr(parsed, "store"), "user") ||
+        server_memory_typed_operation(operation)))
       reply = cJSON_CreateRaw(raw);
    else if (cJSON_IsObject(parsed) && !strcmp(status, "error") &&
             cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "kind")) &&
@@ -335,6 +343,21 @@ static cJSON *user_memory_owner_command_as(const char *operation, const cJSON *r
 static cJSON *user_memory_owner_command(const char *operation, const cJSON *req)
 {
    return user_memory_owner_command_as(operation, req, MEMORY_AUTHORITY_MODEL);
+}
+
+cJSON *memory_user_typed_command(const char *operation, const cJSON *req)
+{
+   if (!operation || !server_memory_typed_operation(operation))
+      return NULL;
+   cJSON *reply = user_memory_owner_command(operation, req);
+   cJSON *parsed = cJSON_IsRaw(reply) ? cJSON_Parse(reply->valuestring) : NULL;
+   cJSON_Delete(reply);
+   if (!cJSON_IsObject(parsed) || strcmp(jo_cstr(parsed, "status"), "ok") != 0)
+   {
+      cJSON_Delete(parsed);
+      return NULL;
+   }
+   return parsed;
 }
 
 cJSON *memory_task_promotion_command(const cJSON *req)

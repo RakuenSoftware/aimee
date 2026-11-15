@@ -25,7 +25,6 @@
 #include "db1_optional.h"
 #include "cJSON.h"
 #include "config.h"
-#include "memory_query.h" /* kb_store_memory_low_eff_row_t etc. */
 #include "tasks.h"
 #include "integrity.h"
 

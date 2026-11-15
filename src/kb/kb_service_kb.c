@@ -44,38 +44,6 @@ extern kb_service_ctx_t *g_kb_ctx;
 
 #define KB_WORM_MAX_PENDING_AGE_SECONDS 60
 
-/* Append the typed-fact backlog warning to `warnings`, if it applies.
- *
- * SHARED BY BOTH STATUS SURFACES ON PURPOSE. This warning was written for
- * kb_service_health_object() and its own comment names the symptom on the OTHER
- * surface -- "`aimee kb status` printed '4 pending' with no hint that pending
- * here means forever". kb_service_status_json() is a separate builder, so the
- * command an operator actually runs never grew the hint that was written for it.
- *
- * Reproduced on a live deployment: 65 memory_facts jobs, oldest 34 hours old,
- * attempts 0, while `aimee kb status` printed "Queue: 65 pending, 0 running, 0
- * failed" under "status: ok" and said nothing about why pending never moves.
- *
- * One helper, both callers, so the two cannot drift apart again. */
-static void kb_status_add_typed_facts_warning(cJSON *warnings)
-{
-   if (!warnings)
-      return;
-   int facts_pending = kb_store_kb_async_count_kind_pending("memory_facts");
-   char synth_endpoint[512];
-   if (facts_pending <= 0 ||
-       config_synth_chat_endpoint_current(synth_endpoint, sizeof(synth_endpoint)))
-      return;
-   char msg[320];
-   snprintf(msg, sizeof(msg),
-            "typed-fact extraction: %d job(s) queued with nothing to drain them - no "
-            "synthesis endpoint is configured, so the curator LLM lane is not running. "
-            "Memories are stored and searchable but contribute no typed facts. The "
-            "backlog is not lost: configuring a synthesis provider drains it.",
-            facts_pending);
-   cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
-}
-
 char *kb_service_status_json(const char *project)
 {
    kb_store_kb_service_project_status_t stats;
@@ -104,17 +72,6 @@ char *kb_service_status_json(const char *project)
    cJSON_AddNumberToObject(queue, "done", stats.queue.done);
    cJSON_AddNumberToObject(queue, "failed", stats.queue.failed);
    cJSON_AddNumberToObject(queue, "total", stats.queue.total);
-
-   /* The pending count above is meaningless without this: an undrainable queue
-    * and a busy one print the same number. */
-   {
-      cJSON *warnings = cJSON_CreateArray();
-      kb_status_add_typed_facts_warning(warnings);
-      if (cJSON_GetArraySize(warnings) > 0)
-         cJSON_AddItemToObject(obj, "warnings", warnings);
-      else
-         cJSON_Delete(warnings);
-   }
 
    cJSON *vector_status = pgvec_vector_status_json();
    if (vector_status)
@@ -487,27 +444,6 @@ static cJSON *kb_service_health_object(void)
          snprintf(msg, sizeof(msg), "curator: %d job(s) failing", n);
       cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
    }
-   /* TWO GATES THAT DO NOT AGREE.
-    *
-    * memory.store enqueues a "memory_facts" job unconditionally,
-    * which is the DEFAULT. The only consumer of those jobs is kb_memory_facts_drain,
-    * which runs on the curator LLM lane -- and that lane deliberately does not start
-    * without a synthesis endpoint ("NO SYNTHESIS PROVIDER => NO LLM LANE"). Both
-    * decisions are individually right. Together they mean an install with no synth
-    * provider, which is a supported configuration, enqueues one row per stored
-    * memory that nothing will ever claim.
-    *
-    * Measured on the e2e VM: 4 memory_facts jobs pending for 11.5 hours with
-    * attempts=0, while /v1/health reported status ok and an empty warnings array,
-    * and `aimee kb status` printed "4 pending" with no hint that pending here means
-    * forever. It grows without bound for the life of the install.
-    *
-    * NOT a blocker. Running without a synthesis provider is explicitly supported,
-    * and memory store and search work perfectly; only typed-fact enrichment is
-    * deferred. Degrading the verdict for a supported configuration is exactly the
-    * dilution this file's status derivation exists to avoid. It is a warning, and
-    * it says the backlog is not lost -- configuring a provider drains it. */
-   kb_status_add_typed_facts_warning(warnings);
 
    if (freshness_days > 30)
       cJSON_AddItemToArray(warnings, cJSON_CreateString("KB not ingested in over 30 days"));

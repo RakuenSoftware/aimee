@@ -7,7 +7,6 @@
  * All operations use the shared kb_store postgres connection (kb_store_conn()). */
 
 /* Table name constants. */
-#define PGVEC_MEMORY_TABLE            "memory_embeddings"
 #define PGVEC_KB_TABLE                "kb_embeddings"
 #define PGVEC_KBPDF_TABLE             "kb_pdf_embeddings"
 #define PGVEC_CODE_TABLE              "code_embeddings"
@@ -29,13 +28,6 @@ int pgvec_ensure_index(const char *table, int dim, int recreate);
 
 /* Returns 1 if the pgvectorscale extension is installed in the connected database, 0 otherwise. */
 int pgvec_vectorscale_available(void);
-
-/* Upsert a single memory embedding row.  Extracts record_type, primary_scope,
- * workspace, project, kind from payload_json. */
-int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char *payload_json);
-
-/* Delete a single memory embedding row by point_id. */
-int pgvec_memory_delete(int64_t point_id);
 
 /* Upsert a single kb embedding row.  Extracts project from payload_json. */
 int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *payload_json);

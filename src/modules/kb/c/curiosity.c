@@ -309,45 +309,10 @@ static double curiosity_base_weight(const char *gap_type)
    return 0.10;
 }
 
-static int memory_coverage_count(void *conn, const char *target)
+static int memory_signal(int (*fn)(void *, const char *), void *ctx, const char *needle)
 {
-   if (!conn || !target || !target[0])
-      return 0;
-   const char *sql = "SELECT COUNT(*) FROM memories"
-                     " WHERE merged_into = 0"
-                     "   AND (LOWER(key) LIKE ?1 OR LOWER(content) LIKE ?2)";
-   char err[CUR_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return 0;
-   char like[288];
-   snprintf(like, sizeof(like), "%%%s%%", target);
-   for (size_t i = 0; like[i]; i++)
-      if (like[i] >= 'A' && like[i] <= 'Z')
-         like[i] = (char)(like[i] + ('a' - 'A'));
-   aimee_pg_bind_text(st, "?1", like);
-   aimee_pg_bind_text(st, "?2", like);
-   int count = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      count = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
-   return count;
-}
-
-static int memory_total_count(void *conn)
-{
-   if (!conn)
-      return 0;
-   char err[CUR_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT COUNT(*) FROM memories WHERE merged_into = 0", err, sizeof(err));
-   if (!st)
-      return 0;
-   int count = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      count = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
-   return count;
+   int n = fn ? fn(ctx, needle) : 0;
+   return n > 0 ? n : 0;
 }
 
 static double age_days(const char *updated_at)
@@ -374,18 +339,20 @@ typedef struct
    char updated_at[32];
 } curiosity_rescore_row_t;
 
-int kb_store_curiosity_rescore_all(void)
+int kb_store_curiosity_rescore_all(const kb_store_curiosity_memory_t *memory)
 {
    void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
-   int total = memory_total_count(conn);
+   int total = memory && memory->total ? memory->total(memory->ctx) : 0;
+   if (total < 0)
+      total = 0;
    double maturity = clamp01(log10((double)total + 1.0) / 4.0);
 
    /* Materialize the SELECT before issuing UPDATEs and the per-row
-    * memory_coverage_count() probes, so we don't keep two prepared
-    * statements active on the connection at once. */
+    * memory coverage probes, so we don't keep a prepared statement
+    * active on the connection while the memory implementation answers. */
    curiosity_rescore_row_t *rows = NULL;
    size_t cap = 0, count = 0;
    {
@@ -443,7 +410,7 @@ int kb_store_curiosity_rescore_all(void)
 
       const char *needle =
           r->target_topic[0] ? r->target_topic : (r->target_entity[0] ? r->target_entity : "");
-      int coverage = memory_coverage_count(conn, needle);
+      int coverage = memory && needle[0] ? memory_signal(memory->coverage, memory->ctx, needle) : 0;
       double novelty = 1.0 / (1.0 + (double)coverage);
 
       double progress = 0.0;

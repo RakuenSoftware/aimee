@@ -2028,7 +2028,6 @@ const http_route_t g_v1_routes[] = {
      * the async lane like the rest: kb.reembed drops and recreates every derived
      * vector table, memory.embed re-embeds the memory corpus after it. */
     {"POST", "/v1/kb/reembed", NULL, RM_EXACT, "kb.reembed", 0, rh_dispatch_op_async},
-    {"POST", "/v1/kb/erase-subject", NULL, RM_EXACT, "kb.erase-subject", 0, rh_dispatch_op_async},
     {"POST", "/v1/memory/embed", NULL, RM_EXACT, "memory.embed", 0, rh_dispatch_op_async},
     {"POST", "/v1/graph/sync_code", NULL, RM_EXACT, "graph.sync_code", 0, rh_dispatch_op_async},
     {"POST", "/v1/index/scan", NULL, RM_EXACT, "index.scan", 0, rh_dispatch_op_async},

@@ -63,7 +63,7 @@ isolation, deterministic seed/arm, metric support, and result destination separa
 - `runtime_toggle.supported`: `false`; the descriptor is `enabled_by_default: false`, so the target module is selected before startup rather than hot-toggled.
 
 No `modules.benchmarks` activation field or target-module registration was found. The legacy
-`src/modules/agent_eval` objects are included in `AGENT_SRCS`, and server/CLI benchmark routes remain
+`src/modules/benchmarks/agent_eval.c` objects are included in `AGENT_SRCS`, and server/CLI benchmark routes remain
 available in ordinary builds. Descriptor-declared optionality is therefore `not present` at the current
 physical/build boundary; this slice documents the mismatch without changing it.
 
@@ -130,14 +130,14 @@ ship that executable.
 
 The separate native `bench-perf` harness times only native paths
 (`pre_tool_check`, `delegate_dispatch`). Its memory, `db_open` and startup cases
-left with the in-process memory engine and native database; Go memory latency is
-measured by `aimee-memory-eval`. `--check` refuses a baseline that names a case
+left with the in-process memory engine and native database; memory latency is measured
+by the installed memory implementation's own evaluation, not by this module. `--check` refuses a baseline that names a case
 the harness does not run, so an old baseline cannot pass unmeasured.
 
 ## Extension and removal
 
 New suites register offline harness/data/metric contracts without adding runtime decision hooks.
-`src/modules/agent_eval`, `server_eval.c`, benchmark routes, and distributed scripts are `relocate` or
+`src/modules/benchmarks/agent_eval.c`, `server_eval.c`, benchmark routes, and distributed scripts are `relocate` or
 compatibility-alias candidates for a later source slice. Stale corpora, duplicate runners, committed
 sample results, and self-tested-only harnesses are candidates, not confirmed dead; removal requires
 consumer, CI, reproducibility, licensing, and liveness evidence.

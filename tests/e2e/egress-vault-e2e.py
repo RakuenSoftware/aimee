@@ -280,8 +280,18 @@ p.write_text(sys.stdin.read());p.chmod(0o600);os.chown(p,1000,1000)
             kill(stack, rows['helper'])
             wait(stack, rows)
             before = state['accepted']
+            # A restarted owner exists before it has attached and registered its
+            # event kinds; restoration is bounded, not instantaneous.
+            deadline, restored = time.monotonic() + 15, None
+            while restored is None:
+                try:
+                    restored = exchange()
+                except RuntimeError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(.5)
             check(role + ' helper failure restarts owner and restores credential handoff',
-                  exchange() == 'ok' and state['accepted'] == before + 2)
+                  restored == 'ok' and state['accepted'] == before + 2)
             check(role + ' provider saw no unexpected stale or unscoped credential', state['rejected'] == expected_rejections)
             stack.start()
             check(role + ' recovered composition is healthy', True)

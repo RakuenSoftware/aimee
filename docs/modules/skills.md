@@ -10,7 +10,7 @@ unbounded mechanism for downloaded text to bypass routing, policy, or user appro
 ## Public contracts
 
 The canonical contracts are `src/modules/skills/include/aimee/skills/skill.h` and the process wire API,
-implemented by `skill.c` and `skill_rollback.c`, with CLI orchestration in `src/cmd_skill.c`. Consumers
+implemented by `skill.c` and `skill_rollback.c`, with CLI marshalling in `marshal_skill_request` (`src/cli_v1_routes_b.c`). Consumers
 use the `aimee/skills` include namespace. The former singular source directory is retired without a
 forwarding API or parallel skill registry.
 

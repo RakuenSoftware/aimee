@@ -274,11 +274,8 @@ func TestOwnedDeliveryRetention(t *testing.T) {
 	key := deliveryHash("retention intent")
 	intent := deliveryIntent(key, "retention-prepared")
 	batch := ownedInputBatch(ownedInputUUID, "safe retained input", "opaque")
-	for _, sid := range []string{"ret-pending", "ret-done", "ret-legacy", "ret-exp-pending", "ret-exp-done", "ret-sub-pending", "ret-sub-done"} {
+	for _, sid := range []string{"ret-pending", "ret-done", "ret-legacy", "ret-exp-pending", "ret-exp-done"} {
 		owner := "retention-alice"
-		if sid == "ret-sub-pending" || sid == "ret-sub-done" {
-			owner = "retention-subject"
-		}
 		if _, e := p.Exec(ctx, `INSERT INTO server_sessions(id,principal) VALUES($1,$2)`, sid, owner); e != nil {
 			t.Fatal(e)
 		}
@@ -287,7 +284,7 @@ func TestOwnedDeliveryRetention(t *testing.T) {
 			continue
 		}
 		c := ownedInputExpect(t, db, store.StatusOK, 58, sid, ownedInputUUID, "turn", owner, batch, intent)
-		if sid == "ret-done" || sid == "ret-exp-done" || sid == "ret-sub-done" {
+		if sid == "ret-done" || sid == "ret-exp-done" {
 			ownedInputExpect(t, db, store.StatusOK, 61, c[5], "source-owner", owner, key, "delivered", `{"known_fixture_result":true}`)
 		}
 	}
@@ -317,23 +314,7 @@ func TestOwnedDeliveryRetention(t *testing.T) {
 	if ownedInputCount(t, p, "session_input_deliveries", "ret-exp-pending") != 1 || ownedInputCount(t, p, "session_input_deliveries", "ret-exp-done") != 0 {
 		t.Fatal("expired pending/resolved retention mismatch")
 	}
-	// Subject deletion is all-or-nothing, including already-resolved siblings.
-	ownedInputExpect(t, db, store.StatusConflict, opServerSessionEraseSubject, "delivery-subject-request-01", "retention-subject")
-	if ownedInputCount(t, p, "session_ir_events", "ret-sub-pending") != 2 || ownedInputCount(t, p, "session_ir_events", "ret-sub-done") != 2 {
-		t.Fatal("subject conflict partially deleted")
-	}
-	got := ownedInputExpect(t, db, store.StatusOK, 59, "ret-sub-pending", ownedInputUUID, "retention-subject", "source-owner")
-	var r inputDeliveryRecord
-	if json.Unmarshal([]byte(got[0]), &r) != nil {
-		t.Fatal("record")
-	}
-	// Synthetic known terminal fixture; private authenticated Native result is a separate join.
-	ownedInputExpect(t, db, store.StatusOK, 61, r.ID, "source-owner", "retention-subject", key, "terminal", `{"known_fixture_terminal":true}`)
-	count := ownedInputExpect(t, db, store.StatusOK, opServerSessionEraseSubject, "delivery-subject-request-01", "retention-subject")
-	if len(count) != 1 || count[0] != "2" {
-		t.Fatal("resolved subject delete", count)
-	}
-	t.Log("PASS pending deletion explicit conflict/no loss; direct FK guard; resolved/legacy deletion; expired skip/count; subject rollback then known-fixture terminal permits normal cleanup")
+	t.Log("PASS pending deletion conflict/no loss; direct FK guard; resolved/legacy deletion; expired skip/count")
 }
 
 func TestOwnedDeliveryRaces(t *testing.T) {

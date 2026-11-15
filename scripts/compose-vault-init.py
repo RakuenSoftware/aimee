@@ -6,12 +6,22 @@ values stay in memory and enter the disposable Vault bootstrap only over stdin.
 Long-lived application definitions contain no SQL or enrollment credentials.
 """
 import json
+from pathlib import Path
 import subprocess
 import sys
 
 VALUE_OPTIONS = {'-f', '--file', '-p', '--project-name', '--env-file', '--project-directory',
                  '--profile', '--ansi', '--progress', '--parallel'}
 FLAG_OPTIONS = {'--compatibility', '--all-resources'}
+MEMORY_INIT = 'aimee-memory-init'
+
+
+class MemoryStartup(Exception):
+    """Memory could not be provisioned; the message is safe to show and says what to do."""
+
+
+EMBEDDER = 'aimee-embedder'
+EMBEDDER_PYTHON = '/opt/aimee/embedder-venv/bin/python'
 
 
 def up_prefix(args):
@@ -68,12 +78,51 @@ def payloads(model):
     return [(owner, ''.join(key + '=' + value + '\0' for key, value in values.items()))]
 
 
-def run(argv, **kwargs):
-    result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120, **kwargs)
+def run(argv, timeout=120, **kwargs):
+    result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, **kwargs)
     if result.returncode:
         # Compose output and bootstrap diagnostics may include secret values.
         raise RuntimeError('Compose Vault preparation failed; check image availability, private volumes, and required bootstrap settings')
     return result.stdout
+
+
+def embedder_identity(compose, model):
+    """Identity of the composition's embedder image, read without serving it.
+
+    Memory pins the embedding provider it indexes with, and the embedder cannot
+    serve before the application has issued its TLS identity, so the identity is
+    read from the image itself. A composition without a local embedder service
+    provisions memory without vector retrieval.
+    """
+    if EMBEDDER not in model.get('services', {}):
+        return b''
+    reader = (Path(__file__).resolve().parent / 'embedder-identity.py').read_bytes()
+    try:
+        output = run([*compose, 'run', '--rm', '--no-deps', '-T', '--entrypoint', EMBEDDER_PYTHON, EMBEDDER, '-'],
+                     timeout=900, input=reader)
+        lines = output.decode().strip().splitlines()
+        identity = json.loads(lines[-1]) if lines else {}
+    except (RuntimeError, ValueError):
+        identity = {}
+    if not isinstance(identity, dict) or not isinstance(identity.get('embedding_identity'), dict):
+        raise MemoryStartup('the embedder image reports no embedding identity; memory needs the embedder image '
+                            'of this release (an embedder from 1.0.x does not report one)')
+    return json.dumps(identity).encode()
+
+
+def provision_memory(compose, identity):
+    """Run the one-shot provisioning service and show what it did.
+
+    Its output names accounts and outcomes, never credentials, and a refusal
+    tells the operator what to do, so unlike the Vault step it is not hidden.
+    """
+    result = subprocess.run([*compose, 'run', '--rm', '--no-deps', '-T', MEMORY_INIT], input=identity,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=900)
+    for line in result.stdout.decode(errors='replace').splitlines():
+        if line.startswith('[memory-provision]'):
+            print(line, file=sys.stderr)
+    if result.returncode:
+        raise MemoryStartup('memory provisioning failed; see the [memory-provision] message above')
 
 
 def main(args):
@@ -91,7 +140,15 @@ def main(args):
     model = json.loads(run([*compose, 'config', '--format', 'json']))
     # Root extension fields survive Compose normalization and are never placed
     # in Config.Env. They preserve Compose's env-file interpolation semantics.
-    for owner, data in payloads(model):
+    owners = payloads(model)
+    if owners and MEMORY_INIT in model.get('services', {}):
+        # The application mounts the provisioned memory subtree of its home
+        # volume, so that subtree must exist before the application image is
+        # run even once. Provisioning is idempotent; it prints no secret.
+        environment = model['services'][MEMORY_INIT].get('environment') or {}
+        off = isinstance(environment, dict) and environment.get('AIMEE_MEMORY_PROVISION') == 'off'
+        provision_memory(compose, b'' if off else embedder_identity(compose, model))
+    for owner, data in owners:
         binary = 'aimee-kb' if owner == 'aimee-kb' else 'aimee-server'
         migration_options = ['-e', 'AIMEE_VAULT_STORE_MIGRATION=1'] if migrate_store else []
         run([*compose, 'run', '--rm', '--no-deps', '-T', *migration_options, '--entrypoint',
@@ -103,6 +160,9 @@ def main(args):
 if __name__ == '__main__':
     try:
         raise SystemExit(main(sys.argv[1:]))
+    except MemoryStartup as error:
+        print(f'compose-vault-init: {error}', file=sys.stderr)
+        raise SystemExit(1)
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError):
         print('compose-vault-init: failed to seal startup credentials; verify required settings, image availability, and Vault ownership', file=sys.stderr)
         raise SystemExit(1)

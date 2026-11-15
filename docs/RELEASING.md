@@ -1,12 +1,13 @@
 # Releasing
 
-The release being prepared is **1.0.0**. A release happens when a human approves one.
-Merging to `main` proposes a version and stops.
+A release happens when a human approves one. Merging to `main` proposes a version and stops.
+The latest published application release is
+[1.0.2](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.2); `testing` holds the next
+one, **1.1.0**.
 
 The automatic 0.2.196 publication exposed why a promotion merge needs a separate release decision.
 It remains marked prerelease. The later **0.3.0 was an intended public release**, published on
-2026-08-04. The latest application release verified on 2026-10-04 is
-[0.4.6](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.6).
+2026-08-04. The 0.4 series ended at 0.4.6 and the 1.0 series began with 1.0.0.
 
 ## The two channels are not the same
 
@@ -54,12 +55,12 @@ The tree declares `AIMEE_VERSION_SERIES` in `src/headers/aimee_version.h`, and t
 version component written down:
 
 ```c
-#define AIMEE_VERSION_SERIES "1.0"
+#define AIMEE_VERSION_SERIES "1.1"
 ```
 
-The patch comes from the highest `v<series>.*` tag at release time. With series `1.0` and no
-`v1.0.*` tag, the next proposal is `1.0.0`. Later patches follow the highest tag in that series;
-a tag in another series cannot advance it.
+The patch comes from the highest `v<series>.*` tag at release time. With series `1.1` and no
+`v1.1.*` tag, the next proposal is `1.1.0`. Later patches follow the highest tag in that series;
+a tag in another series, such as `v1.0.2`, cannot advance it.
 
 **To ship a patch:** merge to `main`, approve. Nothing else.
 
@@ -84,16 +85,31 @@ PostgreSQL shipping inside it, so anything deploying `:latest` got a KB that cou
 
 If a tag survives a failed run, delete it by hand before the next release or that version is skipped.
 
+## The memory bundle is part of the release
+
+The application image links and ships the vendored memory bundle under `vendor/aims-memory`
+([its README](../vendor/aims-memory/README.md)). The bundle is compiled against specific public
+files, recorded with their hashes in `vendor/aims-memory/bundle.json`. `make -C src lint` and the
+image build both run `scripts/check_memory_bundle.py` and refuse a bundle whose recorded files
+differ from the tree, naming them.
+
+Two consequences for a release:
+
+- A change to a recorded file cannot merge until a maintainer with access to the private memory
+  repository rebuilds the bundle from the changed tree and commits it with the change.
+- The server images are published for `linux/amd64` only, the platform the bundle is built for;
+  the image build refuses any other target. Thin clients are still built for every platform.
+
 ## A tag is not a release
 
 A tag may exist without a successful release. The [0.2.196 entry](https://github.com/RakuenSoftware/aimee/releases/tag/v0.2.196)
 is a prerelease; [0.3.0](https://github.com/RakuenSoftware/aimee/releases/tag/v0.3.0) is an intended
-public release. Published 0.4 releases continue through 0.4.6 as of 2026-10-04.
+public release. Published 0.4 releases continue through 0.4.6, and 1.0 releases through 1.0.2.
 
 Read the release entry, draft/prerelease flags and artifact status to establish what shipped.
 Run `scripts/next-release-version.sh /tmp/aimee-next-version.txt` with freshly fetched tags to
 inspect the next proposal. It writes an output file and creates no tag or release. In the current
-1.0 series with no v1.0.* tag, it proposes 1.0.0; a later tag changes that answer.
+1.1 series with no `v1.1.*` tag, it proposes 1.1.0; a later tag changes that answer.
 
 Independent core/module repository tags and the separate native-memory plugin release do not set
 the application version. See [repository extraction](core/repository-extraction.md).

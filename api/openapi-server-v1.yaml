@@ -3538,28 +3538,6 @@ paths:
         returns a dry-run plan naming each table and row count.
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
-  /kb/erase-subject:
-    post:
-      summary: Erase one data subject from mutable DB1 and KB_STORE stores
-      description: >-
-        Owner-only, idempotent two-phase erasure. The server derives affected
-        sessions, commits mutable deletion in both stores, reconciles orphaned
-        blobs, and appends minimized completion evidence without the subject.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [subject]
-              properties:
-                subject: { type: string, minLength: 1 }
-                request_id: { type: string, minLength: 16, maxLength: 128 }
-      responses:
-        "200": { description: Erasure completed or replayed idempotently }
-        "400": { description: Invalid subject or request identifier }
-        "403": { description: Owner authorization required }
-        "500": { description: A store phase failed; retry with the same request identifier }
   /memory/embed:
     post:
       summary: (Re)generate memory embeddings (async; poll GET /runs/{id})

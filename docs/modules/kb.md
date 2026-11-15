@@ -70,7 +70,7 @@ protect against an administrator replacing files on disk.
 
 ## Supported journeys
 
-A standalone KB hosts shared knowledge through the same Go memory and PostgreSQL modules. A separate Server may connect for shared-memory access while retaining its own identity and personal store. Ordinary Docker storage is the default; the explicit LUKS
+A standalone KB hosts shared knowledge through its knowledge domains and the Go PostgreSQL module; shared memory is served by the memory implementation installed for the KB role. A separate Server may connect for shared-memory access while retaining its own identity and personal store. Ordinary Docker storage is the default; the explicit LUKS
 Compose overlay is a PostgreSQL deployment option, independent of `kb`
 identity. See `docs/DEPLOYMENT.md` for the deployment topology and storage choices.
 

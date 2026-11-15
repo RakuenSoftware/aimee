@@ -6,6 +6,7 @@
  * cannot traverse the path or collide with another principal. See vault_store.h.
  */
 #include "vault_store.h"
+#include "vault_content_privacy.h"
 #include "vault_internal.h" /* vault_store_backend_t seam */
 #include "vault_crypto.h"
 #include "vault_kek_check.h"
@@ -41,12 +42,13 @@ int vault_fenced_use_callback_active(void)
 #define VAULT_SECRET_MAX   (64 * 1024) /* opaque OAuth docs and SSH credentials */
 #define VAULT_AAD_MAX      320         /* "principal|agent|cred" (160 + 64 + 64 + seps) */
 
-/* Deployment compatibility: v2 includes permanent value-free retirement. */
+/* Keep the v2 ABI marker; new retirements retain their encrypted payloads. */
 __attribute__((used, externally_visible, retain))
 const unsigned aimee_vault_immutable_custody_contract_v2 = 2;
 
 #define IMMUTABLE_MARKER  "immutable_generation_v1"
 #define RETIRED_MARKER    "immutable_retired_v1"
+#define HISTORY_MARKER    "retained_unavailable_v1"
 #define IMMUTABLE_AAD_MAX (VAULT_AAD_MAX + 80)
 static int generation_valid(const char *s)
 {
@@ -61,7 +63,8 @@ static int generation_valid(const char *s)
    }
    return nonzero;
 }
-/* 0 legacy, 1 live immutable, 2 value-free retirement, -1 malformed marker. */
+/* 0 mutable, 1 live immutable, 2 unavailable immutable, -1 malformed marker.
+ * Legacy four-field tombstones remain unavailable; new retirements keep ciphertext. */
 static int immutable_state(const cJSON *entry)
 {
    const cJSON *generation = cJSON_GetObjectItemCaseSensitive(entry, IMMUTABLE_MARKER);
@@ -72,28 +75,22 @@ static int immutable_state(const cJSON *entry)
       return -1;
    if (!retired)
       return 1;
-   if (!cJSON_IsTrue(retired) || cJSON_GetArraySize(entry) != 4 ||
+   if (!cJSON_IsTrue(retired) ||
+       (cJSON_GetArraySize(entry) != 4 && cJSON_GetArraySize(entry) != 8 &&
+        cJSON_GetArraySize(entry) != 9) ||
        !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(entry, "agent")) ||
        !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(entry, "cred")))
       return -1;
    return 2;
 }
-/* Detach + free the (agent,cred) entry from the creds array if present. */
-static void remove_cred(cJSON *creds, cJSON *entry)
+/* Current lookup excludes historical versions; encrypted values and key wraps
+ * remain in the same retained inventory and participate in every key rotation. */
+static int archive_cred(cJSON *entry)
 {
-   if (!creds || !entry)
-      return;
-   int idx = 0;
-   cJSON *e = NULL;
-   cJSON_ArrayForEach(e, creds)
-   {
-      if (e == entry)
-      {
-         cJSON_DeleteItemFromArray(creds, idx);
-         return;
-      }
-      idx++;
-   }
+   return !entry || cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, HISTORY_MARKER)) ||
+                  cJSON_AddTrueToObject(entry, HISTORY_MARKER)
+              ? 0
+              : -1;
 }
 
 /* Vault records keep their historical unpadded URL decoding profile. */
@@ -326,7 +323,8 @@ static cJSON *find_cred(cJSON *root, const char *agent, const char *cred)
    {
       cJSON *ja = cJSON_GetObjectItemCaseSensitive(e, "agent");
       cJSON *jc = cJSON_GetObjectItemCaseSensitive(e, "cred");
-      if (cJSON_IsString(ja) && cJSON_IsString(jc) && strcmp(ja->valuestring, agent) == 0 &&
+      if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(e, HISTORY_MARKER)) &&
+          cJSON_IsString(ja) && cJSON_IsString(jc) && strcmp(ja->valuestring, agent) == 0 &&
           strcmp(jc->valuestring, cred) == 0)
          return e;
    }
@@ -482,7 +480,8 @@ static int vault_stage_credential(cJSON *root, const char *principal, const uint
       cJSON *creds = creds_array(root);
       if (!creds)
          goto out;
-      remove_cred(creds, find_cred(root, agent, cred)); /* replace any existing entry */
+      if (archive_cred(find_cred(root, agent, cred)))
+         goto out;
       cJSON *obj = cJSON_CreateObject();
       if (!obj)
          goto out;
@@ -856,7 +855,7 @@ static int jsonfile_add_server_wraps(void *ctx, const char *principal,
             rc = -1;
             break;
          }
-         if (state == 2)
+         if (state == 2 && !cJSON_HasObjectItem(e, "ciphertext"))
             continue;
 
          if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(e, "wrapped_dek_server")))
@@ -919,7 +918,7 @@ static int jsonfile_rekey_field(void *ctx, const char *principal, const char *fi
             rc = -1;
             break;
          }
-         if (state == 2)
+         if (state == 2 && !cJSON_HasObjectItem(e, "ciphertext"))
             continue;
 
          cJSON *jw = cJSON_GetObjectItemCaseSensitive(e, field);
@@ -1106,7 +1105,7 @@ static int jsonfile_rekey(void *ctx, const char *principal, const uint8_t old_ke
             rc = -1;
             break;
          }
-         if (state == 2)
+         if (state == 2 && !cJSON_HasObjectItem(e, "ciphertext"))
             continue;
 
          cJSON *jw = cJSON_GetObjectItemCaseSensitive(e, "wrapped_dek");
@@ -1184,6 +1183,8 @@ static int jsonfile_list(void *ctx, const char *principal, vault_store_entry_t *
    {
       cJSON_ArrayForEach(e, creds)
       {
+         if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(e, HISTORY_MARKER)))
+            continue;
          int state = immutable_state(e);
          if (state < 0)
          {
@@ -1211,6 +1212,7 @@ static int jsonfile_list(void *ctx, const char *principal, vault_store_entry_t *
 
 static int retire_or_remove(cJSON *creds, cJSON *entry)
 {
+   (void)creds;
    if (!entry)
       return 0;
    int state = immutable_state(entry);
@@ -1219,28 +1221,10 @@ static int retire_or_remove(cJSON *creds, cJSON *entry)
    if (state == 2)
       return 0;
    if (!state)
-   {
-      remove_cred(creds, entry);
-      return 1;
-   }
-   cJSON *retired = cJSON_CreateObject();
-   if (!retired ||
-       !cJSON_AddStringToObject(
-           retired, "agent",
-           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "agent"))) ||
-       !cJSON_AddStringToObject(
-           retired, "cred",
-           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "cred"))) ||
-       !cJSON_AddStringToObject(
-           retired, IMMUTABLE_MARKER,
-           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, IMMUTABLE_MARKER))) ||
-       !cJSON_AddTrueToObject(retired, RETIRED_MARKER) ||
-       !cJSON_ReplaceItemViaPointer(creds, entry, retired))
-   {
-      cJSON_Delete(retired);
-      return -1;
-   }
-   return 1;
+      return archive_cred(entry) ? -1 : 1;
+   /* Keep the exact authenticated ciphertext, nonce, tag and wrapped DEKs.
+    * Retiring the current generation changes availability, never custody. */
+   return cJSON_AddTrueToObject(entry, RETIRED_MARKER) ? 1 : -1;
 }
 
 /* Re-establish durability for a tombstone left visible by an earlier rename
@@ -1438,6 +1422,46 @@ done:
    return result;
 }
 
+/* Fixed-purpose host privacy index. Immutable random key survives master-key
+ * rotation; a retired/tampered slot never becomes a replacement key. */
+int vault_store_content_index_key(const uint8_t *server_kek, char *out, size_t cap)
+{
+   if (!server_kek || !out || cap < 65)
+      return -1;
+   memset(out, 0, cap);
+   unsigned char random[32];
+   char candidate[65], generation[VAULT_IMMUTABLE_GENERATION_CAP];
+   if (vault_crypto_random(random, sizeof(random)))
+      return -1;
+   for (size_t i = 0; i < sizeof(random); ++i)
+      snprintf(candidate + i * 2, 3, "%02x", random[i]);
+   OPENSSL_cleanse(random, sizeof(random));
+   vault_create_once_result_t created =
+       jsonfile_create_server_once(NULL, "content-privacy-index", server_kek, "privacy", "index",
+                                   candidate, generation, sizeof(generation));
+   OPENSSL_cleanse(candidate, sizeof(candidate));
+   if (created != VAULT_CREATE_ONCE_CREATED && created != VAULT_CREATE_ONCE_REPLAY &&
+       created != VAULT_CREATE_ONCE_CONFLICT)
+      return -1;
+   int lock = vault_write_lock();
+   if (lock < 0)
+      return -1;
+   cJSON *root = load_vault("content-privacy-index");
+   cJSON *entry = find_cred(root, "privacy", "index");
+   int rc = !entry || immutable_state(entry) != 1
+                ? -1
+                : jsonfile_get_server_snapshot(root, "content-privacy-index", server_kek, "privacy",
+                                               "index", out, cap, NULL);
+   cJSON_Delete(root);
+   vault_write_unlock(lock);
+   if (rc || strlen(out) != 64)
+   {
+      OPENSSL_cleanse(out, cap);
+      return -1;
+   }
+   return 0;
+}
+
 static vault_retire_generation_result_t
 jsonfile_retire_server_generation(void *ctx, const char *principal, const char *agent,
                                   const char *cred, const char *expected)
@@ -1626,7 +1650,12 @@ static int g_instance_local;
 
 static const vault_store_backend_t *store_for(const char *principal)
 {
-   return g_instance_local && principal && strcmp(principal, VAULT_SERVER_PRINCIPAL) == 0
+   /* Host content custody is independent of the tenant backend's unlocked
+    * organization-vault contract. Keep these reserved host slots in the same
+    * immutable local Vault on Server and KB. */
+   int content = principal && (!strncmp(principal, "kb-content:", 11) ||
+                               !strcmp(principal, "content-privacy-index"));
+   return content || (g_instance_local && principal && !strcmp(principal, VAULT_SERVER_PRINCIPAL))
               ? &jsonfile_backend
               : g_store_backend;
 }
@@ -2114,18 +2143,40 @@ int vault_store_list_principals(char (*out)[VAULT_PRINCIPAL_MAX], int max)
 {
    if (g_fenced_use_callback)
       return -1;
-   if (!g_instance_local)
-      return g_store_backend->list_principals(g_store_backend->ctx, out, max);
    if (!out || max < 1)
       return -1;
-   snprintf(out[0], VAULT_PRINCIPAL_MAX, "%s", VAULT_SERVER_PRINCIPAL);
-   int n = g_store_backend->list_principals(g_store_backend->ctx, out + 1, max - 1);
-   if (n < 0 || n >= max)
+   if (g_store_backend == &jsonfile_backend)
+      return jsonfile_list_principals(NULL, out, max);
+   int used = g_store_backend->list_principals(g_store_backend->ctx, out, max);
+   if (used < 0 || used >= max)
       return -1;
-   int used = 1;
-   for (int i = 1; i <= n; i++)
-      if (strcmp(out[i], VAULT_SERVER_PRINCIPAL) != 0)
-         memmove(out[used++], out[i], VAULT_PRINCIPAL_MAX);
+   char(*local)[VAULT_PRINCIPAL_MAX] = calloc((size_t)max, sizeof(*local));
+   if (!local)
+      return -1;
+   int n = jsonfile_list_principals(NULL, local, max);
+   if (n < 0 || n >= max)
+   {
+      free(local);
+      return -1;
+   }
+   for (int i = 0; i < n; ++i)
+   {
+      if (store_for(local[i]) != &jsonfile_backend)
+         continue;
+      int duplicate = 0;
+      for (int j = 0; j < used; ++j)
+         duplicate |= !strcmp(out[j], local[i]);
+      if (!duplicate)
+      {
+         if (used >= max)
+         {
+            free(local);
+            return -1;
+         }
+         memcpy(out[used++], local[i], VAULT_PRINCIPAL_MAX);
+      }
+   }
+   free(local);
    return used;
 }
 

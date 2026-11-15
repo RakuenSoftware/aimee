@@ -6,11 +6,10 @@ import (
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
 
-// The cognify queue, the agent log and its aggregates, and trigger runs.
+// The agent log and its aggregates, and trigger runs.
 
 // Reply widths, from the catalog.
 const (
-	cognifyClaimCells    = 9
 	agentLogRowCells     = 13
 	agentLogFailureCells = 3
 	agentLogPatternCells = 8
@@ -20,112 +19,6 @@ const (
 	agentLogPromCells    = 8
 	roleCountCells       = 2
 )
-
-// --- the cognify queue ---------------------------------------------------------
-
-const (
-	// Enqueueing the same memory twice is one job, not two.
-	cognifyEnqueueSQL = `INSERT INTO memory_cognify_jobs (kind, memory_id)
-	                     VALUES ('cognify_unit', $1)
-	                     ON CONFLICT (kind, memory_id) DO NOTHING`
-
-	cognifyStatusSQL = `SELECT COUNT(*) FILTER (WHERE status = 'pending'),
-	                           COUNT(*) FILTER (WHERE status = 'running'),
-	                           COUNT(*) FILTER (WHERE status = 'done'),
-	                           COUNT(*) FILTER (WHERE status = 'failed'),
-	                           COUNT(*)
-	                      FROM memory_cognify_jobs`
-
-	// Claiming the next job, as one statement.
-	//
-	// The C took SQLite's whole-database write lock (BEGIN IMMEDIATE), read the
-	// oldest pending job, and updated it -- correct, but it serialised every
-	// other writer in the store behind a queue poll.
-	//
-	// FOR UPDATE SKIP LOCKED is the shape this actually wants: two claimants
-	// take two DIFFERENT jobs instead of one waiting for the other, and nothing
-	// outside this table is held up at all.
-	cognifyClaimNextSQL = `UPDATE memory_cognify_jobs
-	                          SET status = 'running',
-	                              attempts = attempts + 1,
-	                              claimed_by = $1,
-	                              claimed_at = now(),
-	                              updated_at = now()
-	                        WHERE id = (SELECT id FROM memory_cognify_jobs
-	                                     WHERE status = 'pending'
-	                                     ORDER BY id
-	                                     LIMIT 1
-	                                     FOR UPDATE SKIP LOCKED)
-	                    RETURNING id, memory_id, attempts, max_attempts, kind, status,
-	                              claimed_by,
-	                              COALESCE(to_char(claimed_at AT TIME ZONE 'utc',
-	                                       'YYYY-MM-DD HH24:MI:SS'), ''),
-	                              last_error`
-
-	// Marking a job done or failed releases it: a finished job that still names
-	// a claimant reads as held forever.
-	cognifyMarkSQL = `UPDATE memory_cognify_jobs
-	                     SET status = $2, last_error = $3,
-	                         claimed_by = '', claimed_at = NULL, updated_at = now()
-	                   WHERE id = $1`
-)
-
-func cognifyEnqueue(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	memoryID, ok := store.Atoi64(f[0])
-	if !ok || memoryID <= 0 {
-		return store.StatusInvalid, nil, nil
-	}
-	// DO NOTHING makes a repeat a no-op, so this succeeds either way: the
-	// caller asked for the memory to be queued and it is.
-	if _, err := q.Exec(ctx, cognifyEnqueueSQL, memoryID); err != nil {
-		return store.StatusFailed, nil, err
-	}
-	return store.StatusOK, nil, nil
-}
-
-func cognifyStatus(ctx context.Context, q store.Queryer, _ []string) (uint32, []string, error) {
-	var pending, running, done, failed, total int64
-	if err := q.QueryRow(ctx, cognifyStatusSQL).Scan(
-		&pending, &running, &done, &failed, &total); err != nil {
-		return store.StatusFailed, nil, err
-	}
-	return store.StatusOK, []string{
-		store.I64toa(pending), store.I64toa(running), store.I64toa(done),
-		store.I64toa(failed), store.I64toa(total),
-	}, nil
-}
-
-// cognifyClaimNext takes the oldest pending job. MISSING means the queue is
-// empty, which is an answer rather than a failure.
-func cognifyClaimNext(ctx context.Context, q store.Queryer, _ []string) (uint32, []string, error) {
-	var (
-		id, memoryID, attempts, maxAttempts int64
-		kind, status, claimedBy, claimedAt  string
-		lastError                           string
-	)
-	err := q.QueryRow(ctx, cognifyClaimNextSQL, "cognify-worker").Scan(
-		&id, &memoryID, &attempts, &maxAttempts, &kind, &status,
-		&claimedBy, &claimedAt, &lastError)
-	if store.IsNoRows(err) {
-		return store.StatusMissing, nil, nil
-	}
-	if err != nil {
-		return store.StatusFailed, nil, err
-	}
-	return store.StatusOK, []string{
-		store.I64toa(id), store.I64toa(memoryID),
-		store.I64toa(attempts), store.I64toa(maxAttempts),
-		kind, status, claimedBy, claimedAt, lastError,
-	}, nil
-}
-
-func cognifyMark(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	id, ok := store.Atoi64(f[0])
-	if !ok || id <= 0 || f[1] == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	return touchedOrMissing(ctx, q, cognifyMarkSQL, id, f[1], f[2])
-}
 
 // --- the agent log --------------------------------------------------------------
 

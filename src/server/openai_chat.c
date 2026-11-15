@@ -866,8 +866,7 @@ failure:
    emit(ctx, failure);
 }
 cleanup:
-   if (chat)
-      emit(ctx, "[DONE]");
+   /* server_http owns the single `data: [DONE]` trailer for both routes. */
    free(model);
    aimee_request_free(&request);
    aimee_response_free(&response);

@@ -150,7 +150,7 @@ scan '\\bdb1_window_fts_(add|search|available)\\b|\\bdb1_window_fts_hit_t\\b' \
   "non-DB1 callers expose DB1 lexical-index implementation names"
 path_scan 'memory_collect_fts_via_vector|MEM_SOURCE_FTS|FTS string|FTS query string|FTS/graph|unit/fts|generic FTS path|memory FTS|FTS5 / semantic|pre-DB3 FTS|kb_store_memory_collect_fts_matches|memory_units_fts MATCH|memory_negation_fts FTS table' \
   "memory recall helpers expose stale FTS collector names" \
-  src/modules/memory/memory_core_search.inc src/modules/kb/c/memory_query.h src/modules/kb/c/memory_query.c
+  src/modules/memory/memory_core_search.inc
 path_scan 'fts_search_via_vector|MAX_FTS_RESULTS|fts_res|n_fts|fts_weight|weights: fts|"fts"|ed_build_fts_match|kb_store_directive_match_by_fts|FTS over question|FTS match on question|alpha\*FTS|FTS and vector|FTS_OR|ED_FTS' \
   "KB/directive/query-plan surfaces expose stale FTS vocabulary" \
   src/kb/kb.c src/headers/config.h src/headers/memory.h src/headers/aimee.h \

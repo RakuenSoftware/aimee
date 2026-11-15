@@ -4,6 +4,8 @@
 #endif
 
 #include "headers/module_commands.h"
+#include "headers/memory_stage_contract.h"
+extern int vault_content_protect_json(const char *, char **) __attribute__((weak));
 #include <ouroboros/module_protocol.h>
 
 #include "aimee/audit/obs_bus.h"
@@ -219,6 +221,7 @@ static void wr_u16(unsigned char *p, uint16_t v)
 typedef struct
 {
    char *args_json;
+   char *privacy_redacted;
    char *context_json;
    unsigned char *request;
    unsigned char *response;
@@ -229,6 +232,7 @@ static void command_call_cleanup(void *opaque)
 {
    volatile command_call_scope_t *scope = opaque;
    free(scope->args_json);
+   free(scope->privacy_redacted);
    free(scope->context_json);
    free(scope->request);
    free(scope->response);
@@ -249,6 +253,10 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
    command_outcome_reset(outcome);
    if (!event_kind || !stage_id || !verb || !verb[0] || strlen(verb) > 127)
       return NULL;
+   /* pthread_cleanup_push may setjmp; read the verb only from this frame's
+    * own copy so no argument register is live across it (-Wclobbered). */
+   char verb_copy[128];
+   snprintf(verb_copy, sizeof(verb_copy), "%s", verb);
    volatile command_call_scope_t owned = {0};
    cJSON *volatile result = NULL;
    pthread_cleanup_push(command_call_cleanup, (void *)&owned);
@@ -258,6 +266,57 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
       owned.args_json = cJSON_PrintUnformatted((cJSON *)args);
       if (!owned.args_json)
          goto done;
+      /* Host Vault intake precedes the first raw-value bus frame. Never rewrite
+       * signed source/projection operations or their authenticated context. */
+      const char *operation =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation"));
+      int intake = !strcmp(verb_copy, "store") || !strcmp(verb_copy, "supersede") ||
+                   !strcmp(verb_copy, "search") || !strcmp(verb_copy, "recall") ||
+                   !strcmp(verb_copy, "screen_content") || !strcmp(verb_copy, "facts") ||
+                   !strcmp(verb_copy, "search_graph") || !strcmp(verb_copy, "entity_edges") ||
+                   !strcmp(verb_copy, "serve") || !strcmp(verb_copy, "claim_card") ||
+                   (!strcmp(verb_copy, "runtime") && operation &&
+                    (!strncmp(operation, "user-", 5) || !strncmp(operation, "shared-", 7) ||
+                     !strcmp(operation, "memory-query")));
+      if (event_kind == AIMEE_MEMORY_EVENT_COMMAND && intake && vault_content_protect_json)
+      {
+         char *safe = NULL;
+         if (vault_content_protect_json(owned.args_json, &safe))
+            goto done;
+         if (safe)
+         {
+            if (!strcmp(verb_copy, "screen_content"))
+            {
+               cJSON *intake = cJSON_ParseWithOpts(safe, NULL, 1);
+               const char *text =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(intake, "content"));
+               owned.privacy_redacted = text ? strdup(text) : NULL;
+               cJSON_Delete(intake);
+               if (!owned.privacy_redacted)
+               {
+                  free(safe);
+                  goto done;
+               }
+            }
+            free(owned.args_json);
+            owned.args_json = safe;
+         }
+         /* HTTP intake may already have transformed this text. A screen
+          * response must return that safe text rather than tell a caller to
+          * keep its original private input. Locators remain ordinary data. */
+         if (!strcmp(verb_copy, "screen_content") && !owned.privacy_redacted)
+         {
+            cJSON *screen = cJSON_ParseWithOpts(owned.args_json, NULL, 1);
+            const char *text =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(screen, "content"));
+            if (text && strstr(text, "[[vault:v1:"))
+               owned.privacy_redacted = strdup(text);
+            int failed = text && strstr(text, "[[vault:v1:") && !owned.privacy_redacted;
+            cJSON_Delete(screen);
+            if (failed)
+               goto done;
+         }
+      }
       args_len = strlen(owned.args_json);
    }
    owned.context_json = context && cJSON_IsObject(context) ? cJSON_PrintUnformatted(context) : NULL;
@@ -265,7 +324,7 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
       goto done;
    size_t context_len = owned.context_json ? strlen(owned.context_json) : 0;
    size_t header_len = context ? 20 : INVOKE_REQUEST_HEADER;
-   size_t verb_len = strlen(verb);
+   size_t verb_len = strlen(verb_copy);
    size_t request_len = header_len + verb_len + args_len + context_len;
    if (request_len > OURO_MODULE_MESSAGE_MAX_BODY || context_len > 4096)
       goto done;
@@ -279,7 +338,7 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
    wr_u32(owned.request + 12, (uint32_t)args_len);
    if (context)
       wr_u32(owned.request + 16, (uint32_t)context_len);
-   memcpy(owned.request + header_len, verb, verb_len);
+   memcpy(owned.request + header_len, verb_copy, verb_len);
    if (args_len)
       memcpy(owned.request + header_len + verb_len, owned.args_json, args_len);
    if (context_len)
@@ -304,7 +363,8 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
    }
    if (rc != OURO_MODULE_CALL_OK)
    {
-      LOG_WARN("commands", "command %s: invoke failed: %s", verb, ouro_module_call_result_name(rc));
+      LOG_WARN("commands", "command %s: invoke failed: %s", verb_copy,
+               ouro_module_call_result_name(rc));
       goto done;
    }
    if (outcome)
@@ -312,13 +372,13 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
    if (response_len < INVOKE_RESPONSE_HEADER || rd_u32(owned.response) != INVOKE_RESPONSE_MAGIC ||
        rd_u32(owned.response + 4) != DECL_WIRE_VERSION)
    {
-      LOG_WARN("commands", "command %s: malformed frame", verb);
+      LOG_WARN("commands", "command %s: malformed frame", verb_copy);
       goto done;
    }
    uint32_t body_len = rd_u32(owned.response + 8);
    if ((uint64_t)INVOKE_RESPONSE_HEADER + body_len != response_len)
    {
-      LOG_WARN("commands", "command %s: frame length disagrees with its header", verb);
+      LOG_WARN("commands", "command %s: frame length disagrees with its header", verb_copy);
       goto done;
    }
    /* The raw sibling transports untrusted response bytes without normalizing
@@ -330,6 +390,37 @@ static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_i
       goto done;
    memcpy(owned.body, owned.response + INVOKE_RESPONSE_HEADER, body_len);
    owned.body[body_len] = '\0';
+   if (owned.privacy_redacted)
+   {
+      /* Preserve the screen API's combined result: the host established actual
+       * Vault custody, then the selected owner screened only the safe text. */
+      cJSON *screen = cJSON_ParseWithOpts(owned.body, NULL, 1);
+      const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(screen, "status"));
+      const char *verdict =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(screen, "verdict"));
+      if (status && !strcmp(status, "ok") && verdict && !strcmp(verdict, "allow"))
+      {
+         if (!cJSON_ReplaceItemInObjectCaseSensitive(screen, "verdict",
+                                                     cJSON_CreateString("redact")) ||
+             !cJSON_ReplaceItemInObjectCaseSensitive(screen, "redacted",
+                                                     cJSON_CreateString(owned.privacy_redacted)))
+         {
+            cJSON_Delete(screen);
+            goto done;
+         }
+         char *combined = cJSON_PrintUnformatted(screen);
+         if (!combined)
+         {
+            cJSON_Delete(screen);
+            goto done;
+         }
+         free(owned.body);
+         owned.body = combined;
+         body_len = (uint32_t)strlen(combined);
+      }
+      cJSON_Delete(screen);
+   }
+
    free(owned.response);
    owned.response = NULL;
    if (outcome)

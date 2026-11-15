@@ -56,7 +56,10 @@ int main(void)
           fd == -1);
 
    const char *cat = trusted_fixture("AIMEE_TEST_TRUSTED_CAT", "/usr/bin/cat", "/bin/cat");
-   assert(kb_workload_helper_open(cat, &fd) == KB_WORKLOAD_HELPER_OK && fd > 2);
+   kb_workload_helper_result_t opened = kb_workload_helper_open(cat, &fd);
+   if (opened != KB_WORKLOAD_HELPER_OK || fd <= 2)
+      fprintf(stderr, "trusted fixture open: path=%s result=%d fd=%d\n", cat, (int)opened, fd);
+   assert(opened == KB_WORKLOAD_HELPER_OK && fd > 2);
    static const unsigned char request[] = "descriptor-pinned duplex";
    unsigned char response[128];
    memset(response, 0xa5, sizeof(response));

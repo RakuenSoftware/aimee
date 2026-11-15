@@ -6,6 +6,7 @@
  * 32 bytes. */
 #include "vault_server_key.h"
 #include "vault_crypto.h"
+#include "vault_store.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,6 +92,50 @@ static void test_bad_master_key_not_overwritten(void)
    printf("  PASS: test_bad_master_key_not_overwritten\n");
 }
 
+static void test_missing_master_preserves_custody(void)
+{
+   char path[512], saved[560];
+   snprintf(path, sizeof(path), "%s/.vault/.server-master.key", g_home);
+   snprintf(saved, sizeof(saved), "%s.fixture-original", path);
+   uint8_t before[VAULT_KEK_LEN], after[VAULT_KEK_LEN];
+   assert(vault_server_kek(before) == 0);
+   assert(rename(path, saved) == 0);
+   vault_server_key_reset_for_test();
+   memset(after, 1, sizeof(after));
+   assert(vault_server_kek(after) == -1 && is_all_zero(after, sizeof(after)));
+   assert(access(path, F_OK) != 0);
+   int principals = 0, credentials = 0;
+   char backup[1024], error[512];
+   assert(vault_server_key_rotate("server", &principals, &credentials, backup, sizeof(backup),
+                                  error, sizeof(error)) == -1);
+   assert(strstr(error, "missing") && access(path, F_OK) != 0);
+   /* The failed rotation must release its mutex so same-process recovery works. */
+   assert(rename(saved, path) == 0);
+   vault_server_key_reset_for_test();
+   assert(vault_server_kek(after) == 0 && !memcmp(before, after, sizeof(before)));
+   uint8_t salt[VAULT_SALT_LEN];
+   assert(!vault_store_get_or_create_salt("uid:key-history", salt));
+   assert(!vault_store_set_server("uid:key-history", after, "key-loss", "retained",
+                                  "synthetic retained credential"));
+   char marker[600], marker_saved[640];
+   snprintf(marker, sizeof(marker), "%s.initialized", path);
+   snprintf(marker_saved, sizeof(marker_saved), "%s.fixture-old-format", marker);
+   assert(!rename(marker, marker_saved));
+   assert(!rename(path, saved));
+   vault_server_key_reset_for_test();
+   assert(vault_server_kek(after) == -1 && is_all_zero(after, sizeof(after)));
+   assert(access(path, F_OK) != 0);
+   assert(!rename(saved, path));
+   assert(!rename(marker_saved, marker));
+   vault_server_key_reset_for_test();
+   assert(!vault_server_kek(after) && !memcmp(before, after, sizeof(before)));
+   char secret[128];
+   assert(!vault_store_get_server("uid:key-history", after, "key-loss", "retained", secret,
+                                  sizeof(secret)));
+   assert(!strcmp(secret, "synthetic retained credential"));
+   puts("  PASS: missing initialized master remains absent; original key restores custody");
+}
+
 static void test_concurrent_first_boot(const char *executable)
 {
    pid_t children[16];
@@ -157,6 +202,7 @@ int main(int argc, char **argv)
    test_stable_cached();
    test_survives_restart();
    test_master_key_file_locked_down();
+   test_missing_master_preserves_custody();
    test_bad_master_key_not_overwritten(); /* must run last: corrupts the key file */
 
    char rm[320];

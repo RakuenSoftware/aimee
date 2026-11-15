@@ -8,6 +8,8 @@ limits or durable receipts.
 No credentials, prompt bodies or provider headers are written to the result.
 """
 import argparse
+import difflib
+import re
 import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,6 +34,24 @@ def strings(value):
         for child in value.values():
             yield from strings(child)
 
+
+
+def projection_change_shapes(expected, values):
+    """Failure metadata only: never serialize source bytes or receipt tokens."""
+    if not values:
+        return dict(changes=[])
+    actual = max(values, key=lambda text: difflib.SequenceMatcher(None, expected, text).ratio())
+    changes = []
+    for operation, left, right, observed_left, observed_right in difflib.SequenceMatcher(None, expected, actual, autojunk=False).get_opcodes():
+        if operation == 'equal':
+            continue
+        value = expected[left:right]
+        kind = ('digits' if value.isdecimal() else 'uuid' if re.fullmatch(r'[a-f0-9-]{36}', value)
+                else 'words' if re.fullmatch(r'[A-Za-z -]+', value) else 'other')
+        syntax = lambda text: ''.join('D' if c.isdigit() else 'L' if c.isalpha() else '*' if ord(c)>127 else c for c in text[:100])
+        changes.append(dict(operation=operation, source_characters=len(value), shape=kind,
+                            source_context=syntax(expected[max(0,left-50):min(len(expected),right+50)]), source_syntax=syntax(value), observed_syntax=syntax(actual[observed_left:observed_right])))
+    return dict(changes=changes[:16])
 
 
 def request_outcome(status, response, provider_requests):
@@ -263,7 +283,9 @@ def inside(output, budget_benchmark=False):
                           isinstance(sent.get('messages'), list) and
                           all(t.get('type') == 'function' and 'function' in t for t in sent.get('tools', [])))
                 values = list(strings(sent))
-                check(name + ' preserves the complete Go memory projection', any(context in text for text in values))
+                preserved = any(context in text for text in values)
+                check(name + ' preserves the complete Go memory projection', preserved,
+                      projection_change_shapes(context, values) if not preserved else None)
                 check(name + ' preserves the user constraint', any(policy in text for text in values))
                 check(name + ' includes the tool schema in the final request', tool['name'] in values and
                       tool['description'] in values and 'record_id' in json.dumps(sent.get('tools')))
@@ -385,7 +407,8 @@ def inside(output, budget_benchmark=False):
                 input='FOLLOWUP_MEMORY_BOUNDARY', instructions=new_policy,
                 previous_response_id=responses_ids[protocol], max_output_tokens=32))
             check(name + ' continuation completes', status == 200 and
-                  any('MEMORY_BOUNDARY_OK' in text for text in strings(response)))
+                  any('MEMORY_BOUNDARY_OK' in text for text in strings(response)),
+                  request_outcome(status, response, len(captures) - before) if status != 200 else None)
             selected = captures[before:]
             check(name + ' continuation dispatches once', len(selected) == 1)
             values = list(strings(selected[0][2]))
@@ -417,7 +440,9 @@ def inside(output, budget_benchmark=False):
                 executable = (process / 'cmdline').read_bytes().split(b'\0')[0]
             except (FileNotFoundError, PermissionError, ProcessLookupError):
                 continue
-            if executable.endswith(b'/aimee-module-memory'):
+            # The frozen 1.0 owner runs as aimee-module-memory; the shipped
+            # implementation's memory frontend as aimee-memory-module.
+            if executable.endswith((b'/aimee-module-memory', b'/aimee-memory-module')):
                 memory_pids.append(int(process.name))
         check('provider refusal fixture identifies one real memory owner', len(memory_pids) == 1)
         owner_pid = memory_pids[0]
@@ -446,6 +471,13 @@ def inside(output, budget_benchmark=False):
             os.kill(owner_pid, signal.SIGTERM)
             deadline = time.monotonic() + 75
             while True:
+                # A resumed owner may answer a read before SIGTERM finishes; that
+                # is not evidence that its supervised replacement is ready.
+                if Path('/proc', str(owner_pid)).exists():
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('paused memory owner did not exit after SIGTERM')
+                    time.sleep(0.1)
+                    continue
                 status, recovered = api('/v1/memory/get', dict(id=str(memory_id)))
                 if status == 200 and recovered.get('memory', {}).get('content') == content:
                     break

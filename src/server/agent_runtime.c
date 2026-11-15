@@ -18,7 +18,6 @@
 #include "role_templates.h"
 #include "provider_catalog.h"
 #include "modules/kb/c/agent_hints.h"
-#include "modules/kb/c/memory_query.h"
 #include "modules/kb/c/rules.h"
 #include "modules/kb/c/tasks.h"
 #include "kb_client.h"
@@ -1514,7 +1513,7 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
                                            int mark_reminders, int *native_started, char *error,
                                            size_t error_len)
 {
-   /* The Go owner decides whether recall is usable. Preserve explicit
+   /* The memory owner decides whether recall is usable. Preserve explicit
     * refusals instead of treating an absent recall member as empty memory.
     * No host interpretation of memory policy or individual error kinds. */
    const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "status"));
@@ -1523,6 +1522,14 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
       const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "kind"));
       const char *message =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "message"));
+      /* A request the owner already refused reports that first refusal (for
+       * example stale_context), not the failure it causes in a later call. */
+      const request_context_t *owner = request_context_get();
+      if (owner && owner->context_refused && owner->context_refusal_kind[0])
+      {
+         kind = owner->context_refusal_kind;
+         message = NULL;
+      }
       if (error && error_len)
          snprintf(error, error_len, "memory context refused: %s%s%s",
                   kind ? kind : (status ? status : "unavailable"), message ? ": " : "",
@@ -1564,8 +1571,16 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
    cJSON_Delete(accepted_projection);
    if (accepted != 0)
    {
+      /* As above: an owner refusal earlier in this request (for example a
+       * stale retained source) is the reason, not this later import. */
+      const request_context_t *owner = request_context_get();
       if (error && error_len)
-         snprintf(error, error_len, "memory context refused: source release unavailable");
+      {
+         if (owner && owner->context_refused && owner->context_refusal_kind[0])
+            snprintf(error, error_len, "memory context refused: %s", owner->context_refusal_kind);
+         else
+            snprintf(error, error_len, "memory context refused: source release unavailable");
+      }
       return -1;
    }
    *native_started = 1;

@@ -29,9 +29,12 @@ class NativeAsyncProfiles(unittest.TestCase):
         api.assert_not_called()
 
     def test_explicit_reference_requires_exact_unavailable(self):
-        api = Mock(return_value=(200, self.unavailable()))
-        self.assertFalse(ASYNC.shared_lane_enabled('public-reference', True, api, self.require))
-        api.assert_called_once_with('/v1/memory/recall', dict(store='kb', query='native-profile-boundary', scope='all'))
+        for profile in ('public-reference', 'no-shared-owner'):
+            with self.subTest(profile=profile):
+                api = Mock(return_value=(200, self.unavailable()))
+                self.assertFalse(ASYNC.shared_lane_enabled(profile, True, api, self.require))
+                api.assert_called_once_with('/v1/memory/recall',
+                                            dict(store='kb', query='native-profile-boundary', scope='all'))
 
     def test_reference_rejects_failures_or_data_instead_of_skipping(self):
         for status, changes in [(503, {}), (200, {'status': 'error'}), (200, {'retryable': False}),
@@ -39,15 +42,17 @@ class NativeAsyncProfiles(unittest.TestCase):
                                 (200, {'memory': None}), (200, {'results': []})]:
             with self.subTest(status=status, changes=changes):
                 reply = dict(self.unavailable(), **changes)
-                with self.assertRaises(AssertionError):
-                    ASYNC.shared_lane_enabled('public-reference', True, Mock(return_value=(status, reply)), self.require)
+                for profile in ('public-reference', 'no-shared-owner'):
+                    with self.assertRaises(AssertionError):
+                        ASYNC.shared_lane_enabled(profile, True, Mock(return_value=(status, reply)), self.require)
 
     def test_unknown_profile_never_downgrades(self):
         with self.assertRaises(ValueError):
             ASYNC.shared_lane_enabled('unknown', True, Mock(), self.require)
 
     def test_inside_parser_defaults_to_owner_client_and_propagates_explicit_profile(self):
-        for args, expected in [([], 'owner-client'), (['--shared-profile', 'public-reference'], 'public-reference')]:
+        for args, expected in [([], 'owner-client'), (['--shared-profile', 'public-reference'], 'public-reference'),
+                               (['--shared-profile', 'no-shared-owner'], 'no-shared-owner')]:
             with self.subTest(profile=expected), patch('sys.argv', ['fixture', '--inside', '--output', 'result.json', *args]), \
                  patch.object(ASYNC, 'inside', return_value=0) as inside:
                 self.assertEqual(ASYNC.main(), 0)

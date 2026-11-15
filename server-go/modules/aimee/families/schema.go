@@ -109,19 +109,6 @@ func SchemaFileCount() int {
 	return n
 }
 
-// ReplayErasureIntents runs before the owner advertises readiness, even when all
-// migration versions are already present. It returns a payload-free cleanup count.
-func ReplayErasureIntents(ctx context.Context, q store.Queryer) (int64, error) {
-	var removed int64
-	err := q.QueryRow(ctx, `SELECT user_memory_replay_erasure_intents()`).Scan(&removed)
-	if err != nil {
-		return removed, err
-	}
-	var procedures int64
-	err = q.QueryRow(ctx, `SELECT local_procedure_replay_erasure_intents()`).Scan(&procedures)
-	return removed + procedures, err
-}
-
 // Keep the original migration20 bytes/checksum immutable. Pending installations
 // defer validation of only this legacy-source check until migration50, allowing
 // retained rows to survive the upgrade. Existing original20 plans remain valid.

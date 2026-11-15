@@ -31,7 +31,6 @@
 #include "kb_curator_pipeline.h"
 #include "kb_curator_provider.h"
 #include "kb_evidence_embed.h"
-#include "kb_memory_facts.h"
 #include "kb_learning_synth.h"
 #include "kb_service_code_embed.h"
 #include "kb_service_graph.h" /* kb_graph_build_project_if_changed */
@@ -830,22 +829,6 @@ static void *drain_thread_main(void *arg)
                       "revisit sweep failed this cycle (kb_store unavailable?)");
       }
 
-      /* Typed-fact extraction drain — runs every poll, independent of the
-       * curator extract gates. Pulls "memory_facts" jobs enqueued by memory.store
-       * and runs the general LLM extractor over each memory's content. No longer
-       * gated: config.typed_facts_enabled is retired and the layer is
-       * unconditional. */
-      {
-         int n = kb_memory_facts_drain(8);
-         if (n > 0)
-            aimee_log(LOG_DEBUG, "kb.memory.facts", "drained %d memory_facts job(s)", n);
-
-         /* Observation counts only affect the operator queue's priority. P7
-          * deliberately removes the former count-based ontology promotion:
-          * activating a provisional relation is an authenticated governance
-          * decision, regardless of how often extraction observed it. */
-      }
-
       /* Backfill: queue extract_doc curation for docs that entered kb_documents
        * via the drain (kb_doc_refresh) rather than the ingest-route hook -- else
        * drain-ingested docs are never curated. Idempotent, self-gated. */
@@ -1091,16 +1074,6 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
    if (!ctx)
       return;
    memset(ctx, 0, sizeof(*ctx));
-
-   /* THE "ALL GATES OFF" EARLY RETURN IS GONE, because one of the gates it
-    * tested no longer exists and the work behind it is now unconditional.
-    *
-    * This skipped starting the drain thread when every curator gate was off,
-    * with config.typed_facts_enabled as the last term. The typed-fact drain runs
-    * every poll and is no longer gated, so the thread always has work to do:
-    * keeping the check would mean an install with the curator stages off never
-    * drains "memory_facts" jobs, and typed facts would silently stop being
-    * extracted -- exactly the class of silent-disable this retirement removes. */
 
    ctx->stop = 0;
 

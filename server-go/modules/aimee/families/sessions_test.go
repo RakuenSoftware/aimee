@@ -2,8 +2,6 @@ package families
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -122,10 +120,6 @@ func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row 
 		return inputBoolRow(false)
 	case sql == primaryGetLatestSQL && d.primaryRow != nil:
 		return sessRow{db: d, sql: sql, values: d.primaryRow}
-	case strings.Contains(sql, "local_procedure_prepare_subject_erasure"):
-		return sessRow{db: d, sql: sql, values: []any{int64(0)}}
-	case strings.Contains(sql, "user_memory_prepare_subject_erasure"):
-		return sessRow{db: d, sql: sql, values: d.receiptRow}
 	case strings.Contains(sql, "SELECT persona_delivery_state"):
 		if d.personaState == nil {
 			return sessRow{db: d, sql: sql}
@@ -172,6 +166,9 @@ func TestRetiredLegacySessionOperationsRefuseBeforeStorage(t *testing.T) {
 		{18, []string{"actor", "legacy"}},
 		{19, []string{"actor", "legacy", "sdk-id"}},
 		{20, []string{"actor", "legacy", "sdk-id"}},
+		{25, []string{"actor", "10"}},
+		{26, []string{"retired-request-0123456", "actor"}},
+		{27, []string{"retired-request-0123456", "actor"}},
 	}
 	for _, test := range cases {
 		for _, principal := range []uint32{0, 7} {
@@ -340,67 +337,6 @@ func TestExpiryReapsMutableContentGraphButNotEvidence(t *testing.T) {
 	for _, immutable := range []string{"audit", "worm", "witness", "ledger"} {
 		if strings.Contains(strings.ToLower(sql), "delete from "+immutable) {
 			t.Errorf("retention attempts to rewrite immutable evidence family %s", immutable)
-		}
-	}
-}
-
-func TestSubjectErasureIsBoundAndContentComplete(t *testing.T) {
-	db := newSessDB()
-	db.rows = [][]any{{"session-a"}, {"session-b"}}
-	status, cells := sessCall(t, db, opServerSessionListBySubject, []string{"person@example.test", "10"})
-	if status != store.StatusOK || len(cells) != 2 {
-		t.Fatalf("list status = %d, cells = %v", status, cells)
-	}
-	if got := db.args[0][0].(string); got != "person@example.test" {
-		t.Fatalf("list subject = %q", got)
-	}
-
-	db = newSessDB()
-	db.execRows = 2
-	db.receiptRow = []any{`[]`, int64(2)}
-	status, cells = sessCall(t, db, opServerSessionEraseSubject,
-		[]string{"erase-request-0123456789", "person@example.test"})
-	if status != store.StatusOK || len(cells) != 1 || cells[0] != "2" {
-		t.Fatalf("erase status = %d, cells = %v", status, cells)
-	}
-	deleteAt := -1
-	for i, sql := range db.executed {
-		if strings.Contains(sql, "WITH subject_sessions") {
-			deleteAt = i
-			break
-		}
-	}
-	if deleteAt < 0 {
-		t.Fatalf("subject deletion statement was not executed: %v", db.executed)
-	}
-	sql := db.executed[deleteAt]
-	if strings.Contains(sql, "person@example.test") || db.args[deleteAt][0] != "person@example.test" {
-		t.Fatalf("subject must be a bound parameter: sql=%q args=%v", sql, db.args[deleteAt])
-	}
-	for _, table := range []string{"working_memory", "conv_tool_events", "primary_sessions", "webchat_claude_sessions", "server_sessions"} {
-		if !strings.Contains(sql, "DELETE FROM "+table) {
-			t.Errorf("subject erasure does not delete %s", table)
-		}
-	}
-	for _, immutable := range []string{"audit", "worm", "witness", "ledger"} {
-		if strings.Contains(strings.ToLower(sql), "delete from "+immutable) {
-			t.Errorf("subject erasure attempts to rewrite immutable evidence family %s", immutable)
-		}
-	}
-}
-
-func TestSubjectErasureRetryReturnsJournaledCount(t *testing.T) {
-	db := newSessDB()
-	digestBytes := sha256.Sum256([]byte("person@example.test"))
-	db.row = []any{hex.EncodeToString(digestBytes[:]), int64(7)}
-	status, cells := sessCall(t, db, opServerSessionEraseSubject,
-		[]string{"erase-request-0123456789", "person@example.test"})
-	if status != store.StatusOK || len(cells) != 1 || cells[0] != "7" {
-		t.Fatalf("retry status = %d, cells = %v", status, cells)
-	}
-	for _, sql := range db.executed {
-		if strings.Contains(sql, "WITH subject_sessions") {
-			t.Fatal("journaled retry repeated mutable-data deletion")
 		}
 	}
 }

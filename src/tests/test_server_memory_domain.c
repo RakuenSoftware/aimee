@@ -58,6 +58,15 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    sent = request;
    return reply ? strdup(reply) : NULL;
 }
+/* The account's own typed facts; NULL unless a case supplies local rows. */
+static const char *local_reply;
+static char local_operation[64];
+cJSON *memory_user_typed_command(const char *operation, const cJSON *req)
+{
+   (void)req;
+   snprintf(local_operation, sizeof(local_operation), "%s", operation);
+   return local_reply ? cJSON_Parse(local_reply) : NULL;
+}
 char *kb_client_last_result_json(const char *message)
 {
    (void)message;
@@ -149,6 +158,49 @@ int main(void)
       cJSON_Delete(envelope);
       cJSON_Delete(args);
    }
+   /* A Server's own typed facts join the KB's rows, and stand alone when the
+    * KB has no answer. */
+   const char *graph_local =
+       "{\"status\":\"ok\",\"relations\":[{\"src_entity\":\"LOCAL-ADA\",\"relation\":"
+       "\"works_for\",\"dst_entity\":\"MIT\"}]}";
+   const char *edges_local =
+       "{\"status\":\"ok\",\"edges\":[{\"src_entity\":\"LOCAL-ADA\",\"relation\":"
+       "\"works_for\",\"dst_entity\":\"LOCAL-MIT\"}]}";
+   struct
+   {
+      const char *method, *operation, *kb, *local, *kb_text;
+      cJSON *(*call)(cJSON *);
+   } merges[] = {
+       {"memory.search_graph", "user-search-graph",
+        "{\"status\":\"ok\",\"relations\":[{\"src_entity\":\"KB-GRACE\",\"relation\":"
+        "\"works_for\",\"dst_entity\":\"Harvard\"}]}",
+        graph_local, "KB-GRACE", tool_search_graph},
+       {"memory.entity_edges", "user-entity-edges",
+        "{\"status\":\"ok\",\"edges\":[{\"src_entity\":\"e\",\"relation\":\"knows\","
+        "\"dst_entity\":\"KB-GRACE\"}]}",
+        edges_local, "KB-GRACE", tool_get_entity_edges},
+   };
+   for (size_t i = 0; i < sizeof(merges) / sizeof(merges[0]); i++)
+   {
+      cJSON *args = cJSON_Parse("{\"query\":\"q\",\"entity\":\"e\",\"project\":\"p\","
+                                "\"workspace\":\"w\"}");
+      expected = merges[i].method;
+      local_reply = merges[i].local;
+      reply = merges[i].kb;
+      cJSON *result = merges[i].call(args);
+      const char *text = rendered(result);
+      assert(strcmp(local_operation, merges[i].operation) == 0);
+      assert(strstr(text, merges[i].kb_text) && strstr(text, "LOCAL-"));
+      cJSON_Delete(result);
+      reply = NULL;
+      result = merges[i].call(args);
+      text = rendered(result);
+      assert(strstr(text, "LOCAL-") && !strstr(text, merges[i].kb_text) &&
+             !strstr(text, "unavailable"));
+      cJSON_Delete(result);
+      cJSON_Delete(args);
+   }
+   local_reply = NULL;
    cJSON_Delete(sent);
    puts("server memory domain generic commands: ok");
    return 0;

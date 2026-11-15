@@ -178,8 +178,8 @@ static void pgvec_register_functions(sqlite3 *db)
    sqlite3_exec(
        db,
        "CREATE VIEW IF NOT EXISTS pg_indexes AS "
-       "SELECT 'memory_embeddings' AS tablename, 'idx_memory_embeddings_diskann' AS indexname, "
-       "'CREATE INDEX idx_memory_embeddings_diskann ON memory_embeddings USING diskann (embedding)'"
+       "SELECT 'code_embeddings' AS tablename, 'idx_code_embeddings_hnsw' AS indexname, "
+       "'CREATE INDEX idx_code_embeddings_hnsw ON code_embeddings USING hnsw (embedding)'"
        " AS indexdef "
        "UNION ALL "
        "SELECT 'kb_embeddings', 'idx_kb_embeddings_diskann', "

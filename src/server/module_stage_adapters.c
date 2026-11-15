@@ -1,6 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "module_stage_adapters.h"
+#include "vault_content_privacy.h"
+#pragma weak vault_content_protect_json
 #include "agent_exec.h"
 #include "module_commands.h"
 
@@ -104,6 +106,20 @@ cJSON *server_module_memory_data(const cJSON *request)
    cJSON_Delete(wire);
    if (!encoded)
       return NULL;
+   if (vault_content_protect_json)
+   {
+      char *safe = NULL;
+      if (vault_content_protect_json(encoded, &safe))
+      {
+         free(encoded);
+         return NULL;
+      }
+      if (safe)
+      {
+         free(encoded);
+         encoded = safe;
+      }
+   }
    size_t request_len = strlen(encoded);
    if (request_len == 0 || request_len > OURO_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
    {
@@ -1138,44 +1154,4 @@ void server_module_stage_adapters_configure(void)
    server_error_kind_register_http_status_provider(runtime_web_http_status);
 }
 
-int server_module_memory_reset_derived(void)
-{
-   const char *backend = config_memory_backend_current();
-   if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
-       strcmp(backend, "aimee-native") == 0)
-      return 0;
-   cJSON *request = cJSON_CreateObject();
-   if (!request)
-      return -1;
-   cJSON_AddStringToObject(request, "operation", "reset-derived");
-   cJSON *reply = server_module_memory_data(request);
-   cJSON_Delete(request);
-   int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "deleted"));
-   cJSON_Delete(reply);
-   return ok ? 0 : -1;
-}
-
 /* Called only by the existing authenticated erasure coordinator. */
-int server_module_memory_erase_subject(const char *request_id, const char *subject,
-                                       const cJSON *sessions)
-{
-   const char *backend = config_memory_backend_current();
-   if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
-       strcmp(backend, "aimee-native") == 0)
-      return 0;
-   if (!subject || !subject[0])
-      return -1;
-   cJSON *request = cJSON_CreateObject();
-   if (!request)
-      return -1;
-   cJSON_AddStringToObject(request, "operation", "erase-backend");
-   cJSON_AddStringToObject(request, "backend_subject", subject);
-   cJSON_AddStringToObject(request, "backend_erasure_id", request_id);
-   if (sessions)
-      cJSON_AddItemToObject(request, "backend_sessions", cJSON_Duplicate(sessions, 1));
-   cJSON *reply = server_module_memory_data(request);
-   cJSON_Delete(request);
-   int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "deleted"));
-   cJSON_Delete(reply);
-   return ok ? 0 : -1;
-}

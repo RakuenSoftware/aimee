@@ -1832,14 +1832,6 @@
       "sha256": "e2c0a0ea9745fc1cf39e589d22c60cdebec5973813238ae84239c6c846e8c44d",
       "boundary_review": " 2026-10-25 specialized message admission: reviewed embedding reply decoding only. KB batch reads actual dimension separately from row count and fixed buffer stride; vector consumers honor documented dimension and decline/truncation facts. The matching HTTP fixture now supplies the real Go owner dimension and vector-free error/auth messages; all existing assertions remain. The shared C helper is a message codec only: provider execution, breaker state, storage, scoping, guards and memory eligibility remain with their existing owners. No request methods, arguments, routes, ownership classifications or original inventories change. Evidence: /var/tmp/aimee-specialized-memory-boundary-review/proof.json and /var/tmp/aimee-embed-consumer-evidence/results.json. This is explicit source-boundary review, not production-promotion approval and adds no exemption."
     },
-    "src/kb/kb_memory_facts.c": {
-      "disposition": "host-transport",
-      "symbols": [
-        "kb_module_memory_data"
-      ],
-      "sha256": "af3e0146f7bc5c2e6f348ef6a830fe9ab7799b3f2d7b24a100510791cd0ba60e",
-      "boundary_review": "2026-10-23: Reviewed canonical curator cutover: Go retains fact claim/lease/source validation/commit/retry ownership and the existing kb_module_memory_data bus contract. Host only constructs an admitted owned model request, receives full canonical response, and projects complete authored TEXT (never refusal/error/partial/tool-pending/reasoning-as-answer) before the unchanged memory-facts-complete business operation. Typed fixture retains lease/commit/source assertions; normal and ASan/UBSan/leak memory-facts connection tests pass. No disposition, symbol, authority or inventory exemption changed."
-    },
     "src/kb/kb_module_stage_adapters.c": {
       "disposition": "host-transport",
       "symbols": [
@@ -2313,14 +2305,6 @@
         "kb_client_memory_scope_context_set"
       ],
       "sha256": "818f11fb373c7f0407a422e4f0ee8eee46d2c359bd0fd37fc79ff8ca5ea4c437"
-    },
-    "src/tests/test_kb_memory_facts_connection.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "kb_module_memory_data"
-      ],
-      "sha256": "3cfbd4297c29a1f4df1958305a2b172accc7d37d13d3cc64ebf80e33f7877f7b",
-      "boundary_review": "2026-10-23: Reviewed canonical curator cutover: Go retains fact claim/lease/source validation/commit/retry ownership and the existing kb_module_memory_data bus contract. Host only constructs an admitted owned model request, receives full canonical response, and projects complete authored TEXT (never refusal/error/partial/tool-pending/reasoning-as-answer) before the unchanged memory-facts-complete business operation. Typed fixture retains lease/commit/source assertions; normal and ASan/UBSan/leak memory-facts connection tests pass. No disposition, symbol, authority or inventory exemption changed."
     },
     "src/tests/test_mcp_client_registry.c": {
       "disposition": "host-fixture",

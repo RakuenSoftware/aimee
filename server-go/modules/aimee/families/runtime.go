@@ -1,6 +1,9 @@
 package families
 
-import store "github.com/JBailes/aimee/server-go/modules/aimee"
+import (
+	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"time"
+)
 
 // The runtime family: the small stores a running daemon keeps.
 //
@@ -95,6 +98,7 @@ const (
 	opSessionCacheCAS           = 64
 	opSessionCacheDelete        = 65
 	opSessionCacheReceipt       = 66
+	opRuntimeCodeIndex          = 67
 )
 
 // Runtime is the family, ready to be bound to kind 11787.
@@ -103,6 +107,7 @@ var Runtime = store.Family{
 	Event: EventRuntime,
 	Stage: StageRuntime,
 	Ops: map[uint32]store.Op{
+		opRuntimeCodeIndex: {Name: "runtime_code_index", Args: 1, Cells: 1, HostOnly: true, Timeout: 120 * time.Second, RunDB: runtimeCodeIndex},
 		// --- key/value state ---
 		opRuntimeStateSet:    {Name: "runtime_state_set", Args: 2, Tx: true, Run: runtimeStateSet},
 		opRuntimeStateGet:    {Name: "runtime_state_get", Cells: 2, Args: 1, Run: runtimeStateGet},

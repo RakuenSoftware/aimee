@@ -367,6 +367,13 @@ func (c *Client) Embed(ctx context.Context, trace uint64, request EmbedRequest) 
 				}
 			}
 		}
+	case "serving-id":
+		declined := result.Error != "" || result.Unavailable || result.Unauthorized
+		if len(result.Vector) != 0 || len(result.Vectors) != 0 || result.Truncated ||
+			(!declined && (result.ServingID == "" || len(result.ServingID) > 160)) ||
+			(result.Dim > 0 && (request.MaxDim <= 0 || result.Dim > request.MaxDim)) {
+			return EmbedResponse{}, ErrClientResponse
+		}
 	case "dimension":
 		// Programs return only Dim; HTTP probes also return their vector.
 		if len(result.Vectors) != 0 || (len(result.Vector) != 0 && result.Dim != len(result.Vector)) {

@@ -5,8 +5,8 @@
  * (wfe_advance.h): it resolves the caller's session->work-item binding, reads the
  * work-item's actual state, applies the pure CAS/replay decision, and -- only on a
  * clean OK -- calls wfe_engine_advance under the engine's own invariants (it never
- * mutates gate.deliver / run-state directly; the engine runs wfe_deliver on the
- * gate.deliver node). Every call is audited.
+ * mutates gate.deliver / run-state directly; the engine owns the gate.deliver
+ * node). Every call is audited.
  *
  * Default-OFF: with the enforcement dial unset (WFE_ENFORCE_OFF) the driver is
  * inert. It is only live once an operator opts a session into a bound workflow. */

@@ -255,3 +255,25 @@ int kb_store_task_get_edges(int64_t task_id, task_edge_t *out, int max)
    aimee_pg_finalize(st);
    return count;
 }
+
+int kb_store_task_children(int64_t parent_id, aimee_task_t *out, int max)
+{
+   void *conn = kb_store_conn();
+   if (!conn || !out || max <= 0)
+      return -1;
+   char err[TASK_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT id, parent_id, title, state, confidence, "
+                                          "session_id, created_at, updated_at FROM tasks "
+                                          "WHERE parent_id = ?1 ORDER BY id LIMIT ?2",
+                                          err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", parent_id);
+   aimee_pg_bind_int(st, "?2", max);
+   int n = 0, rc = AIMEE_PG_DONE;
+   while (n < max && (rc = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
+      row_to_task(st, &out[n++]);
+   aimee_pg_finalize(st);
+   return rc == AIMEE_PG_ERR ? -1 : n;
+}

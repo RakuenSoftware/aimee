@@ -45,7 +45,6 @@
 #include "util.h"
 #include "cJSON.h"
 #include "memory.h"
-#include "modules/kb/c/memory_vectors.h"
 #include "modules/kb/c/vault_pg.h" /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include "kb/kb_vault_policy.h"    /* kb_vault_policy_select (custody selection, P7 §3) */
 #include "kb/kb_management_runtime.h"
@@ -56,6 +55,7 @@
 #include "kb_vault_tpm_runtime_lock.h"
 #include "modules/kb/c/kb_audit_worm.h"
 #include "modules/kb/c/vault_operator_status_runtime.h"
+#include "vault_content_privacy.h"
 #include "vault_server_key.h"         /* startup durable seal-epoch synchronization */
 #include "vault_env_bootstrap.h"      /* first-boot credential env -> Vault */
 #include "vault_config_bootstrap.h"   /* legacy config credential -> Vault */
@@ -1362,6 +1362,11 @@ int main(int argc, char **argv)
    /* The local file Vault is still bound here (before KB switches ordinary
     * tenant Vault operations to Postgres), so it can break the DB credential
     * bootstrap cycle and hydrate process memory without retaining env secrets. */
+   if (vault_content_privacy_ready())
+   {
+      fputs("aimee-kb: private content custody unavailable\n", stderr);
+      return 1;
+   }
    if (vault_env_bootstrap_init_all() < 0)
    {
       fputs("aimee-kb: credential Vault bootstrap failed\n", stderr);

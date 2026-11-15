@@ -18,6 +18,7 @@
 #include "modules/kb/c/pgvec_kb_service.h"
 #include <aimee/learning/learning.h>
 #include "curiosity_resolve.h"
+#include "modules/kb/c/curiosity.h"
 #include "kb_bandit.h"
 #include <aimee/learning/policy_arms.h>
 #include "log.h"
@@ -238,10 +239,47 @@ static int kb_handle_curiosity_sweep(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to sweep curiosity");
 }
 
+/* Curiosity novelty and maturity count memories; the memory implementation
+ * answers through its public commands. A refusal counts as unknown (-1). */
+static int curiosity_memory_count(const char *verb, cJSON *args, const char *array,
+                                  const char *number)
+{
+   cJSON *reply = NULL;
+   int rc = aimee_module_commands_dispatch_internal(verb, args, &reply);
+   int n = -1;
+   if (rc == 1 && !strcmp(jo_str(reply, "status", ""), "ok"))
+   {
+      const cJSON *list = array ? cJSON_GetObjectItemCaseSensitive(reply, array) : NULL;
+      const cJSON *stats = number ? cJSON_GetObjectItemCaseSensitive(reply, "stats") : NULL;
+      const cJSON *total = stats ? cJSON_GetObjectItemCaseSensitive(stats, number) : NULL;
+      if (cJSON_IsArray(list))
+         n = cJSON_GetArraySize(list);
+      else if (cJSON_IsNumber(total) && total->valuedouble >= 0 && total->valuedouble < 1e9)
+         n = (int)total->valuedouble;
+   }
+   cJSON_Delete(reply);
+   cJSON_Delete(args);
+   return n;
+}
+static int curiosity_memory_total(void *ctx)
+{
+   (void)ctx;
+   return curiosity_memory_count("memory.stats", cJSON_CreateObject(), NULL, "total");
+}
+static int curiosity_memory_coverage(void *ctx, const char *needle)
+{
+   (void)ctx;
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "query", needle);
+   cJSON_AddNumberToObject(args, "limit", 64);
+   return curiosity_memory_count("memory.find_facts", args, "facts", NULL);
+}
+
 static int kb_handle_curiosity_rescore(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = kb_store_kb_service_curiosity_rescore_json();
+   kb_store_curiosity_memory_t memory = {curiosity_memory_total, curiosity_memory_coverage, NULL};
+   cJSON *resp = kb_store_kb_service_curiosity_rescore_json(&memory);
    return kb_reply_or_error(fd, resp, "failed to rescore curiosity");
 }
 
@@ -696,6 +734,7 @@ static const struct
     {"entities.merge", kb_handle_entities_merge},
     {"entities.unmerge", kb_handle_entities_unmerge},
     {"task.list", kb_handle_task_list},
+    {"task.check_drift", kb_handle_task_check_drift},
     {"task.create", kb_handle_task_create},
     {"task.update_state", kb_handle_task_update_state},
     {"task.delete", kb_handle_task_delete},

@@ -44,4 +44,5 @@ int kb_http_servers_read_unregister(kb_http_servers_read_handler_fn, void *);
 int kb_http_servers_route(const char *, const char *, const char *, char *, int);
 int kb_http_servers_route_ex(const char *, const char *, const char *, const char *, size_t, char *,
                              int);
+int kb_http_servers_owner_trust(const char *, const char *, const char *, int, char *, int);
 #endif

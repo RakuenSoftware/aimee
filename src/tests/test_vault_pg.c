@@ -128,7 +128,8 @@ static int64_t slot_version(const char *principal, const char *agent, const char
 
 static void run(void)
 {
-   const char *principal = "org:test:vault-pg"; /* platform-scoped (team_id NULL) */
+   char principal[80]; /* Fresh identity; retirement deliberately preserves old versions. */
+   snprintf(principal, sizeof(principal), "org:test:vault-pg:%ld", (long)getpid());
    const char *agent = "claude";
    const char *cred = "api_key";
    const char *secret = "sk-pg-envelope-roundtrip-0xC0FFEE";
@@ -175,14 +176,30 @@ static void run(void)
    assert(strcmp(out, secret) == 0);
    printf("  PASS: AAD binds identity slot (no cross-slot decrypt)\n");
 
-   /* list sees both slots; delete removes one; the deleted read is NO_ENTRY. */
+   /* Retirement keeps ciphertext and the last pointer, but every usable view closes. */
    vault_store_entry_t entries[8];
    int n = vault_store_list(principal, entries, 8);
    assert(n == 2);
    assert(vault_store_delete(principal, agent2, cred) == 0);
    assert(vault_store_get(principal, kek, agent2, cred, out, sizeof(out)) == VAULT_STORE_NO_ENTRY);
    assert(vault_store_has_entry(principal, agent, cred) == 1);
-   printf("  PASS: list / delete\n");
+   assert(vault_store_has_entry(principal, agent2, cred) == 0);
+   assert(vault_store_list(principal, entries, 8) == 1);
+   void *conn = kb_store_conn();
+   char err[256];
+   aimee_pg_stmt_t *retained =
+       aimee_pg_prepare(conn,
+                        "SELECT count(*) FROM org_vault_secret s JOIN org_vault_retirement r "
+                        "USING(principal,agent,cred,version) WHERE s.principal=?1 AND s.agent=?2",
+                        err, sizeof(err));
+   assert(retained);
+   aimee_pg_bind_text(retained, "?1", principal);
+   aimee_pg_bind_text(retained, "?2", agent2);
+   assert(aimee_pg_step(retained, err, sizeof(err)) == AIMEE_PG_ROW &&
+          aimee_pg_column_int64(retained, 0) == 1);
+   aimee_pg_finalize(retained);
+   printf(
+       "  PASS: retirement closes reads while retaining encrypted versions and pointer history\n");
 
    /* rekey: re-wrap under a new KEK; the secret is still readable under new, not old. */
    uint8_t newkek[VAULT_KEK_LEN];
@@ -222,6 +239,8 @@ int main(void)
    assert(system(mk) == 0);
    setenv("AIMEE_HOME", home, 1);
 
+   /* This standalone fixture has no application config bootstrap. */
+   kb_store_set_embedding_dim_default(768);
    if (kb_store_init(url) != 0)
    {
       fprintf(stderr, "vault_pg: kb_store_init failed for %s\n", url);

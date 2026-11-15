@@ -92,8 +92,8 @@ recognised as actions, and the repository defaults to the caller's directory unl
 `git verify` keeps its own marshaller: its row precedes the wildcard, and the lookup takes the first
 match.
 
-`cmd_git` in `src/cmd_infra.c` parses the same commands for the in-process (non-thin) path; the
-two agree today but are separate parsers, and folding them together is untaken work.
+The former in-process `cmd_git` parser in `src/cmd_infra.c` is gone with the non-thin path; the
+thin-client marshallers are the only parsers of these commands.
 
 ### History integration: merge, rebase, sync, cherry_pick, revert
 

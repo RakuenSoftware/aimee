@@ -1,5 +1,4 @@
 #include "pgvec_kb_service.h"
-#include "memory_vectors.h"
 #include "pgvec_transport.h"
 
 #include <stdlib.h>
@@ -10,53 +9,20 @@ int pgvec_kb_service_ensure_kb_collection(int dim)
    return pgvec_ensure_index(PGVEC_KB_TABLE, dim, 0);
 }
 
-int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn mem_exists,
-                                       pgvec_kb_service_record_exists_fn kb_exists, int dry_run,
+int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn kb_exists, int dry_run,
                                        pgvec_kb_service_reconcile_result_t *out)
 {
-   if (!out || !mem_exists || !kb_exists)
+   if (!out || !kb_exists)
       return -1;
 
    memset(out, 0, sizeof(*out));
 
    const int batch = 256;
    int64_t ids[256];
-
-   /* Scan memory_embeddings and prune orphans. */
    int64_t offset = -1;
    int done = 0;
-   while (!done)
-   {
-      int n = pgvec_scroll(PGVEC_MEMORY_TABLE, offset, ids, batch, &offset, &done);
-      if (n < 0)
-      {
-         out->rc = -1;
-         return 0;
-      }
-      for (int i = 0; i < n; i++)
-      {
-         int exists = mem_exists(ids[i]);
-         if (exists > 0)
-         {
-            out->mem_kept++;
-         }
-         else if (exists == 0)
-         {
-            out->mem_pruned++;
-            if (!dry_run)
-               pgvec_memory_delete(ids[i]);
-         }
-         else
-         {
-            out->rc = -1;
-            return 0;
-         }
-      }
-   }
 
    /* Scan kb_embeddings and prune orphans. */
-   offset = -1;
-   done = 0;
    while (!done)
    {
       int n = pgvec_scroll(PGVEC_KB_TABLE, offset, ids, batch, &offset, &done);

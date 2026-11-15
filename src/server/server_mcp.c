@@ -547,6 +547,54 @@ cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
    return text_content(summary);
 }
 
+/* The account's own typed facts (local personal memory) for a graph view, as
+ * an owned ok reply carrying `key` rows, or NULL when it has none. */
+static cJSON *mcp_local_typed_rows(const char *operation, const char *field, const char *value,
+                                   int limit, const char *key)
+{
+   cJSON *request = cJSON_CreateObject();
+   if (!request || !cJSON_AddStringToObject(request, field, value) ||
+       !cJSON_AddNumberToObject(request, "limit", limit))
+   {
+      cJSON_Delete(request);
+      return NULL;
+   }
+   cJSON *local = memory_user_typed_command(operation, request);
+   cJSON_Delete(request);
+   if (cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(local, key)) <= 0)
+   {
+      cJSON_Delete(local);
+      return NULL;
+   }
+   return local;
+}
+
+/* KB rows first, then the account's own; with no KB answer, the local rows. */
+static char *mcp_merge_local_rows(char *raw, cJSON *local, const char *key)
+{
+   if (!local)
+      return raw;
+   if (!raw)
+      return cJSON_PrintUnformatted(local);
+   cJSON *response = cJSON_Parse(raw);
+   cJSON *rows = cJSON_GetObjectItemCaseSensitive(response, key);
+   if (!cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0 ||
+       !cJSON_IsArray(rows))
+   {
+      cJSON_Delete(response);
+      return raw;
+   }
+   cJSON *row;
+   cJSON_ArrayForEach(row, cJSON_GetObjectItemCaseSensitive(local, key))
+       cJSON_AddItemToArray(rows, cJSON_Duplicate(row, 1));
+   char *merged = cJSON_PrintUnformatted(response);
+   cJSON_Delete(response);
+   if (!merged)
+      return raw;
+   free(raw);
+   return merged;
+}
+
 cJSON *tool_search_graph(cJSON *args)
 {
    const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "query"));
@@ -561,6 +609,10 @@ cJSON *tool_search_graph(cJSON *args)
    cJSON_AddNumberToObject(request, "limit", limit > 20 ? 20 : limit);
    char *raw = kb_v1_action_request("memory.search_graph", request);
    mcp_memory_scope_end();
+   cJSON *local = mcp_local_typed_rows("user-search-graph", "query", value, limit > 20 ? 20 : limit,
+                                       "relations");
+   raw = mcp_merge_local_rows(raw, local, "relations");
+   cJSON_Delete(local);
    if (!raw)
       return kb_last_result_content("memory search_graph unavailable");
    cJSON *response = cJSON_Parse(raw);
@@ -725,6 +777,10 @@ cJSON *tool_get_entity_edges(cJSON *args)
    cJSON_AddNumberToObject(request, "limit", limit > 20 ? 20 : limit);
    char *raw = kb_v1_action_request("memory.entity_edges", request);
    mcp_memory_scope_end();
+   cJSON *local =
+       mcp_local_typed_rows("user-entity-edges", "entity", value, limit > 20 ? 20 : limit, "edges");
+   raw = mcp_merge_local_rows(raw, local, "edges");
+   cJSON_Delete(local);
    if (!raw)
       return kb_last_result_content("memory entity_edges unavailable");
    cJSON *response = cJSON_Parse(raw);

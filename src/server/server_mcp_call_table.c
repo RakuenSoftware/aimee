@@ -128,9 +128,13 @@ static cJSON *mcph_memory_ask(struct mcp_call *c)
 {
    return tool_memory_ask(c->jargs, c->structured);
 }
+extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
+static cJSON *mcph_served_memory(struct mcp_call *c, int card);
 static cJSON *mcph_search_graph(struct mcp_call *c)
 {
-   return tool_search_graph(c->jargs);
+   return aimee_module_tool_source_mode && aimee_module_tool_source_mode(c->tool) != 0
+              ? mcph_served_memory(c, 0)
+              : tool_search_graph(c->jargs);
 }
 static cJSON *mcph_get_episode(struct mcp_call *c)
 {
@@ -142,7 +146,9 @@ static cJSON *mcph_get_entity(struct mcp_call *c)
 }
 static cJSON *mcph_get_entity_edges(struct mcp_call *c)
 {
-   return tool_get_entity_edges(c->jargs);
+   return aimee_module_tool_source_mode && aimee_module_tool_source_mode(c->tool) != 0
+              ? mcph_served_memory(c, 0)
+              : tool_get_entity_edges(c->jargs);
 }
 static cJSON *mcph_get_context_block(struct mcp_call *c)
 {
@@ -2220,7 +2226,7 @@ static const struct
     {"search_graph", mcph_search_graph, "core,review_indexed"},
     {"get_episode", mcph_get_episode, NULL},
     {"get_entity", mcph_get_entity, NULL},
-    {"get_entity_edges", mcph_get_entity_edges, NULL},
+    {"get_entity_edges", mcph_get_entity_edges, "core"},
     {"get_context_block", mcph_get_context_block, "core,review_indexed"},
     {"memory_get", mcph_memory_get, NULL},
     {"list_facts", mcph_list_facts, NULL},

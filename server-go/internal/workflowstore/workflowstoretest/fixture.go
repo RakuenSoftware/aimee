@@ -295,7 +295,7 @@ func start(t testing.TB, path string) (*fixture, error) {
 	postgresModule := exec.CommandContext(ctx, postgresModuleBin, busSock)
 	postgresModule.Env = append(os.Environ(), "HOME="+home, "AIMEE_HOME="+aimeeHome,
 		"AIMEE_STORE_URL="+storeURL,
-		"AIMEE_STORE_MIGRATION_URL="+withDSNParams(os.Getenv(storeURLEnv), map[string]string{"search_path": schema}))
+		"AIMEE_STORE_MIGRATION_URL="+withDSNParams(os.Getenv(storeURLEnv), map[string]string{"search_path": schema + ",public"}))
 	postgresLog, _ := os.Create(filepath.Join(home, "postgres.log"))
 	postgresModule.Stdout, postgresModule.Stderr = postgresLog, postgresLog
 	if err := postgresModule.Start(); err != nil {
@@ -431,6 +431,11 @@ func prepareStore(t testing.TB, baseURL, key string) (*pgxpool.Pool, *pgxpool.Po
 		return nil, nil, "", "", fmt.Errorf("ping test PostgreSQL: %w", err)
 	}
 	digest := sha256.Sum256([]byte(key + strconv.FormatInt(time.Now().UnixNano(), 10)))
+	// The real store bootstrap installs the vector type before runtime migrations.
+	if _, err := adminPool.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public"); err != nil {
+		adminPool.Close()
+		return nil, nil, "", "", fmt.Errorf("initialize test store vector extension: %w", err)
+	}
 	schema := fmt.Sprintf("aimee_store_test_%x", digest[:8])
 	if _, err := adminPool.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
 		adminPool.Close()
@@ -441,7 +446,7 @@ func prepareStore(t testing.TB, baseURL, key string) (*pgxpool.Pool, *pgxpool.Po
 		adminPool.Close()
 		return nil, nil, "", "", err
 	}
-	storeConfig.ConnConfig.RuntimeParams["search_path"] = schema
+	storeConfig.ConnConfig.RuntimeParams["search_path"] = schema + ",public"
 	storePool, err := pgxpool.NewWithConfig(ctx, storeConfig)
 	if err != nil {
 		_, _ = adminPool.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
@@ -485,7 +490,7 @@ func prepareStore(t testing.TB, baseURL, key string) (*pgxpool.Pool, *pgxpool.Po
 		}
 	}
 	return adminPool, storePool, withDSNParams(baseURL, map[string]string{
-		"search_path": schema, "user": runtimeRole, "password": password,
+		"search_path": schema + ",public", "user": runtimeRole, "password": password,
 	}), schema, nil
 }
 
