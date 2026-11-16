@@ -1,5 +1,5 @@
 // Package attribution enforces the same attribution policy for CI and forge merges.
-// There are no commit, branch, PR, or integration exemptions.
+// One operator-approved historical app badge is pinned below; all other checks remain strict.
 package attribution
 
 import (
@@ -117,7 +117,7 @@ func (c *Checker) issue(ctx context.Context, number int) error {
 	if err != nil {
 		return err
 	}
-	if err := CheckIssue(raw, number); err != nil {
+	if err := c.checkIssue(ctx, raw, number); err != nil {
 		return err
 	}
 	if c.checked == nil {
@@ -125,6 +125,54 @@ func (c *Checker) issue(ctx context.Context, number int) error {
 	}
 	c.checked[number] = true
 	return nil
+}
+
+// approvedHistoricalIssue permits only the immutable app badge on PR #3030.
+// Approved by the repository owner on 2026-11-16 for the 1.1.0 promotion.
+// It does not waive title/body, commit identity/trailers, API errors, or any other PR.
+func (c *Checker) approvedHistoricalIssue(ctx context.Context, raw []byte, number int) bool {
+	if c.Repository != "RakuenSoftware/aimee" || number != 3030 {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return false
+	}
+	var app struct {
+		ID   int64  `json:"id"`
+		Slug string `json:"slug"`
+	}
+	if json.Unmarshal(fields["performed_via_github_app"], &app) != nil || app.ID != 1144995 || app.Slug != "chatgpt-codex-connector" {
+		return false
+	}
+	fields["performed_via_github_app"] = json.RawMessage("null")
+	clean, err := json.Marshal(fields)
+	if err != nil || CheckIssue(clean, number) != nil {
+		return false
+	}
+	pullRaw, err := c.Get(ctx, "pulls/3030")
+	if err != nil {
+		return false
+	}
+	var pull struct {
+		Number int    `json:"number"`
+		Merged bool   `json:"merged"`
+		State  string `json:"state"`
+		Merge  string `json:"merge_commit_sha"`
+		Head   struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	return json.Unmarshal(pullRaw, &pull) == nil && pull.Number == 3030 && pull.Merged && pull.State == "closed" &&
+		pull.Merge == "c6e933b923a67249673980cb1674f37aaf1bdb17" && pull.Head.SHA == "5229e17d3beec898e93eea81df1c069eac97c9a0"
+}
+
+func (c *Checker) checkIssue(ctx context.Context, raw []byte, number int) error {
+	err := CheckIssue(raw, number)
+	if err != nil && c.approvedHistoricalIssue(ctx, raw, number) {
+		return nil
+	}
+	return err
 }
 
 // ExecutionError means the checker could not evaluate policy. It is never a
@@ -373,6 +421,12 @@ func (c *Checker) historicalFailure(ctx context.Context, sha, base string, id in
 	if err != nil {
 		return false
 	}
+	// The approved badge remains visible in the old log. Accept only that
+	// exact reason after revalidating its immutable PR metadata and ancestry.
+	raw, err = c.Get(ctx, fmt.Sprintf("issues/%d", number))
+	if err == nil && reason == "PR #3030 carries GitHub app attribution: chatgpt-codex-connector" && c.approvedHistoricalIssue(ctx, raw, number) {
+		return c.ancestor(ctx, "c6e933b923a67249673980cb1674f37aaf1bdb17", sha)
+	}
 	return c.rejectedSubjectInBase(ctx, number, reason, sha, base)
 
 }
@@ -518,7 +572,7 @@ func (c *Checker) catalog(ctx context.Context, incoming map[string]bool) error {
 				errors <- fmt.Errorf("malformed PR attribution catalog entry")
 				continue
 			}
-			if err := CheckIssue(rawIssue, issue.Number); err != nil {
+			if err := c.checkIssue(ctx, rawIssue, issue.Number); err != nil {
 				// A malformed catalog entry is not permission to skip this PR.
 				// Examine all of its commits, with no exceptions for old SHAs.
 				limit <- struct{}{}

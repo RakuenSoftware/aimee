@@ -1,5 +1,9 @@
 """Exercise the actual release gate with simulated forge and registry results."""
 import os
+import importlib.util
+import json
+import shutil
+from unittest.mock import patch
 from pathlib import Path
 import subprocess
 import tempfile
@@ -65,6 +69,70 @@ esac
     def test_registry_errors_cannot_authorize_a_build(self):
         for registry in ('outage', 'denied'):
             self.assertNotEqual(self.run_gate(registry=registry).returncode, 0)
+
+
+class PromotionSourceTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('promotion', ROOT / 'scripts/synthesis-promotion-source.py')
+        self.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.module)
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        for name in (*self.module.INPUTS, 'dependencies/synthesis-images.lock.json'):
+            target = self.root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / name, target)
+        original = subprocess.check_output
+        def command(args, **kwargs):
+            if args[0] == 'git':
+                kwargs['cwd'] = ROOT
+            return original(args, **kwargs)
+        self.mock = patch.object(self.module.subprocess, 'check_output', side_effect=command)
+        self.mock.start()
+        self.addCleanup(self.mock.stop)
+
+    def test_resolves_both_validated_images_despite_queued_wrapper_edits(self):
+        for image in ('aimee-llm-e2b', 'aimee-llm-e4b'):
+            tag, digest = self.module.resolve(image, self.root)
+            self.assertIn('-b10219-7bc9d6c31053', tag)
+            self.assertIn('@sha256:', digest)
+
+    def test_runtime_or_weight_changes_require_requalification(self):
+        for path in ('Dockerfile.llm', 'scripts/synthesis-model-table.sh'):
+            target = self.root / path
+            saved = target.read_text()
+            target.write_text(saved.replace('b10219', 'b10220') if path.endswith('llm') else saved + '# changed\n')
+            with self.assertRaises(ValueError):
+                self.module.resolve('aimee-llm-e2b', self.root)
+            target.write_text(saved)
+
+    def test_bad_source_tag_and_digest_refuse(self):
+        path = self.root / 'dependencies/synthesis-images.lock.json'
+        original = json.loads(path.read_text())
+        for field, value in (('source_commit', 'main'), ('tag', 'testing'), ('digest', 'latest')):
+            lock = json.loads(json.dumps(original))
+            if field == 'source_commit':
+                lock[field] = value
+            else:
+                lock['images']['aimee-llm-e2b'][field] = value
+            path.write_text(json.dumps(lock))
+            with self.assertRaises(ValueError):
+                self.module.resolve('aimee-llm-e2b', self.root)
+
+    def test_workflow_checks_registry_digest_before_promotion(self):
+        workflow = yaml.load((ROOT / '.github/workflows/publish-llm.yml').read_text(), Loader=yaml.BaseLoader)
+        steps = workflow['jobs']['build']['steps']
+        verify = next(i for i, step in enumerate(steps) if step.get('name') == 'Verify locked source tag and digest')
+        promote = next(i for i, step in enumerate(steps) if step.get('name', '').startswith('Promote to'))
+        self.assertLess(verify, promote)
+        script = steps[verify]['run'].replace('${{ steps.have.outputs.source_tag }}', 'ghcr.io/fixture:immutable').replace('${{ steps.have.outputs.pinned }}', 'ghcr.io/fixture@sha256:expected')
+        docker = self.root / 'docker'
+        docker.write_text('#!/bin/sh\nprintf "%s\\n" "$ACTUAL"\n')
+        docker.chmod(0o755)
+        for digest, expected in (('sha256:expected', 0), ('sha256:changed', 1)):
+            result = subprocess.run(['bash', '-c', script], env=dict(os.environ, PATH=str(self.root)+':'+os.environ['PATH'], ACTUAL=digest), capture_output=True)
+            self.assertEqual(result.returncode, expected, result.stderr)
 
 
 if __name__ == '__main__':

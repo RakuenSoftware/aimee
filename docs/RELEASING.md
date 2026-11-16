@@ -31,6 +31,15 @@ If you want a build without a decision, use `:testing`.
 Nothing before `tag` has an effect, so rejecting leaves no tag and no artifacts. `tag` re-checks
 because another release can land while a run sits in the queue.
 
+Synthesis promotion reads `dependencies/synthesis-images.lock.json`: immutable digests,
+content tags and the source commit that produced them. Both 1.1.0 synthesis artifacts
+are the b10219 images exercised by release validation. CI verifies the source-derived
+tag and its registry digest before promotion; missing or moved manifests fail closed.
+The later SIGCHLD wrapper change and Dockerfile comment edits are queued for the next
+upstream runtime release, as required by synthesis publication policy. Updating the
+runtime or model table requires qualifying and updating this lock; a release never
+rebuilds model images to fill a missing source tag.
+
 ## Approving one
 
 1. Review the `testing` → `main` promotion. Its `Main merge approval` workflow builds the proposed

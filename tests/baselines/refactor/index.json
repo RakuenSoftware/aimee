@@ -11,11 +11,11 @@
         },
         {
           "path": "src/kb/kb_main.c",
-          "sha256": "eeb2242460ce01ba78411b11dd3e4103ceae0c55195909312b3e0217fdb8b479"
+          "sha256": "c5f9bc30b312b9eeda24b390dae99d44680acebd9a3af4a56b4bba970a5cc473"
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "0e9ab8e444a583506941c1e0956c9030c3da89791d0ed9b4895a550236bfecb1"
+          "sha256": "4f227de6f8b40a02e52f8ab52265679200dd37e80e2431b6c0e79960497278af"
         }
       ]
     },
@@ -23,7 +23,7 @@
       "files": [
         {
           "path": "docs/gen/configuration.md",
-          "sha256": "043da059e69e313badf116684d1719210e7cb7d368e3b1aca98b8c0689b7a9e4"
+          "sha256": "41c6b697e43934fef60a53c79a43f099d1f99dcdfa522c6c9d86713d93b4976e"
         }
       ]
     },
@@ -218,12 +218,20 @@
           "sha256": "82e7cfeee0fbd3551a0587ed650aaab4104fed1371b4dc302a94584f50e0b4da"
         },
         {
+          "path": "server-go/modules/aimee/families/schema_retire_subject_erasure.sql",
+          "sha256": "e59556f373671a3b1039335dd9adee9e987baf6d39b70e0922082f2d3d313d58"
+        },
+        {
           "path": "server-go/modules/aimee/families/schema_roundtable.sql",
           "sha256": "64405aa952d924cf3dccb726406ab1ba4188669b7976c68b163872b067bd2b05"
         },
         {
           "path": "server-go/modules/aimee/families/schema_runtime.sql",
           "sha256": "4acb2d3cde8a2c8416a47826e6b7e070b3e60d40a6324066744c356ecddea892"
+        },
+        {
+          "path": "server-go/modules/aimee/families/schema_server_code_index.sql",
+          "sha256": "c656672c5a3045dbd8a4091d03d8c323228b2e93fe792a272214457eb86bc1be"
         },
         {
           "path": "server-go/modules/aimee/families/schema_session_cache.sql",
@@ -275,11 +283,11 @@
         },
         {
           "path": "src/modules/kb/c/schema.sql",
-          "sha256": "01add100fd201d58e87dbaca9033bb03fa19b120d453c817bb3960974456acb9"
+          "sha256": "5f03e8ab9ee221ff5db912e867c0a76d9623368f8fe04046dcf0439fac2d0e89"
         },
         {
           "path": "src/modules/kb/c/schema_grants.sql",
-          "sha256": "4635fc6b19b1bb7b1a2637696bf973375cf33836bb66384a93928c1a728079c3"
+          "sha256": "d8e1302d86d893447dd98acd2ec353d8853a258720dfcb64a7df4422b8eb51bb"
         },
         {
           "path": "src/modules/kb/c/schema_roles.sql",
@@ -287,7 +295,7 @@
         },
         {
           "path": "src/modules/kb/c/schema_sqlite.sql",
-          "sha256": "c57604a89ffbf7668e0c2f4c68fcdfe911d8f0cfc1c9140640859fb3ac4473ca"
+          "sha256": "22ebbe2129622a62e69c0b0bcb9b4dd7b6adc719a131ae3b9bd5680ddf4190aa"
         }
       ]
     },
@@ -295,7 +303,7 @@
       "files": [
         {
           "path": "Dockerfile",
-          "sha256": "d10af3199af3dc06e7224260684ffb3dc92a06e26731410a21e21a5d587a7403"
+          "sha256": "bf88186e84861ae3e709aee6929ee73c4e15c178e4c96d21f9fd95a87861a57b"
         },
         {
           "path": "Dockerfile.authority-bootstrap",
@@ -327,7 +335,7 @@
         },
         {
           "path": "Dockerfile.server",
-          "sha256": "d10af3199af3dc06e7224260684ffb3dc92a06e26731410a21e21a5d587a7403"
+          "sha256": "bf88186e84861ae3e709aee6929ee73c4e15c178e4c96d21f9fd95a87861a57b"
         },
         {
           "path": "Dockerfile.status-authority",
@@ -2155,7 +2163,7 @@
       "files": [
         {
           "path": "docs/gen/v1-route-descriptor.json",
-          "sha256": "9c222cd091b0cecb309a7c9d9e83d75f434259ebbd717f9eb4267409867eb1d1"
+          "sha256": "1d09a78a21681eaba3c1af983588925c1ab45c1b2075651ef20a8ba0b2708de9"
         }
       ]
     }
