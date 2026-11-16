@@ -30,7 +30,7 @@ permissions:
 jobs:
   no-coauthor-trailers:
     # One policy for PRs, queue integration, pushes, and Aimee's merge executor.
-    # Only the operator-approved, immutable PR #3030 app badge is excepted.
+    # Only the explicitly approved historical identities are excepted.
     # Commit checks and enforcement on every event remain enabled.
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -40,6 +40,14 @@ upstream runtime release, as required by synthesis publication policy. Updating 
 runtime or model table requires qualifying and updating this lock; a release never
 rebuilds model images to fill a missing source tag.
 
+The owner approved a bounded historical attribution exception on 2026-11-16 for
+this promotion: the exact closed PR identities #3030–3037, #3042–3046 and #3051,
+plus four exact Claude-authored commit identities from #3032–3035. The records in
+`server-go/modules/git/attribution/check.go` pin repository, app, head, merge and
+closed/merged state, or the exact commit SHA and author/committer values. Superseded
+PRs stay superseded; no history is rewritten. Message/trailer checks, title/body
+checks, unknown or changed identities, and API failure handling remain enforced.
+
 ## Approving one
 
 1. Review the `testing` → `main` promotion. Its `Main merge approval` workflow builds the proposed

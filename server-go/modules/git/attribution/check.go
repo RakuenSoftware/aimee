@@ -1,5 +1,5 @@
 // Package attribution enforces the same attribution policy for CI and forge merges.
-// One operator-approved historical app badge is pinned below; all other checks remain strict.
+// Operator-approved historical identities are pinned below; all other checks remain strict.
 package attribution
 
 import (
@@ -127,11 +127,37 @@ func (c *Checker) issue(ctx context.Context, number int) error {
 	return nil
 }
 
-// approvedHistoricalIssue permits only the immutable app badge on PR #3030.
-// Approved by the repository owner on 2026-11-16 for the 1.1.0 promotion.
-// It does not waive title/body, commit identity/trailers, API errors, or any other PR.
+// Operator-approved on 2026-11-16: these exact, closed historical PRs already
+// contributed to testing at 582fa11b4e7bc55322c770d76b6aef13ad58d0aa.
+// Superseded PRs retain their provenance; they are not relabelled as merged.
+// Only the app badge is waived. Title/body and commit checks remain strict.
+type historicalPull struct {
+	head, merge string
+	merged      bool
+	appID       int64
+	app         string
+}
+
+var approvedHistoricalPulls = map[int]historicalPull{
+	3051: {head: "df8b24de887491a0c0d7882f7eb5bf1dd990eee8", merge: "df8b24de887491a0c0d7882f7eb5bf1dd990eee8", merged: true, appID: 1236702, app: "claude"},
+	3046: {head: "13d0fe70a8447a60f90f90898a57587703d3dc36", merge: "262dca2d86b476260f2f959275e80986c5a05bbe", merged: false, appID: 1144995, app: "chatgpt-codex-connector"},
+	3045: {head: "edbd266cce4ec28763fdcc15d08eb743c82db197", merge: "10c0c6149aa63d7d013510fa1089a3b550d295b5", merged: false, appID: 1144995, app: "chatgpt-codex-connector"},
+	3044: {head: "8cdde3df1656a3cd330993e2bd956d25fcd43e77", merge: "8cdde3df1656a3cd330993e2bd956d25fcd43e77", merged: true, appID: 1144995, app: "chatgpt-codex-connector"},
+	3043: {head: "2ad90a70d6c7c83c117e47df15c880ecfa1662a2", merge: "d15394b7d15ea44b1f887df5f0be608286e6d0ae", merged: true, appID: 1144995, app: "chatgpt-codex-connector"},
+	3042: {head: "b87a849e0ea6951619ebc2918b97055359aa7c13", merge: "b87a849e0ea6951619ebc2918b97055359aa7c13", merged: true, appID: 1144995, app: "chatgpt-codex-connector"},
+	3037: {head: "df9f5556ddb7e6dede1f58e332b4966170c95b9b", merge: "30f8129598826174be5c417c4b2587d016c95b09", merged: true, appID: 1144995, app: "chatgpt-codex-connector"},
+	3036: {head: "78222d62ea1d35d942ee8f0665226debb3039942", merge: "4475fcf2f4ed010fd5a8a6d7f3e3910ad7323feb", merged: false, appID: 1144995, app: "chatgpt-codex-connector"},
+	3035: {head: "460b49703eef42085f398bd393d717f378014a25", merge: "eddea638ca10e087b5d1aabd80e91f42f0cc92c7", merged: true, appID: 1236702, app: "claude"},
+	3034: {head: "c13cbf69e4e1ddbf152cef6521263b54b51a7a1f", merge: "096aaf6a5d7eeeb4632d5127d8df72078bab281a", merged: true, appID: 1236702, app: "claude"},
+	3033: {head: "ee40ef801115a86d85bc1f01083969b663d28ebe", merge: "490208edffaca60cf14e0c58234aef1d858b2eef", merged: true, appID: 1236702, app: "claude"},
+	3032: {head: "24e5640a5f41b15461ba456808898911535c7b4c", merge: "21b29e457e34e7a8db42d9909e885acf2cbd1a66", merged: true, appID: 1236702, app: "claude"},
+	3031: {head: "2fa924167bc9386c48fdc6d715563a0e6884a1d9", merge: "823a65771157c465eed1079be80297b7c32038ef", merged: true, appID: 1144995, app: "chatgpt-codex-connector"},
+	3030: {head: "5229e17d3beec898e93eea81df1c069eac97c9a0", merge: "c6e933b923a67249673980cb1674f37aaf1bdb17", merged: true, appID: 1144995, app: "chatgpt-codex-connector"},
+}
+
 func (c *Checker) approvedHistoricalIssue(ctx context.Context, raw []byte, number int) bool {
-	if c.Repository != "RakuenSoftware/aimee" || number != 3030 {
+	approved, ok := approvedHistoricalPulls[number]
+	if c.Repository != "RakuenSoftware/aimee" || !ok {
 		return false
 	}
 	var fields map[string]json.RawMessage
@@ -142,7 +168,7 @@ func (c *Checker) approvedHistoricalIssue(ctx context.Context, raw []byte, numbe
 		ID   int64  `json:"id"`
 		Slug string `json:"slug"`
 	}
-	if json.Unmarshal(fields["performed_via_github_app"], &app) != nil || app.ID != 1144995 || app.Slug != "chatgpt-codex-connector" {
+	if json.Unmarshal(fields["performed_via_github_app"], &app) != nil || app.ID != approved.appID || app.Slug != approved.app {
 		return false
 	}
 	fields["performed_via_github_app"] = json.RawMessage("null")
@@ -150,21 +176,21 @@ func (c *Checker) approvedHistoricalIssue(ctx context.Context, raw []byte, numbe
 	if err != nil || CheckIssue(clean, number) != nil {
 		return false
 	}
-	pullRaw, err := c.Get(ctx, "pulls/3030")
+	pullRaw, err := c.Get(ctx, fmt.Sprintf("pulls/%d", number))
 	if err != nil {
 		return false
 	}
 	var pull struct {
 		Number int    `json:"number"`
-		Merged bool   `json:"merged"`
+		Merged *bool  `json:"merged"`
 		State  string `json:"state"`
 		Merge  string `json:"merge_commit_sha"`
 		Head   struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
 	}
-	return json.Unmarshal(pullRaw, &pull) == nil && pull.Number == 3030 && pull.Merged && pull.State == "closed" &&
-		pull.Merge == "c6e933b923a67249673980cb1674f37aaf1bdb17" && pull.Head.SHA == "5229e17d3beec898e93eea81df1c069eac97c9a0"
+	return json.Unmarshal(pullRaw, &pull) == nil && pull.Number == number && pull.Merged != nil && *pull.Merged == approved.merged && pull.State == "closed" &&
+		pull.Merge == approved.merge && pull.Head.SHA == approved.head
 }
 
 func (c *Checker) checkIssue(ctx context.Context, raw []byte, number int) error {
@@ -424,8 +450,17 @@ func (c *Checker) historicalFailure(ctx context.Context, sha, base string, id in
 	// The approved badge remains visible in the old log. Accept only that
 	// exact reason after revalidating its immutable PR metadata and ancestry.
 	raw, err = c.Get(ctx, fmt.Sprintf("issues/%d", number))
-	if err == nil && reason == "PR #3030 carries GitHub app attribution: chatgpt-codex-connector" && c.approvedHistoricalIssue(ctx, raw, number) {
-		return c.ancestor(ctx, "c6e933b923a67249673980cb1674f37aaf1bdb17", sha)
+	if err == nil && c.approvedHistoricalIssue(ctx, raw, number) {
+		denied := CheckIssue(raw, number)
+		if denied == nil || denied.Error() != reason {
+			return false
+		}
+		approved := approvedHistoricalPulls[number]
+		source := approved.head
+		if approved.merged {
+			source = approved.merge
+		}
+		return c.ancestor(ctx, source, sha)
 	}
 	return c.rejectedSubjectInBase(ctx, number, reason, sha, base)
 
@@ -481,6 +516,34 @@ func (c *Checker) rejectedSubjectInBase(ctx context.Context, number int, reason,
 	return c.ancestor(ctx, pull.Head.SHA, pull.MergeSHA) && c.ancestor(ctx, pull.MergeSHA, oldHead) && c.ancestor(ctx, pull.Head.SHA, base) && c.ancestor(ctx, pull.MergeSHA, base)
 }
 
+// Four exact historical Claude identities, approved by the owner on 2026-11-16.
+var approvedHistoricalCommits = map[string]struct{ name, email string }{
+	"e49d167eff391897c57a7a66c67c7b31ff7a9a30": {name: "Claude", email: "noreply@anthropic.com"},
+	"460b49703eef42085f398bd393d717f378014a25": {name: "Claude", email: "noreply@anthropic.com"},
+	"9faf244283e9421b3503d861732f5875597f83bb": {name: "Claude", email: "noreply@anthropic.com"},
+	"2c18a5309bd1506622149658e9d3390d0c0fecc5": {name: "Claude", email: "noreply@anthropic.com"},
+}
+
+func (c *Checker) checkCommit(entry commit) error {
+	original := entry.check()
+	approved, ok := approvedHistoricalCommits[entry.SHA]
+	if original == nil || !ok || c.Repository != "RakuenSoftware/aimee" || entry.Commit == nil {
+		return original
+	}
+	for _, who := range []*identity{entry.Commit.Author, entry.Commit.Committer} {
+		if who == nil || who.Name == nil || who.Email == nil || *who.Name != approved.name || *who.Email != approved.email {
+			return original
+		}
+	}
+	clean := entry
+	copy := *entry.Commit
+	clean.Commit = &copy
+	name, email := "Historical operator-approved identity", "historical@example.invalid"
+	clean.Commit.Author = &identity{Name: &name, Email: &email}
+	clean.Commit.Committer = &identity{Name: &name, Email: &email}
+	return clean.check()
+}
+
 // CheckRange checks every incoming commit and every PR GitHub associates with
 // it, including closed/merged PRs. An empty child commit or replacement PR does
 // not erase an ancestor's provenance. Pagination/schema failures are denials.
@@ -512,7 +575,7 @@ func (c *Checker) CheckRange(ctx context.Context, base, head string) error {
 			if seen[entry.SHA] {
 				return fmt.Errorf("duplicate commit in attribution comparison")
 			}
-			if err := entry.check(); err != nil {
+			if err := c.checkCommit(entry); err != nil {
 				return err
 			}
 			seen[entry.SHA] = true

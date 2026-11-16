@@ -570,3 +570,74 @@ func TestApproved3030BadgeIsExactAndDoesNotWaiveContent(t *testing.T) {
 		t.Fatal("API failure admitted")
 	}
 }
+
+func TestAllApprovedHistoricalBadgesRemainPinned(t *testing.T) {
+	for number, approved := range approvedHistoricalPulls {
+		t.Run(fmt.Sprint(number), func(t *testing.T) {
+			raw := encoded(issue(number, map[string]any{"id": approved.appID, "slug": approved.app}))
+			pull := map[string]any{"number": number, "merged": approved.merged, "state": "closed", "merge_commit_sha": approved.merge, "head": map[string]string{"sha": approved.head}}
+			key := fmt.Sprintf("pulls/%d", number)
+			data := map[string][]byte{key: encoded(pull)}
+			c := checker(t, data)
+			c.Repository = "RakuenSoftware/aimee"
+			if c.checkIssue(context.Background(), raw, number) != nil {
+				t.Fatal("approved historical badge denied")
+			}
+			for _, field := range []string{"merged", "state", "head", "merge_commit_sha"} {
+				saved := pull[field]
+				delete(pull, field)
+				data[key] = encoded(pull)
+				if c.checkIssue(context.Background(), raw, number) == nil {
+					t.Fatal("missing immutable metadata allowed", field)
+				}
+				pull[field] = saved
+			}
+			pull["state"] = "open"
+			data[key] = encoded(pull)
+			if c.checkIssue(context.Background(), raw, number) == nil {
+				t.Fatal("reopened PR allowed")
+			}
+		})
+	}
+}
+
+func TestHistoricalCommitIdentityExceptionNeverWaivesTrailers(t *testing.T) {
+	for sha, approved := range approvedHistoricalCommits {
+		t.Run(sha, func(t *testing.T) {
+			entry := humanCommit(sha)
+			who := map[string]any{"name": approved.name, "email": approved.email}
+			entry["commit"].(map[string]any)["author"] = who
+			entry["commit"].(map[string]any)["committer"] = who
+			var parsed commit
+			json.Unmarshal(encoded(entry), &parsed)
+			c := &Checker{Repository: "RakuenSoftware/aimee"}
+			if parsed.check() == nil || c.checkCommit(parsed) != nil {
+				t.Fatal("exact historical identity not scoped")
+			}
+			for _, repo := range []string{"", "owner/repo"} {
+				c.Repository = repo
+				if c.checkCommit(parsed) == nil {
+					t.Fatal("cross-repository exemption")
+				}
+			}
+			c.Repository = "RakuenSoftware/aimee"
+			parsed.SHA = head
+			if c.checkCommit(parsed) == nil {
+				t.Fatal("different commit allowed")
+			}
+			parsed.SHA = sha
+			message := "Change\n\nCo-authored-by: Assistant <a@example.com>"
+			parsed.Commit.Message = &message
+			if c.checkCommit(parsed) == nil {
+				t.Fatal("message trailer waived")
+			}
+			clean := "Change"
+			parsed.Commit.Message = &clean
+			changed := "different@example.invalid"
+			parsed.Commit.Author.Email = &changed
+			if c.checkCommit(parsed) == nil {
+				t.Fatal("changed historical identity allowed")
+			}
+		})
+	}
+}
