@@ -338,6 +338,10 @@ func (c *Checker) historicalFailure(ctx context.Context, sha, base string, id in
 		Name       string `json:"name"`
 		Status     string `json:"status"`
 		Conclusion string `json:"conclusion"`
+		Steps      []struct {
+			Name       string `json:"name"`
+			Conclusion string `json:"conclusion"`
+		} `json:"steps"`
 	}
 	if json.Unmarshal(raw, &job) != nil || job.ID != id || job.RunID <= 0 || job.Attempt <= 0 || job.Head != sha || job.Name != check.Name || job.Status != "completed" || job.Conclusion != "failure" || job.CheckURL != fmt.Sprintf("https://api.github.com/repos/%s/check-runs/%d", c.Repository, id) {
 		return false
@@ -355,7 +359,7 @@ func (c *Checker) historicalFailure(ctx context.Context, sha, base string, id in
 			FullName string `json:"full_name"`
 		} `json:"repository"`
 	}
-	if json.Unmarshal(raw, &run) != nil || run.ID != job.RunID || run.Head != sha || run.Repository.FullName != c.Repository || (run.Path != ".github/workflows/pr-attribution.yml" && run.Path != ".github/workflows/attribution.yml") {
+	if json.Unmarshal(raw, &run) != nil || run.ID != job.RunID || run.Head != sha || run.Repository.FullName != c.Repository || (run.Path != ".github/workflows/pr-attribution.yml" && run.Path != ".github/workflows/attribution.yml" && run.Path != ".github/workflows/ci.yml") {
 		return false
 	}
 	var verdict *Verdict
@@ -407,6 +411,37 @@ func (c *Checker) historicalFailure(ctx context.Context, sha, base string, id in
 	if err != nil {
 		return false
 	}
+	// The old CI shell gate used an Actions error, before structured verdicts.
+	// Accept only an unambiguous app-badge rejection for an explicitly approved
+	// historical PR; prove this assessed head predates the original release cut.
+	if run.Path == ".github/workflows/ci.yml" {
+		if verdict != nil || !c.ancestor(ctx, sha, "582fa11b4e7bc55322c770d76b6aef13ad58d0aa") {
+			return false
+		}
+		clean := map[string]bool{}
+		for _, step := range job.Steps {
+			if step.Conclusion == "success" {
+				clean[step.Name] = true
+			}
+		}
+		if !clean["Reject AI author and committer identities in new commits"] || !clean["Reject AI co-authorship trailers in new commits"] {
+			return false
+		}
+		count, number, reason := 0, 0, ""
+		for _, line := range strings.Split(string(raw), "\n") {
+			if !regexp.MustCompile(`^\d{4}-\d\d-\d\dT[0-9:.]+Z ##\[error\]`).MatchString(line) {
+				continue
+			}
+			count++
+			match := regexp.MustCompile(`^\d{4}-\d\d-\d\dT[0-9:.]+Z ##\[error\]PR #([1-9][0-9]*) carries GitHub app attribution: ([a-zA-Z0-9_-]+) \(performed_via_github_app\)\r?$`).FindStringSubmatch(line)
+			if len(match) != 3 {
+				return false
+			}
+			number, _ = strconv.Atoi(match[1])
+			reason = fmt.Sprintf("PR #%d carries GitHub app attribution: %s", number, match[2])
+		}
+		return count == 1 && c.approvedHistoricalRejection(ctx, number, reason, sha)
+	}
 	failures := 0
 	reason := ""
 	for _, line := range strings.Split(string(raw), "\n") {
@@ -447,23 +482,30 @@ func (c *Checker) historicalFailure(ctx context.Context, sha, base string, id in
 	if err != nil {
 		return false
 	}
-	// The approved badge remains visible in the old log. Accept only that
-	// exact reason after revalidating its immutable PR metadata and ancestry.
-	raw, err = c.Get(ctx, fmt.Sprintf("issues/%d", number))
-	if err == nil && c.approvedHistoricalIssue(ctx, raw, number) {
-		denied := CheckIssue(raw, number)
-		if denied == nil || denied.Error() != reason {
-			return false
-		}
-		approved := approvedHistoricalPulls[number]
-		source := approved.head
-		if approved.merged {
-			source = approved.merge
-		}
-		return c.ancestor(ctx, source, sha)
+	if c.approvedHistoricalRejection(ctx, number, reason, sha) {
+		return true
 	}
 	return c.rejectedSubjectInBase(ctx, number, reason, sha, base)
 
+}
+
+// Revalidate the exact live identity and rejected subject; never erase an
+// unknown historical cause or admit content merely because a rerun passed.
+func (c *Checker) approvedHistoricalRejection(ctx context.Context, number int, reason, oldHead string) bool {
+	raw, err := c.Get(ctx, fmt.Sprintf("issues/%d", number))
+	if err != nil || !c.approvedHistoricalIssue(ctx, raw, number) {
+		return false
+	}
+	denied := CheckIssue(raw, number)
+	if denied == nil || denied.Error() != reason {
+		return false
+	}
+	approved := approvedHistoricalPulls[number]
+	source := approved.head
+	if approved.merged {
+		source = approved.merge
+	}
+	return c.ancestor(ctx, source, oldHead)
 }
 
 func (c *Checker) ancestor(ctx context.Context, ancestor, head string) bool {

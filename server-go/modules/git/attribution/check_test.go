@@ -641,3 +641,44 @@ func TestHistoricalCommitIdentityExceptionNeverWaivesTrailers(t *testing.T) {
 		})
 	}
 }
+
+func TestApprovedLegacyShellBadgeFailureRequiresCompleteEvidence(t *testing.T) {
+	data := executionFixture()
+	for key, value := range data {
+		data[key] = []byte(strings.ReplaceAll(string(value), "owner/repo", "RakuenSoftware/aimee"))
+	}
+	var run map[string]any
+	json.Unmarshal(data["actions/runs/88"], &run)
+	run["path"] = ".github/workflows/ci.yml"
+	data["actions/runs/88"] = encoded(run)
+	var job map[string]any
+	json.Unmarshal(data["actions/jobs/77"], &job)
+	job["steps"] = []any{map[string]string{"name": "Reject AI author and committer identities in new commits", "conclusion": "success"}, map[string]string{"name": "Reject AI co-authorship trailers in new commits", "conclusion": "success"}}
+	data["actions/jobs/77"] = encoded(job)
+	approved := approvedHistoricalPulls[3036]
+	data["issues/3036"] = encoded(issue(3036, map[string]any{"id": approved.appID, "slug": approved.app}))
+	data["pulls/3036"] = encoded(map[string]any{"number": 3036, "merged": false, "state": "closed", "merge_commit_sha": approved.merge, "head": map[string]string{"sha": approved.head}})
+	pairs := [][2]string{{head, "582fa11b4e7bc55322c770d76b6aef13ad58d0aa"}, {approved.head, head}}
+	for _, pair := range pairs {
+		data["compare/"+pair[0]+"..."+pair[1]] = encoded(map[string]any{"status": "ahead", "base_commit": map[string]string{"sha": pair[0]}, "merge_base_commit": map[string]string{"sha": pair[0]}})
+	}
+	valid := "2026-10-17T19:41:37.1657703Z ##[error]PR #3036 carries GitHub app attribution: chatgpt-codex-connector (performed_via_github_app)\n"
+	data["actions/jobs/77/logs"] = []byte(valid)
+	c := checker(t, data)
+	c.Repository = "RakuenSoftware/aimee"
+	if !c.historicalFailureOutsideRange(context.Background(), head, base, 77) {
+		t.Fatal("approved legacy evidence denied")
+	}
+	for _, bad := range []string{valid + valid, strings.Replace(valid, "3036", "3096", 1), valid + "2026-10-17T19:41:37.1657703Z ##[error]unknown failure\n", strings.Replace(valid, "chatgpt-codex-connector", "claude", 1)} {
+		data["actions/jobs/77/logs"] = []byte(bad)
+		if c.historicalFailureOutsideRange(context.Background(), head, base, 77) {
+			t.Fatal("ambiguous or unapproved old error waived")
+		}
+	}
+	data["actions/jobs/77/logs"] = []byte(valid)
+	delete(job, "steps")
+	data["actions/jobs/77"] = encoded(job)
+	if c.historicalFailureOutsideRange(context.Background(), head, base, 77) {
+		t.Fatal("legacy identity/trailer checks not proven")
+	}
+}
