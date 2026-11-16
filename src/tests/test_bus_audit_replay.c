@@ -5,7 +5,7 @@
  * routed event, in seq order, into a per-session capture file. This test proves
  * that stream is a faithful, replayable record of what happened: it emits N audit
  * rows through the real audit bus, stops, then reads the real capture file back
- * with bus_capture_read and requires that exactly N audit events replay, IN
+ * with ouro_capture_read and requires that exactly N audit events replay, IN
  * ORDER, each one reconstructing the governed-action row that was emitted. Replay
  * is observational (nothing re-executed), so a match is exact by construction.
  *
@@ -21,7 +21,7 @@
 #include <unistd.h>
 
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/bus_capture.h>
+#include <ouroboros/capture.h>
 #include "log.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
@@ -54,10 +54,10 @@ struct replay
    char verdicts[N][32];
 };
 
-static void on_event(void *ctx, const bus_capture_event_t *ev)
+static void on_event(void *ctx, const ouro_capture_event_t *ev)
 {
    struct replay *r = ctx;
-   if (ev->type != BUS_CAP_EVENT || ev->frame.event_kind != KIND_AUDIT_ACTION)
+   if (ev->type != OURO_CAP_EVENT || ev->frame.event_kind != KIND_AUDIT_ACTION)
       return; /* ignore host notices / non-audit records */
    if (r->n >= N)
    {
@@ -160,14 +160,14 @@ int main(void)
    /* Replay it. */
    struct replay *r = calloc(1, sizeof *r);
    assert(r);
-   bus_capture_report_t rep = bus_capture_read(buf, (size_t)st.st_size, on_event, r);
-   printf("  stream status: %s, %llu records parsed\n", bus_capture_status_name(rep.status),
+   ouro_capture_report_t rep = ouro_capture_read(buf, (size_t)st.st_size, on_event, r);
+   printf("  stream status: %s, %llu records parsed\n", ouro_capture_status_name(rep.status),
           (unsigned long long)rep.records);
 
-   if (rep.status == BUS_CAPTURE_CORRUPT || rep.status == BUS_CAPTURE_TRUNCATED)
+   if (rep.status == OURO_CAPTURE_CORRUPT || rep.status == OURO_CAPTURE_TRUNCATED)
    {
       fprintf(stderr, "FAIL: capture stream is %s (rule %d at off %zu) — not a faithful record\n",
-              bus_capture_status_name(rep.status), rep.rule, rep.offending_off);
+              ouro_capture_status_name(rep.status), rep.rule, rep.offending_off);
       return 1;
    }
    if (r->bad)

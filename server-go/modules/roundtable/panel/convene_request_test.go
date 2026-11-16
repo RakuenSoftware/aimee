@@ -26,9 +26,9 @@ import (
 func TestConveneRefusesAReviewWithNoOriginalRequest(t *testing.T) {
 	for _, missing := range []string{"", "   ", "\n\t "} {
 		run := Run{
-			ID:              "run-1",
-			OriginalRequest: missing,
-			Reviewed:        Artifact{Content: "diff --git a/x b/x", Hash: "abc", Stage: "frozen_diff"},
+			ID:       "run-1",
+			Request:  fixtureTask(missing),
+			Reviewed: Artifact{Content: "diff --git a/x b/x", Hash: "abc", Stage: "frozen_diff"},
 		}
 		_, err := Convene(context.Background(), nil, run, Panel{}, "")
 		if err == nil {

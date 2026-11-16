@@ -24,7 +24,7 @@ that the store is fine, while it is refusing every call that needs it.
 ## Why
 
 `db1_store_ready()` asks `obs_bus_module_available(AIMEE_DB1_EVENT_SESSIONS)`,
-which resolves to `bus_host_kind_has_server()`. That returns whether the slot
+which resolves to the ring's `ouro_host_kind_has_server()`. That returns whether the slot
 registered to serve the kind is still `in_use`:
 
     return (uint32_t)kind->server < h->cfg.max_slots && h->slots[kind->server].in_use;

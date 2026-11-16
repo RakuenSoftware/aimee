@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const ActionKind uint32 = 3000
@@ -60,7 +60,7 @@ func PublishAction(ctx context.Context, p Publisher, a Action) error {
 			return err
 		}
 		err := p.Publish(ActionKind, body)
-		if !errors.Is(err, bus.ErrWouldBlock) {
+		if !errors.Is(err, ring.ErrWouldBlock) {
 			return err
 		}
 		timer := time.NewTimer(time.Millisecond)

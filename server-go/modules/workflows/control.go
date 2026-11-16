@@ -1,14 +1,16 @@
 package workflows
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-// The workflow control stage carried over the event bus.
+// The workflow control stage carried over the event ring.
 //
 // StageAdvance is a pure decision with a fixed 492-byte contract, which is why
 // it migrated first. The control plane is not that: it is a REST surface over a
@@ -106,9 +108,14 @@ func (r *controlRecorder) WriteHeader(status int) {
 // grant pins the single executable that may attach as it. So the program that
 // owns the control plane serves the advance decision too, rather than a second
 // process claiming the same identity.
-func NewHandler(mux http.Handler) bus.ModuleHandler {
-	control := NewControlHandler(mux)
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func NewHandler(mux http.Handler) ring.ModuleHandler {
+	return NewHandlerContext(context.Background(), mux)
+}
+
+// NewHandlerContext binds admitted control work to the process lifetime.
+func NewHandlerContext(ctx context.Context, mux http.Handler) ring.ModuleHandler {
+	control := NewControlHandlerContext(ctx, mux)
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 		switch invocation.StageID {
 		case StageAdvance:
 			return Handle(invocation, request)
@@ -119,7 +126,7 @@ func NewHandler(mux http.Handler) bus.ModuleHandler {
 		case StageAutonomousRoute:
 			return handleAutonomousRoute(invocation, request)
 		default:
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 }
@@ -128,19 +135,25 @@ func NewHandler(mux http.Handler) bus.ModuleHandler {
 //
 // The mux is passed in rather than constructed here so the stage depends on the
 // routing surface alone, not on the store, engine and config that assemble it.
-func NewControlHandler(mux http.Handler) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
-		if mux == nil {
-			return nil, bus.ModuleStatusInternal
+func NewControlHandler(mux http.Handler) ring.ModuleHandler {
+	return NewControlHandlerContext(context.Background(), mux)
+}
+
+// NewControlHandlerContext propagates host cancellation and the bounded stage
+// deadline into synchronous HTTP handlers and their subprocesses.
+func NewControlHandlerContext(parent context.Context, mux http.Handler) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
+		if mux == nil || parent == nil {
+			return nil, ring.ModuleStatusInternal
 		}
 		// Advance and control share a module and are told apart only by stage id,
 		// so an advance id arriving here is a protocol error, not a control call.
 		if invocation.StageID != StageControl {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var decoded ControlRequest
 		if err := json.Unmarshal(request, &decoded); err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if !controlMethods[decoded.Method] {
 			return controlError(http.StatusMethodNotAllowed, "unsupported workflow control method")
@@ -151,8 +164,10 @@ func NewControlHandler(mux http.Handler) bus.ModuleHandler {
 		if decoded.Path == "" || containsControlChars(decoded.Path, decoded.Query, decoded.Principal) {
 			return controlError(http.StatusBadRequest, "invalid workflow control request")
 		}
-		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+		requestContext, release := controlRequestContext(parent, invocation.Remaining(30*time.Second), invocation.Cancelled)
+		defer release()
+		if status := controlCancellationStatus(requestContext, invocation); status != ring.ModuleStatusOK {
+			return nil, status
 		}
 
 		target := decoded.Path
@@ -160,7 +175,7 @@ func NewControlHandler(mux http.Handler) bus.ModuleHandler {
 			target += "?" + decoded.Query
 		}
 		// http.NewRequest reports a bad target instead of panicking on it.
-		httpRequest, err := http.NewRequest(decoded.Method, target, strings.NewReader(decoded.Body))
+		httpRequest, err := http.NewRequestWithContext(requestContext, decoded.Method, target, strings.NewReader(decoded.Body))
 		if err != nil {
 			return controlError(http.StatusBadRequest, "invalid workflow control target")
 		}
@@ -177,6 +192,9 @@ func NewControlHandler(mux http.Handler) bus.ModuleHandler {
 
 		recorder := &controlRecorder{}
 		mux.ServeHTTP(recorder, httpRequest)
+		if status := controlCancellationStatus(requestContext, invocation); status != ring.ModuleStatusOK {
+			return nil, status
+		}
 		status := recorder.status
 		if status == 0 {
 			// A handler that wrote nothing at all still answered 200 over HTTP.
@@ -186,23 +204,23 @@ func NewControlHandler(mux http.Handler) bus.ModuleHandler {
 	}
 }
 
-func controlError(status int, message string) ([]byte, bus.ModuleStatus) {
+func controlError(status int, message string) ([]byte, ring.ModuleStatus) {
 	body, err := json.Marshal(map[string]string{"error": message})
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return encodeControl(ControlResponse{Status: status, Body: string(body)})
 }
 
-func encodeControl(response ControlResponse) ([]byte, bus.ModuleStatus) {
+func encodeControl(response ControlResponse) ([]byte, ring.ModuleStatus) {
 	encoded, err := json.Marshal(response)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	if uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-		return nil, bus.ModuleStatusInternal
+	if uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }
 
 func containsControlChars(values ...string) bool {
@@ -212,4 +230,41 @@ func containsControlChars(values ...string) bool {
 		}
 	}
 	return false
+}
+
+// The bus exposes cancellation as an atomic observation, not a context. Poll it
+// only while this request is active; release joins the watcher before returning.
+func controlRequestContext(parent context.Context, remaining time.Duration, cancelled func() bool) (context.Context, func()) {
+	ctx, cancel := context.WithTimeout(parent, remaining)
+	if cancelled() {
+		cancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if cancelled() {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return ctx, func() { cancel(); <-done }
+}
+
+func controlCancellationStatus(ctx context.Context, invocation ring.ModuleInvocation) ring.ModuleStatus {
+	if ctx.Err() == context.DeadlineExceeded || invocation.Remaining(30*time.Second) == 0 {
+		return ring.ModuleStatusDeadlineExceeded
+	}
+	if ctx.Err() != nil || invocation.Cancelled() {
+		return ring.ModuleStatusCancelled
+	}
+	return ring.ModuleStatusOK
 }

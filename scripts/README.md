@@ -39,9 +39,9 @@ unchanged input.
 
 ## Sidecars
 
-`llm-chat.py` is a small OpenAI-compatible client used by experiments and command-backed stages.
-`llm-rewrite.py` adapts it to the query-rewrite JSON contract. Configure endpoints and credentials
-through the owning deployment; do not commit them or print them in diagnostics.
+`embed-remote.py` transports embedding requests to the configured service. Model
+communication for curator, learning and reflection tasks uses the active C
+canonical-IR provider path; the unused Python model clients have been retired.
 
 Sidecars read bounded input from stdin, emit the exact documented output on stdout, keep logs on
 stderr, time out, and fail with an explicit degraded result. They do not become hidden storage or

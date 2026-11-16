@@ -47,6 +47,47 @@ it("edits a connection while preserving an unchanged key", async () => {
   expect(body).toEqual({ name: "work", provider: "openai", endpoint: "https://new/v1", auth_type: "bearer", create: false });
 });
 
+it("enrolls Codex through its connection and round-trips execution mode", async () => {
+  const codex = { ...work, name: "codex", provider: "chatgpt", auth_type: "codex-oauth", backend: "provider-cli", cli_kind: "codex", cli_cmd: "codex", session_reuse: true };
+  const fetcher = vi.fn().mockResolvedValue(reply({ providers: [codex] }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<Providers />);
+  fireEvent.click(await screen.findByText("Edit provider"));
+  expect((screen.getByLabelText("Execution") as HTMLSelectElement).value).toBe("codex");
+  fireEvent.click(screen.getByText("Save provider"));
+  await screen.findByText("Provider saved");
+  const native = JSON.parse(fetcher.mock.calls.find(c => c[0] === "/api/providers/save")![1].body);
+  expect(native).toMatchObject({ backend: "provider-cli", cli_kind: "codex", cli_cmd: "codex", session_reuse: true, auth_type: "codex-oauth" });
+  expect(native.api_key).toBeUndefined();
+
+  fireEvent.click(screen.getByText("Edit provider"));
+  fireEvent.change(screen.getByLabelText("Execution"), { target: { value: "http" } });
+  fireEvent.click(screen.getByText("Save provider"));
+  await waitFor(() => expect(fetcher.mock.calls.filter(c => c[0] === "/api/providers/save")).toHaveLength(2));
+  const direct = JSON.parse(fetcher.mock.calls.filter(c => c[0] === "/api/providers/save")[1][1].body);
+  expect(direct.backend).toBe("http");
+  expect(direct.cli_kind).toBeUndefined();
+  expect(direct.api_key).toBeUndefined();
+});
+
+it.each(["openai", "anthropic"])("clears Codex dispatch when an unattached connection becomes %s", async provider => {
+  const codex = { ...work, name: "codex", model_count: 0, provider: "chatgpt", auth_type: "codex-oauth", backend: "provider-cli", cli_kind: "codex", cli_cmd: "codex", session_reuse: true };
+  const fetcher = vi.fn().mockResolvedValue(reply({ providers: [codex] }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<Providers />);
+  fireEvent.click(await screen.findByText("Edit provider"));
+  fireEvent.change(screen.getByLabelText("Provider type"), { target: { value: provider } });
+  expect(screen.queryByLabelText("Execution")).toBeNull();
+  fireEvent.click(screen.getByText("Save provider"));
+  await screen.findByText("Provider saved");
+  const saved = JSON.parse(fetcher.mock.calls.find(c => c[0] === "/api/providers/save")![1].body);
+  expect(saved).toMatchObject({ provider, backend: "http", create: false });
+  expect(saved.cli_kind).toBeUndefined();
+  expect(saved.cli_cmd).toBeUndefined();
+  expect(saved.session_reuse).toBeUndefined();
+  expect(saved.api_key).toBeUndefined();
+});
+
 it("requires explicit deletion confirmation and keeps failed deletes visible", async () => {
   const fetcher = vi.fn(async (path: string) => path === "/api/providers/remove" ? reply({ error: "Save failed" }, false) : reply({ providers: [work] }));
   vi.stubGlobal("fetch", fetcher);
@@ -81,6 +122,47 @@ it("shows load errors instead of claiming there are no providers", async () => {
   render(<Providers />);
   await screen.findByText("Service unavailable");
   expect(screen.queryByText(/No providers configured/)).toBeNull();
+});
+
+it("lets a long discovered model keep its actual ID with a shorter local name", async () => {
+  const provider = { ...work, name: "gui-live-local-8162" };
+  const id = "unsloth/gemma-4-E2B-it-qat-GGUF:qat-UD-Q4_K_XL";
+  const fetcher = vi.fn(async (path: string) => reply(path === "/api/providers/models" ?
+    { details: [{ id }] } : { providers: [provider] }));
+  vi.stubGlobal("fetch", fetcher);
+  const onDone = vi.fn();
+  render(<AddProviderModel onDone={onDone} />);
+  fireEvent.click(await screen.findByText("Show models this provider offers"));
+  fireEvent.click(await screen.findByText(id));
+  expect(screen.getByRole("alert").textContent).toContain("Choose a shorter model name");
+  expect((screen.getByText("Add model") as HTMLButtonElement).disabled).toBe(true);
+  expect(fetcher.mock.calls.some(call => call[0] === "/api/models/add")).toBe(false);
+  fireEvent.change(screen.getByLabelText("Name in Aimee"), { target: { value: "Gemma E2B" } });
+  fireEvent.click(screen.getByText("Add model"));
+  await waitFor(() => expect(onDone).toHaveBeenCalledWith(`Added ${id}`, true));
+  const body = JSON.parse(fetcher.mock.calls.find(call => call[0] === "/api/models/add")![1].body);
+  expect(body.args).toEqual(["Gemma E2B", provider.endpoint, id, "--registration", provider.name]);
+});
+
+it.each([
+  ["a".repeat(63), true], ["a".repeat(64), false],
+  ["é".repeat(31) + "a", true], ["é".repeat(32), false],
+  ["🌿".repeat(15) + "abc", true], ["🌿".repeat(16), false],
+])("validates model names against the backend UTF-8 boundary: %s", async (name, valid) => {
+  const fetcher = vi.fn().mockResolvedValue(reply({ providers: [work] }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<AddProviderModel onDone={() => {}} />);
+  await screen.findByLabelText("Provider");
+  fireEvent.change(screen.getByLabelText("Model ID"), { target: { value: "example" } });
+  fireEvent.change(screen.getByLabelText("Name in Aimee"), { target: { value: name } });
+  expect((screen.getByText("Add model") as HTMLButtonElement).disabled).toBe(!valid);
+  if (valid) {
+    fireEvent.click(screen.getByText("Add model"));
+    await waitFor(() => expect(fetcher.mock.calls.some(call => call[0] === "/api/models/add")).toBe(true));
+  } else {
+    expect(screen.getByRole("alert").textContent).toContain("Choose a shorter model name");
+    expect(fetcher.mock.calls.some(call => call[0] === "/api/models/add")).toBe(false);
+  }
 });
 
 it("keeps model limits and price declarations on Models", async () => {

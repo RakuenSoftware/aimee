@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 	"testing"
 
@@ -16,14 +17,14 @@ type recordingPlaneAgents struct {
 
 func (a *recordingPlaneAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	a.requests = append(a.requests, request)
-	return DelegateResult{Response: "ok", Participant: "p"}, a.err
+	return DelegateResult{Output: canonical.TextResponse("ok"), Participant: "p"}, a.err
 }
 
 func (a *recordingPlaneAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
 	a.requests = append(a.requests, requests...)
 	out := make([]DelegateGroupResult, len(requests))
 	for i := range out {
-		out[i] = DelegateGroupResult{Response: "ok", Participant: "p", Err: a.err}
+		out[i] = DelegateGroupResult{Output: canonical.TextResponse("ok"), Participant: "p", Err: a.err}
 	}
 	return out
 }
@@ -40,7 +41,7 @@ func testSeatRun() roundtablecfg.Run {
 func TestPanelDelegatesAlwaysDeclareTheInlineArtifact(t *testing.T) {
 	agents := &recordingPlaneAgents{}
 	plane := panelDelegates{runner: &NativeRunner{agents: agents}}
-	seat := roundtablecfg.SeatRequest{Role: "review", Persona: "qa", Prompt: "review", Tools: true}
+	seat := roundtablecfg.SeatRequest{Role: "review", Persona: "qa", Input: canonical.TaskRequest("qa", "review"), Tools: true}
 	plane.Group(context.Background(), testSeatRun(), []roundtablecfg.SeatRequest{seat})
 	plane.One(context.Background(), testSeatRun(), seat)
 	if len(agents.requests) != 2 {

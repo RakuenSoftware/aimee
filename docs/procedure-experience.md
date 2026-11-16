@@ -3,8 +3,8 @@
 MR-15 deploys attribution in observe mode. Search result count means availability
 or truncation; it cannot close a correctness reward or update a posterior. The
 KB retrieval-limit and fusion decision points retain their previous artifacts,
-but their `observe` status prevents sampling count-trained weights. Go memory
-also stops dynamic sampling of those weights; explicit operator retrieval limits
+but their `observe` status prevents sampling count-trained weights. The retired Go
+memory owner also stopped dynamic sampling of those weights; explicit operator retrieval limits
 remain available.
 
 ## Receipt-bound feedback

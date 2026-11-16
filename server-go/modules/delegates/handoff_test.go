@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const validHandoff = `{"schema_version":"delegate_result_v1","status":"done",` +
@@ -37,9 +37,9 @@ func decodeFixed(b []byte) string {
 
 func handoffCall(t *testing.T, text, owned string, requireVerification bool) HandoffVerdict {
 	t.Helper()
-	response, status := Handle(bus.ModuleInvocation{StageID: StageHandoff},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageHandoff},
 		handoffRequest(text, owned, requireVerification))
-	if status != bus.ModuleStatusOK || len(response) != handoffResponseLen ||
+	if status != ring.ModuleStatusOK || len(response) != handoffResponseLen ||
 		binary.LittleEndian.Uint32(response[0:4]) != handoffResponseMagic {
 		t.Fatalf("response len %d status %d", len(response), status)
 	}
@@ -201,16 +201,16 @@ func TestOwnershipOutranksTheVerificationDowngrade(t *testing.T) {
 
 func TestHandoffRejectsInvalidEnvelope(t *testing.T) {
 	short := handoffRequest(validHandoff, "", true)[:handoffHeaderLen-1]
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageHandoff}, short); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageHandoff}, short); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("truncated status = %d", status)
 	}
 	lying := handoffRequest(validHandoff, "", true)
 	binary.LittleEndian.PutUint32(lying[8:12], 9999)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageHandoff}, lying); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageHandoff}, lying); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("length-mismatch status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageHandoff, DeadlineNS: 1},
-		handoffRequest(validHandoff, "", true)); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageHandoff, DeadlineNS: 1},
+		handoffRequest(validHandoff, "", true)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired status = %d", status)
 	}
 }

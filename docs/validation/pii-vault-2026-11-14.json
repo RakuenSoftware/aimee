@@ -1,0 +1,233 @@
+{
+  "recorded_at": "2026-11-14T12:27:09.816859+00:00",
+  "audit_completed": true,
+  "qualified": false,
+  "release_ready": false,
+  "required_contract": "PII in encrypted Vault with an opaque memory reference; refusal alone is not successful protection",
+  "inputs": {
+    "application_source_commit": "3549afb7c33f91b320f82c3d5efd9f6aa3060a37",
+    "application_archive_sha256": "7ff0cc701c3b59c493c4e16e8d66542a38bc39a5682c964afbeb1d47c024777d",
+    "application_image": "aimee:pii-vault",
+    "application_image_id": "sha256:7576170ec09305349f4b6547a718af430cb12ff377f068d1253e576dd4db403d",
+    "memory_source_commit": "5bdbad7a4c8498024ba10b686474b352b335ef64",
+    "memory_bundle_sha256": "d0fb57cb2dd4cb9a5797b3c065991bb14cb333bab2628d4afca0733575489cda",
+    "host": "192.168.1.253",
+    "vmid": 9474,
+    "hostname": "aimee-pii-vault-audit",
+    "address": "192.168.0.112/23",
+    "privileged": true,
+    "resources": {
+      "cores": 24,
+      "memory_mib": 32768,
+      "root_disk_gib": 150
+    },
+    "build_args": {
+      "WITH_VSCODE": "0",
+      "AIMEE_VERSION": "1.1.0-3549afb7c"
+    },
+    "harness_sha256": {
+      "finish-recovery.py": "95009dd7d119e9c6541fdeab97b99871761bf816dfc53137269f5b18a79d845b",
+      "offline-vault.py": "a7a5ab37bd7d0d9ee93ea190e55b9f261bb113a511d0c9abaeeafe26eceb79c6",
+      "model-probe.py": "cfe17d7fda3d984346d311e458ba6693e68b7ac999290d52144a6a673afd23d0",
+      "read-tool-followup.py": "f9f8dd30c91a40320af94dfb78dc243f932a9c2771807b8e6bd5c4278adb8ef2",
+      "audit.py": "faf6a33b03324ad884152307013d73228336cefc1127efceedb7314c482fd3d2",
+      "metadata-audit.py": "82ea08d5dc27e992b1f8ba774fdc20e78cabb26e6b8834ee969a73b205f3a69c",
+      "resume-audit.py": "c912d937c80b4a8da67237571e97f5e3189c55dd61303b6e2c7e465a2da9fb5c",
+      "sitecustomize.py": "ca3d31e86e44e386915fbc92fa10d6858f0462bfe0656db9382adb591aa00a7e",
+      "pipeline-audit.py": "e030219c61cae4f0c051111866099aee5a8896e34bc39957391aecb74e244d2e",
+      "scan-files.py": "27d56cd11aaadef871b4d846cc8b54132a1e518e6520c60eb2aa5cfbd8357474",
+      "resume-backup.py": "bad8ecacc1d6ddd949c095097ae831c6fcdb741d664637ebce58c7a67f4fa9a8"
+    },
+    "pii_contract": "PII must be stored in encrypted Vault with an opaque memory reference; refusal without custody/reference is not success",
+    "runtime_changed": false
+  },
+  "results": {
+    "audit_completed": true,
+    "qualified": false,
+    "release_ready": false,
+    "required_contract": "PII in encrypted Vault with an opaque memory reference; refusal alone is not successful protection",
+    "content_matrix": {
+      "server": {
+        "cases": 18,
+        "vault_and_reference": 0,
+        "raw_memory": 9,
+        "refused_without_vault": 9
+      },
+      "kb": {
+        "cases": 18,
+        "vault_and_reference": 0,
+        "raw_memory": 9,
+        "refused_without_vault": 9
+      }
+    },
+    "real_embedding": {
+      "calls": 5,
+      "hits": {
+        "pipeline_org": 1,
+        "phone_parentheses": 1,
+        "pipeline_person": 1
+      }
+    },
+    "raw_original_provider_requests": {
+      "model:original_email": [
+        {
+          "canary_ids": [
+            "original_email"
+          ],
+          "tool_results": 0
+        }
+      ],
+      "model:original_credential": [
+        {
+          "canary_ids": [
+            "original_credential"
+          ],
+          "tool_results": 0
+        }
+      ]
+    },
+    "native_journal_pii_classes": {
+      "server": [
+        "ipv4_private_172",
+        "ipv4_public",
+        "ipv6",
+        "passport_label",
+        "payment_card",
+        "person_name",
+        "phone_international",
+        "phone_parentheses",
+        "postal_address"
+      ],
+      "kb": [
+        "ipv4_private_172",
+        "ipv4_public",
+        "ipv6",
+        "passport_label",
+        "payment_card",
+        "person_name",
+        "phone_international",
+        "phone_parentheses",
+        "postal_address"
+      ]
+    },
+    "backup_pii_classes": {
+      "server": [
+        "ipv4_private_172",
+        "ipv4_public",
+        "ipv6",
+        "original_credential",
+        "original_email",
+        "passport_label",
+        "payment_card",
+        "person_name",
+        "phone_international",
+        "phone_parentheses",
+        "postal_address"
+      ],
+      "kb": [
+        "ipv4_private_172",
+        "ipv4_public",
+        "ipv6",
+        "passport_label",
+        "payment_card",
+        "person_name",
+        "phone_international",
+        "phone_parentheses",
+        "postal_address"
+      ]
+    },
+    "vault_file_permissions": {
+      "server": {
+        "application_metadata_canary_ids": [],
+        "vault_permissions_restrict_to_owner": true,
+        "postgres_bootstrap_credential_variable_names": [
+          "AIMEE_STORE_RUNTIME_PASSWORD",
+          "POSTGRES_PASSWORD",
+          "AIMEE_STORE_MIGRATOR_PASSWORD"
+        ]
+      },
+      "kb": {
+        "application_metadata_canary_ids": [],
+        "vault_permissions_restrict_to_owner": true,
+        "postgres_bootstrap_credential_variable_names": [
+          "AIMEE_STORE_MIGRATOR_PASSWORD",
+          "AIMEE_STORE_RUNTIME_PASSWORD",
+          "POSTGRES_PASSWORD"
+        ]
+      }
+    },
+    "software_master_loss": {
+      "health": "unhealthy",
+      "master_file_created": true,
+      "replacement_differs": true,
+      "ciphertext_files_unchanged": true
+    },
+    "isolated_restore_projects": {
+      "server": "aimee-e2e-server-1d51259441",
+      "kb": "aimee-e2e-kb-456bd20655"
+    },
+    "vault_gcm_failure_recovery": {
+      "tampered credential fails closed before service readiness": true,
+      "corrupt credential causes no provider effect": true,
+      "restored authenticated credential recovers service": true,
+      "restored credential again succeeds through actual Vault pipe": true,
+      "original master restoration recovers healthy service": true,
+      "original credential still usable after master restoration": true,
+      "master recovery preserves original memory version": true
+    },
+    "memory_read_continuation_qualified": false,
+    "memory_read_continuation_note": "Ordinary search_memory failed both broad and single-record continuation; no privacy pass is inferred. Actual graph continuation completed separately.",
+    "source_only_retention_gap": {
+      "public_route": "POST /v1/vault/delete",
+      "handler": "src/server/server_vault.c:410",
+      "backend": "src/modules/vault/vault_store.c:1212",
+      "observed": "Mutable credentials are removed; immutable retirement replaces the encrypted entry with a tombstone. No delete was invoked in this audit."
+    },
+    "infrastructure_errors": []
+  },
+  "evidence_archive": "pii-vault-evidence.tar.gz",
+  "evidence_archive_sha256": "2cd2e264505925304bc7a0931d48b46d0a577756558ead4e2690d4e931645a58",
+  "evidence_files_verified": 42,
+  "evidence_handling": "Canary values, credentials, raw backups and private controller state excluded or redacted. Final secret scan passed. The guest export contains 41 files; the local cleanup confirmation is the 42nd hashed file.",
+  "documentation_corrected": [
+    "docs/UPGRADING.md",
+    "docs/releases/v1.1.0/RELEASE_NOTES.md",
+    "docs/DATA_GOVERNANCE.md",
+    "docs/SECURITY.md",
+    "docs/DEPLOYMENT.md"
+  ],
+  "public_lint_checks_passed": 76,
+  "runtime_fixes_implemented": false,
+  "cleanup": {
+    "host": "192.168.1.253",
+    "vmid": 9474,
+    "hostname": "aimee-pii-vault-audit",
+    "deleted": true,
+    "config_absent": true,
+    "root_disk_absent": true,
+    "host_crypt_mappings_and_loop_attachments_empty": true
+  },
+  "current_ci_failures": [
+    {
+      "job": "e2e-docker (T2)",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/43593141186/job/132442091526",
+      "observed": "memory-native-async-e2e.py failed; the precise cause is unclassified."
+    },
+    {
+      "job": "integration-tests",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/43593141186/job/132442091438"
+    },
+    {
+      "job": "live-auth-rigs",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/43593141186/job/132442091542"
+    }
+  ],
+  "limitations": [
+    "Default software/file Vault custody only; hardware/KMS custody is not qualified by this run.",
+    "Synthetic inputs and controlled provider endpoints only; no real personal data or production credentials used.",
+    "This is a finite test matrix, not proof of a complete PII classifier.",
+    "PostgreSQL LUKS does not encrypt the separate Native memory home and capture files.",
+    "PostgreSQL bootstrap SQL role passwords remain in its own container metadata, as documented; long-lived application metadata contained none of the test credential canaries.",
+    "Runtime privacy routing and key-regeneration defects remain unfixed; only documentation and qualification evidence are changed."
+  ]
+}

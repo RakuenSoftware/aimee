@@ -25,11 +25,6 @@ extern "C"
                                              const char *detail, const char *prev_hash,
                                              char out_hex[65]);
 
-   /* Deprecated no-op retained for ABI compatibility. Hashing is owned by the
-    * shared SQLite worker and is no longer injected into KB_STORE. */
-   void aimee_kb_store_register_audit_hash_provider(kb_store_audit_hash_fn provider);
-   void aimee_kb_store_register_audit_hash_v2_provider(kb_store_audit_hash_v2_fn provider);
-
    /* Submit one governed action to the durable WORM outbox. detail is bounded
     * to AUDIT_WORM_DETAIL_MAX. Returns 0 when the intent commits, -1 on failure. */
    int kb_store_kb_audit_append(const char *actor_role, const char *actor_principal,
@@ -49,10 +44,6 @@ extern "C"
     * queue. Runtime has read-only EXECUTE on the aggregate, never table access. */
    int kb_store_kb_audit_pending(long long *count, long long *oldest_age_seconds);
 
-   /* Capture gate: the aimee-kb service enables this at init from
-    * config.audit_worm_enabled; the central kb audit seam (kb_store_audit_event_write)
-    * dual-writes into the WORM store only when enabled. Default-off. */
-   void kb_store_kb_audit_worm_set_enabled(int enabled);
    int kb_store_kb_audit_worm_enabled(void);
 
 #ifdef __cplusplus

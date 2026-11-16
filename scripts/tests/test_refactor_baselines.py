@@ -31,7 +31,7 @@ class RefactorBaselineTests(unittest.TestCase):
         self.assertIn("src/modules/audit/include/aimee/audit/audit_action.h", files)
         self.assertIn("src/modules/skills/include/aimee/skills/skill.h", files)
         self.assertIn(
-            "src/modules/gateway/include/aimee/gateway/gateway_pipeline.h",
+            "src/modules/gateway/include/aimee/gateway/gateway_policy.h",
             files,
         )
         self.assertIn("src/modules/ir/include/aimee/ir/aimee_ir.h", files)

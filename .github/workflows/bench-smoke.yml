@@ -33,11 +33,14 @@ jobs:
       - name: Benchmark suite unit tests
         run: python3 -m unittest discover -s benchmarks/tests -p 'test_*.py'
 
+      - name: Benchmark adapter, dataset and judge contract tests
+        run: PYTHONPATH=. python3 -m unittest discover -s tests/benchmarks -p 'test_*.py'
+
       - name: Install dependencies
         run: |
           sudo apt-get update -q
-          timeout 240 sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
 
       - name: Build (PR branch)
         run: cd src && make -j$(nproc) all server

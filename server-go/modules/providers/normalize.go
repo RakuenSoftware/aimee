@@ -86,24 +86,55 @@ func normalizeModel(model object) error {
 	if str(model, "auth_type") == "" {
 		model["auth_type"] = "bearer"
 	}
+	// A saved connection owns protocol and credentials, but need not repeat native
+	// adapter fields. Re-derive dispatch after applying that connection instead of
+	// falling through to HTTP with an intentionally empty SDK endpoint.
+	if provider := str(model, "provider"); provider == "claude" || provider == "claude-code" {
+		model["backend"], model["cli_kind"] = "provider-cli", "claude"
+		model["session_reuse"] = true
+		// These SDK aliases use the registered Claude OAuth document. The UI's
+		// historical none/bearer defaults must not select API-key lineage instead.
+		if auth := str(model, "auth_type"); str(model, "endpoint") == "" && (auth == "none" || auth == "bearer") {
+			model["auth_type"] = "claude-oauth"
+		}
+	}
 	if str(model, "backend") == "cli-stdio" {
 		model["backend"] = "provider-cli"
 	}
-	if str(model, "backend") == "provider-cli" && str(model, "cli_kind") == "claude" {
-		model["backend"] = "tmux-cli"
-		if str(model, "provider") == "openai" {
+	if str(model, "backend") == "tmux-cli" {
+		model["backend"] = "provider-cli"
+		if str(model, "cli_kind") == "" {
+			model["cli_kind"] = str(model, "provider")
+		}
+	}
+	if str(model, "backend") == "provider-cli" && (str(model, "cli_kind") == "claude" || str(model, "cli_kind") == "claude-code" || str(model, "cli_kind") == "claude-oauth") {
+		model["cli_kind"] = "claude"
+		// Only the old empty-endpoint default denotes the native SDK alias.
+		// An explicit endpoint owns its upstream wire and authentication, even
+		// though Claude is the scheduler speaking to our local gateway.
+		if str(model, "provider") == "openai" && str(model, "endpoint") == "" {
 			model["provider"] = "claude"
+			model["session_reuse"] = true
+			if auth := str(model, "auth_type"); auth == "none" || auth == "bearer" {
+				model["auth_type"] = "claude-oauth"
+			}
 		}
-		if str(model, "auth_type") == "bearer" {
-			model["auth_type"] = "none"
-		}
-		if cmd := str(model, "cli_cmd"); cmd == "" || cmd == "claude-p" {
+		// Older model commands embedded this exact model selection in the executable
+		// field. Native launches pass --model separately and never interpret shell text.
+		if cmd := str(model, "cli_cmd"); cmd == "" || cmd == "claude-p" || cmd == "claude --model "+str(model, "model") {
 			model["cli_cmd"] = "claude"
 		}
-		delete(model, "cli_kind")
+	}
+	if str(model, "backend") == "provider-cli" && str(model, "cli_kind") == "codex" {
+		if str(model, "cli_cmd") == "" {
+			model["cli_cmd"] = "codex"
+		}
+		if _, present := model["session_reuse"]; !present {
+			model["session_reuse"] = true
+		}
 	}
 	if _, ok := model["primary_only"]; !ok {
-		model["primary_only"] = str(model, "backend") == "tmux-cli" && (str(model, "provider") == "claude" || str(model, "cli_kind") == "claude")
+		model["primary_only"] = str(model, "backend") == "provider-cli" && str(model, "cli_kind") == "claude"
 	}
 	if str(model, "backend") == "provider-cli" && str(model, "cli_kind") == "mistral-plan" {
 		model["cost_tier"] = 0

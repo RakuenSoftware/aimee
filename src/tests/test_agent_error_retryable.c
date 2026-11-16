@@ -40,6 +40,8 @@ int main(void)
    assert(agent_rc_should_try_another(-1, "provider quota exhausted") == 1);
    assert(agent_rc_should_try_another(-1, NULL) == 0);
    assert(agent_rc_should_try_another(AGENT_RC_AT_LIMIT, NULL) == 1);
+   assert(agent_rc_should_try_another(AGENT_RC_CAPTURE_FAILED, "quota exceeded") == 0);
+   assert(agent_rc_is_local_refusal(AGENT_RC_CAPTURE_FAILED));
    assert(agent_rc_should_try_another(AGENT_RC_CONTEXT_REFUSED, "quota exhausted") == 0);
    assert(agent_rc_should_try_another(AGENT_RC_CONTEXT_REFUSED,
                                       "memory context refused: HTTP 503 unavailable") == 0);

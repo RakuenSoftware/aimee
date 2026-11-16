@@ -9,6 +9,5 @@ struct cJSON;
 
 int agent_request_prefers_no_think_prompt(const agent_t *agent);
 char *agent_request_shape_user_prompt(const agent_t *agent, const char *user_prompt);
-void agent_request_shape_openai_messages(const agent_t *agent, struct cJSON *messages);
 
 #endif /* DEC_AGENT_REQUEST_SHAPING_H */

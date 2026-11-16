@@ -1,8 +1,8 @@
 /* acp_server.h: inbound Agent Client Protocol (ACP) server — `aimee acp-serve`.
  *
  * aimee speaks a simplified newline-delimited JSON-RPC 2.0 ACP dialect on stdio
- * (mirroring the outbound client in src/server/cli_acp.c), so ACP editors (Zed,
- * Aider's editor mode, …) can use aimee as a backend. Phase 1 implements the
+ * so ACP editors (Zed, Aider's editor mode, …) can use aimee as a backend.
+ * Phase 1 implements the
  * stdio dispatch loop and the `initialize` handshake; session/new and
  * prompt/submit turn dispatch are later phases. */
 #ifndef DEC_ACP_SERVER_H

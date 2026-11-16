@@ -2,7 +2,7 @@
 """Provisioning must never hand two instances the same identity.
 
 A duplicate principal_ref means two plugins share one grant; a duplicate event
-kind means bus_host_serve_kind() denies the second at attach with nothing in its
+kind means the ring's ouro_host_serve_kind() denies the second at attach with nothing in its
 own logs to explain why. Both are silent-at-the-wrong-layer failures, so the
 allocator is tested rather than trusted.
 

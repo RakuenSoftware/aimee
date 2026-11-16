@@ -35,7 +35,10 @@ typedef enum
 typedef struct
 {
    sandbox_mode_t mode;
-   int network_isolated; /* 1 = block outbound network (Linux only) */
+   /* Borrowed prepared environment overlay, applied only in forked children. */
+   char *const *child_environment;
+   int child_environment_replace; /* explicit child-only replacement; default overlay */
+   int network_isolated;          /* 1 = block outbound network (Linux only) */
    char allow_paths[SANDBOX_MAX_ALLOW_PATHS][SANDBOX_MAX_PATH_LEN];
    int allow_path_count;
 } sandbox_config_t;

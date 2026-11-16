@@ -79,10 +79,10 @@ class PanelContractBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.fixture(root)
-            path = root / "src/cmd_agent_delegate.c"
+            path = root / "src/server/server_compute.c"
             path.write_text(path.read_text(encoding="utf-8").replace(
                 '#include "delegate_ensemble.h"',
-                '#include <aimee/delegates/panel_provider.h>',
+                '#include <aimee/core/types/panel_result.h>',
                 1,
             ), encoding="utf-8")
             with self.assertRaisesRegex(checker.CheckError,

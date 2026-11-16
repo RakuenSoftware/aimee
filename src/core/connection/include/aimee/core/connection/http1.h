@@ -27,7 +27,12 @@ extern "C"
       int has_content_length;
       int connection_close;
       int status;
+      int transfer_chunked;
    } aimee_core_http1_response_t;
+
+   /* Decode an already bounded header block. Streaming clients may accept
+    * chunked transfer; the existing unary exchange retains its strict policy. */
+   int aimee_core_http1_headers_parse(aimee_core_http1_response_t *response, int allow_chunked);
 
    /* Read one HTTP/1.x response into a bounded NUL-terminated allocation.
     * Content-Length responses stop exactly at the declared body end, making

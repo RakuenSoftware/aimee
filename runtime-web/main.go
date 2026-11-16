@@ -25,6 +25,7 @@ func main() {
 	socketPath := flag.String("socket", "", "aimee-server Unix socket path (default: ~/.config/aimee/aimee.sock)")
 	dbPath := flag.String("db", "", "Session database path (default: ~/.config/aimee/webchat.db)")
 	spaPath := flag.String("spa", "", "Path to built frontend/dist/index.html (auto-discovered if empty)")
+	requireOriginalInput := flag.Bool("require-original-input", false, "Require the native original-input contract before chat admission")
 	flag.Parse()
 
 	cfg, err := newConfig(*port, *certFile, *keyFile, *socketPath, *dbPath, *spaPath)
@@ -32,6 +33,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "aimee-runtime-web: config: %v\n", err)
 		os.Exit(1)
 	}
+
+	cfg.requireOriginalInput = *requireOriginalInput
 
 	log.Printf("aimee-runtime-web: starting on :%d", cfg.port)
 	if err := run(cfg); err != nil {

@@ -128,7 +128,7 @@ static void append_go_module_steps(const char *project_root, verify_config_t *cf
    if (dir)
    {
       struct dirent *entry;
-      while ((entry = readdir(dir)) != NULL && module_count < MAX_VERIFY_STEPS)
+      while ((entry = readdir(dir)) != NULL)
       {
          if (!safe_module_dir(entry->d_name))
             continue;
@@ -138,11 +138,18 @@ static void append_go_module_steps(const char *project_root, verify_config_t *cf
          snprintf(path, sizeof(path), "%s/%s/go.mod", project_root, entry->d_name);
          if (stat(path, &st) != 0 || !S_ISREG(st.st_mode))
             continue;
+         if (module_count >= MAX_VERIFY_STEPS)
+         {
+            cfg->incomplete = 1;
+            continue;
+         }
          snprintf(modules[module_count++], MAX_STEP_NAME, "%s", entry->d_name);
       }
       closedir(dir);
    }
 
+   if (module_count > MAX_VERIFY_STEPS - cfg->count)
+      cfg->incomplete = 1;
    qsort(modules, (size_t)module_count, sizeof(modules[0]), compare_module_dirs);
    for (int i = 0; i < module_count && cfg->count < MAX_VERIFY_STEPS; i++)
    {

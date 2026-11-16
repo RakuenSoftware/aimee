@@ -46,8 +46,8 @@ describe('single-user readiness', () => {
     for(const engine of ['cognee','hillock']) {
       const cfg={memory_backend_engine:engine,memory_backend_endpoint:'http://service:8097',memory_backend_auth:'bearer'};
       expect(computeReadiness(cfg,readySignals).steps.memory.ok).toBe(false);
-      expect(computeReadiness({...cfg,memory_backend_token:true},readySignals).steps.memory.ok).toBe(true);
-      expect(computeReadiness({...cfg,memory_backend_auth:'none'},readySignals).steps.memory.ok).toBe(true);
+      expect(computeReadiness({...cfg,memory_backend_token:true},readySignals).steps.memory.ok).toBe(false);
+      expect(computeReadiness({...cfg,memory_backend_auth:'none'},readySignals).steps.memory.ok).toBe(false);
       expect(computeReadiness({...cfg,memory_backend_token:true,memory_backend_endpoint:'http://secret@host'},readySignals).steps.memory.ok).toBe(false);
       expect(computeReadiness({...cfg,memory_backend_token:true,memory_backend_auth:'unknown'},readySignals).steps.memory.ok).toBe(false);
     }

@@ -1,7 +1,6 @@
 /* Single-user setup readiness; optional KB connection never supplies local model readiness. */
 
 import { FIELD_HELP } from '../pages/settingsHelp';
-import { validateMemoryEndpoint } from './memoryBackendConfig';
 
 export type StepId = 'memory' | 'account' | 'provider' | 'embedding' | 'git_identity' | 'connection' | 'project';
 
@@ -13,9 +12,6 @@ export type StepId = 'memory' | 'account' | 'provider' | 'embedding' | 'git_iden
 export const READINESS_KEYS = [
   'provider',
   'memory_backend_engine',
-  'memory_backend_endpoint',
-  'memory_backend_auth',
-  'memory_backend_token',
   'embedder_command',
   'embedder_url',
   'embedder_model',
@@ -54,6 +50,8 @@ export function computeReadiness(
   { accountReady, projectCount, hostsConnected = 0, gitIdentityReady = false }: ReadinessSignals,
 ): Readiness {
   const provider = asStr(cfg, 'provider');
+  const memoryEngine = asStr(cfg, 'memory_backend_engine');
+  const memorySupported = ['', 'native', 'aimee-native'].includes(memoryEngine);
 
   const embCmd = asStr(cfg, 'embedder_command');
   const embUrl = asStr(cfg, 'embedder_url');
@@ -75,12 +73,9 @@ export function computeReadiness(
       detail: provider !== '' ? `primary: ${provider}` : 'no primary provider set',
     },
     memory: {
-      ok: !asStr(cfg, 'memory_backend_engine') || asStr(cfg, 'memory_backend_engine') === 'native' ||
-        (['cognee', 'hillock'].includes(asStr(cfg, 'memory_backend_engine')) && validateMemoryEndpoint(asStr(cfg, 'memory_backend_endpoint')) &&
-          (['', 'bearer', 'none'].includes(asStr(cfg, 'memory_backend_auth')) ||
-            (asStr(cfg, 'memory_backend_engine') === 'cognee' && asStr(cfg, 'memory_backend_auth') === 'api-key')) &&
-          (asStr(cfg, 'memory_backend_auth') === 'none' || cfg.memory_backend_token === true)),
-      detail: asStr(cfg, 'memory_backend_engine') || 'Aimee native (default)',
+      ok: memorySupported,
+      detail: memorySupported ? (memoryEngine || 'Aimee native (default)') :
+        `Unsupported memory backend: ${memoryEngine}; export and migrate its data before switching to native`,
     },
     embedding: {
       ok: embConfigured,

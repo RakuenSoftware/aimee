@@ -65,7 +65,6 @@ extern "C"
    /* Exact verified leaf identity plus an RFC 5705 exporter binding for this
     * live TLS connection. Strings are lowercase/canonical where applicable. */
    int server_tls_peer_cert(SSL *ssl, server_tls_peer_cert_t *out);
-   int server_tls_local_fingerprint(SSL *ssl, char out[65]);
    /* Canonical identity of the certificate presented by this server-side SSL. */
    int server_tls_local_cert(SSL *ssl, server_tls_peer_cert_t *out);
 

@@ -1,4 +1,0 @@
-aimee 7d8b2e4 — what's new:
-  (no changelog entry for this version)
-
-2026-04-16T09:35:46Z ERROR db: migrate: legacy schema_migrations database is unsupported; start fresh

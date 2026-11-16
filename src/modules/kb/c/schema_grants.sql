@@ -110,8 +110,6 @@ BEGIN
   REVOKE ALL ON TABLE kb_subject_erasure_request,kb_subject_erasure_owner_coverage,memory_erasure_intents,memory_erasure_sessions,memory_erasure_epoch FROM aimee_kb_runtime;
   REVOKE ALL ON TABLE memory_projection_generations FROM aimee_kb_runtime;
   GRANT SELECT ON TABLE memory_projection_generations TO aimee_kb_runtime;
-  GRANT EXECUTE ON FUNCTION kb_subject_erasure_begin(TEXT,TEXT,JSONB),
-    kb_subject_erasure_complete(TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
 
   -- Memory governance uses the compatibility definer, which now submits an
   -- outbox intent rather than appending the chain in the runtime process.
@@ -221,10 +219,14 @@ BEGIN
   -- / admin) but its direct write grant from the ALL TABLES line above is REVOKED, so a
   -- compromised runtime session cannot forge or mutate vault rows out of band.
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON
-    org_vault_salt, org_vault_secret, org_vault_current FROM aimee_kb_runtime;
+    org_vault_salt, org_vault_secret, org_vault_current, org_vault_retirement FROM aimee_kb_runtime;
   GRANT SELECT ON
-    org_vault_salt, org_vault_secret, org_vault_current TO aimee_kb_runtime;
+    org_vault_salt, org_vault_secret, org_vault_current, org_vault_retirement TO aimee_kb_runtime;
   REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_vault_rotation FROM aimee_kb_runtime;
+  REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_rotation_request
+    FROM aimee_kb_runtime;
+  REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_rotation_schedule
+    FROM aimee_kb_runtime;
   -- The vault definer functions are the ONLY write/read-through path; EXECUTE to
   -- runtime, never PUBLIC.
   REVOKE ALL ON FUNCTION org_vault_salt_ensure(TEXT,BYTEA) FROM PUBLIC;
@@ -254,6 +256,15 @@ BEGIN
   REVOKE ALL ON FUNCTION org_vault_rotation_transition_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_rotation_fail_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_rotation_remediate(TEXT,BIGINT,TEXT,BIGINT,BIGINT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_request_add(TEXT,BIGINT,TEXT,TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_request_next(TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_request_settle(TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_pending(TEXT,INTEGER) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_request_list(TEXT,BIGINT,INTEGER) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_request_adopt(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_schedule_set(TEXT,BIGINT,TEXT,INTEGER) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_schedule_list(TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_schedule_due(TEXT,INTEGER) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_key_use_candidate(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_key_use_admit(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION org_vault_salt_ensure(TEXT,BYTEA) TO aimee_kb_runtime;
@@ -282,6 +293,15 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_vault_rotation_transition_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_rotation_fail_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_rotation_remediate(TEXT,BIGINT,TEXT,BIGINT,BIGINT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_request_add(TEXT,BIGINT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_request_next(TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_request_settle(TEXT,BIGINT,TEXT,BIGINT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_pending(TEXT,INTEGER) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_request_list(TEXT,BIGINT,INTEGER) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_request_adopt(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_schedule_set(TEXT,BIGINT,TEXT,INTEGER) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_schedule_list(TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_schedule_due(TEXT,INTEGER) TO aimee_kb_runtime;
   REVOKE SELECT,INSERT,UPDATE,DELETE,TRUNCATE ON org_vault_key_use_intent FROM aimee_kb_runtime;
   REVOKE ALL ON TABLE kb_vault_control FROM aimee_kb_runtime;
   REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM PUBLIC;
@@ -446,95 +466,6 @@ $$;
 -- process BYPASSRLS.  A NOLOGIN definer owns only the two bounded erasure
 -- functions and receives the exact table verbs those functions need.  The
 -- runtime role can invoke the functions but cannot SET ROLE to this authority.
-DO $privacy_erasure_grants$
-DECLARE edge RECORD;
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') OR
-     NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_owner') THEN
-    RAISE NOTICE 'privacy erasure grants: hardened roles absent (dev tier) -- skipping';
-    RETURN;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_privacy_erasure') THEN
-    CREATE ROLE aimee_kb_privacy_erasure NOLOGIN NOINHERIT BYPASSRLS
-      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-  END IF;
-  ALTER ROLE aimee_kb_privacy_erasure NOLOGIN NOINHERIT BYPASSRLS
-    NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-  FOR edge IN
-    SELECT granted.rolname AS granted_role,member.rolname AS member_role
-      FROM pg_auth_members membership
-      JOIN pg_roles granted ON granted.oid=membership.roleid
-      JOIN pg_roles member ON member.oid=membership.member
-     WHERE granted.rolname='aimee_kb_privacy_erasure'
-        OR member.rolname='aimee_kb_privacy_erasure'
-  LOOP
-    EXECUTE format('REVOKE %I FROM %I',edge.granted_role,edge.member_role);
-  END LOOP;
-  EXECUTE format('REVOKE ALL ON DATABASE %I FROM aimee_kb_privacy_erasure',current_database());
-  EXECUTE format('GRANT CONNECT ON DATABASE %I TO aimee_kb_privacy_erasure',current_database());
-  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_privacy_erasure;
-  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_privacy_erasure;
-  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_privacy_erasure;
-  GRANT USAGE ON SCHEMA public TO aimee_kb_privacy_erasure;
-  GRANT SELECT,DELETE ON memories,memory_fact_actors,memory_units,memory_embeddings,
-    derived_rederivation_queue,derived_memory_dependencies,derived_memory_registry,
-    report_enrichments,memory_evidence_events,prospective_memories,
-    epistemic_directives,learning_signals,artifacts,artifact_citations,
-    vector_index_ops,kb_async_jobs,kb_embeddings,kb_pdf_embeddings,
-    kb_doc_assets,kb_table_cells,kb_doc_regions,kb_file_index,kb_documents
-    TO aimee_kb_privacy_erasure;
-  -- The existing evidence triggers on memories and derived rows remain active
-  -- during erasure.  They retain content-free lifecycle evidence and therefore
-  -- need their normal append/update stores; granting them here avoids weakening
-  -- those triggers for the privacy path.
-  -- Memory deletion also queues Go index invalidation. Keep the enqueue trigger
-  -- active under this NOLOGIN definer; no runtime role gains erasure authority.
-  GRANT INSERT,UPDATE ON kb_async_jobs TO aimee_kb_privacy_erasure;
-  GRANT SELECT ON fact_evidence,memory_entities TO aimee_kb_privacy_erasure;
-  GRANT SELECT,INSERT ON memory_erasure_intents,memory_erasure_sessions TO aimee_kb_privacy_erasure;
-  GRANT SELECT,UPDATE ON memory_erasure_epoch TO aimee_kb_privacy_erasure;
-  GRANT SELECT,DELETE ON memory_lineage,rules,tasks,learning_proposals,learning_observations,
-    interaction_event_embeddings,entity_profiles,memory_relations TO aimee_kb_privacy_erasure;
-  GRANT SELECT ON learning_observation_evidence TO aimee_kb_privacy_erasure;
-  GRANT SELECT,INSERT,UPDATE ON fact_graph_commits,fact_graph_changes,
-    memory_evidence_events TO aimee_kb_privacy_erasure;
-  GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO aimee_kb_privacy_erasure;
-  GRANT SELECT ON kb_server_registry TO aimee_kb_privacy_erasure;
-  GRANT SELECT,INSERT,UPDATE ON kb_subject_erasure_owner_coverage TO aimee_kb_privacy_erasure;
-  GRANT SELECT,INSERT,UPDATE ON kb_subject_erasure_request TO aimee_kb_privacy_erasure;
-  GRANT EXECUTE ON FUNCTION pg_now_text(TEXT),
-    evidence_envelope_json(JSONB),kb_fact_commit_worm_seal(TEXT,TEXT),
-    memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT),
-    kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
-    TO aimee_kb_privacy_erasure;
-  ALTER FUNCTION kb_subject_erasure_begin(TEXT,TEXT,JSONB)
-    OWNER TO aimee_kb_privacy_erasure;
-  ALTER FUNCTION kb_subject_erasure_require_owners(TEXT) OWNER TO aimee_kb_privacy_erasure;
-  ALTER FUNCTION kb_subject_erasure_ack(TEXT,TEXT,TEXT,BIGINT) OWNER TO aimee_kb_privacy_erasure;
-  REVOKE ALL ON FUNCTION kb_subject_erasure_ack(TEXT,TEXT,TEXT,BIGINT),kb_subject_erasure_require_owners(TEXT) FROM PUBLIC;
-  GRANT EXECUTE ON FUNCTION kb_subject_erasure_ack(TEXT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
-  ALTER FUNCTION kb_subject_erasure_complete(TEXT,TEXT,BIGINT)
-    OWNER TO aimee_kb_privacy_erasure;
-  -- A repeat application above revokes the definer's own EXECUTE ACL too.
-  -- Restore only the internal calls; the runtime cannot call require_owners.
-  GRANT EXECUTE ON FUNCTION kb_subject_erasure_require_owners(TEXT),
-    kb_subject_erasure_complete(TEXT,TEXT,BIGINT) TO aimee_kb_privacy_erasure;
-  ALTER FUNCTION kb_memory_retention_reap(INTEGER)
-    OWNER TO aimee_kb_privacy_erasure;
-  ALTER FUNCTION kb_memory_sensitivity_retention_reap(TEXT,INTEGER)
-    OWNER TO aimee_kb_privacy_erasure;
-  ALTER FUNCTION kb_document_retention_reap(INTEGER)
-    OWNER TO aimee_kb_privacy_erasure;
-  REVOKE ALL ON FUNCTION kb_memory_retention_reap(INTEGER),
-    kb_memory_sensitivity_retention_reap(TEXT,INTEGER),
-    kb_document_retention_reap(INTEGER),kb_subject_erasure_begin(TEXT,TEXT,JSONB),
-    kb_subject_erasure_complete(TEXT,TEXT,BIGINT) FROM PUBLIC;
-  GRANT EXECUTE ON FUNCTION kb_memory_retention_reap(INTEGER),
-    kb_memory_sensitivity_retention_reap(TEXT,INTEGER),
-    kb_document_retention_reap(INTEGER),kb_subject_erasure_begin(TEXT,TEXT,JSONB),
-    kb_subject_erasure_complete(TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
-END
-$privacy_erasure_grants$;
 
 -- P7-reseal-d3a dedicated operator-status authority.  The login role cannot
 -- inherit this capability implicitly; the runtime must prove its posture and
@@ -1288,6 +1219,8 @@ BEGIN
   ALTER TABLE public.kb_management_status_key OWNER TO aimee_kb_owner;
   ALTER TABLE public.org_vault_secret OWNER TO aimee_kb_owner;
   ALTER TABLE public.org_vault_current OWNER TO aimee_kb_owner;
+  ALTER TABLE public.org_vault_retirement OWNER TO aimee_kb_owner;
+  GRANT SELECT,INSERT ON public.org_vault_retirement TO aimee_kb_owner;
   ALTER TABLE public.org_vault_rotation OWNER TO aimee_kb_owner;
   GRANT EXECUTE ON FUNCTION public.org_vault_control_require_open(),
     public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_owner;

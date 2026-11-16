@@ -41,25 +41,6 @@ typedef struct
    int target_count;
 } notify_config_t;
 
-/* Load notification config from ~/.config/aimee/notifications.json.
- * Returns 0 on success (or missing file — returns zeroed config).
- * Returns -1 on parse error. */
-int notify_config_load(notify_config_t *cfg);
-
-/* Save notification config to ~/.config/aimee/notifications.json.
- * Returns 0 on success, -1 on error. */
-int notify_config_save(const notify_config_t *cfg);
-
-/* Fire-and-forget event notification. No-op if notifications disabled
- * or event doesn't match verbosity. Never blocks — fork+exec for delivery. */
-void event_notify(aimee_event_t event, const char *message);
-
-/* Human-readable event name string (e.g. "delegate_complete"). */
-const char *event_type_name(aimee_event_t event);
-
-/* Returns 1 if event should fire at the given verbosity level. */
-int event_matches_verbosity(aimee_event_t event, int verbosity);
-
 /* Build an ntfy delivery command for tests and platform delivery. */
 int notify_build_ntfy_command(const notify_target_t *target, const char *event_name,
                               const char *message, char *cmd, size_t cmd_len);

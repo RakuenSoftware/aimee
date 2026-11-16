@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The gateway seam's apply/bypass verdict is decided in the module, so these
@@ -20,7 +20,7 @@ func TestReduceStageDecidesOnTheGatewaySeam(t *testing.T) {
 		HistoryFold:   true,
 		ClosetEnabled: true,
 	})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if !resp.Mutated || resp.Reason != "reduced" {
@@ -42,7 +42,7 @@ func TestReduceStageLeavesTheDelegateSeamUndecided(t *testing.T) {
 		HistoryFold:   true,
 		ClosetEnabled: true,
 	})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if resp.Bypass != "" {
@@ -59,7 +59,7 @@ func TestReduceStageBypassesWhenNothingWasApplied(t *testing.T) {
 		HistoryFold:  true,
 		MeasureOnly:  true,
 	})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if resp.Mutated {
@@ -79,21 +79,13 @@ func TestReduceStageBypassesWhenNothingWasApplied(t *testing.T) {
 func TestReduceStageRunsTheStructuralCheck(t *testing.T) {
 	// A tool result whose matching call is not in the array is an orphan: the
 	// exact shape the guard exists to keep away from a provider.
-	arr := NewArray()
-	for i := 0; i < 12; i++ {
-		appendTurn(arr, i)
-	}
-	orphan := NewObject()
-	orphan.Set("role", NewString("tool"))
-	orphan.Set("tool_call_id", NewString("call_missing"))
-	orphan.Set("content", NewString("a result for a call that is not here"))
-	arr.Append(orphan)
+	arr := canonicalModuleTurns(12, true)
 
 	// Pin the premise: this transcript IS structurally broken by the same
 	// function the stage is expected to use. If this stops holding, the test
 	// below is proving nothing.
 	if MessageHistoryRepair(arr.Clone()) == 0 {
-		t.Skip("fixture is no longer structurally broken; rewrite it")
+		t.Fatal("fixture is no longer structurally broken")
 	}
 
 	body, err := json.Marshal(ReduceRequest{
@@ -106,8 +98,8 @@ func TestReduceStageRunsTheStructuralCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, status := NewHandler()(bus.ModuleInvocation{StageID: StageReduce}, body)
-	if status != bus.ModuleStatusOK {
+	out, status := NewHandler()(ring.ModuleInvocation{StageID: StageReduce}, body)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	var resp ReduceResponse
@@ -115,7 +107,7 @@ func TestReduceStageRunsTheStructuralCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !resp.Mutated {
-		t.Skip("no reduction was applied, so there is no view to check")
+		t.Fatal("fixture produced no reduction for structural admission")
 	}
 	if resp.Bypass == "none" {
 		t.Errorf("a structurally broken reduced view was cleared for dispatch "+

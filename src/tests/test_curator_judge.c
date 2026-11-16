@@ -1,7 +1,6 @@
-/* test_curator_judge.c: unit tests for the deep-curator LLM judge sidecar.
- * Drives kb_curator_judge_same_entity with tiny shell "sidecars" (printf/echo/
- * false) so the request->invoke->parse round-trip is exercised end to end
- * without a real model. */
+/* Curator judge business parsing through a canonical mock provider. */
+#include "kb_curator_llm.h"
+#include "support/curator_model_fixture.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -25,8 +24,8 @@ static void test_same_true(void)
    int same = -1;
    char err[256];
    /* The sidecar ignores stdin and emits the canonical affirmative response. */
-   int rc = kb_curator_judge_same_entity("printf '{\"same_entity\": true}'", "Acme", "the vendor",
-                                         "Acme Corp", 0.80, &same, err, sizeof(err));
+   int rc = kb_curator_judge_same_entity(curator_fixture_reply("{\"same_entity\": true}"), "Acme",
+                                         "the vendor", "Acme Corp", 0.80, &same, err, sizeof(err));
    assert(rc == 0);
    assert(same == 1);
    printf("  same_entity=true parsed OK\n");
@@ -36,8 +35,8 @@ static void test_same_false(void)
 {
    int same = -1;
    char err[256];
-   int rc = kb_curator_judge_same_entity("printf '{\"same_entity\": false}'", "Apple", "the fruit",
-                                         "Apple Inc", 0.72, &same, err, sizeof(err));
+   int rc = kb_curator_judge_same_entity(curator_fixture_reply("{\"same_entity\": false}"), "Apple",
+                                         "the fruit", "Apple Inc", 0.72, &same, err, sizeof(err));
    assert(rc == 0);
    assert(same == 0);
    printf("  same_entity=false parsed OK\n");
@@ -49,8 +48,8 @@ static void test_prose_wrapped(void)
    int same = -1;
    char err[256];
    int rc = kb_curator_judge_same_entity(
-       "printf 'Sure! Here is my verdict:\\n{\"same_entity\": true}\\n'", "K8s", "orchestrator",
-       "Kubernetes", 0.83, &same, err, sizeof(err));
+       curator_fixture_reply("Sure! Here is my verdict:\\n{\"same_entity\": true}\\n"), "K8s",
+       "orchestrator", "Kubernetes", 0.83, &same, err, sizeof(err));
    assert(rc == 0);
    assert(same == 1);
    printf("  prose-wrapped JSON parsed OK\n");
@@ -60,8 +59,8 @@ static void test_garbage_output(void)
 {
    int same = 7;
    char err[256];
-   int rc = kb_curator_judge_same_entity("echo not-json-at-all", "x", "", "y", 0.75, &same, err,
-                                         sizeof(err));
+   int rc = kb_curator_judge_same_entity(curator_fixture_reply("not-json-at-all"), "x", "", "y",
+                                         0.75, &same, err, sizeof(err));
    assert(rc == -1);
    assert(same == 7);
    printf("  garbage output -> error OK\n");
@@ -71,7 +70,8 @@ static void test_nonzero_exit(void)
 {
    int same = 9;
    char err[256];
-   int rc = kb_curator_judge_same_entity("false", "x", "", "y", 0.75, &same, err, sizeof(err));
+   int rc = kb_curator_judge_same_entity(curator_fixture_failure(), "x", "", "y", 0.75, &same, err,
+                                         sizeof(err));
    assert(rc == -1);
    assert(same == 9);
    printf("  non-zero exit -> error OK\n");

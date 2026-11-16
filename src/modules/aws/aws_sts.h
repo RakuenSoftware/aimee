@@ -31,42 +31,12 @@ extern "C"
 
    /* --- form-body construction --- */
 
-   /* Build the AssumeRole (mode b) form body into out[cap]:
-    * Action=AssumeRole&DurationSeconds=900&ExternalId=..&Policy=..&RoleArn=..&
-    * RoleSessionName=.. (values RFC3986-encoded, keys in a stable order). This body
-    * is SigV4-signed by the caller (see aws_sts_build_signed_assume_role). Returns 0
-    * on success, -1 on error/overflow. session_policy_json may be NULL (omit Policy);
-    * external_id is REQUIRED for mode b. */
-   int aws_sts_assume_role_body(char *out, size_t cap, const char *role_arn,
-                                const char *role_session_name, const char *external_id,
-                                const char *session_policy_json);
-
-   /* Build the AssumeRoleWithWebIdentity (mode a) form body into out[cap]:
-    * Action=AssumeRoleWithWebIdentity&DurationSeconds=900&Policy=..&RoleArn=..&
-    * RoleSessionName=..&WebIdentityToken=.. — NO ExternalId. This request is UNSIGNED.
-    * Returns 0 on success, -1 on error/overflow. */
-   int aws_sts_assume_role_web_identity_body(char *out, size_t cap, const char *role_arn,
-                                             const char *role_session_name,
-                                             const char *web_identity_token,
-                                             const char *session_policy_json);
-
    /* The signed AssumeRole request: the form body + the SigV4 result over it. */
    typedef struct
    {
       char body[8192];
       aws_sigv4_result_t sig;
    } aws_sts_signed_request_t;
-
-   /* Build a SigV4-signed AssumeRole POST to sts.<region>.amazonaws.com using the
-    * (vault-held) IAM key. Signs host + x-amz-date + content-type over the exact
-    * body bytes (payload = SHA-256 of the body). `amz_date` (YYYYMMDDTHHMMSSZ) and
-    * `date` (YYYYMMDD) are passed in (deterministic). Returns 0 / -1. */
-   int aws_sts_build_signed_assume_role(aws_sts_signed_request_t *out, const char *region,
-                                        const char *host, const char *access_key_id,
-                                        const char *secret_access_key, const char *session_token,
-                                        const char *role_arn, const char *role_session_name,
-                                        const char *external_id, const char *session_policy_json,
-                                        const char *amz_date, const char *date);
 
    /* --- web-identity JWT validation (verify-then-trust) --- */
 
@@ -111,13 +81,6 @@ extern "C"
       char session_token[8192];
       char expiration[64];
    } aws_sts_credentials_t;
-
-   /* Parse an AssumeRole / AssumeRoleWithWebIdentity XML response into `out`. Hand-
-    * rolled bounded scanner: NO external-entity resolution (rejects DOCTYPE/ENTITY),
-    * takes the FIRST <Credentials> block, REJECTS duplicate credential fields and a
-    * trailing alternate <Credentials>/result, bounds every field. A missing
-    * AccessKeyId/SecretAccessKey/SessionToken/Expiration -> error. Returns 0 / -1. */
-   int aws_sts_parse_assume_response(const char *xml, aws_sts_credentials_t *out);
 
 #ifdef __cplusplus
 }

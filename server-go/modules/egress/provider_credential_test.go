@@ -3,7 +3,7 @@ package egress
 import (
 	"context"
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -32,20 +32,20 @@ func TestProviderCredentialBindsAccountOriginPortAndCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := HTTPRequest{CredentialHandle: "provider", CredentialScope: "bearer", CredentialResource: "account-a", Credential: envelope}
-	inv := bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: ProvidersClientRef}
+	inv := ring.ModuleInvocation{PrincipalClass: 1, PrincipalRef: ProvidersClientRef}
 	now := time.Now()
 	plaintext, err := broker.decrypt(now, inv, request, "http://127.0.0.1:18765")
 	if err != nil || string(plaintext) != "fixture-secret" {
 		t.Fatal(err)
 	}
 	clear(plaintext)
-	for name, mutate := range map[string]func(*HTTPRequest, *bus.ModuleInvocation, *string){
-		"account": func(r *HTTPRequest, _ *bus.ModuleInvocation, _ *string) { r.CredentialResource = "account-b" },
-		"caller":  func(_ *HTTPRequest, i *bus.ModuleInvocation, _ *string) { i.PrincipalRef++ },
-		"port":    func(_ *HTTPRequest, _ *bus.ModuleInvocation, h *string) { *h = "http://127.0.0.1:18766" },
-		"scheme":  func(_ *HTTPRequest, _ *bus.ModuleInvocation, h *string) { *h = "https://127.0.0.1:18765" },
-		"auth":    func(r *HTTPRequest, _ *bus.ModuleInvocation, _ *string) { r.CredentialScope = "x-api-key" },
-		"tamper": func(r *HTTPRequest, _ *bus.ModuleInvocation, _ *string) {
+	for name, mutate := range map[string]func(*HTTPRequest, *ring.ModuleInvocation, *string){
+		"account": func(r *HTTPRequest, _ *ring.ModuleInvocation, _ *string) { r.CredentialResource = "account-b" },
+		"caller":  func(_ *HTTPRequest, i *ring.ModuleInvocation, _ *string) { i.PrincipalRef++ },
+		"port":    func(_ *HTTPRequest, _ *ring.ModuleInvocation, h *string) { *h = "http://127.0.0.1:18766" },
+		"scheme":  func(_ *HTTPRequest, _ *ring.ModuleInvocation, h *string) { *h = "https://127.0.0.1:18765" },
+		"auth":    func(r *HTTPRequest, _ *ring.ModuleInvocation, _ *string) { r.CredentialScope = "x-api-key" },
+		"tamper": func(r *HTTPRequest, _ *ring.ModuleInvocation, _ *string) {
 			r.Credential.Ciphertext = strings.Repeat("A", len(r.Credential.Ciphertext))
 		},
 	} {
@@ -95,9 +95,9 @@ func TestCodexProbeHeadersAndSealedTokenReachProvider(t *testing.T) {
 		Body:    body, CredentialHandle: "provider", CredentialScope: "bearer", CredentialResource: "codex", Credential: envelope, MaxResponseBytes: 4096, TimeoutMS: 1000}
 	wire, _ := json.Marshal(request)
 	p := policy{resolver: fixedResolver{{IP: net.ParseIP("127.0.0.1")}}, credentials: broker}
-	encoded, status := p.handleHTTP(bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: ProvidersClientRef, StageID: StageHTTP}, wire)
+	encoded, status := p.handleHTTP(ring.ModuleInvocation{PrincipalClass: 1, PrincipalRef: ProvidersClientRef, StageID: StageHTTP}, wire)
 	response, err := decodeHTTPResponse(encoded)
-	if status != bus.ModuleStatusOK || err != nil || response.Status != 200 || !strings.Contains(string(response.Body), "response.completed") {
+	if status != ring.ModuleStatusOK || err != nil || response.Status != 200 || !strings.Contains(string(response.Body), "response.completed") {
 		t.Fatal(status, response, err)
 	}
 }

@@ -1154,21 +1154,6 @@ void kb_client_mtls_pool_stats(int *total_out, int *idle_out, int *busy_out, int
    pthread_mutex_unlock(&g_lock);
 }
 
-void kb_client_mtls_pool_reset(void)
-{
-   pthread_mutex_lock(&g_lock);
-   g_identity_generation++;
-   SSL_CTX_free(g_pool_ctx);
-   g_pool_ctx = NULL;
-   SSL_SESSION_free(g_pool_session);
-   g_pool_session = NULL;
-   for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
-      if (g_pool[i].conn && !g_pool[i].busy)
-         pool_close_entry_locked(&g_pool[i]);
-   pthread_cond_broadcast(&g_pool_cv);
-   pthread_mutex_unlock(&g_lock);
-}
-
 void kb_client_mtls_tls_stats(unsigned long *handshakes_total_out, unsigned long *resumed_total_out)
 {
    pthread_mutex_lock(&g_lock);

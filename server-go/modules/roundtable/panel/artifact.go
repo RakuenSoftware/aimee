@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-const MaxArtifactBytes = int(bus.ModuleMessageMaxBody) - 13
+const MaxArtifactBytes = int(ring.ModuleMessageMaxBody) - 13
 
 // MaterializeArtifact converts an exact GitHub pull-request URL into immutable
 // review bytes at the service boundary. Reviewers never need to spend their tool

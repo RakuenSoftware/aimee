@@ -59,3 +59,28 @@ func TestCopyExecutableCreatesPrivateModuleAlias(t *testing.T) {
 		t.Fatalf("alias mode=%#o want 0700", got)
 	}
 }
+
+func TestStartupReconciledRequiresActualSuccessMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.log")
+	if startupReconciled(path) {
+		t.Fatal("missing log admitted fixture seeds")
+	}
+	for _, body := range []string{
+		"WARN  server: delegate startup reconciliation pending store attachment; new jobs blocked\n",
+		"INFO  coord_dispatcher: started\n",
+		"INFO  server: delegate startup reconciliation complete",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if startupReconciled(path) {
+			t.Fatal("unacknowledged/incomplete startup marker admitted fixture seeds")
+		}
+	}
+	if err := os.WriteFile(path, []byte("2026-10-22T00:00:00Z INFO  server: delegate startup reconciliation complete\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if !startupReconciled(path) {
+		t.Fatal("acknowledged daemon startup not ready")
+	}
+}

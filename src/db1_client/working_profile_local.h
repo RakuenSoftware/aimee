@@ -25,8 +25,6 @@ extern "C"
    int db1_working_profile_local_observe(const char *field, const char *value, double confidence,
                                          const char *session_id, int threshold);
    int db1_working_profile_local_list(db1_working_profile_local_state_t *out, int max);
-   int db1_working_profile_local_get(const char *field, db1_working_profile_local_state_t *out);
-   int db1_working_profile_local_reset_field(const char *field);
 
 #ifdef __cplusplus
 }

@@ -26,7 +26,7 @@ delegate_file_snapshot_t delegate_file_snapshot(const char *path);
 
 /* Resolved workspace for a delegate run: where it executes (worktree_path), the
  * managed git root when a sibling worktree was created (git_root, empty for a
- * shared worktree), the deterministic sibling work-name, and the two flags the
+ * shared/dedicated worktree), the deterministic sibling work-name, and the flags the
  * caller keys cleanup/apply-back off. */
 typedef struct
 {
@@ -36,26 +36,27 @@ typedef struct
    int attempted; /* a sibling worktree creation was attempted */
    int shared;    /* the delegate shares the parent/session worktree */
    int dedicated; /* the delegate EXCLUSIVELY owns this pre-existing worktree (a WFE
-                   * per-slice tree, $AIMEE_HOME/wfe-worktrees/wi_<id>): mount it
-                   * read-WRITE in a container and apply no host write guard — nothing
-                   * else looks at that tree. Distinct from a sibling worktree (which
-                   * has a git_root for apply-back) and from shared (read-only). */
+                   * per-slice tree, $AIMEE_HOME/wfe-worktrees/wi_<id>). Isolation
+                   * does not grant writes: the resolved role still controls the
+                   * container mount. Distinct from a sibling worktree (which
+                   * has a git_root for apply-back) and from legacy parent sharing. */
 } delegate_worktree_t;
 
-/* Decide and (for write delegates that need isolation) create the delegate's
- * worktree. A read-only or foreground sole-writer delegate shares the parent
- * worktree (git_root cleared so apply-back/sibling-cleanup are skipped); a
- * concurrent/branch write delegate gets an isolated sibling worktree and this
- * sets the thread-local run cwd to it. No-op (all-empty out) with no git root. */
+/* Resolve the managed root and, when needs_worktree is set, create an isolated
+ * sibling or retain an exclusively owned WFE tree. A new sibling also becomes
+ * the thread-local run cwd. The current server requests isolation for every
+ * repository role; mount write permission remains a separate role decision.
+ * The legacy allows_writes && !needs_worktree mode shares the parent and clears
+ * git_root to suppress sibling cleanup/apply-back. No-op with no git root. */
 void delegate_resolve_worktree(const char *cwd, const char *deleg_id, const char *branch,
                                int allows_writes, int needs_worktree, delegate_worktree_t *out);
 
-/* Classify a finished delegate run and persist a delegate_learning row + a
- * structured IE_DELEGATE_EXIT event. Pure post-run side effect. */
-void delegate_record_exit_learning(const char *sid, const char *role, const agent_result_t *result,
-                                   int rc, int max_turns, agent_config_t *acfg,
-                                   agent_t *target_agent, const char *goal,
-                                   const char *source_ref);
+/* Persist operational IE_DELEGATE_EXIT metrics only. Reusable experience is
+ * derived exclusively from protected canonical child/parent source records.
+ * Returns -1 on metric persistence failure; never alters the execution result. */
+int delegate_record_exit_metrics(const char *sid, const char *role, const agent_result_t *result,
+                                 int rc, int max_turns, agent_config_t *acfg, agent_t *target_agent,
+                                 const char *source_ref);
 
 /* Detect a no-op write delegate (success reported but owned files / worktree /
  * HEAD unchanged). Returns 1 and fills err with the "treated as incomplete"

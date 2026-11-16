@@ -8,10 +8,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifndef _WIN32
 #include <sys/socket.h>
 #include <unistd.h>
-#endif
 
 typedef struct
 {
@@ -150,7 +148,6 @@ static void test_http1_engine(void)
    assert(aimee_core_http1_response_read(&io, 1024, 4096, 1, &response) == -1);
 }
 
-#ifndef _WIN32
 typedef struct
 {
    int checks;
@@ -189,7 +186,6 @@ static void test_controlled_io(void)
    close(sockets[0]);
    close(sockets[1]);
 }
-#endif
 
 int main(void)
 {
@@ -197,9 +193,7 @@ int main(void)
    test_cleartext_policy();
    test_endpoints();
    test_http1_engine();
-#ifndef _WIN32
    test_controlled_io();
-#endif
    puts("test_communication: ok");
    return 0;
 }

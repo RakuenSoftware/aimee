@@ -347,6 +347,9 @@ static int ensure_connection(void)
 
 static cJSON *server_request(cJSON *req, int timeout_ms)
 {
+   int remote = cli_v1_has_remote_endpoint();
+   if (cli_native_bridge_enabled() && !remote)
+      return NULL; /* Revoked/malformed scoped authority never becomes a UID dial. */
    /* Remote aimee-server: POST mcp.call to its first-class /v1 route. The local
     * cli_v1_dispatch_local path only speaks the co-located UDS, so a thin client
     * configured with a remote endpoint must route here. Memory/kb/search tools
@@ -354,7 +357,7 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
     * cwd is a registered detached workspace marshal back to this client over the
     * workspace reverse-channel (Phase 2b); on a non-served cwd they fail safe
     * server-side (the path does not exist there). */
-   if (cli_v1_has_remote_endpoint())
+   if (remote)
    {
       char *endpoint = cli_v1_client_endpoint();
       char *bearer = cli_v1_client_bearer();
@@ -366,7 +369,29 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
       const char *method =
           (cJSON_IsString(jmethod) && jmethod->valuestring[0]) ? jmethod->valuestring : "mcp.call";
       const char *verb = NULL;
-      const char *path = cli_v1_route_for_method(method, &verb);
+      const char *path = NULL;
+      if (cli_native_bridge_enabled())
+      {
+         /* A scoped MCP owner exposes exactly these protocol methods, never
+          * the operator command manifest or an ambient UID route. */
+         if (!strcmp(method, "mcp.tools_list"))
+         {
+            path = "/v1/mcp/tools_list";
+            verb = "GET";
+         }
+         else if (!strcmp(method, "mcp.tools_wait"))
+         {
+            path = "/v1/mcp/tools_wait";
+            verb = "POST";
+         }
+         else if (!strcmp(method, "mcp.call"))
+         {
+            path = "/v1/mcp/call";
+            verb = "POST";
+         }
+      }
+      else
+         path = cli_v1_route_for_method(method, &verb);
       cJSON *resp = NULL;
       if (endpoint && path)
       {
@@ -507,7 +532,7 @@ static void add_prompt_message(cJSON *messages, const char *role, const char *te
  * absent, so ordinary initialization remains one cheap readiness read. */
 static void mcp_ensure_remote_repo_index(void)
 {
-   if (!cli_v1_remote_endpoint_is_network())
+   if (cli_native_bridge_enabled() || !cli_v1_remote_endpoint_is_network())
       return;
 
    char cwd[MAX_PATH_LEN];
@@ -541,13 +566,16 @@ static void handle_initialize(cJSON *id)
     * changes. */
    cJSON_AddBoolToObject(tools_cap, "listChanged", 1);
    cJSON_AddItemToObject(caps, "tools", tools_cap);
-   cJSON *res_cap = cJSON_CreateObject();
-   cJSON_AddBoolToObject(res_cap, "subscribe", 0);
-   cJSON_AddBoolToObject(res_cap, "listChanged", 0);
-   cJSON_AddItemToObject(caps, "resources", res_cap);
-   cJSON *prompts_cap = cJSON_CreateObject();
-   cJSON_AddBoolToObject(prompts_cap, "listChanged", 0);
-   cJSON_AddItemToObject(caps, "prompts", prompts_cap);
+   if (!cli_native_bridge_enabled())
+   {
+      cJSON *res_cap = cJSON_CreateObject();
+      cJSON_AddBoolToObject(res_cap, "subscribe", 0);
+      cJSON_AddBoolToObject(res_cap, "listChanged", 0);
+      cJSON_AddItemToObject(caps, "resources", res_cap);
+      cJSON *prompts_cap = cJSON_CreateObject();
+      cJSON_AddBoolToObject(prompts_cap, "listChanged", 0);
+      cJSON_AddItemToObject(caps, "prompts", prompts_cap);
+   }
    cJSON_AddItemToObject(result, "capabilities", caps);
 
    cJSON *info = cJSON_CreateObject();
@@ -665,14 +693,16 @@ static void handle_tools_call(cJSON *id, cJSON *req)
     * consumed one TLS worker per short-lived discovery client; the abandoned
     * polls then filled the 64-worker cap and made an unrelated tools/list fail.
     * The helper is idempotent, so subsequent tool calls are cheap. */
-   cli_workspace_reverse_channel_start();
+   if (!cli_native_bridge_enabled())
+      cli_workspace_reverse_channel_start();
 
    /* A remote Git tool runs in the server's reconstructed mirror. Refresh its
     * immutable client snapshot on every call: unchanged trees reuse the same
     * generation (preserving server-side commits/index state), while local
     * commits or edits select a fresh worktree. Fail closed if the refresh cannot
     * be acknowledged; forwarding would knowingly act on stale source. */
-   if (strcmp(tool, "git") == 0 && cli_workspace_reverse_channel_sync() != 0)
+   if (!cli_native_bridge_enabled() && strcmp(tool, "git") == 0 &&
+       cli_workspace_reverse_channel_sync() != 0)
    {
       cJSON *result = cJSON_CreateObject();
       cJSON *content = cJSON_AddArrayToObject(result, "content");
@@ -697,6 +727,14 @@ static void handle_tools_call(cJSON *id, cJSON *req)
    {
       mcp_error(id, -32000,
                 "aimee-server unavailable after retries. Restart aimee-server and retry.");
+      return;
+   }
+
+   const cJSON *tool_error = cJSON_GetObjectItemCaseSensitive(resp, "isError");
+   if (tool_error && !cJSON_IsBool(tool_error))
+   {
+      mcp_error(id, -32603, "Server returned an invalid tool error status");
+      cJSON_Delete(resp);
       return;
    }
 
@@ -751,6 +789,9 @@ static void handle_tools_call(cJSON *id, cJSON *req)
 
    cJSON *result = cJSON_CreateObject();
    cJSON_AddItemToObject(result, "content", content);
+   cJSON *error_flag = cJSON_DetachItemFromObjectCaseSensitive(resp, "isError");
+   if (error_flag)
+      cJSON_AddItemToObject(result, "isError", error_flag);
    cJSON *structured = cJSON_DetachItemFromObjectCaseSensitive(resp, "structuredContent");
    if (structured)
       cJSON_AddItemToObject(result, "structuredContent", structured);
@@ -1176,6 +1217,11 @@ static void handle_request(cJSON *req)
          return;
       return;
    }
+   if (cli_native_bridge_enabled() && (!strncmp(m, "resources/", 10) || !strncmp(m, "prompts/", 8)))
+   {
+      mcp_error(id, -32601, "This owned scope exposes tools only");
+      return;
+   }
 
    if (strcmp(m, "initialize") == 0)
       handle_initialize(id);
@@ -1370,25 +1416,85 @@ static int tools_generation_now(double *out)
    return ok ? 0 : -1;
 }
 
+/* How long the server holds one mcp.tools_wait, and how much longer the request
+ * may take in transit before the bridge gives up on it. */
+#define TOOLS_WAIT_MS       290000
+#define TOOLS_WAIT_GRACE_MS 15000
+
+/* mcp.tools_wait: 0 with the generation once it differs from `have` or the
+ * server's hold expires, 1 if the server was too busy to hold the wait, -1 on
+ * failure, -2 if the server predates the method. */
+static int tools_generation_wait(double have, double *out)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return -1;
+   cJSON_AddStringToObject(req, "method", "mcp.tools_wait");
+   cJSON_AddNumberToObject(req, "generation", have);
+   cJSON_AddNumberToObject(req, "timeout_ms", TOOLS_WAIT_MS);
+   cJSON *resp = server_request(req, TOOLS_WAIT_MS + TOOLS_WAIT_GRACE_MS);
+   cJSON_Delete(req);
+   if (!resp)
+      return -1;
+   cJSON *gen = cJSON_GetObjectItemCaseSensitive(resp, "generation");
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   int rc = -1;
+   if (cJSON_IsNumber(gen))
+   {
+      *out = gen->valuedouble;
+      rc = cJSON_IsString(status) && strcmp(status->valuestring, "busy") == 0 ? 1 : 0;
+   }
+   else if (cJSON_GetObjectItemCaseSensitive(resp, "error"))
+      rc = -2; /* an older server: no such method */
+   cJSON_Delete(resp);
+   return rc;
+}
+
+/* Sleep the configured interval in short slices, so stop() is prompt. */
+static void tools_watch_pause(void)
+{
+   for (int i = 0; i < g_tools_watch_interval_sec * 10 && !atomic_load(&g_watch_stop); i++)
+      usleep(100000);
+}
+
 static void *tools_watch_run(void *unused)
 {
    (void)unused;
    double last = 0;
    int have_last = 0;
+   /* The server holds one wait open and answers when the tool list changes,
+    * instead of the bridge asking every interval. Against a server without the
+    * method, or one too busy to hold the wait, it falls back to asking. */
+   int long_poll = 1;
 
    while (!atomic_load(&g_watch_stop))
    {
-      /* Sleep in short slices so stop() is prompt even on a long interval: a
-       * thread that only checks its stop flag once per interval makes shutdown
-       * wait out the whole tick. */
-      for (int i = 0; i < g_tools_watch_interval_sec * 10 && !atomic_load(&g_watch_stop); i++)
-         usleep(100000);
-      if (atomic_load(&g_watch_stop))
-         break;
-
       double now = 0;
-      if (tools_generation_now(&now) != 0)
-         continue; /* server down or too old to report it; try again next tick */
+      if (have_last && long_poll)
+      {
+         int waited = tools_generation_wait(last, &now);
+         if (atomic_load(&g_watch_stop))
+            break;
+         if (waited == -2)
+            long_poll = 0;
+         if (waited != 0)
+         {
+            tools_watch_pause(); /* busy, failed or unsupported: do not spin */
+            continue;
+         }
+      }
+      else
+      {
+         if (have_last)
+            tools_watch_pause();
+         if (atomic_load(&g_watch_stop))
+            break;
+         if (tools_generation_now(&now) != 0)
+         {
+            tools_watch_pause(); /* server down or too old to report it */
+            continue;
+         }
+      }
       if (!have_last)
       {
          last = now;
@@ -1421,7 +1527,9 @@ static void tools_watch_stop(void)
    if (!g_watch_running)
       return;
    atomic_store(&g_watch_stop, 1);
-   pthread_join(g_watch_thread, NULL);
+   /* Not joined: the watcher may be inside a wait the server holds for
+    * minutes, and the bridge is exiting. It checks the flag before it sends. */
+   pthread_detach(g_watch_thread);
    g_watch_running = 0;
 }
 

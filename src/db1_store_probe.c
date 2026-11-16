@@ -65,6 +65,9 @@ int db1_store_probe(void)
    }
 
    long long now = now_ns();
+   /* Bus success only attests delivery: the reply may report a SQL failure.
+    * Always sample an actual store result rather than extending readiness
+    * from transport outcomes of unrelated family calls. */
    pthread_mutex_lock(&g_lock);
    if (g_last_answer >= 0 && g_checked_at_ns != 0 && now - g_checked_at_ns < PROBE_CACHE_NS)
    {

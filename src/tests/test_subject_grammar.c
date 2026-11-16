@@ -1,7 +1,7 @@
 /* test_subject_grammar.c — every C copy of the subject grammar, against one corpus.
  *
- * The grammar is encoded FOUR times and the copies cannot share an
- * implementation (see tests/subject_corpus.h). This test covers the three C ones;
+ * The grammar is encoded three times and the copies cannot share an
+ * implementation (see tests/subject_corpus.h). This test covers the two C ones;
  * the Postgres regex is covered by the same corpus through
  * scripts/gen-subject-corpus-sql.py.
  *
@@ -14,7 +14,6 @@
 #include "subject_corpus.h"
 
 #include "modules/kb/c/management_intent_fields.h"
-#include "kb_mgmt_token_authority.h"
 #include "server_identity_token.h"
 
 #include <assert.h>
@@ -39,20 +38,6 @@ static int server_says(const char *subject)
    return server_identity_subject_valid(subject) ? 1 : 0;
 }
 
-/* The authority's own copy. It reached the corpus late and for the worst reason:
- * it rejected a bare name the database had already admitted, so the mint refused
- * with INTEGRITY after every one of its eleven gates had passed — a failure that
- * pointed at the signing path rather than at a grammar. */
-static int authority_says(const char *subject)
-{
-   char rec[577];
-   if (strlen(subject) >= sizeof(rec))
-      return 0;
-   memset(rec, 0, sizeof(rec));
-   memcpy(rec, subject, strlen(subject));
-   return kb_identity_token_authority_subject_valid(rec) ? 1 : 0;
-}
-
 int main(void)
 {
    int failures = 0;
@@ -62,14 +47,12 @@ int main(void)
       const subject_case_t *c = &SUBJECT_CORPUS[i];
       int kb_store = kb_store_says(c->subject);
       int srv = server_says(c->subject);
-      int aut = authority_says(c->subject);
 
-      /* Disagreement first: it is the defect the four-copy design risks, and it is
+      /* Disagreement first: it is the defect the multi-copy design risks, and it is
        * invisible in production because the stricter copy just wins. */
-      if (kb_store != srv || kb_store != aut)
+      if (kb_store != srv)
       {
-         printf("  DISAGREE [%s] (%s): kb_store=%d server=%d authority=%d\n", c->subject, c->why,
-                kb_store, srv, aut);
+         printf("  DISAGREE [%s] (%s): kb_store=%d server=%d\n", c->subject, c->why, kb_store, srv);
          failures++;
          continue;
       }

@@ -16,6 +16,7 @@
 #define DEC_RESPONSE_DEDUP_H 1
 
 #include <stddef.h>
+#include <aimee/response-composition/module_api.h>
 
 /* Default short window (seconds). */
 #define RESPONSE_DEDUP_TTL_SECONDS 5
@@ -28,19 +29,7 @@
  * context (the pre-injected <aimee-context> envelope), and behavior_flags (a
  * string of the generation-affecting config flags) are hashed so the key stays
  * bounded. */
-typedef struct
-{
-   const char *principal;       /* auth/account boundary */
-   const char *source;          /* turn-origin / account source */
-   const char *provider;        /* resolved provider */
-   const char *model;           /* resolved model (not the requested alias) */
-   const char *endpoint;        /* request endpoint */
-   int stream;                  /* stream mode (0/1) */
-   const char *idempotency_key; /* explicit Idempotency-Key */
-   const char *body;            /* exact request body */
-   const char *context;         /* pre-injected context envelope */
-   const char *behavior_flags;  /* behaviour-affecting config flags */
-} response_dedup_key_inputs_t;
+typedef aimee_response_key_input_t response_dedup_key_inputs_t;
 
 typedef int (*response_dedup_key_provider_fn)(const response_dedup_key_inputs_t *in, char *out,
                                               size_t out_cap);

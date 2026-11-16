@@ -13,7 +13,7 @@
  * it. This header is the one definition of "which IPv4 does this IPv6 name",
  * shared by the server's web egress guard and aimee-kb's management-endpoint
  * guard so the two cannot drift. The Go planes carry the same table in
- * server-go/modules/delegates/proxyguard.go and
+ * server-go/modules/egress/egress.go and
  * server-go/modules/sandbox/proxy_policy.go.
  *
  * Reachability is not the point. Whether a given deployment has a NAT64 gateway

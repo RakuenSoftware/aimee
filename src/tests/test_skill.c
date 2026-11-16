@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* test_skill.c: unit tests for skill.c */
 #include <assert.h>
 #include <stdio.h>
@@ -561,60 +562,6 @@ static void test_skill_manage_write_file_guards_paths(void)
    free(root);
 }
 
-static void test_skill_rollback_snapshot_restores_tree(void)
-{
-   char *root = make_tmpdir();
-   char err[256] = "";
-
-   char skills_dir[512], snapshot_dir[512], archive_dir[512];
-   snprintf(skills_dir, sizeof(skills_dir), "%s/.aimee/skills", root);
-   snprintf(snapshot_dir, sizeof(snapshot_dir), "%s/.aimee/skills/.snapshots/restore-1", root);
-   snprintf(archive_dir, sizeof(archive_dir), "%s/.archive", snapshot_dir);
-   mkdir_p(skills_dir);
-   mkdir_p(snapshot_dir);
-   mkdir_p(archive_dir);
-
-   char path[512];
-   snprintf(path, sizeof(path), "%s/current.md", skills_dir);
-   write_file(path, "---\nname: current\ndescription: Use when testing current skills.\n---\n"
-                    "current\n");
-   snprintf(path, sizeof(path), "%s/keep.md", skills_dir);
-   write_file(path, "---\nname: keep\ndescription: Use when testing stale copies.\n---\nstale\n");
-
-   snprintf(path, sizeof(path), "%s/keep.md", snapshot_dir);
-   write_file(path, "---\nname: keep\ndescription: Use when testing restored skills.\n---\n"
-                    "restored\n");
-   snprintf(path, sizeof(path), "%s/.usage.json", snapshot_dir);
-   write_file(path, "{\"keep\":{\"state\":\"active\",\"use_count\":3}}\n");
-   snprintf(path, sizeof(path), "%s/old.md", archive_dir);
-   write_file(path, "---\nname: old\ndescription: Use when testing archived restore.\n---\nold\n");
-
-   assert(skill_rollback_snapshot(root, "../bad", err, sizeof(err)) != 0);
-   assert(skill_rollback_snapshot(root, "bad/id", err, sizeof(err)) != 0);
-   assert(skill_rollback_snapshot(root, "bad..id", err, sizeof(err)) != 0);
-   assert(skill_rollback_snapshot(root, ".", err, sizeof(err)) != 0);
-   assert(skill_rollback_snapshot(root, "missing", err, sizeof(err)) != 0);
-   assert(skill_rollback_snapshot(root, "restore-1", err, sizeof(err)) == 0);
-
-   snprintf(path, sizeof(path), "%s/current.md", skills_dir);
-   assert(access(path, F_OK) != 0);
-   snprintf(path, sizeof(path), "%s/keep.md", skills_dir);
-   char *content = read_file(path);
-   assert(strstr(content, "restored") != NULL);
-   free(content);
-   snprintf(path, sizeof(path), "%s/.usage.json", skills_dir);
-   content = read_file(path);
-   assert(strstr(content, "\"use_count\":3") != NULL);
-   free(content);
-   snprintf(path, sizeof(path), "%s/.archive/old.md", skills_dir);
-   assert(access(path, F_OK) == 0);
-   snprintf(path, sizeof(path), "%s/.snapshots/restore-1/keep.md", skills_dir);
-   assert(access(path, F_OK) == 0);
-
-   rm_rf(root);
-   free(root);
-}
-
 static void test_skill_lifecycle_marks_stale_and_archives(void)
 {
    char *root = make_tmpdir();
@@ -835,37 +782,16 @@ static void test_skill_lint_rules(void)
    assert(skill_lint_content("clean-skill", clean, report, sizeof(report)) == 0);
 }
 
-static void test_skill_trigger_frontmatter_matches(void)
-{
-   const char *content = "---\nname: trigger-skill\n"
-                         "description: Use when matching trigger frontmatter.\n"
-                         "triggers:\n"
-                         "  tool: [Bash]\n"
-                         "  arg_pattern: [\"sleep \", \"curl \"]\n"
-                         "---\n"
-                         "Prefer condition checks.\n";
-   assert(skill_trigger_policy_matches_content(content, "Bash", "sleep 5") == 1);
-   assert(skill_trigger_policy_matches_content(content, "Bash", "echo ok") == 0);
-   assert(skill_trigger_policy_matches_content(content, "Write", "sleep 5") == 0);
-
-   const char *path_content = "---\nname: path-skill\n"
-                              "description: Use when matching path trigger frontmatter.\n"
-                              "triggers:\n"
-                              "  tool: [Write, Edit]\n"
-                              "  path_pattern: [\"_test.\", \"test_\"]\n"
-                              "---\n"
-                              "Prefer tests first.\n";
-   assert(skill_trigger_policy_matches_content(path_content, "Write", "src/foo_test.c") == 1);
-   assert(skill_trigger_policy_matches_content(path_content, "Edit", "src/test_foo.c") == 1);
-   assert(skill_trigger_policy_matches_content(path_content, "Write", "src/foo.c") == 0);
-}
-
+/* The skills module process owns trigger matching (its Go tests hold the
+ * frontmatter rules); this stand-in only lets the wiring through skill.c be
+ * exercised: it matches the one trigger the test skill declares. */
 static int trigger_policy_provider(const char *content, const char *tool_name, const char *subject,
                                    int *match)
 {
+   (void)content;
    if (!match)
       return -1;
-   *match = skill_trigger_policy_matches_content(content, tool_name, subject);
+   *match = strcmp(tool_name, "Bash") == 0 && strncmp(subject, "sleep ", 6) == 0;
    return 0;
 }
 
@@ -941,28 +867,6 @@ static void test_skill_capability_autostub_proposes_missing_tool(void)
 
    rm_rf(root);
    free(root);
-}
-
-static void test_skill_change_eval_gate(void)
-{
-   char reason[256];
-   const char *pass = "{\"eval_result\":{\"status\":\"pass\",\"passed\":true,"
-                      "\"compliance_delta\":0.50}}\n";
-   assert(skill_change_eval_gate_allows(pass, 0.25, reason, sizeof(reason)) == 1);
-
-   const char *missing = "{\"skill_name\":\"x\"}\n";
-   assert(skill_change_eval_gate_allows(missing, 0.01, reason, sizeof(reason)) == 0);
-   assert(strstr(reason, "missing eval_result") != NULL);
-
-   const char *failed = "{\"eval_result\":{\"status\":\"fail\",\"passed\":false,"
-                        "\"compliance_delta\":1.0,\"message\":\"treatment failed\"}}\n";
-   assert(skill_change_eval_gate_allows(failed, 0.01, reason, sizeof(reason)) == 0);
-   assert(strstr(reason, "treatment failed") != NULL);
-
-   const char *low_delta = "{\"eval_result\":{\"status\":\"pass\",\"passed\":true,"
-                           "\"compliance_delta\":0.01}}\n";
-   assert(skill_change_eval_gate_allows(low_delta, 0.25, reason, sizeof(reason)) == 0);
-   assert(strstr(reason, "below threshold") != NULL);
 }
 
 static void test_skill_eval_passes_with_delta(void)
@@ -1104,21 +1008,28 @@ typedef struct
    int calls;
    int no_effect;
    int tool_attempt;
+   int incomplete;
 } executable_eval_runner_t;
 
-static int executable_eval_runner(void *opaque, const char *system_prompt, const char *prompt,
-                                  int max_tokens, char **response_out,
-                                  skill_trial_usage_t *usage_out, char *errbuf, size_t errbuf_len)
+static int executable_eval_runner(void *opaque, const aimee_request_t *request,
+                                  aimee_response_t *response_out, skill_trial_usage_t *usage_out,
+                                  char *errbuf, size_t errbuf_len)
 {
-   (void)prompt;
-   (void)max_tokens;
    (void)errbuf;
    (void)errbuf_len;
    executable_eval_runner_t *runner = opaque;
-   int treatment = strstr(system_prompt, "### ACTIVE SKILL:") != NULL;
+   assert(!aimee_ir_request_admit(request) && request->n_messages == 1);
+   assert(request->has_temperature && request->temperature == 0.0);
+   assert(request->has_max_tokens && request->max_tokens == 128);
+   assert(request->n_system == 1 && request->system[0].type == AIMEE_BLK_TEXT);
+   int treatment = strstr(request->system[0].text, "### ACTIVE SKILL:") != NULL;
    runner->order[runner->calls++] = treatment;
-   *response_out = strdup(runner->no_effect || treatment ? "I reviewed first."
-                                                         : "I changed it without review.");
+   int rc = fixture_ir_response_from_text(
+       response_out,
+       runner->no_effect || treatment ? "I reviewed first." : "I changed it without review.",
+       "test/model");
+   if (runner->incomplete)
+      response_out->stop_reason = AIMEE_STOP_MAX_TOKENS;
    memset(usage_out, 0, sizeof(*usage_out));
    usage_out->prompt_tokens = 10;
    usage_out->completion_tokens = 5;
@@ -1126,7 +1037,7 @@ static int executable_eval_runner(void *opaque, const char *system_prompt, const
    usage_out->cost_usd = 0.01;
    usage_out->tool_calls = runner->tool_attempt;
    snprintf(usage_out->route, sizeof(usage_out->route), "test/model");
-   return *response_out ? 0 : -1;
+   return rc;
 }
 
 static void test_skill_executable_eval_is_paired_held_out_and_bounded(void)
@@ -1180,6 +1091,11 @@ static void test_skill_executable_eval_is_paired_held_out_and_bounded(void)
    assert(!result.passed && result.inconclusive);
    assert(strstr(result.first_failure, "tool or external-effect") != NULL);
 
+   memset(&runner, 0, sizeof(runner));
+   runner.incomplete = 1;
+   assert(skill_eval_executable(root, "paired-eval", &options, &result, err, sizeof(err)) == 0);
+   assert(!result.passed && result.inconclusive && result.calls == 0);
+
    rm_rf(root);
    free(root);
 }
@@ -1211,7 +1127,6 @@ int main(void)
    test_skill_manage_create_patch_edit_archive();
    test_skill_import_content_round_trips_agentskills_markdown();
    test_skill_manage_write_file_guards_paths();
-   test_skill_rollback_snapshot_restores_tree();
    test_skill_lifecycle_marks_stale_and_archives();
    test_skill_inject_records_activation();
    test_skill_inject_no_skill();
@@ -1221,10 +1136,8 @@ int main(void)
    test_skill_path_null_inputs();
    test_skill_list_null_inputs();
    test_skill_lint_rules();
-   test_skill_trigger_frontmatter_matches();
    test_skill_trigger_requires_process_provider();
    test_skill_capability_autostub_proposes_missing_tool();
-   test_skill_change_eval_gate();
    test_skill_eval_passes_with_delta();
    test_skill_eval_fails_without_treatment_compliance();
    test_skill_eval_fails_without_baseline_violation();

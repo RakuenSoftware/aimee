@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/JBailes/aimee/server-go/modules/git/attribution"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Forge operations. Named rather than numbered on the wire for the same reason
@@ -163,7 +165,7 @@ func forgeCall(ctx context.Context, traceID uint64, executor egress.Executor,
 		CredentialPresent: credential != nil}, Headers: headers, Body: encoded,
 		CredentialHandle: "forge", CredentialScope: operation, CredentialResource: resource,
 		Credential:       credential,
-		MaxResponseBytes: int64(bus.ModuleMessageMaxBody) - 12, TimeoutMS: forgeTimeoutMS})
+		MaxResponseBytes: int64(ring.ModuleMessageMaxBody) - 12, TimeoutMS: forgeTimeoutMS})
 	if err != nil {
 		return 0, nil, err
 	}
@@ -172,12 +174,32 @@ func forgeCall(ctx context.Context, traceID uint64, executor egress.Executor,
 
 // forgeError extracts the forge's own message. GitHub answers a rejected
 // operation with a JSON "message", and repeating it is far more useful to an
-// operator than the status alone.
+// operator than the status alone. A 422 says only "Validation Failed" at the top;
+// what failed ("A pull request already exists", "No commits between ...") is in
+// "errors", so every entry is carried too.
 func forgeError(status int, payload []byte, what string) string {
 	var decoded struct {
 		Message string `json:"message"`
+		Errors  []struct {
+			Message  string `json:"message"`
+			Code     string `json:"code"`
+			Field    string `json:"field"`
+			Resource string `json:"resource"`
+		} `json:"errors"`
 	}
 	if json.Unmarshal(payload, &decoded) == nil && decoded.Message != "" {
+		var details []string
+		for _, e := range decoded.Errors {
+			switch {
+			case e.Message != "":
+				details = append(details, e.Message)
+			case e.Code != "":
+				details = append(details, strings.TrimSpace(e.Resource+" "+e.Field+" "+e.Code))
+			}
+		}
+		if len(details) > 0 {
+			return fmt.Sprintf("%s: %s: %s (HTTP %d)", what, decoded.Message, strings.Join(details, "; "), status)
+		}
 		return fmt.Sprintf("%s: %s (HTTP %d)", what, decoded.Message, status)
 	}
 	return fmt.Sprintf("%s: HTTP %d", what, status)
@@ -367,6 +389,24 @@ func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
 		if method == "" {
 			method = "merge"
 		}
+		if method != "merge" && method != "squash" && method != "rebase" {
+			return ForgeResponse{Error: "pr merge: unsupported merge method"}
+		}
+		checker := attribution.Checker{Repository: request.Owner + "/" + request.Repo, Get: func(ctx context.Context, path string) ([]byte, error) {
+			status, payload, err := forgeCall(ctx, traceID, executor, methodGet,
+				repo+"/"+path, request.Op, resource, request.Credential, nil)
+			if err != nil {
+				return nil, &attribution.ExecutionError{Code: "api_read", Message: err.Error()}
+			}
+			if status != 200 {
+				return nil, &attribution.ExecutionError{Code: "api_read", Message: fmt.Sprintf("attribution API returned HTTP %d", status)}
+			}
+			return payload, nil
+		}}
+		head, err := checker.CheckPull(ctx, request.Number, request.ExpectedHeadSHA)
+		if err != nil {
+			return ForgeResponse{Error: "pr merge: attribution denied: " + err.Error()}
+		}
 		body := map[string]any{"merge_method": method}
 		// Only a squash synthesises a body from the child commits, which is where
 		// the attribution trailers protected branches reject come back in. A merge
@@ -374,9 +414,8 @@ func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
 		if method == "squash" {
 			body["commit_message"] = ""
 		}
-		if request.ExpectedHeadSHA != "" {
-			body["sha"] = request.ExpectedHeadSHA
-		}
+		// Pin the head we actually verified, including when the caller omitted sha.
+		body["sha"] = head
 		status, payload, err := forgeCall(ctx, traceID, executor, methodPut,
 			fmt.Sprintf("%s/pulls/%d/merge", repo, request.Number), request.Op, resource, request.Credential, body)
 		if err != nil {
@@ -410,18 +449,45 @@ func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
 	return ForgeResponse{Error: "forge: unsupported operation " + strings.TrimSpace(request.Op)}
 }
 
+// forgeInvocationExecutor checks cancellation before every evidence read and write.
+type forgeInvocationExecutor struct {
+	egress.Executor
+	invocation ring.ModuleInvocation
+}
+
+func (e forgeInvocationExecutor) Do(ctx context.Context, traceID uint64, request egress.HTTPRequest) (egress.HTTPResponse, error) {
+	if e.invocation.Cancelled() {
+		return egress.HTTPResponse{}, fmt.Errorf("forge invocation cancelled")
+	}
+	if err := ctx.Err(); err != nil {
+		return egress.HTTPResponse{}, err
+	}
+	if e.Executor == nil {
+		return egress.HTTPResponse{}, fmt.Errorf("egress transport is not configured")
+	}
+	return e.Executor.Do(ctx, traceID, request)
+}
+
 // handleForgeRequest serves git-forge-request (stage 4).
-func handleForgeRequest(executor egress.Executor, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleForgeRequest(executor egress.Executor, invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var decoded ForgeRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
-	encoded, err := json.Marshal(PerformForge(context.Background(), invocation.TraceID, executor, decoded))
-	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-		return nil, bus.ModuleStatusInternal
+	// Evidence traversal must stop at the caller's deadline. Otherwise a timed-out
+	// admission could keep running and submit a merge after reporting failure.
+	limit := 25 * time.Second
+	if decoded.Op == OpPRMerge {
+		limit = 55 * time.Second // leave time to return before the 60s C RPC/envelope expiry
 	}
-	return encoded, bus.ModuleStatusOK
+	ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(limit))
+	defer cancel()
+	encoded, err := json.Marshal(PerformForge(ctx, invocation.TraceID, forgeInvocationExecutor{executor, invocation}, decoded))
+	if err != nil || uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+		return nil, ring.ModuleStatusInternal
+	}
+	return encoded, ring.ModuleStatusOK
 }

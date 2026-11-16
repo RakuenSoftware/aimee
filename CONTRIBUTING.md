@@ -20,6 +20,37 @@ database connections. Native KB algorithms use its session transport and hold no
 The `aimee` and `aimee-kb` binaries link no SQLite:
 `make -C src check-linking` asserts each binary's boundary and prints what it found.
 
+## Commit and PR identity
+
+Use the operator's Git identity for both author and committer. The attribution restriction is
+absolute: no co-authorship trailers, assistant identities, generated-by footers, session backlinks,
+or GitHub-app opening attribution. There are no SHA, branch, PR, promotion, or historical
+exceptions. Ordinary explanatory prose and documentation links are allowed.
+
+The `no-coauthor-trailers` check and Aimee's merge executor share the policy in
+`server-go/modules/git/attribution`. Both verify every incoming commit's raw author/committer and
+message, live PR title/body and `performed_via_github_app`, associated PRs, prior attribution
+rejections, and the complete PR issue catalog including closed originals. GitHub's commit-to-PR
+endpoint alone is insufficient: after an indirect merge it can omit the rejected original.
+Missing, malformed, unavailable, or incomplete evidence denies admission.
+
+A replacement PR, empty commit, rerun, retarget, or indirect merge must never circumvent a
+rejection. An attribution rejection recorded on an incoming ancestor remains a rejection even
+when a different PR has green checks. Do not add allowlists or weaken the check to land work.
+If a PR is blocked, report the concrete violation and correct the offending material without
+carrying the rejected commits into the target. Immutable app metadata cannot be removed by
+editing a footer. Do not replace a blocked PR to conceal that metadata.
+
+Create and edit PRs through registered `aimee git pr` commands with the operator's credentials.
+Personally authenticated `gh` is a fallback when the required Aimee operation is unavailable.
+Do not mutate GitHub through an assistant connector. Keep automatic reviews enabled.
+
+The `PR attribution` workflow checks all PR bases, edits, protected-branch pushes, merge groups,
+and explicit manual comparisons. Its concurrency is independent of source CI. Aimee repeats
+admission immediately before the merge and pins the verified head in the GitHub merge request.
+The legacy `auto=true` shell path is refused because it bypasses that final admission.
+Keep `no-coauthor-trailers` required in branch protection; no admin bypass is authorized.
+
 ## Build and test
 
 From `src/`:
@@ -53,12 +84,35 @@ owner/replay checks use real restricted roles; SQLite fixtures cannot replace th
 
 The Makefile is canonical. Keep CMake in sync for Windows and macOS builds.
 
+## Merge into testing
+
+Use GitHub's merge queue after the PR checks pass. The queue creates a temporary integration
+commit containing the latest `testing` and queued changes. CI runs the full suite on that commit;
+GitHub merges it only after the required checks pass. Advancing `testing` does not require merging
+it into every feature branch. Resolve actual merge conflicts on the feature branch.
+
+Repository administration must enable **Require merge queue** for `testing` and disable
+**Require branches to be up to date before merging** on its existing required status checks.
+Keep all existing required check names and review requirements. The queue provides integration
+validation; disabling the update requirement without enabling the queue would permit stale results.
+Set the queue build concurrency to 1 and maximum merge group size to 1 initially, so unrelated
+changes do not repeatedly invalidate several candidates. Increase these after measuring queue time.
+
+The `CI`, `Release policy`, `core-c-package`, `Module exports and runtime validation`, and `Audit storage regressions` workflows accept
+`merge_group: checks_requested` for `testing`. They check out GitHub's event SHA, which is the
+queued integration commit. Queue runs always take the full test path, including documentation-only
+changes. PR attribution checks also traverse every incoming commit and its PR history on the queue
+commit; the absence of a queue title/body does not skip enforcement. Publishing and release workflows do not run on the temporary queue branches.
+
+This workflow change does not activate repository settings. Until the queue requirement is enabled,
+the existing branch protection still applies. Promotion from `testing` to `main` is unchanged.
+
 ## Change contracts, not copies
 
 - Commands come from the command registry and CLI help data.
 - `/v1` routes come from the route descriptors and OpenAPI sources.
 - Configuration comes from the field descriptors.
-- Event-bus frames and kinds are versioned contracts shared by C and Go.
+- Event-bus frames and kinds are versioned contracts shared by C, Go and Rust.
 
 Regenerate documentation after changing one of those sources. Do not hand-edit files under
 `docs/gen/`.

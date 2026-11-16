@@ -481,78 +481,6 @@ static void test_write_aimee_rules_idempotent(void)
    rmdir_r(dir);
 }
 
-static void test_write_novel_rules_basic(void)
-{
-   char *dir = make_tmpdir();
-
-   int rc = write_novel_rules_file(dir);
-   assert(rc == 0);
-
-   char path[PATH_MAX];
-   snprintf(path, sizeof(path), "%s/.aimee-rules", dir);
-   FILE *f = fopen(path, "r");
-   assert(f != NULL);
-
-   char buf[4096];
-   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-   fclose(f);
-   buf[n] = '\0';
-
-   /* Story-bible scaffold, not the engineering stack doc. */
-   assert(strstr(buf, "Story Bible") != NULL);
-   assert(strstr(buf, "Premise") != NULL);
-   assert(strstr(buf, "Voice & POV") != NULL);
-   assert(strstr(buf, "Timeline & Canon") != NULL);
-   assert(strstr(buf, "Detected stack") == NULL);
-
-   /* Idempotent: second call leaves a sentinel intact. */
-   f = fopen(path, "w");
-   assert(f != NULL);
-   fputs("sentinel", f);
-   fclose(f);
-   assert(write_novel_rules_file(dir) == 1);
-   f = fopen(path, "r");
-   assert(f != NULL);
-   char sb[64];
-   size_t m = fread(sb, 1, sizeof(sb) - 1, f);
-   fclose(f);
-   sb[m] = '\0';
-   assert(strcmp(sb, "sentinel") == 0);
-
-   rmdir_r(dir);
-}
-
-static void test_write_songbook_rules_basic(void)
-{
-   char *dir = make_tmpdir();
-
-   int rc = write_songbook_rules_file(dir);
-   assert(rc == 0);
-
-   char path[PATH_MAX];
-   snprintf(path, sizeof(path), "%s/.aimee-rules", dir);
-   FILE *f = fopen(path, "r");
-   assert(f != NULL);
-
-   char buf[4096];
-   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-   fclose(f);
-   buf[n] = '\0';
-
-   /* Songbook scaffold, not story bible or engineering stack. */
-   assert(strstr(buf, "Songbook") != NULL);
-   assert(strstr(buf, "Concept") != NULL);
-   assert(strstr(buf, "Structure") != NULL);
-   assert(strstr(buf, "Hook") != NULL);
-   assert(strstr(buf, "Detected stack") == NULL);
-   assert(strstr(buf, "Story Bible") == NULL);
-
-   /* Idempotent. */
-   assert(write_songbook_rules_file(dir) == 1);
-
-   rmdir_r(dir);
-}
-
 static void test_write_aimee_rules_no_stack(void)
 {
    char *dir = make_tmpdir();
@@ -572,71 +500,6 @@ static void test_write_aimee_rules_no_stack(void)
    assert(strstr(buf, "none detected") != NULL);
 
    rmdir_r(dir);
-}
-
-static void test_ensure_mcp_json_rewrites_server_command(void)
-{
-   char tmpdir[PATH_MAX];
-   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-mcp-json-XXXXXX", platform_tmpdir());
-   assert(platform_mkdtemp(tmpdir) != NULL);
-
-   char home_dir[PATH_MAX];
-   char bin_dir[PATH_MAX];
-   char workspace_dir[PATH_MAX];
-   char fake_aimee_client[PATH_MAX];
-   char mcp_path[PATH_MAX];
-   snprintf(home_dir, sizeof(home_dir), "%s/home", tmpdir);
-   snprintf(bin_dir, sizeof(bin_dir), "%s/.local/bin", home_dir);
-   snprintf(workspace_dir, sizeof(workspace_dir), "%s/workspace", tmpdir);
-   snprintf(fake_aimee_client, sizeof(fake_aimee_client), "%s/aimee", bin_dir);
-   snprintf(mcp_path, sizeof(mcp_path), "%s/.mcp.json", workspace_dir);
-
-   char cmd[PATH_MAX * 2];
-   snprintf(cmd, sizeof(cmd), "mkdir -p '%s' '%s'", bin_dir, workspace_dir);
-   assert(system(cmd) == 0);
-
-   FILE *fp = fopen(fake_aimee_client, "w");
-   assert(fp != NULL);
-   fputs("#!/bin/sh\n", fp);
-   fclose(fp);
-
-   fp = fopen(mcp_path, "w");
-   assert(fp != NULL);
-   fputs("{\n"
-         "  \"mcpServers\": {\n"
-         "    \"aimee\": {\n"
-         "      \"command\": \"aimee-server\",\n"
-         "      \"args\": [\"mcp-serve\"]\n"
-         "    }\n"
-         "  }\n"
-         "}\n",
-         fp);
-   fclose(fp);
-
-   char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
-   platform_setenv("HOME", home_dir);
-
-   ensure_mcp_json(workspace_dir);
-
-   fp = fopen(mcp_path, "r");
-   assert(fp != NULL);
-   char buf[2048];
-   size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
-   fclose(fp);
-   buf[n] = '\0';
-
-   assert(strstr(buf, fake_aimee_client) != NULL);
-   assert(strstr(buf, "\"args\": [\"mcp-serve\"]") != NULL);
-   assert(strstr(buf, "\"command\": \"aimee-server\"") == NULL);
-   assert(strstr(buf, "\"command\": \"aimee\"") == NULL);
-
-   if (old_home)
-   {
-      platform_setenv("HOME", old_home);
-      free(old_home);
-   }
-
-   rmdir_r(tmpdir);
 }
 
 /* --- Bootstrap banner helpers --- */
@@ -727,10 +590,7 @@ int main(void)
    test_detect_stacks_none();
    test_write_aimee_rules_basic();
    test_write_aimee_rules_idempotent();
-   test_write_novel_rules_basic();
-   test_write_songbook_rules_basic();
    test_write_aimee_rules_no_stack();
-   test_ensure_mcp_json_rewrites_server_command();
    test_webchat_bootstrap_no_rules();
    test_webchat_bootstrap_rules_exist();
 

@@ -95,7 +95,4 @@ char *anchor_format_read(const char *bytes, size_t len, int offset, int limit,
  * token is malformed. */
 int anchor_parse(const char *token, int *ordinal, unsigned *tag);
 
-/* Drop all snapshots older than the TTL (called opportunistically). */
-void anchor_snapshot_gc(void);
-
 #endif /* AIMEE_ANCHOR_SNAPSHOT_H */

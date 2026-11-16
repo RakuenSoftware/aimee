@@ -103,8 +103,8 @@ authorizes and records every inter-module event through them and the safety boun
 on a module the bus is trying to reach"; Taken at face value that forbids this proposal; it does not,
 because the stated reason is not true of `vault`.
 
-Nothing under `src/core/event_bus/` references the vault, not the runtime, not admission, not
-routing. Attach admission (`bus_runtime.c`) compares the peer's uid and resolved executable path
+Nothing in the ouroboros ring references the vault, not the runtime, not admission, not
+routing. Attach admission (the ring's `runtime.c`) compares the peer's uid and resolved executable path
 against a `.grant` manifest on disk; both come from the kernel, neither from a credential. The bus
 authorizes and records through execution-policy and audit. It never reaches the vault, so moving the
 vault behind the bus cannot create the circularity the contract is guarding against.

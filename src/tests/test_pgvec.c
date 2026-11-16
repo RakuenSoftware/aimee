@@ -18,18 +18,17 @@
 #include "../modules/kb/c/kb_store_internal.h"
 #include "../modules/kb/c/lifecycle.h" /* kb_store_set_embedding_dim */
 #include "../modules/kb/c/pgvec_transport.h"
-#include "../modules/kb/c/memory_vectors.h"
 #include "../modules/kb/c/kb_vectors.h"
 
 static void test_collection_names(void)
 {
-   const char *mem = PGVEC_MEMORY_TABLE;
+   const char *mem = PGVEC_CODE_TABLE;
    const char *kb = pgvec_kb_vector_collection_name();
    assert(mem && mem[0]);
    assert(kb && kb[0]);
    assert(strcmp(mem, kb) != 0);
    /* The new curator_entity_vectors table is a sibling collection, not
-    * the same as memory or kb. Verify it is its own non-empty name and
+    * the same as code or kb. Verify it is its own non-empty name and
     * distinct from the other two. */
    const char *cur = PGVEC_CURATOR_ENTITY_TABLE;
    assert(cur && cur[0]);
@@ -65,11 +64,11 @@ static void test_collection_names(void)
 
 static void test_collection_readiness_accepts_supported_ann_indexes(void)
 {
-   assert(pgvec_table_ready(PGVEC_MEMORY_TABLE) == 1); /* HNSW */
-   assert(pgvec_table_ready(PGVEC_KB_TABLE) == 1);     /* DiskANN */
+   assert(pgvec_table_ready(PGVEC_CODE_TABLE) == 1); /* HNSW */
+   assert(pgvec_table_ready(PGVEC_KB_TABLE) == 1);   /* DiskANN */
    /* Existing indexes satisfy ensure without trying to create a redundant
     * second ANN index (SQLite cannot execute either backend's DDL). */
-   assert(pgvec_ensure_index(PGVEC_MEMORY_TABLE, 4, 0) == 0);
+   assert(pgvec_ensure_index(PGVEC_CODE_TABLE, 4, 0) == 0);
    assert(pgvec_ensure_index(PGVEC_KB_TABLE, 4, 0) == 0);
    printf("pgvec: HNSW and DiskANN both satisfy collection readiness OK\n");
 }
@@ -78,10 +77,6 @@ static void test_upsert_graceful_on_no_db(void)
 {
    /* Under the sqlite shim, vector SQL fails — must not crash. */
    float vec[4] = {0.1f, 0.2f, 0.3f, 0.4f};
-   int rc;
-
-   rc = pgvec_memory_upsert(1, vec, 4, "{\"record_type\":\"memory\",\"kind\":\"fact\"}");
-   (void)rc; /* -1 expected under shim; 0 if somehow succeeds */
 
    /* curator_entity_upsert should return the same kind of value the existing
     * kb_upsert does under the shim: it either succeeds (0) or fails (-1),
@@ -116,8 +111,6 @@ static void test_upsert_graceful_on_no_db(void)
    assert(rc_cl == 0 || rc_cl == -1);
    assert(rc_ccu == 0 || rc_ccu == -1);
 
-   int rc_mem_del = pgvec_memory_delete(1);
-   (void)rc_mem_del;
    int rc_kb_del = pgvec_kb_delete(1);
    int rc_ce_del = pgvec_curator_entity_delete(1);
    int rc_cn_del = pgvec_curator_narrative_delete(1);
@@ -204,18 +197,10 @@ static void test_scroll_graceful_on_no_db(void)
    int64_t ids[8];
    int64_t next = -1;
    int done = 0;
-   int n = pgvec_scroll(PGVEC_MEMORY_TABLE, -1, ids, 8, &next, &done);
+   int n = pgvec_scroll(PGVEC_CODE_TABLE, -1, ids, 8, &next, &done);
    /* Under shim: table doesn't exist, n < 0 or n = 0 */
    (void)n;
    printf("pgvec: scroll graceful on no-vector-db OK\n");
-}
-
-static void test_latency_snapshot(void)
-{
-   int64_t total, count, maxv;
-   pgvec_search_latency_snapshot(&total, &count, &maxv, 1);
-   assert(total >= 0 && count >= 0 && maxv >= 0);
-   printf("pgvec: latency snapshot callable OK\n");
 }
 
 static void test_public_api_symbols(void)
@@ -232,65 +217,6 @@ static void test_public_api_symbols(void)
    printf("pgvec: all public API symbols resolve OK\n");
 }
 
-/* pgvectorscale is the DEFAULT index, and these cases exist because the tree
- * used to say otherwise in two places at once: this policy returned HNSW for an
- * unset setting and gated "auto" behind a million-row threshold, while
- * schema.sql created DiskANN whenever the extension was present. Two policies,
- * opposite defaults, and no production caller of this one to make the
- * disagreement visible. */
-static void test_corpus_index_type_defaults_to_diskann(void)
-{
-   /* Unset, "auto" and "diskann" all mean the same thing: use the access method
-    * this system indexes with, whenever it is installed. */
-   const char *t = pgvec_corpus_index_type(NULL, 0, 1, 0);
-   assert(strcmp(t, "diskann") == 0);
-   t = pgvec_corpus_index_type("", 0, 1, 0);
-   assert(strcmp(t, "diskann") == 0);
-   t = pgvec_corpus_index_type("auto", 0, 1, 0);
-   assert(strcmp(t, "diskann") == 0);
-   t = pgvec_corpus_index_type("diskann", 0, 1, 0);
-   assert(strcmp(t, "diskann") == 0);
-
-   /* A corpus of ZERO rows still gets DiskANN. The old threshold would have sent
-    * it to HNSW, which is exactly backwards for a small corpus of wide vectors:
-    * HNSW caps at 2000 dimensions and DiskANN does not, so the threshold sent
-    * the one case that cannot use HNSW straight to it. */
-   t = pgvec_corpus_index_type("auto", 0, 1, 1000000);
-   assert(strcmp(t, "diskann") == 0);
-   printf("pgvec: corpus_index_type defaults to diskann OK\n");
-}
-
-static void test_corpus_index_type_falls_back_without_the_extension(void)
-{
-   /* Without pgvectorscale there is only one answer available. */
-   const char *t = pgvec_corpus_index_type(NULL, 0, 0, 0);
-   assert(strcmp(t, "hnsw") == 0);
-   t = pgvec_corpus_index_type("auto", 2000000, 0, 0);
-   assert(strcmp(t, "hnsw") == 0);
-   t = pgvec_corpus_index_type("diskann", 0, 0, 0);
-   assert(strcmp(t, "hnsw") == 0);
-
-   /* An operator who names HNSW gets it even where DiskANN is available: a
-    * setting that was silently overridden would be a lie. */
-   t = pgvec_corpus_index_type("hnsw", 999999999, 1, 0);
-   assert(strcmp(t, "hnsw") == 0);
-   printf("pgvec: corpus_index_type falls back without vectorscale OK\n");
-}
-
-static void test_corpus_ensure_index_graceful(void)
-{
-   /* Under the sqlite shim, pgvec SQL fails gracefully — must not crash */
-   int rc = pgvec_ensure_corpus_index("corpus_section_vectors", "hnsw", 0);
-   (void)rc;
-   rc = pgvec_ensure_corpus_index("corpus_section_vectors", "diskann", 0);
-   (void)rc;
-   rc = pgvec_ensure_corpus_index("corpus_section_vectors", "hnsw", 1);
-   (void)rc;
-   rc = pgvec_ensure_corpus_index(NULL, "hnsw", 0);
-   assert(rc == -1);
-   printf("pgvec: corpus ensure_index graceful OK\n");
-}
-
 int main(void)
 {
    kb_store_test_shim_open();
@@ -303,11 +229,7 @@ int main(void)
    test_upsert_graceful_on_no_db();
    test_search_graceful_on_no_db();
    test_scroll_graceful_on_no_db();
-   test_latency_snapshot();
    test_public_api_symbols();
-   test_corpus_index_type_defaults_to_diskann();
-   test_corpus_index_type_falls_back_without_the_extension();
-   test_corpus_ensure_index_graceful();
 
    kb_store_test_shim_close();
    printf("pgvec: all tests passed\n");

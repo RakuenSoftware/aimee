@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type driftReq struct{ w wireWriter }
@@ -66,8 +66,8 @@ func TestDriftStageRoundTrip(t *testing.T) {
 		path("src/never.c", false, false).
 		bytes()
 
-	response, status := handleNamedFileDrift(bus.ModuleInvocation{}, request)
-	if status != bus.ModuleStatusOK {
+	response, status := handleNamedFileDrift(ring.ModuleInvocation{}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	severity, message := decodeDrift(t, response)
@@ -87,8 +87,8 @@ func TestDriftStageCarriesIndexHitsPerPath(t *testing.T) {
 		path("stdio.h", false, false, "src/vendor/other.h", "src/a.c").
 		bytes()
 
-	response, status := handleNamedFileDrift(bus.ModuleInvocation{}, request)
-	if status != bus.ModuleStatusOK {
+	response, status := handleNamedFileDrift(ring.ModuleInvocation{}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	if severity, message := decodeDrift(t, response); severity != DriftNone {
@@ -98,8 +98,8 @@ func TestDriftStageCarriesIndexHitsPerPath(t *testing.T) {
 	// The same path with NO hits is ambiguous and still needs create intent.
 	request = newDriftReq("Edit stdio.h to fix the bug.", "", "", true).
 		paths(1).path("stdio.h", false, false).bytes()
-	response, status = handleNamedFileDrift(bus.ModuleInvocation{}, request)
-	if status != bus.ModuleStatusOK {
+	response, status = handleNamedFileDrift(ring.ModuleInvocation{}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	if severity, _ := decodeDrift(t, response); severity != DriftHard {
@@ -139,7 +139,7 @@ func TestDriftStageRejectsMalformedRequests(t *testing.T) {
 		"count ceiling":  hugeCount,
 		"empty":          nil,
 	} {
-		if _, status := handleNamedFileDrift(bus.ModuleInvocation{}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := handleNamedFileDrift(ring.ModuleInvocation{}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: want InvalidRequest, got %v", name, status)
 		}
 	}
@@ -153,14 +153,14 @@ func TestDriftStageRejectsAnUnknownPathFlag(t *testing.T) {
 	r.w.str("a.c")
 	r.w.u32(1 << 5)
 	r.w.strings(nil)
-	if _, status := handleNamedFileDrift(bus.ModuleInvocation{}, r.bytes()); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handleNamedFileDrift(ring.ModuleInvocation{}, r.bytes()); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("want InvalidRequest, got %v", status)
 	}
 }
 
 func TestDriftStageHonoursCancellation(t *testing.T) {
 	request := newDriftReq("p", "", "", true).paths(0).bytes()
-	if _, status := handleNamedFileDrift(bus.ModuleInvocation{DeadlineNS: 1}, request); status != bus.ModuleStatusCancelled {
+	if _, status := handleNamedFileDrift(ring.ModuleInvocation{DeadlineNS: 1}, request); status != ring.ModuleStatusCancelled {
 		t.Errorf("want Cancelled, got %v", status)
 	}
 }

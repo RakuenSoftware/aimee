@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func noopWriteRequest(flags uint32, namedCount int) []byte {
@@ -18,9 +18,9 @@ func noopWriteRequest(flags uint32, namedCount int) []byte {
 
 func callNoopWrite(t *testing.T, flags uint32, namedCount int) NoopWriteVerdict {
 	t.Helper()
-	response, status := Handle(bus.ModuleInvocation{StageID: StageNoopWrite},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageNoopWrite},
 		noopWriteRequest(flags, namedCount))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	if len(response) < 12 || binary.LittleEndian.Uint32(response[0:4]) != noopWriteResponseMagic {
@@ -70,7 +70,7 @@ func TestNoopWriteStageCarriesTheBenignMessage(t *testing.T) {
 // does not read. Judging on a partial view is worse than not judging.
 func TestNoopWriteStageRefusesUnknownFlags(t *testing.T) {
 	request := noopWriteRequest(noopWriteRun|(1<<20), 0)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageNoopWrite}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageNoopWrite}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("status = %v, want InvalidRequest", status)
 	}
 }
@@ -97,15 +97,15 @@ func TestNoopWriteStageRejectsMalformedRequests(t *testing.T) {
 	cases["negative named count"] = negative
 
 	for name, request := range cases {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageNoopWrite}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageNoopWrite}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: status = %v, want InvalidRequest", name, status)
 		}
 	}
 }
 
 func TestNoopWriteStageHonoursCancellation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageNoopWrite, DeadlineNS: 1}
-	if _, status := Handle(invocation, noopWriteRequest(noopWriteRun, 0)); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageNoopWrite, DeadlineNS: 1}
+	if _, status := Handle(invocation, noopWriteRequest(noopWriteRun, 0)); status != ring.ModuleStatusCancelled {
 		t.Errorf("status = %v, want Cancelled", status)
 	}
 }

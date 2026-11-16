@@ -14,8 +14,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/economizer"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // memoryStateStore gives multi-turn benchmark conversations the same
@@ -54,8 +54,8 @@ func main() {
 		if !json.Valid(line) {
 			fatal("input is not valid JSON")
 		}
-		out, status := handler(bus.ModuleInvocation{StageID: economizer.StageReduce}, line)
-		if status != bus.ModuleStatusOK {
+		out, status := handler(ring.ModuleInvocation{StageID: economizer.StageReduce}, line)
+		if status != ring.ModuleStatusOK {
 			fatal(fmt.Sprintf("economizer status %d", status))
 		}
 		var response json.RawMessage = out

@@ -13,8 +13,41 @@
 #include <string.h>
 
 char test_vault_server_codex_oauth[4096];
+char test_vault_codex_connection[128];
+char test_vault_codex_token[4096];
+char test_vault_codex_account[128];
 char test_vault_api_key_agent[64];
 char test_vault_api_key[4096];
+
+static struct
+{
+   char agent[128], credential[64], value[64 * 1024 + 1];
+} test_vault_entries[16];
+
+vault_status_t vault_service_set_server(const char *agent, const char *credential,
+                                        const char *value)
+{
+   if (!agent || !credential || !value || strlen(agent) >= 128 || strlen(credential) >= 64 ||
+       strlen(value) > 64 * 1024)
+      return VAULT_ERR_BADARG;
+   size_t selected = 16;
+   for (size_t i = 0; i < 16; i++)
+      if (!strcmp(test_vault_entries[i].agent, agent) &&
+          !strcmp(test_vault_entries[i].credential, credential))
+      {
+         selected = i;
+         break;
+      }
+      else if (selected == 16 && !test_vault_entries[i].agent[0])
+         selected = i;
+   if (selected == 16)
+      return VAULT_ERR_IO;
+   snprintf(test_vault_entries[selected].agent, 128, "%s", agent);
+   snprintf(test_vault_entries[selected].credential, 64, "%s", credential);
+   snprintf(test_vault_entries[selected].value, sizeof test_vault_entries[selected].value, "%s",
+            value);
+   return VAULT_OK;
+}
 
 vault_status_t vault_service_inject_api_key(const char *principal, const char *agent, char *api_key,
                                             size_t api_key_len, long now_epoch)
@@ -50,8 +83,8 @@ vault_status_t vault_service_get(const char *principal, const char *agent, const
  * credential sees it as both present and gettable. */
 int vault_service_has_server_principal(const char *agent, const char *cred)
 {
-   if (agent && cred && test_vault_api_key_agent[0] && strcmp(agent, test_vault_api_key_agent) == 0 &&
-       strcmp(cred, VAULT_API_KEY_CRED) == 0)
+   if (agent && cred && test_vault_api_key_agent[0] &&
+       strcmp(agent, test_vault_api_key_agent) == 0 && strcmp(cred, VAULT_API_KEY_CRED) == 0)
       return test_vault_api_key[0] != '\0';
    return agent && cred && strcmp(agent, "codex") == 0 && strcmp(cred, "oauth") == 0 &&
           test_vault_server_codex_oauth[0];
@@ -60,15 +93,58 @@ int vault_service_has_server_principal(const char *agent, const char *cred)
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t out_len)
 {
+   if (agent && cred && test_vault_codex_connection[0] &&
+       !strcmp(agent, test_vault_codex_connection))
+   {
+      const char *value = !strcmp(cred, VAULT_CODEX_TOKEN_CRED)     ? test_vault_codex_token
+                          : !strcmp(cred, VAULT_CODEX_ACCOUNT_CRED) ? test_vault_codex_account
+                                                                    : "";
+      if (value[0])
+      {
+         snprintf(out, out_len, "%s", value);
+         return VAULT_OK;
+      }
+   }
    if (agent && cred && strcmp(agent, "codex") == 0 && strcmp(cred, "oauth") == 0 &&
        test_vault_server_codex_oauth[0])
    {
       snprintf(out, out_len, "%s", test_vault_server_codex_oauth);
       return VAULT_OK;
    }
+   for (size_t i = 0; agent && cred && i < 16; i++)
+      if (!strcmp(test_vault_entries[i].agent, agent) &&
+          !strcmp(test_vault_entries[i].credential, cred))
+      {
+         if (strlen(test_vault_entries[i].value) >= out_len)
+            return VAULT_ERR_BADARG;
+         snprintf(out, out_len, "%s", test_vault_entries[i].value);
+         return VAULT_OK;
+      }
    if (out && out_len)
       out[0] = '\0';
    return VAULT_NO_ENTRY;
+}
+
+vault_status_t vault_service_read_server_snapshot(const char *agent, vault_store_read_t *reads,
+                                                  size_t count)
+{
+   vault_status_t result = VAULT_OK;
+   for (size_t i = 0; i < count; i++)
+   {
+      memset(reads[i].value, 0, reads[i].capacity);
+      vault_status_t status = vault_service_get_server_principal(agent, reads[i].credential,
+                                                                 reads[i].value, reads[i].capacity);
+      reads[i].present = status == VAULT_OK;
+      if (status != VAULT_OK && status != VAULT_NO_ENTRY)
+         result = status;
+   }
+   if (result != VAULT_OK)
+      for (size_t i = 0; i < count; i++)
+      {
+         memset(reads[i].value, 0, reads[i].capacity);
+         reads[i].present = 0;
+      }
+   return result;
 }
 
 /* The git ssh-key route (rh_git_sshkey) stores/removes a per-webuser key; tests

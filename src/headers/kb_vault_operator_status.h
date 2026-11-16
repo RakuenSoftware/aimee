@@ -154,16 +154,6 @@ int kb_vault_operator_mutation_response_decode(const unsigned char *input, size_
                                                kb_vault_operator_result_t *result,
                                                kb_vault_operator_status_t *status);
 
-/* Takes ownership of the fixed inherited listener fd, including on a failed
- * initialization attempt. The fd must be exactly KB_VAULT_OPERATOR_LISTEN_FD
- * and name the fixed root-owned socket. Stop closes admission, drains the
- * current callback, joins, and frees service. */
-kb_vault_operator_service_t *
-kb_vault_operator_service_start(int inherited_fd, kb_vault_operator_status_fn read_status,
-                                void *opaque);
-kb_vault_operator_service_t *
-kb_vault_operator_service_start_mutations(int inherited_fd, kb_vault_operator_status_fn read_status,
-                                          kb_vault_operator_mutation_fn mutate, void *opaque);
 kb_vault_operator_service_t *kb_vault_operator_service_start_mutations_ex(
     int inherited_fd, kb_vault_operator_status_fn read_status, kb_vault_operator_mutation_fn mutate,
     kb_vault_operator_post_wipe_fn post_wipe, void *opaque);
@@ -198,9 +188,6 @@ int kb_vault_operator_mutation_format(kb_vault_operator_result_t result,
  * callers use the joined service above. */
 int kb_vault_operator_serve_connection(int fd, kb_vault_operator_status_fn read_status,
                                        void *opaque);
-int kb_vault_operator_serve_connection_mutations(int fd, kb_vault_operator_status_fn read_status,
-                                                 kb_vault_operator_mutation_fn mutate,
-                                                 void *opaque);
 int kb_vault_operator_serve_connection_mutations_ex(int fd, kb_vault_operator_status_fn read_status,
                                                     kb_vault_operator_mutation_fn mutate,
                                                     kb_vault_operator_post_wipe_fn post_wipe,

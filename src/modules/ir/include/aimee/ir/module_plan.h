@@ -33,7 +33,6 @@ typedef struct
 
 /* Request a host-only plan, validate it, then execute only declared effects and
  * IR edits. The stage returns 1 for an IR edit, 0 for no edit or unavailable plan.
- * Text execution returns an owned string, or NULL for an absent/empty result. */
+ * Every plan executes against the owned canonical request. */
 int aimee_ir_stage_module_plan(aimee_request_t *request, void *configuration);
-char *aimee_ir_module_plan_text(const aimee_ir_module_plan_t *configuration);
 #endif

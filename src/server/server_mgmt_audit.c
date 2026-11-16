@@ -34,13 +34,3 @@ int server_mgmt_audit_outcome(const char *a, const char *t, const char *c, const
    snprintf(v, sizeof(v), "status_%d", st);
    return append("management.outcome", a, t, c, j, d, v);
 }
-int server_mgmt_dispatch_audited(const char *a, const char *t, const char *c, const char *j,
-                                 const char *d, server_mgmt_action_fn fn, void *ctx)
-{
-   if (!fn || server_mgmt_audit_intent(a, t, c, j, d) != 0)
-      return -1;
-   int st = fn(ctx);
-   if (server_mgmt_audit_outcome(a, t, c, j, d, st) != 0)
-      return -1;
-   return st;
-}

@@ -24,10 +24,9 @@
 ARG AIMEE_EMBEDDER=bekko-a25m
 
 # ---- the weights ----------------------------------------------------------------
-# BUILDPLATFORM-pinned: the payload is architecture-independent, so a
-# linux/amd64 + linux/arm64 build fetches ONCE and both manifests reference the same
-# layer, rather than downloading the same gigabytes twice to produce identical bytes.
-# Same reasoning as Dockerfile.model.
+# BUILDPLATFORM-pinned: the payload is architecture-independent, so the fetch
+# never runs under emulation. Images are built for linux/amd64, as in
+# Dockerfile.model.
 FROM --platform=$BUILDPLATFORM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS weights
 ARG AIMEE_EMBEDDER
 ENV EMBEDDER_VENV=/opt/aimee/embedder-venv

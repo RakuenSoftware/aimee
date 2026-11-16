@@ -6,6 +6,7 @@
 
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
+#include "json_int64.h"
 #include "modules/kb/c/kb_store.h"
 #include "modules/kb/c/code_projection.h"
 #include "modules/kb/c/entity_edges.h"
@@ -181,8 +182,8 @@ int kb_handle_graph_sync_code(int fd, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "project", project);
-   cJSON_AddNumberToObject(resp, "generation_id", (double)gen);
-   cJSON_AddNumberToObject(resp, "edge_count", (double)edges);
+   cJSON_AddItemToObject(resp, "generation_id", jo_i64_value_exact(gen));
+   cJSON_AddItemToObject(resp, "edge_count", jo_i64_value_exact(edges));
    int rc = kb_send_response(fd, resp);
    cJSON_Delete(resp);
    return rc;

@@ -102,16 +102,6 @@ var builtinPermissions = map[string]EnforcementPoint{
 	PermKnowledgeWrite: EnforceAPI,
 }
 
-// BuiltinPermissionNames lists the guaranteed vocabulary, sorted.
-func BuiltinPermissionNames() []string {
-	out := make([]string, 0, len(builtinPermissions))
-	for name := range builtinPermissions {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // DefaultEnforcementPoint reports where a permission is enforced when the
 // operator has not said otherwise. EnforceNone for anything not built in.
 func DefaultEnforcementPoint(permission string) EnforcementPoint {

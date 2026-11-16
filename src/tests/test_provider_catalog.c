@@ -267,89 +267,9 @@ static void test_health_unknown_agent_is_healthy(void)
 
 /* ---- locality queries ---- */
 
-static void test_locality_local_agent(void)
-{
-   reset_catalog();
-   agent_t ag = make_agent("ollama", "http://localhost:11434");
-   provider_catalog_init(&ag, 1);
-   assert(provider_catalog_get_locality("ollama") == PROVIDER_LOCALITY_LOCAL);
-   printf("  locality_local_agent: OK\n");
-}
-
-static void test_locality_lan_agent(void)
-{
-   reset_catalog();
-   agent_t ag = make_agent("lan-llm", "http://192.168.1.50:8080");
-   provider_catalog_init(&ag, 1);
-   assert(provider_catalog_get_locality("lan-llm") == PROVIDER_LOCALITY_LAN);
-   printf("  locality_lan_agent: OK\n");
-}
-
-static void test_locality_unknown_agent(void)
-{
-   reset_catalog();
-   assert(provider_catalog_get_locality("ghost") == PROVIDER_LOCALITY_UNKNOWN);
-   assert(provider_catalog_get_locality(NULL) == PROVIDER_LOCALITY_UNKNOWN);
-   printf("  locality_unknown_agent: OK\n");
-}
-
 /* ---- concurrency inference ---- */
 
-static void test_inferred_concurrency_local(void)
-{
-   reset_catalog();
-   agent_t ag = make_agent("ollama", "http://localhost:11434");
-   provider_catalog_init(&ag, 1);
-   assert(provider_catalog_inferred_concurrency("ollama") == PROVIDER_LOCAL_CONCURRENCY_DEFAULT);
-   printf("  inferred_concurrency_local: OK\n");
-}
-
-static void test_inferred_concurrency_lan(void)
-{
-   reset_catalog();
-   agent_t ag = make_agent("lan-llm", "http://10.0.0.5:8080");
-   provider_catalog_init(&ag, 1);
-   assert(provider_catalog_inferred_concurrency("lan-llm") == PROVIDER_LAN_CONCURRENCY_DEFAULT);
-   printf("  inferred_concurrency_lan: OK\n");
-}
-
-static void test_inferred_concurrency_remote_is_zero(void)
-{
-   reset_catalog();
-   agent_t ag = make_agent("claude", "https://api.anthropic.com");
-   provider_catalog_init(&ag, 1);
-   assert(provider_catalog_inferred_concurrency("claude") == 0);
-   printf("  inferred_concurrency_remote_is_zero: OK\n");
-}
-
 /* ---- dump_json ---- */
-
-static void test_dump_json_single_entry(void)
-{
-   reset_catalog();
-   agent_t ag = make_agent("ollama", "http://localhost:11434");
-   provider_catalog_init(&ag, 1);
-
-   char buf[1024];
-   int n = provider_catalog_dump_json(buf, sizeof(buf));
-   assert(n > 0);
-   assert(strstr(buf, "\"agent\":\"ollama\"") != NULL);
-   assert(strstr(buf, "\"locality\":\"local\"") != NULL);
-   assert(strstr(buf, "\"health\":\"healthy\"") != NULL);
-   printf("  dump_json_single_entry: OK\n");
-}
-
-static void test_dump_json_overflow(void)
-{
-   reset_catalog();
-   agent_t ag = make_agent("ollama", "http://localhost:11434");
-   provider_catalog_init(&ag, 1);
-
-   char tiny[5];
-   int n = provider_catalog_dump_json(tiny, sizeof(tiny));
-   assert(n == -1);
-   printf("  dump_json_overflow: OK\n");
-}
 
 /* ---- label helpers ---- */
 
@@ -405,17 +325,6 @@ int main(void)
    test_health_half_opens_after_cooldown();
    test_persistent_failure_backs_off_further_than_a_blip();
    test_health_unknown_agent_is_healthy();
-
-   test_locality_local_agent();
-   test_locality_lan_agent();
-   test_locality_unknown_agent();
-
-   test_inferred_concurrency_local();
-   test_inferred_concurrency_lan();
-   test_inferred_concurrency_remote_is_zero();
-
-   test_dump_json_single_entry();
-   test_dump_json_overflow();
 
    test_labels();
    test_registration_health_isolation();

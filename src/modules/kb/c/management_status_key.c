@@ -247,9 +247,3 @@ int kb_store_management_status_key_startup_begin(kb_store_management_status_key_
    aimee_pg_finalize(s);
    return 0;
 }
-
-int kb_store_management_status_key_startup_end(kb_store_management_status_key_ctx_t *ctx,
-                                               int commit)
-{
-   return kb_store_management_status_key_guard_end(ctx, commit);
-}

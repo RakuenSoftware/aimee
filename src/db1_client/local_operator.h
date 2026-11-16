@@ -23,13 +23,7 @@ extern "C"
       char created_at[DB1_LOCAL_OPERATOR_TS_LEN];
    } db1_local_operator_t;
 
-   int db1_local_operator_upsert(const char *secret_ref, const char *operator_uuid, int active,
-                                 const char *display_hint);
-   int db1_local_operator_get(const char *secret_ref, db1_local_operator_t *out);
    int db1_local_operator_get_active(db1_local_operator_t *out);
-   int db1_local_operator_set_active(const char *secret_ref);
-   int db1_local_operator_delete(const char *secret_ref);
-   int db1_local_operator_list(db1_local_operator_t *out, int max);
 
 #ifdef __cplusplus
 }

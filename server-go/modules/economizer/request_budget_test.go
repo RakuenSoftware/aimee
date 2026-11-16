@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestRequestBudgetAdmission(t *testing.T) {
@@ -106,8 +106,8 @@ func TestInheritedProviderRequestAdmission(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			for route := uint16(1); route <= 3; route++ {
 				frame := policyBudgetFrame(route, tc.size, tc.limits, tc.policy)
-				out, status := NewHandler()(bus.ModuleInvocation{StageID: StageRequestBudget}, frame)
-				if status != bus.ModuleStatusOK || len(out) != 44 || binary.LittleEndian.Uint16(out[6:]) != tc.want {
+				out, status := NewHandler()(ring.ModuleInvocation{StageID: StageRequestBudget}, frame)
+				if status != ring.ModuleStatusOK || len(out) != 44 || binary.LittleEndian.Uint16(out[6:]) != tc.want {
 					t.Fatalf("route %d status %v response %x want %d", route, status, out, tc.want)
 				}
 				digest := sha256.Sum256(frame)
@@ -129,11 +129,11 @@ func TestRequestBudgetPolicyFrameRefusals(t *testing.T) {
 		frames = append(frames, bad)
 	}
 	for _, frame := range frames {
-		if _, status := NewHandler()(bus.ModuleInvocation{StageID: StageRequestBudget}, frame); status != bus.ModuleStatusInvalidRequest {
+		if _, status := NewHandler()(ring.ModuleInvocation{StageID: StageRequestBudget}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatalf("malformed policy frame accepted: %v", status)
 		}
 	}
-	if _, status := NewHandler()(bus.ModuleInvocation{StageID: StageRequestBudget, DeadlineNS: 1}, valid); status != bus.ModuleStatusCancelled {
+	if _, status := NewHandler()(ring.ModuleInvocation{StageID: StageRequestBudget, DeadlineNS: 1}, valid); status != ring.ModuleStatusCancelled {
 		t.Fatal("expired policy admission accepted", status)
 	}
 }
@@ -143,8 +143,8 @@ func TestRequestBudgetStageCommitment(t *testing.T) {
 	for route := uint16(1); route <= 3; route++ {
 		for _, size := range []uint64{0, 3, 4} {
 			frame := budgetFrame(route, size, `{"schema_version":1,"max_request_bytes":3}`)
-			out, status := handler(bus.ModuleInvocation{StageID: StageRequestBudget}, frame)
-			if status != bus.ModuleStatusOK || len(out) != 44 {
+			out, status := handler(ring.ModuleInvocation{StageID: StageRequestBudget}, frame)
+			if status != ring.ModuleStatusOK || len(out) != 44 {
 				t.Fatalf("status %v response length %d", status, len(out))
 			}
 			want := RequestBudgetAdmitted
@@ -180,8 +180,8 @@ func TestRequestBudgetMalformedFrames(t *testing.T) {
 		frames = append(frames, bad)
 	}
 	for _, frame := range frames {
-		out, status := NewHandler()(bus.ModuleInvocation{StageID: StageRequestBudget}, frame)
-		if status != bus.ModuleStatusInvalidRequest || out != nil {
+		out, status := NewHandler()(ring.ModuleInvocation{StageID: StageRequestBudget}, frame)
+		if status != ring.ModuleStatusInvalidRequest || out != nil {
 			t.Fatalf("malformed frame admitted: %v", status)
 		}
 	}
@@ -189,8 +189,8 @@ func TestRequestBudgetMalformedFrames(t *testing.T) {
 
 func TestRequestBudgetCancelled(t *testing.T) {
 	frame := budgetFrame(1, 3, `{"schema_version":1,"max_request_bytes":3}`)
-	out, status := NewHandler()(bus.ModuleInvocation{StageID: StageRequestBudget, DeadlineNS: 1}, frame)
-	if status != bus.ModuleStatusCancelled || out != nil {
+	out, status := NewHandler()(ring.ModuleInvocation{StageID: StageRequestBudget, DeadlineNS: 1}, frame)
+	if status != ring.ModuleStatusCancelled || out != nil {
 		t.Fatalf("expired admission: %v", status)
 	}
 }
@@ -200,7 +200,7 @@ func BenchmarkRequestBudgetAdmission(b *testing.B) {
 	handler := NewHandler()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		if _, status := handler(bus.ModuleInvocation{StageID: StageRequestBudget}, frame); status != bus.ModuleStatusOK {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageRequestBudget}, frame); status != ring.ModuleStatusOK {
 			b.Fatal(status)
 		}
 	}
@@ -217,7 +217,7 @@ func BenchmarkRequestBudgetOperatorAdmission(b *testing.B) {
 			handler := NewHandler()
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				if _, status := handler(bus.ModuleInvocation{StageID: StageRequestBudget}, frame); status != bus.ModuleStatusOK {
+				if _, status := handler(ring.ModuleInvocation{StageID: StageRequestBudget}, frame); status != ring.ModuleStatusOK {
 					b.Fatal(status)
 				}
 			}

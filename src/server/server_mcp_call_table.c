@@ -73,9 +73,30 @@ static cJSON *mcph_kb_last_result(const char *message)
 
 /* ── thin wrappers: uniform signature over the existing tool_* helpers ─────── */
 
+static cJSON *mcph_git_verify(struct mcp_call *c)
+{
+   cJSON *args = cJSON_Duplicate(c->jargs, 1);
+   if (!args)
+      return text_content("error: cannot retain verification arguments");
+   const char *cwd = run_cmd_get_cwd();
+   if (!cJSON_GetObjectItemCaseSensitive(args, "path") &&
+       !cJSON_GetObjectItemCaseSensitive(args, "cwd") && cwd && cwd[0])
+      cJSON_AddStringToObject(args, "path", cwd);
+   cJSON *result = mcp_git_run_tool("git_verify", args, c->sid);
+   cJSON_Delete(args);
+   return result;
+}
 static cJSON *mcph_get_help(struct mcp_call *c)
 {
    return tool_get_help(c->jargs);
+}
+static cJSON *mcph_delegate_native(struct mcp_call *c)
+{
+   char *response = server_mcp_delegate_native(c->tool, c->jargs, c->sid);
+   cJSON *content =
+       text_content(response ? response : "error: native orchestration owner unavailable");
+   free(response);
+   return content;
 }
 static cJSON *mcph_ast_grep_search(struct mcp_call *c)
 {
@@ -107,9 +128,13 @@ static cJSON *mcph_memory_ask(struct mcp_call *c)
 {
    return tool_memory_ask(c->jargs, c->structured);
 }
+extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
+static cJSON *mcph_served_memory(struct mcp_call *c, int card);
 static cJSON *mcph_search_graph(struct mcp_call *c)
 {
-   return tool_search_graph(c->jargs);
+   return aimee_module_tool_source_mode && aimee_module_tool_source_mode(c->tool) != 0
+              ? mcph_served_memory(c, 0)
+              : tool_search_graph(c->jargs);
 }
 static cJSON *mcph_get_episode(struct mcp_call *c)
 {
@@ -121,7 +146,9 @@ static cJSON *mcph_get_entity(struct mcp_call *c)
 }
 static cJSON *mcph_get_entity_edges(struct mcp_call *c)
 {
-   return tool_get_entity_edges(c->jargs);
+   return aimee_module_tool_source_mode && aimee_module_tool_source_mode(c->tool) != 0
+              ? mcph_served_memory(c, 0)
+              : tool_get_entity_edges(c->jargs);
 }
 static cJSON *mcph_get_context_block(struct mcp_call *c)
 {
@@ -135,9 +162,46 @@ static cJSON *mcph_list_facts(struct mcp_call *c)
 {
    return tool_list_facts(c->jargs);
 }
+/* Optional host deployment policy, not authority from MCP arguments/_meta. */
+extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
+extern int aimee_module_tool_source_render(const char *, const cJSON *, cJSON **)
+    __attribute__((weak));
+#pragma weak agent_tool_source_attach
+static cJSON *mcph_source_unavailable(struct mcp_call *c)
+{
+   (void)c;
+   return text_content("{\"status\":\"error\",\"kind\":\"source_custody_unavailable\",\"message\":"
+                       "\"selected tool output requires an owner-issued source receipt\"}");
+}
 static cJSON *mcph_served_memory(struct mcp_call *c, int card)
 {
-   cJSON *reply = card ? memory_claim_card_command(c->jargs) : memory_serve_command(c->jargs);
+   int selected = aimee_module_tool_source_mode ? aimee_module_tool_source_mode(c->tool) : 0;
+   cJSON *reply = NULL;
+   if (selected)
+   {
+      /* The trusted module renderer issues a durable receipt without allocating
+       * the ordinary API's unused ephemeral projection/ticket cache entry. */
+      if (selected < 0 || !aimee_module_tool_source_render ||
+          aimee_module_tool_source_render(c->tool, c->jargs, &reply) != 1)
+      {
+         cJSON_Delete(reply);
+         return mcph_source_unavailable(c);
+      }
+   }
+   else
+      reply = card ? memory_claim_card_command(c->jargs) : memory_serve_command(c->jargs);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "native_tool_output");
+   const cJSON *source = cJSON_GetObjectItemCaseSensitive(reply, "native_tool_source");
+   if (selected || output || source)
+   {
+      cJSON *content = NULL;
+      if (selected >= 0 && cJSON_IsString(output) && source && agent_tool_source_attach &&
+          agent_tool_source_attach(source, output->valuestring) == 0)
+         content = text_content(output->valuestring);
+      cJSON_Delete(reply);
+      return content ? content : mcph_source_unavailable(c);
+   }
+   /* No native receipt-selected deployment: retain the legacy owner response. */
    char *raw = reply ? cJSON_PrintUnformatted(reply) : NULL;
    cJSON *content = text_content(raw ? raw : "{\"status\":\"error\",\"kind\":\"unavailable\"}");
    free(raw);
@@ -912,7 +976,10 @@ done:
 
 static cJSON *mcph_session_search(struct mcp_call *c)
 {
-   cJSON *result = session_search_tool_result_for_uid(c->jargs, (unsigned)c->conn->peer_uid);
+   cJSON *result =
+       c->conn->vault_principal[0]
+           ? session_search_tool_result_for_principal(c->jargs, c->conn->vault_principal)
+           : session_search_tool_result_for_uid(c->jargs, (unsigned)c->conn->peer_uid);
    *c->structured = cJSON_Duplicate(result, 1);
    return json_result_content(result);
 }
@@ -2118,7 +2185,9 @@ static cJSON *mcph_peer_inbox(struct mcp_call *c)
  * query away. Both shipped green.
  *
  * Marking a tool native asserts it works with NO client session behind it: a native
- * call passes ctx=NULL and conn=NULL. Today no handler touches ctx and only
+ * call passes ctx=NULL and conn=NULL. Orchestration wrappers use the existing
+ * dispatch seam under the attested model owner rather than a client connection.
+ * Today no handler touches ctx and only
  * session_search / workflow_run touch conn — keep those two external-only (they are
  * about an external client's own session anyway, and are EXEMPT in
  * check-native-tool-parity.py for that reason).
@@ -2146,7 +2215,10 @@ static const struct
    mcp_tool_handler_fn fn;
    const char *native;
 } mcp_tool_table[] = {
+    {"delegate", mcph_delegate_native, "primary"},
+    {"delegate_status", mcph_delegate_native, "primary"},
     {"get_help", mcph_get_help, NULL},
+    {"git_verify", mcph_git_verify, "core,current_code"},
     {"ast_grep_search", mcph_ast_grep_search, "core,review_indexed"},
     {"search_memory", mcph_search_memory, NULL},
     {"mutate", mcph_mutate, NULL},
@@ -2154,7 +2226,7 @@ static const struct
     {"search_graph", mcph_search_graph, "core,review_indexed"},
     {"get_episode", mcph_get_episode, NULL},
     {"get_entity", mcph_get_entity, NULL},
-    {"get_entity_edges", mcph_get_entity_edges, NULL},
+    {"get_entity_edges", mcph_get_entity_edges, "core"},
     {"get_context_block", mcph_get_context_block, "core,review_indexed"},
     {"memory_get", mcph_memory_get, NULL},
     {"list_facts", mcph_list_facts, NULL},
@@ -2252,24 +2324,13 @@ mcp_tool_handler_fn mcp_tool_lookup(const char *tool)
 {
    for (size_t i = 0; i < sizeof(mcp_tool_table) / sizeof(mcp_tool_table[0]); i++)
       if (strcmp(mcp_tool_table[i].name, tool) == 0)
-         return mcp_tool_table[i].fn;
+         return aimee_module_tool_source_mode && aimee_module_tool_source_mode(tool) < 0
+                    ? mcph_source_unavailable
+                    : mcp_tool_table[i].fn;
    return NULL;
 }
 
 /* ── the native surface, derived from the table above ────────────────────── */
-
-/* Run an MCP tool for one of aimee's own agents: the same handler an external MCP
- * client reaches, so there is no second implementation that can drift. ctx/conn are
- * NULL — see the table's header for why only ctx/conn-free tools may be native. */
-static cJSON *mcp_native_call(const char *tool, cJSON *args, const char *sid)
-{
-   mcp_tool_handler_fn fn = mcp_tool_lookup(tool);
-   if (!fn)
-      return NULL;
-   struct mcp_call c = {
-       .ctx = NULL, .conn = NULL, .jargs = args, .sid = sid, .tool = tool, .structured = NULL};
-   return fn(&c);
-}
 
 /* The tool's tools/list entry ({"description","inputSchema"}), so the native surface
  * advertises the tool's OWN schema instead of a hand-copied second one. Copying is
@@ -2277,6 +2338,8 @@ static cJSON *mcp_native_call(const char *tool, cJSON *args, const char *sid)
  * Caller owns the result. */
 static cJSON *mcp_native_advert(const char *tool)
 {
+   if (aimee_module_tool_source_mode && aimee_module_tool_source_mode(tool) < 0)
+      return NULL;
    static cJSON *list = NULL;
    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
    pthread_mutex_lock(&lock);
@@ -2289,27 +2352,18 @@ static cJSON *mcp_native_advert(const char *tool)
        * was fine and only the advert lied — exactly the silent shape this merge exists
        * to end. Caught by running a real server, not by CI. */
       list = mcp_build_tools_list_flat(); /* process-lifetime cache; the list is static */
-   cJSON *found = NULL;
-   cJSON *item = NULL;
-   cJSON_ArrayForEach(item, list)
-   {
-      cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "name");
-      if (cJSON_IsString(name) && strcmp(name->valuestring, tool) == 0)
-      {
-         found = cJSON_Duplicate(item, 1);
-         break;
-      }
-   }
+   cJSON *found = mcp_tool_advert_from_list(list, tool);
    pthread_mutex_unlock(&lock);
    return found;
 }
 
 void mcp_tool_register_native_surface(void)
 {
-   agent_tools_set_mcp_provider(mcp_native_call, mcp_native_advert);
+   agent_tools_set_mcp_provider(server_mcp_native_call, mcp_native_advert);
    for (size_t i = 0; i < sizeof(mcp_tool_table) / sizeof(mcp_tool_table[0]); i++)
    {
-      if (!mcp_tool_table[i].native)
+      if (!mcp_tool_table[i].native || (aimee_module_tool_source_mode &&
+                                        aimee_module_tool_source_mode(mcp_tool_table[i].name) < 0))
          continue;
       agent_tools_register_mcp_tool(mcp_tool_table[i].name);
       /* `native` is a comma-separated set list: one tool can belong to several

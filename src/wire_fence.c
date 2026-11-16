@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <limits.h>
 #include <stdio.h>
 #include "http_retry.h"
 #include "agent_exec.h"
@@ -143,17 +144,38 @@ int wire_fence_select(int proof_gated, wire_fence_route_t route, const void *pri
    selected->data = NULL;
    selected->len = 0;
    const request_context_t *context = request_context_get ? request_context_get() : NULL;
-   if (context && context->context_refused)
-   {
-      last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
-      return WIRE_FENCE_CONTEXT_REFUSED;
-   }
    /* Deployment-owned metadata is forwarded unchanged. Go owns validation and
     * intersection with the caller's limit. Empty/unset means no operator cap;
     * literal zero is expressed in the versioned JSON object. */
    const char *policy = getenv("AIMEE_PROVIDER_CONTEXT_LIMITS");
    if (policy && !*policy)
       policy = NULL;
+   if (context && context->context_refused)
+   {
+      /* A memory owner may refuse an oversized input before this fence runs
+       * (its own request bounds are owner-specific and undisclosed). When a
+       * deployment budget applies and the caller's request already overflows
+       * it, report the budget so every owner classifies the same input the
+       * same way. Nothing is sent either way; any other outcome keeps the
+       * owner's refusal. */
+      if ((policy || context->request_budget_present > 0) &&
+          (policy ? econ_module_request_budget_with_policy &&
+                        econ_module_request_budget_with_policy(
+                            (unsigned)route, pristine, pristine_len,
+                            context->request_budget_present > 0 ? context->request_budget_limits
+                                                                : NULL,
+                            policy) == ECON_REQUEST_BUDGET_OVERFLOW
+                  : econ_module_request_budget &&
+                        econ_module_request_budget((unsigned)route, pristine, pristine_len,
+                                                   context->request_budget_limits) ==
+                            ECON_REQUEST_BUDGET_OVERFLOW))
+      {
+         last_error = "request_budget_exceeded";
+         return -1;
+      }
+      last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
+      return WIRE_FENCE_CONTEXT_REFUSED;
+   }
    if (policy || (context && context->request_budget_present))
    {
       const char *limits =
@@ -230,6 +252,7 @@ typedef struct
    const char *provider, *model;
    char attempt[33];
    void *send_guard_state;
+   int transport_attempts;
 } wire_attempt_t;
 
 extern int ingress_preinject_acquire_send_guard(void **) __attribute__((weak));
@@ -240,9 +263,18 @@ static int wire_send_acquire(void *opaque)
    const request_context_t *context = request_context_get ? request_context_get() : NULL;
    if (context && !context->memory_source_release[0])
       return 0;
-   if (!ingress_preinject_acquire_send_guard || !ingress_preinject_release_send_guard)
-      return -1;
-   return ingress_preinject_acquire_send_guard(&attempt->send_guard_state);
+   int result = ingress_preinject_acquire_send_guard && ingress_preinject_release_send_guard
+                    ? ingress_preinject_acquire_send_guard(&attempt->send_guard_state)
+                    : -1;
+   if (result != 0)
+   {
+      /* The guard can set a more specific current refusal. Do not report a
+       * stale default left by an earlier successful wire selection. */
+      context = request_context_get ? request_context_get() : NULL;
+      last_error = context && context->context_refusal_kind[0] ? context->context_refusal_kind
+                                                               : "unavailable";
+   }
+   return result;
 }
 extern int ingress_preinject_started_attempt(const char *) __attribute__((weak));
 static void wire_send_release(void *opaque, int status)
@@ -297,9 +329,23 @@ refused:
    return -1;
 }
 
-static void wire_attempt_after(void *opaque, int status, const char *response, size_t length)
+static _Thread_local wire_fence_transport_observer_t transport_observer;
+wire_fence_transport_observer_t
+wire_fence_transport_observer_bind(wire_fence_transport_observer_t observer)
 {
-   wire_attempt_t *attempt = opaque;
+   wire_fence_transport_observer_t previous = transport_observer;
+   transport_observer = observer;
+   return previous;
+}
+static void wire_transport_completed(int status)
+{
+   if (status != HTTP_RETRY_ADMISSION_REFUSED && transport_observer.completed)
+      transport_observer.completed(transport_observer.context, status);
+}
+
+static void wire_attempt_receipt(wire_attempt_t *attempt, int status, const char *response,
+                                 size_t length)
+{
    if (attempt->attempt[0] &&
        (!ingress_preinject_observe_attempt ||
         ingress_preinject_observe_attempt(attempt->attempt, status, response, length) != 0))
@@ -307,11 +353,20 @@ static void wire_attempt_after(void *opaque, int status, const char *response, s
           "provider receipt observation unavailable; admitted attempt outcome remains unresolved\n",
           stderr);
 }
+static void wire_attempt_after(void *opaque, int status, const char *response, size_t length)
+{
+   wire_attempt_t *attempt = opaque;
+   wire_transport_completed(status);
+   if (status != HTTP_RETRY_ADMISSION_REFUSED && attempt->transport_attempts < INT_MAX)
+      attempt->transport_attempts++;
+   wire_attempt_receipt(attempt, status, response, length);
+}
 
-int wire_fence_post(const char *url, const char *auth_header, const void *body, size_t body_len,
-                    char **response_buf, int timeout_ms, const char *extra_headers,
-                    int max_attempts, int base_ms, int max_ms, const char *provider,
-                    const char *model, const char *session_id, wire_fence_route_t route)
+int wire_fence_post_observed(const char *url, const char *auth_header, const void *body,
+                             size_t body_len, char **response_buf, int timeout_ms,
+                             const char *extra_headers, int max_attempts, int base_ms, int max_ms,
+                             const char *provider, const char *model, const char *session_id,
+                             wire_fence_route_t route, wire_fence_observation_t *observation)
 {
    wire_attempt_t attempt = {.route = route, .provider = provider, .model = model};
    agent_http_send_guard_t guard = {.context = &attempt,
@@ -322,9 +377,22 @@ int wire_fence_post(const char *url, const char *auth_header, const void *body, 
                                      .before = wire_attempt_before,
                                      .after = wire_attempt_after,
                                      .send_guard = wire_send_guard_required() ? &guard : NULL};
-   return http_retry_post_observed_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
-                                         extra_headers, max_attempts, base_ms, max_ms, provider,
-                                         model, session_id, NULL, &observer);
+   int status = http_retry_post_observed_bytes(
+       url, auth_header, body, body_len, response_buf, timeout_ms, extra_headers, max_attempts,
+       base_ms, max_ms, provider, model, session_id, NULL, &observer);
+   if (observation)
+      observation->transport_attempts = attempt.transport_attempts;
+   return status;
+}
+
+int wire_fence_post(const char *url, const char *auth_header, const void *body, size_t body_len,
+                    char **response_buf, int timeout_ms, const char *extra_headers,
+                    int max_attempts, int base_ms, int max_ms, const char *provider,
+                    const char *model, const char *session_id, wire_fence_route_t route)
+{
+   return wire_fence_post_observed(url, auth_header, body, body_len, response_buf, timeout_ms,
+                                   extra_headers, max_attempts, base_ms, max_ms, provider, model,
+                                   session_id, route, NULL);
 }
 
 extern int ingress_preinject_observe_commitment(const char *, int, const char *, size_t,
@@ -355,13 +423,17 @@ int wire_fence_post_stream(const char *url, const char *auth_header, const void 
    if (wire_attempt_before(&attempt, body, body_len) != 0)
       return HTTP_RETRY_ADMISSION_REFUSED;
    if (!attempt.attempt[0])
-      return agent_http_post_stream_bytes(url, auth_header, body, body_len, callback, userdata,
-                                          timeout_ms, extra_headers);
+   {
+      int status = agent_http_post_stream_bytes(url, auth_header, body, body_len, callback,
+                                                userdata, timeout_ms, extra_headers);
+      wire_transport_completed(status);
+      return status;
+   }
    wire_stream_t stream = {.digest = EVP_MD_CTX_new(), .callback = callback, .context = userdata};
    if (!stream.digest || EVP_DigestInit_ex(stream.digest, EVP_sha256(), NULL) != 1)
    {
       EVP_MD_CTX_free(stream.digest);
-      wire_attempt_after(&attempt, -1, NULL, 0);
+      wire_attempt_receipt(&attempt, -1, NULL, 0);
       last_error = "unavailable";
       return HTTP_RETRY_ADMISSION_REFUSED;
    }
@@ -376,6 +448,7 @@ int wire_fence_post_stream(const char *url, const char *auth_header, const void 
                                                   extra_headers, &guard)
            : agent_http_post_stream_bytes(url, auth_header, body, body_len, wire_stream_chunk,
                                           &stream, timeout_ms, extra_headers);
+   wire_transport_completed(status);
    unsigned char raw[32];
    unsigned int length = 0;
    char digest[65];

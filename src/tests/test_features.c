@@ -75,25 +75,6 @@ static void test_feature_row_upsert_conflict(void)
    printf("  feature_row_upsert_conflict: ok\n");
 }
 
-/* ---- 3. kb_features_upsert ---- */
-static void test_kb_features_upsert(void)
-{
-   open_db();
-
-   int rc = kb_features_upsert(999, 0.7, 0.88, 5.0);
-   assert(rc == 0);
-
-   char buf[512];
-   assert(kb_features_read(999, buf, sizeof(buf)) == 0);
-   assert(strstr(buf, "lex.cos") != NULL);
-   assert(strstr(buf, "dense.cos") != NULL);
-   assert(strstr(buf, "temp.age_days") != NULL);
-   assert(strstr(buf, "temp.recency") != NULL);
-
-   close_db();
-   printf("  kb_features_upsert: ok\n");
-}
-
 /* ---- 4. kb_features_read_miss ---- */
 static void test_kb_features_read_miss(void)
 {
@@ -139,26 +120,6 @@ static void test_ranker_model_write(void)
 
    close_db();
    printf("  ranker_model_write: ok\n");
-}
-
-/* ---- 7. ranker_rerank_noop ---- */
-static void test_ranker_rerank_noop(void)
-{
-   /* When no model is loaded in the global cache, rerank returns 0. */
-   int64_t ids[3] = {10, 20, 30};
-   double lex[3] = {0.5, 0.6, 0.4};
-   double dense[3] = {0.7, 0.8, 0.6};
-   double age[3] = {1.0, 2.0, 0.5};
-   int64_t ranked[3];
-
-   /* The global weight cache starts empty (loaded=0) in a fresh process.
-    * After test_ranker_model_write above opened+closed the DB without calling
-    * kb_ranker_model_load(), the cache should still be unloaded. */
-   int n = kb_ranker_rerank(ids, lex, dense, age, 3, ranked, NULL);
-   /* Returns 0 because g_weights.loaded == 0. */
-   assert(n == 0);
-
-   printf("  ranker_rerank_noop: ok\n");
 }
 
 /* ---- 8. ranker_rerank_sketch_features ---- */
@@ -310,11 +271,9 @@ int main(void)
 
    test_feature_row_upsert();
    test_feature_row_upsert_conflict();
-   test_kb_features_upsert();
    test_kb_features_read_miss();
    test_kb_features_upsert_with_sketch();
    test_ranker_model_write();
-   test_ranker_rerank_noop();
    test_ranker_rerank_sketch_features();
    test_config_ranking_defaults();
    test_drift_detect_disabled();

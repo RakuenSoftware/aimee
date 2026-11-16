@@ -30,6 +30,7 @@ func TestVaultUnlockSendsWebuserWithoutBearer(t *testing.T) {
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	rr := httptest.NewRecorder()
 	s.handleVaultUnlock(rr, req)
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"status":"ok"`) {
 		t.Fatalf("unlock: code=%d body=%q", rr.Code, rr.Body.String())
@@ -60,6 +61,7 @@ func TestVaultUnlockNeedsNoSharedToken(t *testing.T) {
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	rr := httptest.NewRecorder()
 	s.handleVaultUnlock(rr, req)
+	waitFakeV1(t)
 
 	if !called {
 		t.Fatal("aimee-server was not called over the trusted Unix socket")
@@ -147,6 +149,7 @@ func TestVaultCredentialsRoutesByMethod(t *testing.T) {
 		req.Header.Set("Sec-Fetch-Site", "same-origin")
 		rr := httptest.NewRecorder()
 		s.handleVaultCredentials(rr, req)
+		waitFakeV1(t)
 		return rr.Code
 	}
 	do(http.MethodGet, "")

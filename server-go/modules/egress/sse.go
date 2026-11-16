@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type SSELimits struct {
@@ -84,19 +84,19 @@ type streamRecvReply struct {
 	Error string `json:"error,omitempty"`
 }
 
-func (s *streamService) handle(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func (s *streamService) handle(invocation ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	if invocation.StageID == StageSSEOpen {
 		var request SSERequest
 		if json.Unmarshal(body, &request) != nil || !validSSERequest(request) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		stream, err := s.open(invocation, request)
 		if err != nil {
 			encoded, _ := json.Marshal(streamRecvReply{Error: err.Error()})
-			return encoded, bus.ModuleStatusOK
+			return encoded, ring.ModuleStatusOK
 		}
 		handle := s.next.Add(1)
 		if handle == 0 {
@@ -106,11 +106,11 @@ func (s *streamService) handle(invocation bus.ModuleInvocation, body []byte) ([]
 		s.streams[streamKey{invocation.PrincipalRef, handle}] = stream
 		s.mu.Unlock()
 		encoded, _ := json.Marshal(streamOpenReply{Handle: handle})
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 	var command streamCommand
 	if json.Unmarshal(body, &command) != nil || command.Handle == 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	key := streamKey{invocation.PrincipalRef, command.Handle}
 	s.mu.Lock()
@@ -120,22 +120,22 @@ func (s *streamService) handle(invocation bus.ModuleInvocation, body []byte) ([]
 	}
 	s.mu.Unlock()
 	if stream == nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	switch invocation.StageID {
 	case StageSSESend:
 		if len(command.Frame) == 0 || len(command.Frame) > stream.limits.MaxEventBytes {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if err := stream.Send(command.Frame); err != nil {
 			encoded, _ := json.Marshal(streamRecvReply{Error: err.Error()})
-			return encoded, bus.ModuleStatusOK
+			return encoded, ring.ModuleStatusOK
 		}
-		return []byte(`{}`), bus.ModuleStatusOK
+		return []byte(`{}`), ring.ModuleStatusOK
 	case StageSSERecv:
 		timeout := time.Duration(command.TimeoutMS) * time.Millisecond
 		if timeout <= 0 || timeout > maxHTTPTimeout {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		frame, err := stream.Recv(timeout)
 		reply := streamRecvReply{Frame: frame}
@@ -143,12 +143,12 @@ func (s *streamService) handle(invocation bus.ModuleInvocation, body []byte) ([]
 			reply.Error = err.Error()
 		}
 		encoded, _ := json.Marshal(reply)
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	case StageSSEClose:
 		_ = stream.Close()
-		return []byte(`{}`), bus.ModuleStatusOK
+		return []byte(`{}`), ring.ModuleStatusOK
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 }
 
@@ -178,7 +178,7 @@ func validCredentialHandle(handle string) bool {
 	return true
 }
 
-func (s *streamService) open(invocation bus.ModuleInvocation, request SSERequest) (*networkSSE, error) {
+func (s *streamService) open(invocation ring.ModuleInvocation, request SSERequest) (*networkSSE, error) {
 	var bearer []byte
 	if request.CredentialHandle != "" {
 		if s.credentials == nil {

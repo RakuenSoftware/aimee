@@ -19,6 +19,8 @@ static int g_reverse_channel_starts;
 static int g_reverse_channel_syncs;
 static int g_reverse_channel_sync_rc;
 static int g_remote_active;
+static int g_scoped_bridge, g_local_dials, g_public_route_lookups;
+static const char *g_tool_result_error_flag;
 static int g_remote_http_failures;
 static int g_remote_http_calls;
 static const char *g_git_root_to_return;
@@ -55,6 +57,7 @@ const char *cli_ensure_server(void)
 
 const char *cli_ensure_server_for_method(const char *method)
 {
+   g_local_dials++;
    (void)method;
    return cli_ensure_server();
 }
@@ -108,6 +111,10 @@ void cli_workspace_reverse_channel_stop(void)
  * This test drives the local-socket path (cli_ensure_server returns a socket),
  * so cli_v1_has_remote_endpoint() returns 0 and the rest are never called;
  * stub them so cli_mcp_serve.o links standalone. */
+int cli_native_bridge_enabled(void)
+{
+   return g_scoped_bridge;
+}
 int cli_v1_has_remote_endpoint(void)
 {
    return g_remote_active;
@@ -141,6 +148,7 @@ char *cli_v1_client_bearer(void)
 }
 const char *cli_v1_route_for_method(const char *method, const char **verb_out)
 {
+   g_public_route_lookups++;
    if (verb_out)
       *verb_out = strcmp(method, "mcp.tools_list") == 0 ? "GET" : "POST";
    return strcmp(method, "mcp.tools_list") == 0 ? "/v1/mcp/tools_list" : "/v1/mcp/call";
@@ -456,6 +464,8 @@ cJSON *cli_v1_dispatch_local(cJSON *request, int timeout_ms)
       if (strcmp(tool, "session_status") == 0)
       {
          cJSON *resp = cJSON_CreateObject();
+         if (g_tool_result_error_flag)
+            cJSON_AddItemToObject(resp, "isError", cJSON_Parse(g_tool_result_error_flag));
          cJSON_AddStringToObject(resp, "status", "ok");
          cJSON *content = cJSON_CreateArray();
          cJSON *block = cJSON_CreateObject();
@@ -1487,6 +1497,68 @@ static void test_session_id_is_shared_not_invented(void)
    printf("  PASS: test_session_id_is_shared_not_invented\n");
 }
 
+static void test_tools_call_error_flag_fidelity(void)
+{
+   const char *flags[] = {"true", "false", "null", "0", "\"true\""};
+   for (size_t i = 0; i < sizeof flags / sizeof flags[0]; i++)
+   {
+      g_tool_result_error_flag = flags[i];
+      cJSON *request = cJSON_Parse("{\"jsonrpc\":\"2.0\",\"id\":993,\"method\":\"tools/call\","
+                                   "\"params\":{\"name\":\"session_status\",\"arguments\":{}}}");
+      cJSON *response = capture_response(request);
+      const cJSON *result = cJSON_GetObjectItem(response, "result");
+      if (i < 2)
+      {
+         const cJSON *flag = cJSON_GetObjectItem(result, "isError");
+         assert(cJSON_IsBool(flag) && cJSON_IsTrue(flag) == (i == 0));
+         assert(cJSON_GetObjectItem(result, "structuredContent"));
+      }
+      else
+         assert(!result && cJSON_GetObjectItem(response, "error"));
+      cJSON_Delete(response);
+      cJSON_Delete(request);
+   }
+   g_tool_result_error_flag = NULL;
+}
+
+static void test_scoped_owner_mcp_never_bootstraps_or_falls_back(void)
+{
+   g_scoped_bridge = 1;
+   int public_routes = g_public_route_lookups;
+   g_remote_active = 1;
+   g_remote_http_calls = g_remote_http_failures = 0;
+   g_index_ensure_calls = g_reverse_channel_starts = g_reverse_channel_syncs = 0;
+   cJSON *request = cJSON_Parse("{\"jsonrpc\":\"2.0\",\"id\":990,\"method\":\"initialize\"}");
+   cJSON *response = capture_response(request);
+   assert(response && !g_index_ensure_calls);
+   const cJSON *capabilities =
+       cJSON_GetObjectItem(cJSON_GetObjectItem(response, "result"), "capabilities");
+   assert(cJSON_GetObjectItem(capabilities, "tools") &&
+          !cJSON_GetObjectItem(capabilities, "resources") &&
+          !cJSON_GetObjectItem(capabilities, "prompts"));
+   cJSON_Delete(response);
+   cJSON_Delete(request);
+   request = cJSON_Parse("{\"jsonrpc\":\"2.0\",\"id\":991,\"method\":\"tools/call\","
+                         "\"params\":{\"name\":\"git\",\"arguments\":{}}}");
+   response = capture_response(request);
+   assert(response && g_remote_http_calls == 1 && !g_reverse_channel_starts &&
+          !g_reverse_channel_syncs && g_public_route_lookups == public_routes);
+   cJSON_Delete(response);
+   cJSON_Delete(request);
+   request = cJSON_Parse("{\"jsonrpc\":\"2.0\",\"id\":992,\"method\":\"resources/"
+                         "read\",\"params\":{\"uri\":\"aimee://config\"}}");
+   response = capture_response(request);
+   assert(cJSON_GetObjectItem(response, "error") && g_remote_http_calls == 1);
+   cJSON_Delete(response);
+   cJSON_Delete(request);
+   g_remote_active = 0;
+   int dials = g_local_dials;
+   request = cJSON_Parse("{\"method\":\"mcp.call\"}");
+   assert(!server_request(request, 50) && g_local_dials == dials && g_remote_http_calls == 1);
+   cJSON_Delete(request);
+   g_scoped_bridge = 0;
+}
+
 int main(void)
 {
    setenv("AIMEE_SESSION_ID", "test-session", 1);
@@ -1521,6 +1593,8 @@ int main(void)
    test_resources_list();
    test_unknown_method();
    test_notification_no_response();
+   test_tools_call_error_flag_fidelity();
+   test_scoped_owner_mcp_never_bootstraps_or_falls_back();
    puts("cli_mcp_serve: all tests passed");
    return 0;
 }

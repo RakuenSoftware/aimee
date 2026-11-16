@@ -38,8 +38,8 @@ secrets such as `AIMEE_MCP_<principal>_TOKEN`. Ordinary callers cannot add a hos
 
 There is no public proxy URL or CLI tunnel. Callers use authenticated `egress` bus stages; operators see health,
 metrics, and audit outcomes. Forge credentials arrive as short-lived encrypted envelopes, while MCP
-credentials are resolved by exact principal. The memory backend receives only its configured origin
-and allowed Cognee API routes, using the instance's existing Vault credential helper.
+credentials are resolved by exact principal. An installed memory implementation that needs outbound access receives only the origins and
+routes granted to it, using the instance's existing Vault credential helper.
 The installed egress process opens a private helper pipe before bus attachment and
 runtime hardening. The helper attests its parent and disables its own dumpability
 before acknowledging readiness. It reads no credential until an admitted request

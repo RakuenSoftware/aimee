@@ -2,642 +2,177 @@
 
 ## Purpose and non-goals
 
-One Go implementation runs independently in Server and KB. Server owns durable personal memory;
-KB owns the shared corpus. [Server and KB](../SERVER_AND_KB.md) defines instance, store, and
-scope boundaries. PostgreSQL access in both placements belongs to the Go provider; the native
-DB2 provider is retired.
+Memory stores and retrieves what an instance has learned: personal records on a Server, shared
+records on a KB. From 1.1.0 it is served by a separate implementation that ships inside the
+application image as a vendored binary bundle (`vendor/aims-memory`) and is provisioned for each
+deployment at first boot. The implementation's source is not part of this repository.
 
-The [memory behavior guide](../MEMORY.md) details Go ownership, retrieval validity,
-mutation admission, evaluation and caller migration.
-
-Shared KB searches admit semantic-only whole-record and derived-unit matches
-from the active versioned embedding catalog. The Go owner holds the rebuild lock
-while it checks the model identity, embeds the query and reads candidates. Current input hashes,
-parent visibility, exact scope, lifecycle, suppression, kind and tier are checked
-before limiting candidates. Wrong-width and zero vectors cannot enter the result.
-The channel retains the former whole-record cosine floor and dimension-dependent
-scale, including the `memory_semantic_floor_scale` configuration override, then
-fuses lexical and semantic ranks while preserving scope priority. Unit similarity
-adds the retired native type/kind intent boosts and weight contribution, with
-separate temporal/event/summary floors scaled to the deployed dimension. Intent
-matching uses whole terms, so `candidate` and `Chicago` do not imply a date query.
-
-Each semantic channel filters current input hashes, parent visibility, lifecycle,
-suppression, kind, tier and vector validity before its parent budget. Unit inputs
-include the source content, so editing a parent or unit invalidates stale unit
-vectors. Non-finite unit weights are excluded. Units group by parent using their
-best qualifying similarity; copies cannot add votes. Whole-record and unit hits
-then deduplicate by parent using the stronger score. Both channels use one query
-embedding and the same pinned serving identity. Unit and temporal lane counters
-identify their actual contributions.
-
-Model outages, identity changes and invalid query embeddings leave lexical recall
-available; a required SQL failure remains an operation failure. This path requires
-a pinned active version and a governed executor. Unversioned-vector admission and legacy semantic query expansion are deliberately
-retired from this path under the compatibility decisions above; this does not
-certify historical retrieval quality.
-
-Memory is one Go module deployed in two placements. `AIMEE_MODULE_PLACEMENT` is
-required for a running process:
-
-- `server` owns the appliance user's private `user_memories` rows.
-- `kb` owns `global`, `workspace`, and `project` rows in `memories`.
-
-The placement is validated before every data operation. The server's C bus
-adapter also replaces any supplied scope with `user`, so a client cannot use the
-server placement to address KB memory. The KB placement rejects user scope.
-
-The Go owner stores embedding generations in an unconstrained `vector` column,
-with dimensions recorded per version. Global KB_STORE dimension reset only discovers
-columns declared with a fixed vector dimension, so it cannot drop these Go-owned
-generations. Unknown dimension-bound tables still refuse the reset, including
-with force enabled. Rebuild/cutover of memory generations stays with Go.
+This repository owns the generic SDK, the host paths that call memory, the bundle's packaging and
+verification, and the provisioning command. It does not own the datastore, retrieval policy,
+ontology or maintenance, and the retired Go memory owner is not restored. The public tree still
+builds an unavailable adapter (`server-go/modules/memory/adapter/unavailable.go`), which is what
+runs when no installation has been provisioned. See [Memory boundary](../MEMORY.md).
 
 ## Public contracts
 
-Server KB store, list and supersede forward complete Go-rendered responses through
-the authenticated KB transport. The Go owner owns validation and server response
-shape; native callers no longer reconstruct these records through `memory_t`.
-The transport preserves numeric tokens and extra receipt fields, forwards owner
-`review_required`/`conflict` errors, and rejects missing/malformed owner envelopes.
-It copies command data fields, reconstructs host scope, and supplies authority
-from the verified host context; caller-supplied actor/authority/operation and scope
-control fields do not pass through. Supersede keeps its flat server envelope,
-while the ordinary KB command retains its nested memory response. Missing private
-memory still cannot trigger a KB fallback.
-
-
-Private store/get/list/search/delete/supersede/stats commands also forward complete
-Go envelopes through the Server placement. Their runtime transport quotes the
-JSON so the native parser cannot round record IDs or error receipts. Private
-get/delete/supersede accept canonical positive decimal-string int64 IDs;
-unsafe numeric IDs remain rejected. Supersede retains a typed integer in its flat
-Go response. The host adds HTTP error classification through its existing
-runtime-web provider without rewriting owner tokens. Personal retained history now lives in
-`personal_versions.go`; `include_version`, `at_version`, and `expected_version` select its explicit
-read/mutation contracts. Both placements also support correction proposals and verified user
-review, described in the [behavior guide](../MEMORY.md#current-ownership-and-review).
-
-Personal review-list rendering now belongs to the Go owner through the private
-`user-review-list` runtime operation. It retains the Server envelope, both
-`lifecycle_state` and `lifecycle` fields, complete content and integer IDs. The
-Server only selects local-user versus explicit KB transport. KB review responses
-pass through as complete JSON, and restore returns its `id` and `restored` receipt
-from Go. The retired `kb_client_memory_review_list_json` and
-`kb_client_memory_restore` APIs are forbidden by the native boundary guard.
-Server restore still records its content-free transport audit; KB publishes the
-authoritative mutation audit. Owner refusals retain their error kinds, while
-missing or malformed responses are unavailable rather than successful empty
-reviews or a fabricated not-found result.
-
-Memory statistics and health console views are rendered by the Go owner through
-`view=console` on the existing public commands. Statistics optionally include
-effectiveness for JSON output; failures of the primary query remain failures.
-The CLI forwards Go's display/text fields and search timing view. Server KB stats
-forward the complete validated owner envelope, preserving integer tokens and
-error kinds. Missing or malformed replies never become healthy zero statistics.
-The four native stats, raw-stats, effectiveness and health client APIs are retired.
-PageRank timing fields use one process-local snapshot of successful Go scoring
-calls. The console timing envelope labels zero samples `unmeasured`, identifies
-its source as `go-pagerank`, and separates recall and explicit candidate-scoring
-sample counts. Timings publish only after the owner request commits; recall
-timing includes neighbor expansion, graph loading and reranking. These are not
-end-to-end retrieval or write-to-readable latency measurements.
-
-The same console view owns maintenance mode parsing, summary rendering and the
-vector-maintenance handoff indicator. The CLI passes mode names and watch timing;
-Go retains the comma/space mode vocabulary, numeric API modes, default-mode
-sentinel, force and dry-run behavior. Skipped cycles use the owner's boolean
-receipt, and failed maintenance cannot be rendered as a successful empty cycle.
-MCP also uses the Go-rendered summary and prune-removal notice, which distinguishes
-completed, skipped and dry-run outcomes. The private `maintenance-model-plan`
-runtime operation now owns MCP mode parsing, default expansion, prune removal,
-capability selection and no-op text. It ignores caller-supplied actor/capability
-fields and emits a new bounded request. Server enforces the selected capability
-against the authenticated connection and forwards only that request. The KB Go
-owner reapplies `model_policy` before execution: a prune-only request returns a
-no-op before reaching SQL, and zero/default modes become replay plus compact.
-Operator and scheduler maintenance retain their existing unrestricted path.
-The retired native mode-policy functions are forbidden by the boundary guard;
-MCP mutation-verb routing and other native clients still await migration.
-
-History and stale-memory inspection also render in Go. CLI history preserves its
-12-field record shape, MCP history preserves its six-field rows and empty/count
-envelope, and both carry complete content and int64 IDs as rendered text through
-native transport. The low-effectiveness console retains its 0.3 threshold and
-limit behavior. Stale provenance combines the 14-day unused-L2 and three-version
-queries with a 256-row cap each; a failed query never becomes an empty half of
-the report. JSON field filtering now handles top-level arrays while retaining
-number tokens. Four native history/stale reader APIs are retired and guarded.
-
-The supervised `aimee-module-memory` process is pure Go. It owns extraction,
-write gating, embedding, retrieval safety, reranking, command declaration, and
-the scoped memory data API.
-
-| Stage | Event | Responsibility |
-| --- | ---: | --- |
-| `extract_index` | 5889 | pattern extraction and retraction scan |
-| `write` | 5890 | typed-fact write gate |
-| `embedding` | 5891 | governed HTTP embedding and breaker state |
-| `retrieve` | 5892 | sensitive-data recall decisions |
-| `reranking` | 5893 | confidence-band decision |
-| `command-declaration` | 5894 | canonical command inventory |
-| `memory-data` | 5895 | scoped CRUD/search, typed-fact extraction and recall, temporal checks, feedback, and maintenance |
-| `command-execution` | 5896 | public private-memory get, store, list, search, delete, supersede, and stats |
-
-The data stage reaches PostgreSQL over the module bus with the storage-only
-principal 73. It owns neither a DSN nor a database connection. Both placements
-therefore deploy the same executable and storage implementation while retaining
-different scope and table boundaries.
+The public `server-go/memory` SDK (`client.go`, `store.go`, `wire.go`, `scope.go`, `version.go`)
+defines the generic client, store interface, wire types, scope selection and record versions an
+implementation speaks. The implementation declares the public `memory.*` commands it serves; the
+host exposes exactly those through the fixed `/v1/memory/*` routes and
+`/v1/commands/memory.<verb>`. A command that is not declared returns `404` from the command route.
+Legacy stage IDs alone do not establish protocol compatibility.
 
 ## Dependencies and consumers
 
-The descriptor declares these dependencies. Server and KB adapters consume the
-same `memory` process contract, while scoped database operations use the shared
-PostgreSQL bus service rather than a caller-owned connection.
-
-- `audit`: records governed memory actions through the audit publisher.
-- `egress`: supplies governed access to external memory providers.
-- `postgres`: executes owner-scoped storage operations over the module bus.
-- `config`: validated memory, embedding, and retrieval policy configuration.
-- `ir`: gateway request/response integration for the memory stages.
-- `module-runtime`: process attachment, principal identity, and bounded event calls.
+The descriptor `src/modules/memory/module.yaml` declares no dependencies. The SDK uses a borrowed,
+already admitted bus caller and stays independent of server domain storage. Consumers are the C
+resource hosts, which authenticate callers and forward memory commands, and the host paths of a
+provider-bound request in `src/server/ingress_preinject.c` and `src/wire_fence.c`, which ask the
+implementation for context, a source release and revalidation. The bundle's bridge objects are
+linked into `aimee-server` and `aimee-kb` by `Dockerfile.server`.
 
 ## Providers and readiness
 
-The `memory-data` stage needs its placement's PostgreSQL schema and registered
-storage operations. Semantic retrieval additionally needs an available embedding
-provider. A live bus process alone does not establish database or model readiness;
-the deployment matrix tests personal and shared recall with the actual services.
+Each role's supervisor requires a `memory` module. A provisioned installation supplies it together
+with its database process; readiness is reached when both attach to the bus and the
+implementation declares its commands. Without a provisioned installation the unavailable adapter
+runs: it prints `memory capability unavailable` and exits, the supervisor restarts it, the instance
+reports `missing_module: memory` in `/v1/ready`, and memory commands answer `503`.
+
+Vector retrieval needs the embedding provider. Provisioning pins the provider by its identity, read
+from the embedder image by `scripts/embedder-identity.py`; a composition without a local embedder
+service is provisioned without vector retrieval.
 
 ## Configuration and activation
 
-- `runtime_toggle.supported`: `false`; memory is required by both role compositions.
+The one-shot `aimee-memory-init` service in `compose.yaml` runs `aimee-memory-provision`
+(`deploy/container/memory-provision.py`) before the application starts:
 
-`AIMEE_MODULE_PLACEMENT` must be `server` or `kb` and is validated before data
-operations. Configure embedding through the deployment's model/provider settings.
-Selecting an optional shared KB never changes the Server's private-store scope
-or permits the KB placement to read user rows.
+- first boot: it generates this deployment's memory identity, grants and owner key, prepares the
+  installation under `/opt/aims-memory/<role>` in the `aimee-memory` volume, and creates the
+  writable subtree `private-memory/<role>` in the home volume;
+- later boots: it verifies the installation and changes nothing;
+- after an image update, or when the requested accounts or embedding provider change: it prepares
+  the installation again under the same identity and keeps the owner key and the stored memory.
+  Adding a browser login also keeps the runtime account's existing typed-fact processing identity.
+  An image update is refused while the application is running; a changed account list, shared
+  scope or embedder found while it runs keeps the current installation until the next start.
+
+Ontology startup pins the instance's signed seed and authority key. Native verification accepts
+an active successor only after checking its complete retained predecessor chain, signatures and
+graph namespace against those pins. Supervision and restart preserve authorized promotions;
+they do not reactivate the seed over a successor. Unrelated packages remain unavailable.
+
+A Server serves personal memory for `aimee`, every browser login and any account in
+`AIMEE_MEMORY_ACCOUNTS`, at most 32. A KB serves `global` and the scopes in
+`AIMEE_MEMORY_SHARED_SCOPES` (by default every project and workspace), storing shared facts as
+written. The supervisor passes `AIMEE_MODULE_PLACEMENT` to module
+processes: `server` serves the instance-local user scope, `kb` serves the shared scope. Memory is
+selected at deployment, not switched at run time:
+
+- `runtime_toggle.supported`: `false`; the installation is replaced only by provisioning while the
+  application is stopped.
+
+A Server enrolled into a separately deployed KB reaches it over HTTPS, and that link never carries
+memory. Such a Server serves personal memory only, as in 1.0: a shared-store request (`store=kb`)
+answers the typed, retryable `unavailable` result ("memory bus service unavailable or
+unsupported", dependency `kb`), and with `kb_mode` `remote` and automatic recall on, a native run
+refuses its memory context rather than continue without the shared lane. Set `kb_mode` to `none`
+for private-only context on that Server. Shared memory is written and read on the KB itself.
 
 ## Surfaces
 
-The maintained JSON surface supports `get`, `search`, `visible-search`,
-`recall`, `briefing`, `list`, `store`, `supersede`, `delete`, `feedback`,
-`maintenance`, `upsert-workflow`, `prospective-count`, `fact-recall`,
-`valid-at`, `recall-gate`, and `pii-inject`.
-The same surface owns the `memory-facts-claim`, `memory-facts-parse`, and
-`memory-facts-finish` worker phases used by the KB curator connection adapter.
-Host integration also uses `redirect-classify`, `redirect-bash`, and
-`content-gate`; those operations are policy in Go and do not touch the store.
-
-KB visible search applies local-first scope ordering: project, workspace, then
-global, with ID de-duplication and a single bounded result limit. Server calls
-are always user-scoped. Writes use active-row replacement semantics and never
-reactivate a retired KB row accidentally.
-
-### Personal recall
-
-The `recall-bundle` operation runs in either placement. Server placement reads
-its own user store through the same Go retrieval implementation; it needs no
-shared schema or KB-generated envelope. Expired and retired personal records
-are excluded. API, CLI, and MCP recall default to that local store; an explicit
-`store=kb` selects shared recall without merging personal records. Recall items
-include `text`, `memory_id`, and a scoped handle for prompt consumers.
-
-The published 0.4.2 testing candidate also passes KB-free semantic recall with
-local embedding, personal vector persistence, and local-model inference.
-Structured reminders and directives remain KB-placement operations requiring
-the shared schema; personal recall does not imply those shared operations are local.
+The image carries the memory executables and provisioning scripts under `/opt/aimee/memory` and
+the provisioning command as `/usr/local/bin/aimee-memory-provision`. The public tree also builds
+the unavailable adapter, installed as `/usr/local/libexec/aimee-modules/aimee-module-memory`, and
+the generic probe `server-go/cmd/aimee-memory-bus-probe`. CLI, MCP and HTTP memory surfaces are
+host surfaces that dispatch to whatever the implementation declares.
 
 ## Data and migrations
 
-The Server placement persists private rows in `user_memories`; the KB placement
-persists global, workspace, and project rows in `memories`. The Go owner applies
-scope ordering, active-row replacement, and temporal/retirement filtering.
-PostgreSQL owns the transport and transactional migration boundary. Preserve
-the instance home, Vault state, and database together for upgrade and rollback;
-the published 0.4.1-to-0.4.2 deployment checks verify existing and new canary rows.
+Memory records and their history are retained. Invalidation or retirement makes a record
+unavailable for current use; it does not physically delete its payload or earlier revisions.
+The legacy `memory.delete` name denotes retained retirement. The retired SQL subject-erasure
+coordinator is not part of the memory contract and must not be ported to the new owner.
+
+The implementation keeps its records in its own database under `private-memory/<role>/state` in
+the home volume, next to its configuration and owner key; one backup of the home volume covers
+them. The `aimee-memory` volume holds only prepared artifacts and can be regenerated. Canonical
+source producers, access and historical replay records remain with DB1 under
+`server-go/modules/aimee/families/`.
+
+The 1.0.x memory tables (`user_memories` on a Server, `memories` on a KB) are retained by an
+upgrade but are no longer read; `scripts/upgrade/migrate-memory.py` exports their active records
+and imports them through the public store command. See
+[Upgrading](../UPGRADING.md#upgrade-from-102).
+  Import also protects retained legacy SQL payloads and the export snapshot with authenticated
+  Vault references, preserving rows, revisions and lifecycle state. See the upgrade guide for
+  the host-side `--psql` and container-side API transport commands.
 
 ## Security and privacy
 
-The Server C adapter overwrites requested scope with `user` before dispatch;
-the Go placement check independently rejects cross-placement operations.
-Storage-only principal `73` accesses the database through the bus. PII gates,
-write decisions, and sensitive retrieval policy execute in the Go owner; a
-missing module cannot authorize a substitute local policy engine.
+The application mounts the prepared installation read-only and can write only its configuration,
+state and runtime directories. Every module process runs under an exact executable grant generated
+at provisioning, and the owner key is created on the deployment and never leaves its home volume.
+At each start the resource composes its module grant policy from the installation's grants and the
+grants an operator keeps in `$AIMEE_HOME/modules.d/<role>`, such as an installed plugin's; the
+installation's grants win, and an operator grant for a principal the installation owns, or for the
+public memory adapter it replaces, is left out and named in the startup log.
+Host-side checks do not move with the implementation: source revalidation, the byte budget
+(`request_budget_exceeded`), the send guard and provider receipts stay in `src/wire_fence.c` and
+`src/server/ingress_preinject.c`. The bundle is verified against its recorded hashes before it is
+linked (`scripts/check_memory_bundle.py`).
 
 ## Supported journeys
 
-KB-free Server supports persistent personal CRUD, recall, and semantic search
-when its local embedding service is available. Explicit `store=kb` selects shared
-recall through the optional KB. The KB curator uses the memory-facts worker
-phases for claim, parse, and finish. See the published testing qualification in
-`docs/validation/release-0.4.2-testing-a8abc2e-2026-09-07.md` for exercised journeys.
+Operators start the composition through `scripts/compose-local.sh`, wait for readiness and use the
+ordinary memory commands.
 
 ## Tests and failure behavior
 
-Required policy stages do not silently run a second implementation. Extraction
-returns an error, write gating defers, and PII injection fails closed when the
-Go module is unavailable. The cheap recall gate fails open because omitting that
-optimization must not suppress a valid recall. Supported production memory data operations cross the Go owner. The ownership ledger classifies every original native file/API and each external
-native-name finding; native fixtures prove transport, while the Go owner tests
-prove memory behavior.
+`scripts/tests/test_memory_provision.py` covers the provisioning decisions,
+`scripts/tests/test_check_memory_bundle.py` the bundle verification and
+`scripts/tests/test_compose_vault_init.py` the startup order. `make -C src lint` fails when a
+public file the bundle was compiled against has changed, naming the file, so a stale bundle is
+never linked.
 
-The Go package tests cover placement isolation, scope expansion, CRUD,
-maintenance, workflow identity, recall gating, extraction, ontology, embedding,
-typed-fact planning/grounding, and PII behavior. Active C transport tests cover message framing and host/connection integration;
-retired-engine fixtures are not substitutes for Go owner regressions.
-The required `postgres-knowledge-replay` CI job exercises the PostgreSQL provider
-and memory owner with separate replay and scratch connections. The manual
-`make -C src memory-owner-replay-check` gate requires `AIMEE_KB_STORE_REPLAY_URL`,
-`AIMEE_MEMORY_EVAL_URL` and
-`AIMEE_DB_TEST_URL` are required; the evaluator provisions isolated databases.
-The target runs the full memory, isolated evaluator and module race suites with
-required PostgreSQL variables, including the restricted-role replay. Missing
-DSNs fail instead of skipping. The existing cross-language conformance gate
-now also kills and restarts the
-Go memory process in both placements while retaining its C host/callers. It
-checks unavailable discovery after reaping and reruns host and Go-client parity
-after restart. This store-free process test does not prove durable database
-recovery, real-provider quality or the complete surface/restart/failure matrix.
+The Docker deployment tests (`tests/e2e/deployment-matrix.py`, `egress-vault-e2e.py`,
+`kb-upgrade-e2e.py`) run the shipped image with its provisioned memory, as an operator would.
 
-Descriptor validation enforces the source inventory, and both `aimee-server`
-and `aimee-kb` must link without any retired C memory implementation.
+Two bare-metal rigs test host-side gates, not memory, and need some memory module behind them:
+the live write-tier rig (`AIMEE_LIVE_REFERENCE_MEMORY_OWNER`) and the execution-grade journey.
+They use the frozen 1.0 Go owner as a test double. [Its public source pin](../../tests/fixtures/legacy-memory-owner.json)
+is separate from the shipped implementation; with Go 1.26.10 available, run
+`python3 scripts/build_reference_memory_fixture.py --output /absolute/test-cache/aimee-module-memory`
+from the repository root (create the output directory first) and check an existing artifact with
+`--verify`. The reference is never installed or shipped. The Docker tests still accept
+`--reference-memory-owner` to qualify against it explicitly; that run uses the `public-reference`
+profile of `tests/e2e/memory-placement-e2e.py`, and a failed request never switches profiles.
 
 ## Operational diagnostics
 
-Check `memory` module attachment, placement, PostgreSQL readiness, and embedding health
-when recall is unavailable. Personal data calls receive a bounded five-second
-budget through the Server adapter; the regression holds a real database lock
-for 1.5 seconds and requires a successful `recall` with the exact canary.
-An expired call still fails rather than retrying indefinitely or changing stores.
+`GET /v1/ready` names the failed boundary: `missing_module: memory` means no implementation is
+attached. Provisioning prints `[memory-provision]` lines saying whether the installation was
+created, verified or updated, and a refusal says what to do. The supervisor log shows
+`memory capability unavailable` each time it restarts the unavailable adapter.
+`server-go/cmd/aimee-memory-bus-probe` exercises the generic bus contract against an attached
+implementation.
 
 ## Compatibility
 
-The final native-file dispositions separate external protocol consumers from
-memory implementation. The C bus itself is unchanged by this cutover.
-
-| Retired memory-tree file | Disposition |
-|---|---|
-| `memory_data_bus.c` | Its only production callers are native benchmark hosts. Their request/response transport is now owned by `src/modules/benchmarks/agent_eval_memory_transport.c`; it calls the existing C bus and contains no memory storage, ranking or lifecycle implementation. Memory's producer and consumer remain Go. |
-| `include/aimee/memory/module_api.h` | Host stage identifiers live in `src/headers/memory_stage_contract.h`, outside the memory module. Go conformance tests compare every identifier with the owner; event durability coverage follows the host contract. |
-| `memory_ontology.h` | Persisted graph codes shared with native indexing belong to `src/modules/kb/include/aimee/kb/graph_kinds.h`. They contain enum declarations only. Go conformance tests pin node and relation codes to the Go ontology. |
-| `memory_core_internal.h` | Deleted obsolete declarations for the removed native engine. The unregistered lane-outcome fixture is ported to Go and runs in the normal package tests. The native performance harness explicitly reports its retired memory cases unavailable. |
-
-`check_memory_c_boundary.py` also forbids database access from the benchmark
-transport and rejects restored native memory policy in other owners. Existing
-external C transport callers may remain; they cannot replace an unavailable Go
-owner with local memory behavior. There are no forwarding memory headers or
-native memory include roots in Make/CMake.
-
-The historical `check_memory_go_only.py --report` inventory remains available
-with its original all-native-callers criterion and immutable baseline. It still
-reports external C callers and shared types, so its total is not the module's
-native-file count. The default audit has not been weakened or made to pass by
-renaming retained host interfaces.
-
-Recall lane counters now live in Go and are exposed by `recall-metrics` as
-`lane_counters`. They count unique eligible candidates and the final store
-selection for lexical, semantic and graph lanes, including overlapping sources
-and a shutout when a populated lane supplies no selected record. Empty lanes
-emit no keys. Counters are process-local, concurrency-safe and diagnostic only;
-they are not evidence of final context packing, transaction commit or provider
-delivery. Route-qualified counts distinguish lexical from hybrid contributions.
-
-The native `bench-perf` memory cases depended on deleted in-process functions.
-They now emit null timings with `status=unavailable`, exit 2, and cannot save or
-certify a baseline. Use `aimee-memory-eval` for isolated Go corpus measurements;
-its results are not interchangeable with the old in-process timing baseline.
-The private, host-only `runtime` operation `pagerank` now scores an explicit
-candidate set in Go. Supply `ids`, optional `iterations` (default 6, range 1–16),
-`weight` (default 0.35, range greater than zero through 10), and `relations`
-(default `depends_on`, `related_to`, `co_edited`, `fixes`; an empty list accepts
-all nonempty relation labels). Normal project/workspace or exact-scope filtering
-applies before graph work; suppressed and inactive records cannot contribute.
-The work budget is 128 unique positive IDs and 8192 links. Oversized graphs and
-SQL errors fail instead of producing partial scores. IDs retain int64 precision.
-
-The Go kernel matches captured output from the retired C implementation:
-undirected adjacency, parallel-edge multiplicity, damping 0.85, uniform dangling
-mass, and maximum-normalized bonuses. Successful owner calls record graph-query
-plus kernel time only after the request transaction commits. Measurements are
-process-local, not an end-to-end retrieval latency or a replacement for the old
-native baseline. `BenchmarkPageRankKernel50` measures CPU work alone. This private
-operation makes scoring available to the isolated evaluator.
-
-PageRank recall is disabled by default. The KB owner honors the existing
-`memory_pagerank_enabled`, `memory_pagerank_iterations`, `memory_pagerank_weight`
-and comma-separated `memory_pagerank_relations` settings, with the corresponding
-`AIMEE_MEMORY_PAGERANK_*` environment overrides. Defaults match the private scorer.
-Environment integers clamp to the existing enable/iteration bounds; malformed
-numbers, non-finite/out-of-range weights and invalid relation filters fail the
-request. A settings-provider failure also fails the lookup. Caller JSON cannot
-activate or override the deployment policy. Personal memory bypasses KB graph
-configuration entirely.
-
-When enabled, retrieval collects up to four times the requested result count
-(minimum 16, maximum 128), applies its existing semantic/graph/negation fusion,
-and adds eligible one-hop memory-link neighbors while space remains. Both ends
-must satisfy scope, kind, tier, lifecycle and suppression checks before links can
-consume the 8192-link neighbor budget. Candidate scoring has a separate 8192-link
-budget. Overflow and required SQL failures fail the lookup, without successful
-fallback metrics. Candidate visibility is checked again before graph scoring.
-Project/workspace/global priority precedes the final score and result limit.
-
-The versioned `rrf60-pagerank-v1` integration adds the kernel bonus divided by 61
-to the existing Go reciprocal-rank/negation score. Link-only neighbors start with
-zero base contribution. Diagnostics and traces report the actual `retrieval_base`,
-`pagerank` contribution and total used in that decision, rather than recomputing
-a text score. The answer-support gate still uses its existing text-support scale;
-graph popularity is not corroborating evidence. Disabling PageRank restores the
-previous retrieval path and does not query memory links for this feature.
-
-This integration preserves the native PageRank kernel and its opt-in setting,
-but does not reproduce the retired C ranker's different score units. Historical
-end-to-end ranking parity, legacy query/candidate expansion and unversioned-vector
-admission remain separate work. No production enablement or quality improvement
-is claimed without paired evaluation.
-
-There is no C memory engine and no C KB_STORE `memory_*.c` implementation. A legacy
-operation must be added to the Go data handler before its adapter may report
-success; a local fallback is forbidden.
-
-### Correction preconditions
-
-Shared `memory.get` with `include_version: true` returns `memory.version` alongside
-its content. Shared `memory.supersede` accepts that object as `expected_version`:
-`{"schema_version":1,"owner_id":"<owner UUID>","record_id":"42","record_revision":"3"}`.
-The Go owner compares all identifiers under the replacement lock. A stale version
-returns `conflict` / `expected_version_conflict`; callers should inspect the current
-record before deciding whether to submit a new correction. The native HTTP host
-only forwards these fields. Other verbs and the personal placement currently
-refuse this optional contract. It grants no additional authority and is not an
-idempotency key or release-freshness receipt.
+The wire types in `server-go/memory/wire.go` and the command names the host routes are the
+compatibility surface. The bundle is tied to the exact public files recorded in
+`vendor/aims-memory/bundle.json`; a change to one of them needs a rebuilt bundle. The bundle
+exists for `linux-amd64`, the only platform server images are built for; the image build refuses
+any other. In the `kb` placement the scopes in `AIMEE_MEMORY_SHARED_SCOPES` are served (by default every
+project and workspace);
+a shared store that names no scope is global, as in 1.0.x. The frozen reference in `tests/fixtures/legacy-memory-owner.json` records the last public Go
+owner for compatibility tests only; it is not a default or a runtime fallback.
 
 ## Extension and removal
 
-Add operations to the Go `memory-data` handler with placement-isolation and
-bus-framing tests, and update the descriptor-owned sources. Do not restore a
-retired C policy or storage implementation to satisfy a legacy ABI. Both role
-supervisors require memory; removing it requires migrating those consumers
-and their event contracts rather than silently dropping recall behavior.
-
-### Retained fidelity evidence
-
-The host-only `memory.runtime` operation `fidelity-read` reads retained
-`fidelity_report` and `fidelity_attribution` artifacts through the shared PostgreSQL
-module in both role compositions. The KB audit adapter forwards the exact turn ID.
-A missing report remains `not_evaluated`; owner or database failures become
-`evidence_unavailable` at the audit transport. Report and attribution count come
-from one statement snapshot. No native connection pool is used by this path.
-
-The former C fidelity writer APIs had no production callers and were removed with
-the C reader. This does not enable the deferred fidelity judge or add a new write
-API. Existing rows and the public audit response fields remain readable.
-
-### Replaceable backends and derived erasure
-
-The first-start Server setup wizard lets the administrator save native, Cognee or
-Hillock memory, with an external service origin and a Vault-only credential.
-Memory and egress load `memory.backend` through the config owner on restart;
-explicit deployment environment selection takes precedence. Existing installations
-keep native by default. This does not install services or migrate records. See the
-[first-start backend guide](../../integrations/hillock/README.md#first-start-backend-selection).
-
-The independent `server-go/memory` contract supplies existing wire framing, scopes,
-record types and the Store interface. Native remains the default; setting
-`AIMEE_MEMORY_BACKEND=cognee` selects the first alternative adapter through the
-existing memory module, egress and Vault. See the [backend implementation guide](#memory-backend-contract)
-for configuration, extension points and bounded retrieval behavior.
-
-Derived providers implement `Forget` for admitted record deletion and
-`ResetDerived` for subject-wide erasure. The existing private/shared coordinator
-resets this node's derived index before acknowledging completion, and retries
-reuse the existing erasure receipt/journal. Failed or unsupported cleanup cannot
-be acknowledged. Other nodes' derived namespaces and retained canonical records
-are preserved; retained records can be reindexed. A handler gate serializes
-provider requests before opening source snapshots, preventing old in-flight
-indexing from recreating erased copies after cleanup.
-
-Startup completes canonical restore replay and configured derived cleanup before
-publishing the memory handler. A failed cleanup prevents readiness. The existing erasure coordinator and audit owner remain authoritative; external catalogs retain their own erasure replay metadata.
-
-### Memory backend contract
-
-Contract compliance is required for external integrations (Cognee, Hillock and future adapters). Native memory may use its own implementation, APIs and optimizations; its correctness is verified by native regression tests, not by forcing it to implement the external adapter contract.
-
-This contract and the Cognee adapter are implemented in
-[PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005), after published 0.4.6.
-Use a build containing that change for the configuration below.
-
-```mermaid
-flowchart LR
-    Request[Admitted scoped request] --> Owner[Existing Aimee memory owner]
-    Owner --> Contract[Generic Store contract]
-    Contract --> Native[Native PostgreSQL memory]
-    Contract --> Adapter[Cognee or Hillock adapter]
-    Adapter --> Catalog[Independent durable compatibility catalog]
-    Adapter --> Egress[Existing egress and Vault]
-    Egress --> Engine[Selected retrieval engine]
-```
-
-The public Go contract is `github.com/JBailes/aimee/server-go/memory`. It contains scopes, public record types, the existing event/stage IDs and client framing. It imports no native memory implementation. The existing memory descriptor, bus admission and supervisor remain the host infrastructure.
-
-### Required operations
-
-Implement `memory.Store`: Get, Search, Put and Delete. `memory.Backend` adds a capability declaration with provider name, contract version 1 and the implemented operations. Use the caller context for cancellation. Exact reads return `memory.ErrNotFound` for unavailable records; deletion reports whether the canonical source changed. Empty search queries list eligible records. Keep IDs as int64, and versions as exact decimal strings. Scope is supplied by the admitted host, never inferred from query text.
-
-Put preserves the existing native upsert-by-kind/key behavior. Conditional mutation, authority, history, graph and learning are existing extended contracts; a Store implementation does not automatically claim them. `Client.DataJSON` and `Client.Command` preserve their existing wire access without importing native memory.
-
-The optional `DerivedStore.Forget(ctx, scope, id)` extension removes derived state without mutating canonical records. It must be idempotent and must work for records which are no longer serving-eligible. The existing native lifecycle invokes it before admitted retirement/destruction. A cleanup error stops that mutation.
-
-Providers with derived storage also implement `DerivedResetter.ResetDerived(ctx)`. This discards all derived copies owned by the current Aimee node, verifies their absence and preserves canonical records and other nodes' namespaces. The existing private/shared subject-erasure coordinator invokes the internal `reset-derived` data operation after canonical erasure and before completion acknowledgement. Missing capability, failure, cancellation and unknown outcomes prevent acknowledgement; the existing request ID and erasure journal provide retries. There is no additional ledger, coordinator or process. Providers which maintain no derived copies need neither extension.
-
-### Version 1 contract reference
-
-```go
-type Store interface {
-    Get(ctx context.Context, scope Scope, id int64) (Record, error)
-    Search(ctx context.Context, scope Scope, query, kind, tier string, limit int) ([]Record, error)
-    Put(ctx context.Context, scope Scope, record Record) (Record, error)
-    Delete(ctx context.Context, scope Scope, id int64) (bool, error)
-}
-type Backend interface {
-    Store
-    Capabilities() Capability
-}
-```
-
-| Operation | Required behavior |
-| --- | --- |
-| Get | Return the current serving-eligible canonical record in the exact admitted scope. An absent, inaccessible or no-longer-serving record returns `ErrNotFound`. Never fall back to another scope or placement. |
-| Search | Return at most `limit` distinct positive-ID records in that exact scope, filtered by nonempty `kind` and `tier`. An empty query lists eligible records. No matches is an empty result with no error. Nonempty queries use the provider's retrieval algorithm. |
-| Put | Preserve the source's upsert identity for `(scope, kind, key)` and return the persisted canonical record. The source assigns the ID; a provider must not invent a second record identity. Host admission and source transactions still apply. |
-| Delete | Return true when canonical deletion changes the source, false when there is nothing to delete. Required derived cleanup runs before canonical mutation; failures must leave that mutation retryable. |
-| Capabilities | Report a stable provider name, `Version: 1`, and baseline `get`, `search`, `put`, `delete`. Declare `forget` and `reset-derived` when supplied. This declaration does not grant bus authority or native extended operations. |
-
-`Record` includes `ID`, `Scope`, `Key`, `Content`, `Kind`, `Tier`, `Confidence`, and optional `Version`, `Historical`, `Authorship` and `UtilityHorizon`. Preserve canonical values and opaque JSON metadata through the bridge. Do not accept generated summaries as canonical content, synthesize authorship, or silently discard source revisions. IDs use signed 64-bit integers; revision counters are exact decimal strings. Historical views and conditional writes belong to the existing extended API; baseline search returns current records.
-
-`Scope.Canonical()` normalizes explicit scopes without authorizing them:
-
-| Type | Canonical value |
-| --- | --- |
-| `user` | `_user`; empty input is normalized to this value. |
-| `global` | `_global`; empty input is normalized to this value. |
-| `workspace` | Nonempty explicit workspace value. |
-| `project` | Nonempty explicit project value. |
-
-Unknown types, invalid user/global values and values over 1024 bytes are rejected. User scope is local to the already-admitted personal runtime; `_user` does not denote every user's records. The host chooses placement and scope. A provider must never choose tenancy from a prompt, query, record content or a numeric ID. If the source implements `NamespaceStore`, its stable opaque audience namespace can distinguish otherwise identical scopes; the provider must also isolate each node's derived state. Cognee combines the host's persisted node identity with scope and exact source revision.
-
-Return errors usable with `errors.Is`:
-
-| Error | Meaning |
-| --- | --- |
-| `ErrNotFound` | Exact canonical record unavailable in the admitted scope. |
-| `ErrUnsupported` | Requested contract extension is unavailable. |
-| `ErrUnavailable` | Provider/storage/network failure, invalid response or unknown outcome. |
-| `ErrCapacity` | A declared completeness or response bound would be exceeded. Never substitute silent truncation. |
-| `context.Canceled` / `context.DeadlineExceeded` | Caller cancelled or its deadline expired. Preserve these causes. |
-
-Keep credentials out of contract arguments, records, errors and logs. Transport is injected by host composition. Provider-specific retries must stay within the supplied context and preserve idempotency; do not retry a non-idempotent write by guessing that a lost response means it never committed. `ClientStore` preserves existing structured host refusals as `RefusalError`; callers must not reinterpret an authorization refusal as a backend outage.
-
-### Add a backend to Aimee
-
-1. Add a provider package under `server-go/modules/memory/<provider>/` which imports the public `server-go/memory` contract. Implement `Backend` using the supplied canonical `Store` and an injected transport/client. Avoid native SQL, bus admission and credential resolution inside this package.
-2. Supply an independently durable backend-owned catalog for a replacement backend. Native extended APIs require explicit equivalent capabilities; do not silently fall back to native storage. For derived indexing, implement both `DerivedStore` and `DerivedResetter`, including cleanup verification and retries after unknown outcomes. Providers without derived copies need neither.
-3. Add compile-time interface assertions and behavioral tests. Cover exact scope, IDs above 2^53, source revision changes, empty queries, filters, limits, cancellation, unavailable storage, deletion retries and derived reset isolation. The native bridge tests are in `store_adapter_test.go`; Cognee's adapter and live tests provide the first working integration example.
-4. Register the factory in `configuredMemoryBackend` (or inject it with `WithMemoryBackend` in another host composition). Construct it from the request-bound source passed to the factory. Validate provider configuration before readiness; unknown names must fail rather than silently select native. Add any outbound origin/credential policy to the existing egress and Vault contracts.
-5. Add provider files and tests to the existing memory descriptor `src/modules/memory/module.yaml`. If host transport changes, update that existing module's descriptor too. Reuse the current runtime manifest, principal grants and restart infrastructure; do not create another binding registry or supervisor.
-6. Run the contract/bridge tests, a real-provider test, existing PostgreSQL replay and source/export checks. Add the provider's real test to CI and to the required aggregate. Document provider-specific bounds and operational configuration. Build and install the existing module executable and generated grants, then restart the memory owner.
-
-For a full replacement of the baseline canonical Store, `ContractDataStore` is the host bridge. Such an implementation must preserve the source guarantees and does not inherit native graph, learning, authority or lifecycle support merely by implementing four methods. The selected Cognee/Hillock production composition now supplies an independent backend-owned compatibility catalog.
-
-The smallest adapter with no derived storage can delegate the existing source. This example establishes the exact package boundary; replace its Search implementation with your engine's retrieval and canonical revalidation:
-
-```go
-package mymemory
-
-import (
-    "context"
-    memory "github.com/JBailes/aimee/server-go/memory"
-)
-
-type Backend struct { source memory.Store }
-
-func New(source memory.Store) *Backend { return &Backend{source: source} }
-func (*Backend) Capabilities() memory.Capability {
-    return memory.Capability{Name: "mymemory", Version: 1,
-        Operations: []string{"get", "search", "put", "delete"}}
-}
-func (b *Backend) Get(ctx context.Context, s memory.Scope, id int64) (memory.Record, error) {
-    return b.source.Get(ctx, s, id)
-}
-func (b *Backend) Search(ctx context.Context, s memory.Scope, q, k, t string, n int) ([]memory.Record, error) {
-    return b.source.Search(ctx, s, q, k, t, n)
-}
-func (b *Backend) Put(ctx context.Context, s memory.Scope, r memory.Record) (memory.Record, error) {
-    return b.source.Put(ctx, s, r)
-}
-func (b *Backend) Delete(ctx context.Context, s memory.Scope, id int64) (bool, error) {
-    return b.source.Delete(ctx, s, id)
-}
-var _ memory.Backend = (*Backend)(nil)
-```
-
-The current factory selects compiled Go adapters. Installing an SDK or Python package by itself does not register a provider. An independently hosted module must use the existing executable registration and memory event/stage contract and implement the same guarantees; no runtime plugin discovery mechanism is added here.
-
-### Hosting
-
-A backend can use any implementation internally. Cognee imports only the generic contract and standard library. Its host supplies an authorized `Store` and a transport function; it has no supervisor, SQL, Vault, audit or admission implementation.
-
-For an implementation hosted in the existing memory service:
-
-```go
-handler := native.NewHandler(executor,
-    native.WithDataStore(placement, existingSource),
-    native.WithMemoryBackend(func(source memory.Store) (memory.Backend, error) {
-        return mybackend.New(source), nil
-    }))
-```
-
-For a complete baseline Store implementation, pass `native.ContractDataStore{Store: backend}` to `WithDataStore`. Native-specific handler options belong in this host composition, not in provider code. Existing module manifests/executable registration support another module executable using the same bus wire contract; this change introduces no provider process registry or switch-generation service. A Go adapter is compiled/registered in host composition; adding an adapter does not mean that an arbitrary installed Python package is automatically discovered.
-
-Consumers can use `memory.ClientStore{Client: client, TraceID: trace}` for the four typed operations over the existing bus. The compatibility client in the native package delegates to the same independent client. No wire IDs changed.
-
-### Cognee configuration
-
-Set `AIMEE_MEMORY_BACKEND=cognee` and `AIMEE_MEMORY_BACKEND_URL=https://your-cognee-origin` (the alias `AIMEE_COGNEE_URL` is also accepted). An empty backend, `native` or `aimee-native` selects native. Unknown names or invalid origins fail startup. A custom Go backend is injected with `WithMemoryBackend`; it does not need to pretend to be Cognee or use Cognee's API.
-
-Authentication defaults to bearer. Import `AIMEE_MEMORY_BACKEND_TOKEN` through the existing Vault credential mechanism. The memory process supplies only its credential handle; egress resolves the token and binds the request to the configured origin. `AIMEE_MEMORY_BACKEND_AUTH=none` is available for a server configured to accept unauthenticated requests. The existing egress allowlist admits only add, cognify, the pinned wrapper’s `POST /api/v1/aimee/index-chunks`, search, dataset listing and individual dataset deletion. The CHUNKS path uses bounded parallel classification, extraction and embedding tasks without synchronous graph LLM extraction. Graph cognify remains a separate provider operation.
-
-Run the server and KB with their own `AIMEE_HOME`, immutable node identity, module policy directory and canonical storage namespace, as the existing deployment topology requires. Native memory requires PostgreSQL 18 and the existing owner/runtime role split; unrelated Aimee control services retain their infrastructure. Selected Cognee/Hillock memory record owners do not open native PostgreSQL storage; apply schema and runtime/default grants through the existing PostgreSQL migration path. Install the generated module executables at the grant-pinned paths, including the canonical egress/PostgreSQL helpers, and start the existing role supervisor. A one-shot module launcher cannot recover from dependencies which attach later during startup.
-
-Cognee authentication is also provider configuration. Aimee forwards the configured bearer and fails closed on 401; it does not silently renew credentials or fall back to native retrieval. Cognee 1.6.2 generates a process-local JWT signing secret when `FASTAPI_USERS_JWT_SECRET` is unset, which invalidates prior session tokens on restart. Persist that secret securely in Cognee when using session tokens, account for their expiration, and rotate the Aimee credential through its existing Vault mechanism. Use a provider-supported durable API credential for unattended service operation. The validation fixtures use synthetic credentials only.
-
-Cognee retains derived retrieval state; Aimee retains canonical identities, admission, audit and lifecycle. Search reconciles exact revision-specific datasets, waits for completed cognification, queries CHUNKS, sorts distances within this backend and re-reads canonical records. It never converts generated prose into records. Cognee 1.6.2 was verified with a real local API, SQLite/LanceDB/Ladybug and deterministic model/embedding fixtures. `only_context` is false: CHUNKS itself is non-generative, while context-only mode returns text and loses scores.
-
-The first adapter has explicit limits: 256 candidates per provider request and 1 MiB response bodies. Larger inputs return `ErrCapacity`, never silent truncation. Cognification is synchronous and follows the existing two-minute data/egress deadline, clamped by the caller. Existing public command bridges have their own deadline (currently 60 seconds for private memory commands); large cold indexing can exhaust that budget and return an unavailable/cancelled outcome. Retries reconcile already-created derived datasets against the canonical source. This is an initial adapter, not a large-corpus indexing implementation. Empty queries use the authorized source listing without external indexing.
-
-Selected Cognee/Hillock owners support independent durable baseline records, revisions/history, scoped CRUD and retrieval. Advanced native graph, learning, served views and code-index operations return capability-absent until equivalent contracts are implemented.
-
-Subject-wide erasure now includes the configured Cognee node namespace. Cleanup conservatively removes this node's complete derived index, including retired revisions and records already erased from the source. Retained canonical records are reindexed on subsequent retrieval. This avoids duplicating subject/provenance tracking inside the adapter, and cleanup is independent of the 256-record retrieval limit. The memory handler serializes provider calls before opening source snapshots, so an older in-flight indexing request finishes before cleanup acknowledges success. Waiting requests retain cancellation/deadline handling.
-
-At module startup, the existing canonical erasure replay runs first; configured derived storage is reset before publishing the memory handler. Failure prevents startup/readiness. Thus restoring an external Cognee index does not bypass retained canonical erasure intents when the memory owner restarts. Restore node identity and surviving canonical control metadata as prescribed by the existing backup boundary, and restart the memory owner after restoring Cognee. Coverage concerns managed live provider state; independently retained vendor backups or detached provider accounts are outside `managed_application_stores`, as with the existing erasure workflow.
-
-### Verification
-
-`go test -race -short ./...` covers contract framing, the native bridge, HTTP routing, scope isolation, stale-record refusal, cancelled requests, failed deletion retry, verified node reset, foreign-node isolation, restored derived copies and in-flight indexing barriers. Native erasure route tests verify that cleanup failure cannot emit completion evidence and that the same request ID can retry. The existing `memory-owner-replay-check` exercises real PostgreSQL compatibility.
-
-For a disposable real Cognee server, run the opt-in test with `AIMEE_COGNEE_TEST_URL`, `AIMEE_COGNEE_TEST_USER` and `AIMEE_COGNEE_TEST_PASSWORD`, then `go test -v ./modules/memory/cognee -run TestCogneeLiveContract -count=1`. The test creates/deletes datasets in that account. Keep credentials out of checked-in files.
-
-API references: [Cognee CHUNKS implementation](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/modules/retrieval/chunks_retriever.py), [Cognee API introduction](https://docs.cognee.ai/api-reference/introduction).
-
-### Continuous integration
-
-The `memory-backends` job in `.github/workflows/ci.yml` runs race tests for the independent contract, native bridge, memory lifecycle, Cognee adapter and egress. It installs pinned `cognee[api]==1.6.2` in a disposable virtual environment and runs the real API with SQLite/LanceDB/Ladybug storage and deterministic local model fixtures. The runner requires an actual `TestCogneeLiveContract` pass, so an unset environment or skipped live test cannot make the job green. The required `unit-tests` aggregate includes this job. Existing real-PostgreSQL replay remains a separate required gate.
-
-Reproduce the real-provider job locally:
-
-```sh
-python3 -m venv /tmp/cognee-contract-venv
-/tmp/cognee-contract-venv/bin/pip install 'cognee[api]==1.6.2'
-python3 scripts/validation/memory/run-cognee-contract.py \
-  --python /tmp/cognee-contract-venv/bin/python \
-  --artifacts /tmp/cognee-contract-evidence-unique-run
-```
-
-Use a new artifact directory for each run. The runner starts API/model processes on ephemeral loopback ports, waits for readiness, runs retrieval/delete/cross-scope erasure and retry checks, and stops every process even on failure. Retained artifacts contain fixture storage, server diagnostics, the Go test log and a JSON result. It needs no external model service, production credentials or vendor account. Deterministic models validate protocol and storage behavior; they do not establish retrieval quality on production corpora.
-
-#### Subject erasure and readiness
-
-```mermaid
-flowchart LR
-    Request[Existing erasure request and journal] --> Canonical[Canonical erasure and replay]
-    Canonical --> Cleanup[Selected provider cleanup]
-    Cleanup -->|verified success| Complete[Completion coverage]
-    Cleanup -->|failure: same request ID| Request
-    Startup[Memory startup or restore] --> Replay[Canonical replay]
-    Replay --> Reset[Provider reset]
-    Reset --> Ready[Memory ready]
-```
-
-Subject-wide erasure can already have committed canonical removal when provider cleanup fails.
-The failure prevents completion coverage and retries with the existing journal/request ID; it is
-not a distributed transaction. Ordinary admitted record deletion separately calls `Forget` before
-its source mutation. Startup replays canonical erasure and resets selected derived state before readiness.
-
-### Hillock proof of concept
-
-Native, Cognee and Hillock are selectable durable baseline backends. Cognee/Hillock use independent adapter-owned catalogs under `$AIMEE_HOME/memory-backends/<engine>/<placement>`; `AIMEE_MEMORY_BACKEND_DIR` overrides the root. Their production constructor returns before constructing native PostgreSQL storage. Catalogs persist records, scopes, authorship, exact versions, correction history, retry receipts and retained erasure markers with private permissions, process locking, atomic writes and fsync. Subject erasure removes history and receipt payloads; retained `erasures.json` prevents stale record restoration. [Completed baseline](../proposals/done/independent-durable-memory-backends.md) records evidence. [Remaining parity/qualification](../validation/external-memory-support-2026-10-08.md) records the outstanding qualification work.
-
-External owners expose scoped `backend_capabilities`, `backend_list` (stable `after_id` paging), `backend_export` and `backend_import` commands. Export/import requires verified human authority and an empty destination catalog; exports preserve scope, IDs, history and erasure controls. Native PostgreSQL migration is not yet this format. Advanced unsupported APIs do not execute native SQL. Discovery lists only supported baseline commands. The ordinary public CRUD command paths are tested with PostgreSQL absent.
-
-`AIMEE_MEMORY_BACKEND=hillock` selects a third retrieval backend using the pinned upstream Hillock HDC encoder and HYDRA scorer. Configure `AIMEE_MEMORY_BACKEND_URL` (fallback `AIMEE_HILLOCK_URL`) and the same governed bearer/Vault mechanism as Cognee. The supplied sidecar is a stateless `hdc-subword` profile: it ranks an authorized request snapshot, returns canonical IDs/revision hashes, and retains no records or learned state between requests. Aimee rehydrates and rechecks results. Startup verifies the exact upstream revision and stateless protocol before readiness. Native remains the default.
-
-The rank API has explicit 256-candidate and 1 MiB bounds, with additional token/vocabulary limits; overload returns capacity, not truncated success. It does not implement upstream chat generation, extraction, graph or Hebbian learning. See [run/configuration and real-engine tests](../../integrations/hillock/README.md) and [the specific APIs required for full support](../../integrations/hillock/FULL_SUPPORT_CONTRACT.md). The `memory-backends` CI job requires the pinned real Hillock contract to execute across a restart, alongside existing native/Cognee coverage.
-
-### External conversation profile
-
-Cognee and Hillock implement [the reusable conversation v2 contract](../../integrations/memory/CONTRACT.md) through independent durable catalogs and provider ranking. It includes recall/composition/briefing, exact history, authenticated export, source revalidation/send barriers, and idempotent erasure with fresh host-admitted writes. Native is exempt. [Support validation](../validation/external-memory-support-2026-10-08.md) distinguishes completed integration from remaining answer/scale qualification.
-
-The catalog is bounded at 64 MiB; 16 for Cognee and 256 for Hillock are the per-request provider candidate counts, not the corpus size. Aimee scans eligible records and selects a lexical pool; retrieval is explicitly non-exhaustive. Cognee supports `AIMEE_MEMORY_BACKEND_AUTH=api-key` for Vault-backed service keys, alongside bearer and explicit development `none`.
+A new bundle release replaces the archive under `vendor/aims-memory` and is recorded with
+`scripts/check_memory_bundle.py`; deployments pick it up at their next start after the image
+update. The unavailable adapter stays in the public tree so that an instance without a provisioned
+installation fails closed and visibly, as `missing_module: memory`, and never falls back to a
+built-in datastore.

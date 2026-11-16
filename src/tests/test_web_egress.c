@@ -123,7 +123,7 @@ static void test_every_transition_form_is_judged_on_the_v4(void)
    printf("  PASS: NAT64, 6to4, Teredo and v4-compatible are judged on the embedded v4\n");
 }
 
-/* The v4 deny-list is kept in step with the Go planes (proxyguard.go,
+/* The v4 deny-list is kept in step with the Go planes (egress.go,
  * proxy_policy.go). A destination refused on one plane and dialed on another is
  * the inconsistency this pins. */
 static void test_reserved_ranges_match_the_go_planes(void)

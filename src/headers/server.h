@@ -2,6 +2,7 @@
 #define DEC_SERVER_H 1
 
 #include "aimee_features.h"
+#include <aimee/ir/aimee_ir.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <sys/types.h>
@@ -10,12 +11,6 @@
 #include "provider_catalog.h"
 #include "index.h" /* project_info_t, for server_active_project_match */
 
-/* True when `name` is a provider the chat path can resolve: a built-in CLI
- * provider, a known adapter, or an agent in `acfg` (matched by name or by
- * provider). Gates the durable primary write in handle_provider_set so a
- * mistyped `aimee provider <word>` cannot brick every later chat turn.
- * `acfg` may be NULL to check only the built-in/adapter sets. */
-int provider_name_settable(const char *name, const agent_config_t *acfg);
 #include "vault_principal.h"
 #include "memory_authority.h" /* memory_authority_t — attested write authority */
 
@@ -24,7 +19,7 @@ typedef struct cJSON cJSON;
 
 /* Authenticated hook memory interception, implemented with the other hook
  * helpers so the main method table does not own storage-policy details. */
-int server_memory_intercept(const char *tool, const char *tool_input, const char *cwd, cJSON *req,
+int server_memory_intercept(const aimee_block_t *call, const char *cwd, cJSON *req,
                             const char *client, char *msg, size_t msg_len);
 
 #define SERVER_PROTOCOL_VERSION 1
@@ -220,7 +215,7 @@ extern const int method_registry_count;
  * event loop without waiting; the event loop later reclaims the slot
  * once refcount reaches 0. Connection slots are fixed in place while
  * in use, so worker-held pointers stay valid for their job lifetime. */
-typedef struct
+typedef struct server_conn
 {
    int in_use; /* slot is reserved by an open or closing connection */
    int fd;
@@ -311,6 +306,10 @@ int server_vault_bootstrap_prepare(void);
 typedef int (*aimee_agent_resolver_fn)(const char *name, char *canon, size_t cap);
 void server_vault_bootstrap_set_resolver(aimee_agent_resolver_fn fn);
 void server_shutdown(server_ctx_t *ctx);
+
+/* Wake the server's park loop: a SIGHUP, an announced config change, shutdown.
+ * Async-signal-safe. */
+void server_park_wake(void);
 int server_compute_budget_acquire(server_ctx_t *ctx);
 void server_compute_budget_release(server_ctx_t *ctx, int granted);
 int server_session_pool_submit(server_ctx_t *ctx, const char *session_id, void (*fn)(void *),
@@ -446,6 +445,7 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int server_memory_store_selection(const cJSON *req);
 int server_memory_scope_begin(cJSON *req);
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_protected_intake(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* The same command in the shape the core command table routes: takes arguments,
  * RETURNS the result, writes to no connection. The handler above is now only the
  * RPC surface's connection write. This is the shape every surface needs, and the
@@ -534,7 +534,7 @@ int handle_kb_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -613,6 +613,9 @@ int handle_delegate_cancel_unassigned(server_ctx_t *ctx, server_conn_t *conn, cJ
  * each against the live code index; returns a JSON report. Files nothing. */
 int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Read-only projection from the authenticated canonical child-log owner.
+ * 0 observed, 1 no binding, -1 unavailable, -2 owner/source refused. */
+int server_delegate_job_observation(cJSON *out, int job_id, int full);
 int handle_delegate_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Credential vault (WP-C.1): resolve the attested principal from the conn. */
 int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -678,6 +681,7 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_agent_generate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_draft(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_setup(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -687,6 +691,7 @@ int handle_agent_cli_oauth_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
 
 /* MCP proxy handler (server_mcp.c) */
 int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_mcp_tools_wait(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Full served tool surface (built-ins + discovery + server-only), unfiltered;
  * caller owns the returned cJSON array (server_mcp_tools.c). */
 cJSON *mcp_build_full_served_list(void);
@@ -706,6 +711,8 @@ void server_mcp_served_outcome(const char *verdict, const char *reason);
  * callers must then emit the typed `scope_required` error. See
  * server_active_project.c. */
 int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen);
+/* Approved local repository identity for learning; independent of KB/index names. */
+int server_learning_project_from_cwd(const char *cwd, char *out, size_t outlen);
 /* The root-matching half, split out so it is unit-testable without a live
  * knowledge service. */
 int server_active_project_match(const char *cwd, const project_info_t *projects, int count,
@@ -720,6 +727,10 @@ cJSON *action_receipt_command(cJSON *input);
 int handle_action_receipt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 cJSON *task_projection_command(cJSON *input);
 cJSON *memory_task_promotion_command(const cJSON *req);
+/* The account's typed facts over its personal memory: operation is user-facts,
+ * user-search-graph or user-entity-edges. Owned ok reply, or NULL when the
+ * memory module is unavailable or refuses. */
+cJSON *memory_user_typed_command(const char *operation, const cJSON *req);
 int handle_task_projection(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 #endif /* DEC_SERVER_H */

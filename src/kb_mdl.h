@@ -50,19 +50,6 @@ extern "C"
                                     int n, const char *evidence, int min_agreement,
                                     kb_mdl_score_t *scores);
 
-   /* Compute MDL drift fraction between pre-bump and post-bump candidate sets.
-    * pre_candidates/n_pre: candidates before prompt bump
-    * post_candidates/n_post: candidates after prompt bump
-    * evidence: shared evidence bundle
-    * threshold: alert threshold (from config.kb_mdl_bump_drift_alert)
-    * Drift = (post_winner.l_candidate - pre_winner.l_candidate) / pre_winner.l_candidate.
-    * Prompt-bump hedging inflates candidate length (l_candidate) without improving
-    * evidence explanation; this shows up even when l_residual shrinks.
-    * Returns 1 if drift fraction >= threshold (alert), 0 if stable, -1 on error. */
-   int kb_mdl_drift_alert(const char *const *pre_candidates, int n_pre,
-                          const char *const *post_candidates, int n_post, const char *evidence,
-                          double threshold);
-
 #ifdef __cplusplus
 }
 #endif

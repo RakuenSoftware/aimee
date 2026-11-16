@@ -25,17 +25,6 @@ extern "C"
 {
 #endif
 
-   /* Upsert checkpoint for `delegation_id`. 0 on success, -1 on error. */
-   int db1_delegation_checkpoint_save(const char *delegation_id, const char *job_id, int attempt,
-                                      const char *steps_json, const char *last_output,
-                                      const char *error);
-
-   /* Read checkpoint for `delegation_id`. Buffers may be NULL to skip.
-    * Returns 0 on hit, -1 on miss or error. */
-   int db1_delegation_checkpoint_load(const char *delegation_id, char *steps_out, size_t steps_cap,
-                                      char *error_out, size_t error_cap, char *output_out,
-                                      size_t output_cap);
-
 #ifdef __cplusplus
 }
 #endif

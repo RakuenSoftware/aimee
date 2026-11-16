@@ -3909,6 +3909,25 @@ CREATE TABLE IF NOT EXISTS org_vault_current (
     REFERENCES org_vault_secret(principal, agent, cred, version)
 );
 
+-- A retired slot has no usable current version, while its pointer row and
+-- every encrypted version remain. Retirement events retain the former pointer.
+ALTER TABLE org_vault_current ALTER COLUMN version DROP NOT NULL;
+CREATE TABLE IF NOT EXISTS org_vault_retirement (
+  principal TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  cred TEXT NOT NULL,
+  version BIGINT NOT NULL,
+  retired_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  PRIMARY KEY(principal,agent,cred,version),
+  FOREIGN KEY(principal,agent,cred,version)
+    REFERENCES org_vault_secret(principal,agent,cred,version)
+);
+ALTER TABLE org_vault_retirement ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_vault_retirement_admin_read ON org_vault_retirement;
+CREATE POLICY p_vault_retirement_admin_read ON org_vault_retirement FOR SELECT
+  USING (kb_principal_is_admin());
+REVOKE ALL ON org_vault_retirement FROM PUBLIC;
+
 -- ENABLE (not FORCE) RLS on all three, mirroring P3a: the owner-scoped SECURITY
 -- DEFINER functions bypass RLS to read/write, while the non-owner NOBYPASSRLS runtime
 -- role's DIRECT table reads stay tenant-filtered by the SELECT policies below.
@@ -4121,7 +4140,7 @@ $$;
 CREATE OR REPLACE FUNCTION org_vault_list(p_principal TEXT)
 RETURNS TABLE(agent TEXT, cred TEXT)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT agent, cred FROM org_vault_current WHERE principal = p_principal ORDER BY agent, cred;
+  SELECT agent, cred FROM org_vault_current WHERE principal = p_principal AND version IS NOT NULL ORDER BY agent, cred;
 $$;
 
 -- org_vault_list_principals: distinct principals with at least one current slot.
@@ -4131,8 +4150,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT DISTINCT principal FROM org_vault_current ORDER BY principal;
 $$;
 
--- org_vault_delete: drop a slot (its pointer + every version row). Pointer first so the
--- version rows are no longer referenced by the FK.
+-- org_vault_delete: retire availability, retaining every encrypted value and pointer history.
 CREATE OR REPLACE FUNCTION org_vault_delete(p_principal TEXT, p_agent TEXT, p_cred TEXT) RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_rot BOOLEAN := false;
@@ -4147,20 +4165,21 @@ BEGIN
   IF v_rot THEN
     RAISE EXCEPTION 'org_vault_delete: active rotation conflict' USING ERRCODE='40001';
   END IF;
-  DELETE FROM org_vault_current WHERE principal = p_principal AND agent = p_agent AND cred = p_cred;
-  DELETE FROM org_vault_secret  WHERE principal = p_principal AND agent = p_agent AND cred = p_cred;
+  INSERT INTO org_vault_retirement(principal,agent,cred,version)
+    SELECT principal,agent,cred,version FROM org_vault_current
+     WHERE principal=p_principal AND agent=p_agent AND cred=p_cred AND version IS NOT NULL
+    ON CONFLICT DO NOTHING;
+  UPDATE org_vault_current SET version=NULL,updated_at=pg_now_text()
+   WHERE principal=p_principal AND agent=p_agent AND cred=p_cred AND version IS NOT NULL;
 END; $$;
 
--- org_vault_current_wraps: (agent, cred, version, wrapped_dek) for every current slot of
+-- org_vault_current_wraps: (agent, cred, version, wrapped_dek) for every retained version of
 -- a principal — the rekey read-side (re-wrap each DEK under a new KEK; ciphertext untouched).
 CREATE OR REPLACE FUNCTION org_vault_current_wraps(p_principal TEXT)
 RETURNS TABLE(agent TEXT, cred TEXT, version BIGINT, wrapped_dek BYTEA)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT s.agent, s.cred, s.version, s.wrapped_dek
-    FROM org_vault_current c
-    JOIN org_vault_secret s
-      ON s.principal = c.principal AND s.agent = c.agent AND s.cred = c.cred AND s.version = c.version
-   WHERE c.principal = p_principal;
+    FROM org_vault_secret s WHERE s.principal = p_principal;
 $$;
 
 -- org_vault_rewrap: replace the wrapped_dek of one current version row (rekey write-side;
@@ -4212,8 +4231,7 @@ CREATE TABLE IF NOT EXISTS org_vault_rotation (
   claim_until     TIMESTAMPTZ,
   last_error      TEXT NOT NULL DEFAULT '' CHECK (char_length(last_error) <= 1000),
   created_at      TEXT NOT NULL DEFAULT (pg_now_text()),
-  updated_at      TEXT NOT NULL DEFAULT (pg_now_text()),
-  UNIQUE(principal, agent, cred, to_version)
+  updated_at      TEXT NOT NULL DEFAULT (pg_now_text())
 );
 -- CREATE TABLE IF NOT EXISTS does not evolve an existing generated CHECK.
 ALTER TABLE org_vault_rotation DROP CONSTRAINT IF EXISTS org_vault_rotation_state_check;
@@ -4246,6 +4264,14 @@ ALTER TABLE org_vault_rotation ADD CONSTRAINT org_vault_rotation_claim_owner_che
 ALTER TABLE org_vault_rotation DROP CONSTRAINT IF EXISTS org_vault_rotation_claim_token_check;
 ALTER TABLE org_vault_rotation ADD CONSTRAINT org_vault_rotation_claim_token_check
   CHECK (claim_token >= 0);
+-- One rotation reaches each slot version. A remediated rotation (retired with
+-- its failure phase kept) never activated its version, so it must not hold that
+-- version against the next rotation of the slot.
+ALTER TABLE org_vault_rotation
+  DROP CONSTRAINT IF EXISTS org_vault_rotation_principal_agent_cred_to_version_key;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_vault_rotation_version
+  ON org_vault_rotation(principal, agent, cred, to_version)
+  WHERE failure_phase = '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_vault_rotation_active_slot
   ON org_vault_rotation(principal, agent, cred)
   WHERE state <> 'retired';
@@ -4856,7 +4882,7 @@ BEGIN
      NOT EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.key_id=p_key_id AND
        r.principal=p_principal AND r.team_id=p_team_id AND r.agent=COALESCE(p_agent,'') AND
        r.cred=COALESCE(p_cred,'') AND r.to_version=p_version AND
-       r.state IN ('activated','revoked','retired')) OR
+       r.state IN ('activated','revoked','retired') AND r.failure_phase='') OR
      EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.key_id=p_key_id AND
        (r.principal<>p_principal OR r.team_id IS DISTINCT FROM p_team_id OR
         r.agent<>COALESCE(p_agent,'') OR r.cred<>COALESCE(p_cred,''))) OR
@@ -4923,7 +4949,7 @@ BEGIN
      NOT EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.key_id=p_key_id AND
        r.principal=p_principal AND r.team_id=p_team_id AND r.agent=COALESCE(p_agent,'') AND
        r.cred=COALESCE(p_cred,'') AND r.to_version=p_version AND
-       r.state IN ('activated','revoked','retired')) OR
+       r.state IN ('activated','revoked','retired') AND r.failure_phase='') OR
      EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.key_id=p_key_id AND
        (r.principal<>p_principal OR r.team_id IS DISTINCT FROM p_team_id OR
         r.agent<>COALESCE(p_agent,'') OR r.cred<>COALESCE(p_cred,''))) OR
@@ -7585,144 +7611,6 @@ BEGIN
                                p_subject,p_verdict,p_detail);
 END; $$;
 
-CREATE OR REPLACE FUNCTION kb_memory_retention_reap(p_days INTEGER)
-RETURNS BIGINT
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
-DECLARE v_count BIGINT;
-BEGIN
-  IF p_days NOT BETWEEN 1 AND 36500 THEN
-    RAISE EXCEPTION 'memory retention days must be 1..36500' USING ERRCODE='22023';
-  END IF;
-  WITH targets AS MATERIALIZED (
-         SELECT id FROM memories WHERE updated_at<pg_now_text('-'||p_days||' days')),
-       units AS MATERIALIZED (
-         SELECT id FROM memory_units WHERE memory_id IN (SELECT id FROM targets)),
-       d_vectors AS (
-         DELETE FROM memory_embeddings WHERE point_id IN
-           (SELECT id FROM targets UNION SELECT id FROM units) RETURNING point_id),
-       d_memories AS (
-         DELETE FROM memories WHERE id IN (SELECT id FROM targets)
-           AND (SELECT count(*) FROM d_vectors)>=0 RETURNING id)
-  SELECT count(*) INTO v_count FROM d_memories;
-  RETURN v_count;
-END; $$;
-
-CREATE OR REPLACE FUNCTION kb_memory_sensitivity_retention_reap(
-  p_sensitivity TEXT, p_days INTEGER
-) RETURNS BIGINT
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
-DECLARE v_count BIGINT;
-BEGIN
-  IF p_sensitivity NOT IN ('restricted','sensitive') THEN
-    RAISE EXCEPTION 'unsupported retention sensitivity' USING ERRCODE='22023';
-  END IF;
-  IF p_days NOT BETWEEN 1 AND 36500 THEN
-    RAISE EXCEPTION 'memory retention days must be 1..36500' USING ERRCODE='22023';
-  END IF;
-  WITH targets AS MATERIALIZED (
-         SELECT id FROM memories WHERE sensitivity=p_sensitivity
-           AND created_at<pg_now_text('-'||p_days||' days')),
-       units AS MATERIALIZED (
-         SELECT id FROM memory_units WHERE memory_id IN (SELECT id FROM targets)),
-       d_vectors AS (
-         DELETE FROM memory_embeddings WHERE point_id IN
-           (SELECT id FROM targets UNION SELECT id FROM units) RETURNING point_id),
-       d_memories AS (
-         DELETE FROM memories WHERE id IN (SELECT id FROM targets)
-           AND (SELECT count(*) FROM d_vectors)>=0 RETURNING id)
-  SELECT count(*) INTO v_count FROM d_memories;
-  RETURN v_count;
-END; $$;
-
-CREATE OR REPLACE FUNCTION kb_document_retention_reap(p_days INTEGER)
-RETURNS BIGINT
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
-DECLARE v_count BIGINT;
-BEGIN
-  IF p_days NOT BETWEEN 1 AND 36500 THEN
-    RAISE EXCEPTION 'document retention days must be 1..36500' USING ERRCODE='22023';
-  END IF;
-  WITH targets AS MATERIALIZED (
-         SELECT id,project,generation,file_path FROM kb_documents
-          WHERE updated_at<pg_now_text('-'||p_days||' days')),
-       target_regions AS MATERIALIZED (
-         SELECT id FROM kb_doc_regions WHERE chunk_id IN (SELECT id FROM targets)),
-       target_derived AS MATERIALIZED (
-         SELECT DISTINCT derived_kind,derived_memory_id FROM derived_memory_dependencies
-          WHERE input_kind IN ('document','document_version')
-            AND input_id IN (SELECT id::TEXT FROM targets)),
-       target_artifacts AS MATERIALIZED (
-         SELECT DISTINCT artifact_id FROM artifact_citations
-          WHERE source_kind IN ('document','document_version')
-            AND source_id IN (SELECT id::TEXT FROM targets)),
-       d_rederive AS (
-         DELETE FROM derived_rederivation_queue q USING target_derived d
-          WHERE q.derived_kind=d.derived_kind AND q.derived_memory_id=d.derived_memory_id
-          RETURNING q.derived_memory_id),
-       d_deps AS (
-         DELETE FROM derived_memory_dependencies d WHERE
-           (d.input_kind IN ('document','document_version')
-             AND d.input_id IN (SELECT id::TEXT FROM targets))
-           OR EXISTS (SELECT 1 FROM target_derived x WHERE x.derived_kind=d.derived_kind
-                       AND x.derived_memory_id=d.derived_memory_id) RETURNING d.id),
-       d_registry AS (
-         DELETE FROM derived_memory_registry r USING target_derived d
-          WHERE r.derived_kind=d.derived_kind AND r.derived_memory_id=d.derived_memory_id
-            AND (SELECT count(*) FROM d_rederive)>=0
-            AND (SELECT count(*) FROM d_deps)>=0 RETURNING r.derived_memory_id),
-       d_enrichments AS (
-         DELETE FROM report_enrichments WHERE
-           subject_type IN ('document','document_version')
-           AND subject_id IN (SELECT id::TEXT FROM targets) RETURNING subject_id),
-       d_evidence AS (
-         DELETE FROM memory_evidence_events WHERE
-           (object_kind IN ('document','document_version')
-             AND object_id IN (SELECT id::TEXT FROM targets))
-           OR source_document_id IN (SELECT id::TEXT FROM targets) RETURNING event_id),
-       d_artifacts AS (
-         DELETE FROM artifacts WHERE id IN (SELECT artifact_id FROM target_artifacts)
-           AND (SELECT count(*) FROM d_registry)>=0 RETURNING id),
-       d_cells AS (
-         DELETE FROM kb_table_cells WHERE region_id IN (SELECT id FROM target_regions)
-           RETURNING id),
-       d_regions AS (
-         DELETE FROM kb_doc_regions WHERE id IN (SELECT id FROM target_regions)
-           AND (SELECT count(*) FROM d_cells)>=0 RETURNING id),
-       d_ops AS (
-         DELETE FROM vector_index_ops WHERE memory_id IS NULL
-           AND point_id IN (SELECT id FROM targets) RETURNING point_id),
-       d_jobs AS (
-         DELETE FROM kb_async_jobs WHERE document_id IN (SELECT id FROM targets)
-           RETURNING document_id),
-       d_embed AS (
-         DELETE FROM kb_embeddings WHERE point_id IN (SELECT id FROM targets)
-           RETURNING point_id),
-       d_pdf AS (
-         DELETE FROM kb_pdf_embeddings WHERE point_id IN (SELECT id FROM targets)
-           RETURNING point_id),
-       d_assets AS (
-         DELETE FROM kb_doc_assets a USING targets t
-          WHERE a.project=t.project AND a.generation=t.generation
-            AND a.document_key=t.file_path RETURNING a.id),
-       d_docs AS (
-         DELETE FROM kb_documents WHERE id IN (SELECT id FROM targets)
-           AND (SELECT count(*) FROM d_artifacts)>=0
-           AND (SELECT count(*) FROM d_enrichments)>=0
-           AND (SELECT count(*) FROM d_evidence)>=0
-           AND (SELECT count(*) FROM d_regions)>=0
-           AND (SELECT count(*) FROM d_ops)>=0 AND (SELECT count(*) FROM d_jobs)>=0
-           AND (SELECT count(*) FROM d_embed)>=0 AND (SELECT count(*) FROM d_pdf)>=0
-           AND (SELECT count(*) FROM d_assets)>=0 RETURNING id),
-       d_files AS (
-         DELETE FROM kb_file_index f USING targets t
-          WHERE f.project=t.project AND f.generation=t.generation
-            AND f.file_path=t.file_path AND (SELECT count(*) FROM d_docs)>=0 RETURNING f.id)
-  SELECT count(*) INTO v_count FROM d_docs;
-  RETURN v_count;
-END; $$;
-
--- A receipt is durable verified coverage from one retained owner, not a health
--- check or delivery acknowledgement. Offline and revoked servers remain required.
 ALTER TABLE kb_subject_erasure_request ADD COLUMN IF NOT EXISTS coverage_policy TEXT NOT NULL DEFAULT 'legacy';
 CREATE TABLE IF NOT EXISTS kb_subject_erasure_owner_coverage (
  request_id TEXT NOT NULL REFERENCES kb_subject_erasure_request(request_id),
@@ -7737,268 +7625,18 @@ REVOKE ALL ON kb_subject_erasure_owner_coverage FROM PUBLIC;
 
 -- Called under the request row lock; a newly registered retained owner cannot
 -- disappear from coverage merely because another owner has already replied.
-CREATE OR REPLACE FUNCTION kb_subject_erasure_require_owners(p_request_id TEXT) RETURNS VOID
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
-BEGIN
- INSERT INTO kb_subject_erasure_owner_coverage(request_id,owner_id)
- SELECT p_request_id,'server:'||server_id FROM kb_server_registry WHERE status<>'pending'
- ON CONFLICT DO NOTHING;
- IF NOT EXISTS(SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id) THEN
-  INSERT INTO kb_subject_erasure_owner_coverage(request_id,owner_id) VALUES(p_request_id,'standalone');
- END IF;
-END $$;
-REVOKE ALL ON FUNCTION kb_subject_erasure_require_owners(TEXT) FROM PUBLIC;
+-- Retired destructive retention/subject-erasure routines are removed on upgrade.
+-- Historical request/coverage records remain intact. Memory lifecycle changes
+-- are retained native state transitions, not SQL payload destruction.
+DROP FUNCTION IF EXISTS kb_subject_erasure_ack(TEXT,TEXT,TEXT,BIGINT);
+DROP FUNCTION IF EXISTS kb_subject_erasure_begin(TEXT,TEXT,JSONB);
+DROP FUNCTION IF EXISTS kb_subject_erasure_complete(TEXT,TEXT,BIGINT);
+DROP FUNCTION IF EXISTS kb_subject_erasure_require_owners(TEXT);
+DROP FUNCTION IF EXISTS kb_memory_retention_reap(INTEGER);
+DROP FUNCTION IF EXISTS kb_memory_sensitivity_retention_reap(TEXT,INTEGER);
+DROP FUNCTION IF EXISTS kb_document_retention_reap(INTEGER);
 
 
-CREATE OR REPLACE FUNCTION kb_subject_erasure_begin(
-  p_request_id TEXT, p_subject TEXT, p_session_ids JSONB
-) RETURNS TABLE(deleted_memories BIGINT, deleted_documents BIGINT, already_done BOOLEAN)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_digest TEXT;
-  v_row kb_subject_erasure_request%ROWTYPE;
-  v_sessions TEXT[];
-  v_memories BIGINT[];
-  v_documents BIGINT[];
-  v_regions BIGINT[];
-  v_units BIGINT[];
-  v_derived TEXT[];
-  v_memory_count BIGINT := 0;
-  v_document_count BIGINT := 0;
-BEGIN
-  IF p_request_id !~ '^[A-Za-z0-9._-]{16,128}$' OR
-     p_subject IS NULL OR char_length(p_subject) NOT BETWEEN 1 AND 600 OR
-     jsonb_typeof(COALESCE(p_session_ids,'[]'::JSONB)) <> 'array' THEN
-    RAISE EXCEPTION 'invalid subject-erasure request' USING ERRCODE='22023';
-  END IF;
-  IF jsonb_array_length(p_session_ids)>4096 OR EXISTS(
-   SELECT 1 FROM jsonb_array_elements(p_session_ids) value
-   WHERE jsonb_typeof(value)<>'string' OR length(value#>>'{}') NOT BETWEEN 1 AND 1024) THEN
-    RAISE EXCEPTION 'invalid subject-erasure session set' USING ERRCODE='22023';
-  END IF;
-  v_digest := encode(sha256(convert_to(p_subject,'UTF8')),'hex');
-  INSERT INTO kb_subject_erasure_request(request_id,subject_digest,coverage_policy)
-    VALUES(p_request_id,v_digest,'memory-erasure-v2') ON CONFLICT(request_id) DO NOTHING;
-  SELECT * INTO v_row FROM kb_subject_erasure_request
-    WHERE request_id=p_request_id FOR UPDATE;
-  IF v_row.subject_digest<>v_digest THEN
-    RAISE EXCEPTION 'request id belongs to another subject' USING ERRCODE='22023';
-  END IF;
-  IF v_row.state='completed' THEN
-    RETURN QUERY SELECT v_row.memory_count,v_row.document_count,true;
-    RETURN;
-  END IF;
-
-  PERFORM kb_subject_erasure_require_owners(p_request_id);
-  SELECT COALESCE(array_agg(CASE WHEN value ~ '^sha256:[0-9a-f]{64}$' THEN substring(value FROM 8)
- ELSE encode(sha256(convert_to(value,'UTF8')),'hex') END),'{}'::TEXT[]) INTO v_sessions
-    FROM jsonb_array_elements_text(p_session_ids);
-  -- Freeze canonical writers before traversing; late queued producers also
-  -- encounter the durable dependency guard after these locks are released.
-  LOCK TABLE memories,memory_fact_actors,memory_lineage,memory_units,derived_memory_dependencies,
-    artifacts,artifact_citations IN SHARE ROW EXCLUSIVE MODE;
-  UPDATE memory_erasure_epoch SET generation=generation+1 WHERE id=1;
-  INSERT INTO memory_erasure_sessions(session_digest) SELECT unnest(v_sessions) ON CONFLICT DO NOTHING;
-  SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_memories FROM memories
-    WHERE owner_principal=p_subject
-      OR EXISTS (SELECT 1 FROM memory_fact_actors a
-                 WHERE a.memory_id=memories.id AND a.actor_principal=p_subject)
-      OR encode(sha256(convert_to(COALESCE(source_session,''),'UTF8')),'hex')=ANY(v_sessions);
-  SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_documents FROM kb_documents
-    WHERE owner_principal=p_subject;
-  -- Follow declared derivation, never generic related links. UNION terminates
-  -- cycles. Exhausting the bound aborts the transaction instead of certifying
-  -- a partially erased subject. The privacy definer sees every required scope.
-  WITH RECURSIVE edges(child,parent) AS MATERIALIZED (
-    SELECT object_id,substring(source_ref FROM 8)::bigint FROM memory_lineage
-      WHERE object_type='memory' AND source_kind='memory' AND source_ref ~ '^memory:-?[0-9]+$'
-    UNION
-    SELECT object_id,(source_ref::jsonb->>'record_id')::bigint FROM memory_lineage
-      WHERE object_type='memory' AND source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1')
-    UNION
-    SELECT u.memory_id,(input->>'record_id')::bigint FROM memory_units u
-      JOIN memory_lineage l ON l.object_type='memory_unit' AND l.object_id=u.id
-      CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN l.source_kind='episode-card-input-v1'
-        THEN l.source_ref::jsonb->'inputs' ELSE '[]'::jsonb END) input
-      WHERE u.is_episode_card=1 AND l.source_kind='episode-card-input-v1'
-    UNION
-    SELECT derived_memory_id::bigint,input_id::bigint FROM derived_memory_dependencies
-      WHERE derived_kind IN ('memory','cognified_memory','episode_card') AND input_kind='memory'
-  ), closure(id) AS (
-    SELECT unnest(v_memories)
-    UNION SELECT e.child FROM edges e JOIN closure c ON e.parent=c.id
-  ) SELECT COALESCE(array_agg(id),'{}'::bigint[]) INTO v_memories
-    FROM (SELECT id FROM closure LIMIT 10001) bounded;
-  IF cardinality(v_memories)>10000 THEN
-    RAISE EXCEPTION 'subject erasure dependency closure exceeds bound';
-  END IF;
-  INSERT INTO memory_erasure_intents(memory_id,scope_type,scope_value,payload_digest)
-    SELECT id,scope_type,scope_value,COALESCE((SELECT l.source_ref::jsonb->>'payload_digest'
- FROM memory_lineage l WHERE l.object_type='memory' AND l.object_id=memories.id
- AND l.source_kind='memory-compaction-origin-v1' LIMIT 1),encode(sha256(convert_to(content,'UTF8')),'hex'))
-    FROM memories WHERE id=ANY(v_memories) ON CONFLICT(memory_id) DO NOTHING;
-  -- Only retained payloads contribute to the reported deletion count.
-  SELECT count(*) INTO v_memory_count FROM memories WHERE id=ANY(v_memories);
-
-  v_document_count := cardinality(v_documents);
-
-  SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_units
-    FROM memory_units WHERE memory_id=ANY(v_memories);
-  SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_regions
-    FROM kb_doc_regions WHERE chunk_id=ANY(v_documents);
-  SELECT COALESCE(array_agg(DISTINCT derived_kind || chr(31) || derived_memory_id),'{}'::TEXT[])
-    INTO v_derived FROM derived_memory_dependencies
-    WHERE (input_kind='memory' AND input_id IN
-             (SELECT x::TEXT FROM unnest(v_memories) AS x))
-       OR (input_kind IN ('document','document_version') AND input_id IN
-             (SELECT x::TEXT FROM unnest(v_documents) AS x));
-
-  DELETE FROM derived_rederivation_queue
-    WHERE derived_kind || chr(31) || derived_memory_id=ANY(v_derived);
-  DELETE FROM derived_memory_dependencies
-    WHERE derived_kind || chr(31) || derived_memory_id=ANY(v_derived)
-       OR (input_kind='memory' AND input_id IN
-             (SELECT x::TEXT FROM unnest(v_memories) AS x))
-       OR (input_kind IN ('document','document_version') AND input_id IN
-             (SELECT x::TEXT FROM unnest(v_documents) AS x));
-  DELETE FROM derived_memory_registry
-    WHERE derived_kind || chr(31) || derived_memory_id=ANY(v_derived);
-  DELETE FROM report_enrichments
-    WHERE (subject_type='memory' AND subject_id IN
-             (SELECT x::TEXT FROM unnest(v_memories) AS x))
-       OR (subject_type IN ('document','document_version') AND subject_id IN
-             (SELECT x::TEXT FROM unnest(v_documents) AS x));
-
-  DELETE FROM memory_embeddings WHERE point_id=ANY(v_memories) OR point_id=ANY(v_units);
-  DELETE FROM memory_evidence_events
-    WHERE (object_kind='memory' AND object_id IN
-             (SELECT x::TEXT FROM unnest(v_memories) AS x))
-       OR (object_kind IN ('document','document_version') AND object_id IN
-             (SELECT x::TEXT FROM unnest(v_documents) AS x))
-       OR source_document_id IN (SELECT x::TEXT FROM unnest(v_documents) AS x);
-  DELETE FROM prospective_memories WHERE encode(sha256(convert_to(source_session,'UTF8')),'hex')=ANY(v_sessions);
-  DELETE FROM epistemic_directives WHERE encode(sha256(convert_to(source_session,'UTF8')),'hex')=ANY(v_sessions);
-  DELETE FROM learning_signals WHERE encode(sha256(convert_to(source_session,'UTF8')),'hex')=ANY(v_sessions);
-  DELETE FROM tasks WHERE encode(sha256(convert_to(session_id,'UTF8')),'hex')=ANY(v_sessions);
-  DELETE FROM learning_proposals WHERE target_memory_id=ANY(v_memories);
-  DELETE FROM learning_signals WHERE target_memory_id=ANY(v_memories);
-  DELETE FROM learning_observations WHERE observation_id IN (
-    SELECT e.observation_id FROM learning_observation_evidence e
-      JOIN interaction_event_embeddings i ON i.source_event_id=e.source_event_id
-      WHERE encode(sha256(convert_to(i.session_id,'UTF8')),'hex')=ANY(v_sessions));
-  DELETE FROM interaction_event_embeddings WHERE encode(sha256(convert_to(session_id,'UTF8')),'hex')=ANY(v_sessions);
-  -- FK-backed units, summaries, episodes, history and embedding versions cascade.
-  -- Copied relations and profiles can instead belong to a different root.
-  DELETE FROM entity_profiles WHERE entity_id IN (
-    SELECT entity FROM memory_entities WHERE memory_id=ANY(v_memories));
-  DELETE FROM memory_relations WHERE id IN (
-    SELECT object_id FROM memory_lineage WHERE object_type='relation'
-      AND source_kind IN ('memory-relation-input-v1','memory-relation-input-v2')
-      AND source_ref::jsonb->>'record_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id)));
-  DELETE FROM rules WHERE id IN (
-    SELECT object_id FROM memory_lineage WHERE object_type='rule' AND (
-      (source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1') AND source_ref::jsonb->>'record_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id)))
-      OR (source_kind='metadata' AND source_ref=ANY(ARRAY(SELECT 'memory-cognify-rule-v1:'||id::text FROM unnest(v_memories) id)))));
-  DELETE FROM artifacts WHERE payload->>'memory_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id))
-    OR encode(sha256(convert_to(payload->>'session_id','UTF8')),'hex')=ANY(v_sessions);
-  DELETE FROM memories WHERE id=ANY(v_memories);
-
-  DELETE FROM artifacts a WHERE EXISTS (
-    SELECT 1 FROM artifact_citations c WHERE c.artifact_id=a.id
-      AND ((c.source_kind='memory'
-             AND c.source_id IN (SELECT x::TEXT FROM unnest(v_memories) AS x))
-        OR (c.source_kind IN ('document','document_version')
-             AND c.source_id IN (SELECT x::TEXT FROM unnest(v_documents) AS x))));
-  DELETE FROM vector_index_ops WHERE memory_id IS NULL AND point_id=ANY(v_documents);
-  DELETE FROM kb_async_jobs WHERE document_id=ANY(v_documents);
-  DELETE FROM kb_embeddings WHERE point_id=ANY(v_documents);
-  DELETE FROM kb_pdf_embeddings WHERE point_id=ANY(v_documents);
-  DELETE FROM kb_doc_assets a USING kb_documents d
-    WHERE d.id=ANY(v_documents) AND a.project=d.project
-      AND a.generation=d.generation AND a.document_key=d.file_path;
-  DELETE FROM kb_table_cells WHERE region_id=ANY(v_regions);
-  DELETE FROM kb_doc_regions WHERE id=ANY(v_regions);
-  DELETE FROM kb_file_index WHERE owner_principal=p_subject;
-  DELETE FROM kb_documents WHERE id=ANY(v_documents);
-
-  v_memory_count:=v_memory_count+v_row.memory_count;
-  v_document_count:=v_document_count+v_row.document_count;
-  UPDATE kb_subject_erasure_request SET state='knowledge_done',memory_count=v_memory_count,
-    document_count=v_document_count WHERE request_id=p_request_id;
-  RETURN QUERY SELECT v_memory_count,v_document_count,(v_row.state='knowledge_done');
-END; $$;
-
-CREATE OR REPLACE FUNCTION kb_subject_erasure_complete(
-  p_request_id TEXT, p_actor TEXT, p_db1_count BIGINT
-) RETURNS BOOLEAN
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_row kb_subject_erasure_request%ROWTYPE;
-  v_detail TEXT;
-BEGIN
-  SELECT * INTO v_row FROM kb_subject_erasure_request
-    WHERE request_id=p_request_id FOR UPDATE;
-  IF v_row.request_id IS NULL OR v_row.state='pending' OR p_actor='' OR p_db1_count<0 THEN
-    RAISE EXCEPTION 'subject erasure is not ready to complete' USING ERRCODE='22023';
-  END IF;
-  IF v_row.coverage_policy<>'memory-erasure-v2' OR NOT EXISTS(
-   SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id) OR EXISTS(
-   SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND state<>'verified') THEN
-    RETURN false;
-  END IF;
-  IF v_row.state='completed' THEN RETURN false; END IF;
-  v_detail := jsonb_build_object(
-    'request_id',p_request_id,'subject_digest',v_row.subject_digest,
-    'stores',jsonb_build_object('db1',p_db1_count,'memory',v_row.memory_count,
-      'documents',v_row.document_count),'policy_revision','memory-erasure-v2','coverage_scope','managed_application_stores',
-    'verified_owners',(SELECT count(*) FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND state='verified'),
-    'outcome','completed')::TEXT;
-  PERFORM kb_audit_worm_append('privacy-admin',p_actor,'subject.erase.completed',
-    p_request_id,'allow',v_detail);
-  UPDATE kb_subject_erasure_request SET state='completed',db1_count=p_db1_count,
-    completed_at=pg_now_text() WHERE request_id=p_request_id;
-  RETURN true;
-END; $$;
-
-CREATE OR REPLACE FUNCTION kb_subject_erasure_ack(
- p_request_id TEXT,p_actor TEXT,p_transport TEXT,p_db1_count BIGINT
-) RETURNS TABLE(event_created BOOLEAN,coverage_complete BOOLEAN,pending_owners BIGINT)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
-DECLARE request kb_subject_erasure_request%ROWTYPE; owner_key TEXT; remaining BIGINT; emitted BOOLEAN:=FALSE;
-BEGIN
- SELECT * INTO request FROM kb_subject_erasure_request WHERE request_id=p_request_id FOR UPDATE;
- IF request.request_id IS NULL OR request.state='pending' OR request.coverage_policy<>'memory-erasure-v2'
- OR p_actor='' OR p_db1_count<0 THEN RAISE EXCEPTION 'erasure coverage is not ready'; END IF;
- SELECT CASE WHEN count(*)=1 THEN min('server:'||server_id) END INTO owner_key FROM kb_server_registry
- WHERE status='active' AND p_transport='cert:'||client_issuer||':'||client_serial_norm;
- IF owner_key IS NULL AND NOT EXISTS(SELECT 1 FROM kb_server_registry WHERE status<>'pending')
- AND EXISTS(SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND owner_id='standalone') THEN
-  owner_key:='standalone';
- END IF;
- IF owner_key IS NULL THEN RAISE EXCEPTION 'authenticated retained owner receipt required'; END IF;
- IF request.state='completed' THEN
-  IF NOT EXISTS(SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND owner_id=owner_key AND state='verified') THEN
-   RAISE EXCEPTION 'owner is outside this completed erasure manifest';
-  END IF;
-  RETURN QUERY SELECT FALSE,TRUE,0::bigint; RETURN;
- END IF;
- PERFORM kb_subject_erasure_require_owners(p_request_id);
- UPDATE kb_subject_erasure_owner_coverage SET state='verified',deleted_count=p_db1_count,verified_at=clock_timestamp()
- WHERE request_id=p_request_id AND owner_id=owner_key AND state='pending';
- SELECT count(*) INTO remaining FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND state<>'verified';
- IF remaining=0 THEN
-  emitted:=kb_subject_erasure_complete(p_request_id,p_actor,
-   (SELECT COALESCE(sum(deleted_count),0)::bigint FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id));
- END IF;
- RETURN QUERY SELECT emitted,remaining=0,remaining;
-END $$;
-REVOKE ALL ON FUNCTION kb_subject_erasure_ack(TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
-
-REVOKE ALL ON FUNCTION kb_memory_retention_reap(INTEGER) FROM PUBLIC;
-REVOKE ALL ON FUNCTION kb_memory_sensitivity_retention_reap(TEXT,INTEGER) FROM PUBLIC;
-REVOKE ALL ON FUNCTION kb_document_retention_reap(INTEGER) FROM PUBLIC;
-REVOKE ALL ON FUNCTION kb_subject_erasure_begin(TEXT,TEXT,JSONB) FROM PUBLIC;
-REVOKE ALL ON FUNCTION kb_subject_erasure_complete(TEXT,TEXT,BIGINT) FROM PUBLIC;
 
 -- The external SQLite worker claims rows while holding their PostgreSQL locks,
 -- writes them idempotently using event_id="kb:<outbox_id>", then acknowledges
@@ -13037,7 +12675,8 @@ BEGIN
       ON vc.principal=r.principal AND vc.agent=r.agent AND vc.cred=r.cred AND
          vc.version=r.to_version WHERE r.key_id=p_key_id AND
       r.principal=p_principal AND r.agent=COALESCE(p_agent,'') AND
-      r.cred=COALESCE(p_cred,'') AND r.team_id=p_team AND r.state='activated') THEN
+      r.cred=COALESCE(p_cred,'') AND r.team_id=p_team AND
+      r.state IN ('activated','revoked','retired') AND r.failure_phase='') THEN
     RAISE EXCEPTION 'org_egress_binding_set: unavailable authority tuple' USING ERRCODE='42501';
   END IF;
   INSERT INTO org_egress_binding(team_id,model_id,billable_model,pricing_version,key_id,
@@ -13119,7 +12758,8 @@ BEGIN
     WHERE x.team_id=p_team AND x.model_id=p_model AND x.enabled AND NOT x.overage_fenced AND
       EXISTS(SELECT 1 FROM org_vault_rotation vr WHERE vr.key_id=x.key_id AND
         vr.principal=x.vault_principal AND vr.agent=x.vault_agent AND vr.cred=x.vault_cred AND
-        vr.team_id=x.team_id AND vr.to_version=vc.version AND vr.state='activated') AND
+        vr.team_id=x.team_id AND vr.to_version=vc.version AND
+        vr.state IN ('activated','revoked','retired') AND vr.failure_phase='') AND
       c.enabled AND c.provider='bedrock' AND c.wire='bedrock' AND c.bedrock_api='converse';
   IF NOT FOUND THEN
     RAISE EXCEPTION 'org_egress_admit: not authorized' USING ERRCODE='42501';
@@ -13404,6 +13044,301 @@ REVOKE ALL ON FUNCTION org_egress_dispatch_owner_guard(BIGINT,TEXT,BIGINT) FROM 
 REVOKE ALL ON FUNCTION org_egress_budget_settle_overage(TEXT,TEXT,NUMERIC) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_egress_dispatch_settle(BIGINT,TEXT,BIGINT,TEXT,INT,BIGINT,BIGINT,BIGINT,BIGINT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_egress_recover(INT) FROM PUBLIC;
+
+-- ============================================================================
+-- P7 rotation requests.  An admin files a request (rotate the credential behind
+-- a team's egress binding for one model, or remediate a failed rotation); the
+-- KB daemon, which holds custody and the signed high-water mark, takes it up
+-- and drives the fenced rotation workflow to completion.  The requester never
+-- touches key material and the request row never holds any.
+CREATE TABLE IF NOT EXISTS org_rotation_request (
+  id           BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
+  team_id      BIGINT NOT NULL REFERENCES kb_team(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL CHECK (kind IN ('rotate','remediate','adopt')),
+  model_id     TEXT NOT NULL DEFAULT '' CHECK (char_length(model_id) <= 200),
+  rotation_id  BIGINT REFERENCES org_vault_rotation(id) ON DELETE CASCADE,
+  -- adopt names the slot directly: it has no binding yet.
+  slot_key_id    TEXT NOT NULL DEFAULT '' CHECK (char_length(slot_key_id) <= 600),
+  slot_principal TEXT NOT NULL DEFAULT '' CHECK (char_length(slot_principal) <= 600),
+  slot_agent     TEXT NOT NULL DEFAULT '' CHECK (char_length(slot_agent) <= 255),
+  slot_cred      TEXT NOT NULL DEFAULT '' CHECK (char_length(slot_cred) <= 255),
+  requested_by TEXT NOT NULL CHECK (char_length(requested_by) BETWEEN 1 AND 575),
+  state        TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','accepted','rejected')),
+  detail       TEXT NOT NULL DEFAULT '' CHECK (char_length(detail) <= 500),
+  created_at   TEXT NOT NULL DEFAULT (pg_now_text()),
+  updated_at   TEXT NOT NULL DEFAULT (pg_now_text()),
+  CHECK ((kind='rotate' AND model_id<>'') OR (kind='remediate' AND rotation_id IS NOT NULL) OR
+         (kind='adopt' AND slot_key_id<>'' AND slot_principal<>''))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_vault_rotation_request_pending
+  ON org_rotation_request(team_id,kind,model_id,slot_principal,slot_agent,slot_cred,
+     COALESCE(rotation_id,0))
+  WHERE state='pending';
+ALTER TABLE org_rotation_request ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_vault_rotation_request_read ON org_rotation_request;
+CREATE POLICY p_vault_rotation_request_read ON org_rotation_request FOR SELECT
+  USING (kb_principal_is_admin());
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_request_add(
+  p_actor TEXT,p_team_id BIGINT,p_kind TEXT,p_model_id TEXT,p_rotation_id BIGINT
+) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE v_id BIGINT; v_key TEXT;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR p_team_id IS NULL OR p_kind NOT IN ('rotate','remediate') OR
+     (p_kind='rotate' AND (COALESCE(p_model_id,'')='' OR char_length(p_model_id)>200)) OR
+     (p_kind='remediate' AND p_rotation_id IS NULL) THEN
+    RAISE EXCEPTION 'org_vault_rotation_request_add: invalid input' USING ERRCODE='22023';
+  END IF;
+  IF NOT org_vault_rotation_authorized(p_actor,p_team_id) OR NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_vault_rotation_request_add: not authorized' USING ERRCODE='42501';
+  END IF;
+  IF p_kind='rotate' THEN
+    SELECT key_id INTO v_key FROM org_egress_binding WHERE team_id=p_team_id AND model_id=p_model_id;
+    IF v_key IS NULL THEN
+      RAISE EXCEPTION 'org_vault_rotation_request_add: no egress binding' USING ERRCODE='P0002';
+    END IF;
+  ELSE
+    SELECT key_id INTO v_key FROM org_vault_rotation WHERE id=p_rotation_id AND team_id=p_team_id;
+    IF v_key IS NULL THEN
+      RAISE EXCEPTION 'org_vault_rotation_request_add: no such rotation' USING ERRCODE='P0002';
+    END IF;
+  END IF;
+  SELECT id INTO v_id FROM org_rotation_request WHERE state='pending' AND
+    team_id=p_team_id AND kind=p_kind AND
+    model_id=CASE WHEN p_kind='rotate' THEN p_model_id ELSE '' END AND
+    COALESCE(rotation_id,0)=CASE WHEN p_kind='remediate' THEN p_rotation_id ELSE 0 END;
+  IF v_id IS NOT NULL THEN RETURN v_id; END IF;
+  INSERT INTO org_rotation_request(team_id,kind,model_id,rotation_id,requested_by)
+    VALUES(p_team_id,p_kind,CASE WHEN p_kind='rotate' THEN p_model_id ELSE '' END,
+      CASE WHEN p_kind='remediate' THEN p_rotation_id END,p_actor)
+    RETURNING id INTO v_id;
+  PERFORM kb_audit_worm_append('kb',p_actor,'vault.rotation.request',v_key,'allow',
+    json_build_object('request_id',v_id,'kind',p_kind,'team_id',p_team_id)::text);
+  RETURN v_id;
+END; $$;
+
+-- Adoption: a credential stored with an ordinary vault write is at a version no
+-- rotation reached, so key use refuses it.  The daemon adopts it by re-staging
+-- the same credential as the next version through a fenced, HWM-attested
+-- rotation.  Only a slot nothing has made usable yet can be adopted.
+CREATE OR REPLACE FUNCTION org_vault_rotation_request_adopt(
+  p_actor TEXT,p_team_id BIGINT,p_key_id TEXT,p_principal TEXT,p_agent TEXT,p_cred TEXT
+) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE v_id BIGINT; v_cur BIGINT;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR p_team_id IS NULL OR COALESCE(p_key_id,'')='' OR
+     char_length(p_key_id)>600 OR COALESCE(p_principal,'')='' OR char_length(p_principal)>600 OR
+     char_length(COALESCE(p_agent,''))>255 OR char_length(COALESCE(p_cred,''))>255 THEN
+    RAISE EXCEPTION 'org_vault_rotation_request_adopt: invalid input' USING ERRCODE='22023';
+  END IF;
+  IF NOT org_vault_rotation_authorized(p_actor,p_team_id) OR NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_vault_rotation_request_adopt: not authorized' USING ERRCODE='42501';
+  END IF;
+  SELECT c.version INTO v_cur FROM org_vault_current c JOIN org_vault_secret s
+      ON s.principal=c.principal AND s.agent=c.agent AND s.cred=c.cred AND s.version=c.version
+   WHERE c.principal=p_principal AND c.agent=COALESCE(p_agent,'') AND
+     c.cred=COALESCE(p_cred,'') AND s.team_id=p_team_id;
+  IF v_cur IS NULL THEN
+    RAISE EXCEPTION 'org_vault_rotation_request_adopt: no such slot' USING ERRCODE='P0002';
+  END IF;
+  IF EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.principal=p_principal AND
+      r.agent=COALESCE(p_agent,'') AND r.cred=COALESCE(p_cred,'') AND
+      ((r.to_version=v_cur AND r.failure_phase='') OR r.state<>'retired')) THEN
+    RAISE EXCEPTION 'org_vault_rotation_request_adopt: slot already usable or rotating'
+      USING ERRCODE='P0003';
+  END IF;
+  SELECT id INTO v_id FROM org_rotation_request WHERE state='pending' AND
+    team_id=p_team_id AND kind='adopt' AND slot_principal=p_principal AND
+    slot_agent=COALESCE(p_agent,'') AND slot_cred=COALESCE(p_cred,'');
+  IF v_id IS NOT NULL THEN RETURN v_id; END IF;
+  INSERT INTO org_rotation_request(team_id,kind,slot_key_id,slot_principal,slot_agent,
+      slot_cred,requested_by)
+    VALUES(p_team_id,'adopt',p_key_id,p_principal,COALESCE(p_agent,''),COALESCE(p_cred,''),
+      p_actor)
+    RETURNING id INTO v_id;
+  PERFORM kb_audit_worm_append('kb',p_actor,'vault.rotation.request',p_key_id,'allow',
+    json_build_object('request_id',v_id,'kind','adopt','team_id',p_team_id)::text);
+  RETURN v_id;
+END; $$;
+
+-- The oldest pending request, with the slot a rotate request names.  The caller
+-- settles it after acting; acting is idempotent, so two daemons racing on one
+-- request converge on the same rotation.
+CREATE OR REPLACE FUNCTION org_vault_rotation_request_next(p_actor TEXT)
+RETURNS TABLE(id BIGINT,team_id BIGINT,kind TEXT,model_id TEXT,rotation_id BIGINT,key_id TEXT,
+  vault_principal TEXT,vault_agent TEXT,vault_cred TEXT)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  IF COALESCE(p_actor,'')<>current_setting('aimee.principal',true) OR
+     NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_vault_rotation_request_next: not authorized' USING ERRCODE='42501';
+  END IF;
+  RETURN QUERY SELECT q.id,q.team_id,q.kind,q.model_id,q.rotation_id,
+      CASE WHEN q.kind='adopt' THEN q.slot_key_id ELSE b.key_id END,
+      CASE WHEN q.kind='adopt' THEN q.slot_principal ELSE b.vault_principal END,
+      CASE WHEN q.kind='adopt' THEN q.slot_agent ELSE b.vault_agent END,
+      CASE WHEN q.kind='adopt' THEN q.slot_cred ELSE b.vault_cred END
+    FROM org_rotation_request q
+    LEFT JOIN org_egress_binding b ON q.kind='rotate' AND b.team_id=q.team_id AND
+      b.model_id=q.model_id
+   WHERE q.state='pending' ORDER BY q.id LIMIT 1;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_request_settle(
+  p_actor TEXT,p_request_id BIGINT,p_state TEXT,p_rotation_id BIGINT,p_detail TEXT
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE q org_rotation_request%ROWTYPE;
+BEGIN
+  IF COALESCE(p_actor,'')<>current_setting('aimee.principal',true) OR
+     NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_vault_rotation_request_settle: not authorized' USING ERRCODE='42501';
+  END IF;
+  IF p_state NOT IN ('accepted','rejected') OR char_length(COALESCE(p_detail,''))>500 THEN
+    RAISE EXCEPTION 'org_vault_rotation_request_settle: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO q FROM org_rotation_request WHERE id=p_request_id FOR UPDATE;
+  IF NOT FOUND OR q.state<>'pending' THEN RETURN; END IF;
+  UPDATE org_rotation_request SET state=p_state,
+    rotation_id=COALESCE(p_rotation_id,q.rotation_id),detail=COALESCE(p_detail,''),
+    updated_at=pg_now_text() WHERE id=q.id;
+  PERFORM kb_audit_worm_append('kb',p_actor,'vault.rotation.request.settle',q.kind,
+    CASE WHEN p_state='accepted' THEN 'allow' ELSE 'deny' END,
+    json_build_object('request_id',q.id,'team_id',q.team_id,
+      'rotation_id',COALESCE(p_rotation_id,q.rotation_id),'detail',COALESCE(p_detail,''))::text);
+END; $$;
+
+-- Rotations the daemon still has to drive: everything short of retired, except
+-- failed rows, which wait for an explicit remediate request.
+CREATE OR REPLACE FUNCTION org_vault_rotation_pending(p_actor TEXT,p_limit INTEGER)
+RETURNS TABLE(id BIGINT,team_id BIGINT)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  IF COALESCE(p_actor,'')<>current_setting('aimee.principal',true) OR
+     NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_vault_rotation_pending: not authorized' USING ERRCODE='42501';
+  END IF;
+  RETURN QUERY SELECT r.id,r.team_id FROM org_vault_rotation r
+   WHERE r.state NOT IN ('retired','failed') AND r.team_id IS NOT NULL AND NOT r.compromise
+     AND (r.claim_owner='' OR r.claim_until<=clock_timestamp())
+   ORDER BY r.id LIMIT LEAST(GREATEST(COALESCE(p_limit,1),1),100);
+END; $$;
+
+-- Owner/admin listing for the CLI: requests with their outcome and the rotation
+-- they produced, newest first.
+CREATE OR REPLACE FUNCTION org_vault_rotation_request_list(p_actor TEXT,p_team_id BIGINT,
+  p_limit INTEGER)
+RETURNS TABLE(id BIGINT,team_id BIGINT,kind TEXT,model_id TEXT,rotation_id BIGINT,state TEXT,
+  detail TEXT,created_at TEXT,rotation_state TEXT,failure_phase TEXT,last_error TEXT,
+  slot_principal TEXT)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  IF NOT org_vault_rotation_authorized(p_actor,p_team_id) OR NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_vault_rotation_request_list: not authorized' USING ERRCODE='42501';
+  END IF;
+  RETURN QUERY SELECT q.id,q.team_id,q.kind,q.model_id,q.rotation_id,q.state,q.detail,
+      q.created_at,COALESCE(r.state,''),COALESCE(r.failure_phase,''),COALESCE(r.last_error,''),
+      q.slot_principal
+    FROM org_rotation_request q LEFT JOIN org_vault_rotation r ON r.id=q.rotation_id
+   WHERE q.team_id=p_team_id ORDER BY q.id DESC LIMIT LEAST(GREATEST(COALESCE(p_limit,1),1),100);
+END; $$;
+
+-- Rotation cadence per binding.  The daemon files a rotate request when the
+-- slot's last completed rotation is older than the interval, unless the slot is
+-- rotating, failed (that waits for remediation) or already has a request.
+CREATE TABLE IF NOT EXISTS org_rotation_schedule (
+  team_id       BIGINT NOT NULL REFERENCES kb_team(id) ON DELETE CASCADE,
+  model_id      TEXT NOT NULL CHECK (char_length(model_id) BETWEEN 1 AND 200),
+  interval_days INTEGER NOT NULL CHECK (interval_days BETWEEN 1 AND 3650),
+  set_by        TEXT NOT NULL CHECK (char_length(set_by) BETWEEN 1 AND 575),
+  updated_at    TEXT NOT NULL DEFAULT (pg_now_text()),
+  PRIMARY KEY(team_id,model_id)
+);
+ALTER TABLE org_rotation_schedule ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_vault_rotation_schedule_read ON org_rotation_schedule;
+CREATE POLICY p_vault_rotation_schedule_read ON org_rotation_schedule FOR SELECT
+  USING (kb_principal_is_admin());
+
+-- p_days NULL or 0 removes the schedule.
+CREATE OR REPLACE FUNCTION org_vault_rotation_schedule_set(p_actor TEXT,p_team_id BIGINT,
+  p_model_id TEXT,p_days INTEGER) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  IF COALESCE(p_actor,'')='' OR p_team_id IS NULL OR COALESCE(p_model_id,'')='' OR
+     char_length(p_model_id)>200 OR (p_days IS NOT NULL AND p_days NOT BETWEEN 0 AND 3650) THEN
+    RAISE EXCEPTION 'org_vault_rotation_schedule_set: invalid input' USING ERRCODE='22023';
+  END IF;
+  IF NOT org_vault_rotation_authorized(p_actor,p_team_id) OR NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_vault_rotation_schedule_set: not authorized' USING ERRCODE='42501';
+  END IF;
+  IF COALESCE(p_days,0)=0 THEN
+    DELETE FROM org_rotation_schedule WHERE team_id=p_team_id AND model_id=p_model_id;
+  ELSE
+    IF NOT EXISTS(SELECT 1 FROM org_egress_binding WHERE team_id=p_team_id AND
+        model_id=p_model_id) THEN
+      RAISE EXCEPTION 'org_vault_rotation_schedule_set: no egress binding' USING ERRCODE='P0002';
+    END IF;
+    INSERT INTO org_rotation_schedule(team_id,model_id,interval_days,set_by)
+      VALUES(p_team_id,p_model_id,p_days,p_actor)
+      ON CONFLICT(team_id,model_id) DO UPDATE SET interval_days=EXCLUDED.interval_days,
+        set_by=EXCLUDED.set_by,updated_at=pg_now_text();
+  END IF;
+  PERFORM kb_audit_worm_append('kb',p_actor,'vault.rotation.schedule',p_model_id,'allow',
+    json_build_object('team_id',p_team_id,'interval_days',COALESCE(p_days,0))::text);
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_schedule_list(p_actor TEXT,p_team_id BIGINT)
+RETURNS TABLE(model_id TEXT,interval_days INTEGER,last_retired_at TEXT)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  IF NOT org_vault_rotation_authorized(p_actor,p_team_id) OR NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_vault_rotation_schedule_list: not authorized' USING ERRCODE='42501';
+  END IF;
+  RETURN QUERY SELECT s.model_id,s.interval_days,
+      COALESCE((SELECT max(r.updated_at) FROM org_vault_rotation r JOIN org_egress_binding b
+          ON b.vault_principal=r.principal AND b.vault_agent=r.agent AND b.vault_cred=r.cred
+         WHERE b.team_id=s.team_id AND b.model_id=s.model_id AND r.state='retired' AND
+           r.failure_phase=''),'')
+    FROM org_rotation_schedule s WHERE s.team_id=p_team_id ORDER BY s.model_id;
+END; $$;
+
+-- Schedules that are due now.  A slot with any rotation short of retired, a
+-- failed one, or a pending request is skipped.
+CREATE OR REPLACE FUNCTION org_vault_rotation_schedule_due(p_actor TEXT,p_limit INTEGER)
+RETURNS TABLE(team_id BIGINT,model_id TEXT)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  IF COALESCE(p_actor,'')<>current_setting('aimee.principal',true) OR
+     NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_vault_rotation_schedule_due: not authorized' USING ERRCODE='42501';
+  END IF;
+  RETURN QUERY SELECT s.team_id,s.model_id FROM org_rotation_schedule s
+    JOIN org_egress_binding b ON b.team_id=s.team_id AND b.model_id=s.model_id
+   WHERE NOT EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.principal=b.vault_principal AND
+       r.agent=b.vault_agent AND r.cred=b.vault_cred AND r.state<>'retired')
+     AND NOT EXISTS(SELECT 1 FROM org_rotation_request q WHERE q.state='pending' AND
+       q.team_id=s.team_id AND q.kind='rotate' AND q.model_id=s.model_id)
+     AND COALESCE((SELECT max(r.updated_at) FROM org_vault_rotation r
+          WHERE r.principal=b.vault_principal AND r.agent=b.vault_agent AND r.cred=b.vault_cred
+            AND r.state='retired' AND r.failure_phase=''),'') <
+         to_char((now() AT TIME ZONE 'UTC') - make_interval(days=>s.interval_days),
+                 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+   ORDER BY s.team_id,s.model_id LIMIT LEAST(GREATEST(COALESCE(p_limit,1),1),100);
+END; $$;
+
+REVOKE ALL ON TABLE org_rotation_schedule FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_request_adopt(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_schedule_set(TEXT,BIGINT,TEXT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_schedule_list(TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_schedule_due(TEXT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON TABLE org_rotation_request FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_request_add(TEXT,BIGINT,TEXT,TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_request_next(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_request_settle(TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_pending(TEXT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_request_list(TEXT,BIGINT,INTEGER) FROM PUBLIC;
 
 -- ============================================================================
 -- P5-C1c PRIMARY/WORM MANAGEMENT-ACTION JOURNAL.  Admission records the exact
@@ -19330,16 +19265,8 @@ BEGIN
  END LOOP;
 END $erasure_dependency_triggers$;
 
--- Replay after a content-only restore, before recording reader readiness.
-UPDATE memory_erasure_epoch SET generation=generation+1 WHERE id=1;
-DELETE FROM memories m USING memory_erasure_intents i
- WHERE m.id=i.memory_id OR (m.scope_type=i.scope_type AND m.scope_value=i.scope_value
- AND encode(sha256(convert_to(m.content,'UTF8')),'hex')=i.payload_digest);
-DELETE FROM memories m WHERE EXISTS(SELECT 1 FROM memory_erasure_sessions i
- WHERE i.session_digest=encode(sha256(convert_to(COALESCE(m.source_session,''),'UTF8')),'hex'));
-DELETE FROM artifacts a WHERE a.payload->>'memory_id' IN (SELECT memory_id::text FROM memory_erasure_intents)
- OR EXISTS(SELECT 1 FROM artifact_citations c JOIN memory_erasure_intents i
- ON c.source_kind='memory' AND c.source_id=i.memory_id::text WHERE c.artifact_id=a.id);
+-- Historical invalidation intents remain as source/write fences. Installing
+-- or replaying the schema never destroys stored memory or artifact payloads.
 -- Auxiliary session payloads use the same durable session receipt as memory.
 CREATE OR REPLACE FUNCTION memory_session_erasure_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
@@ -19363,7 +19290,6 @@ BEGIN
   EXECUTE format('DROP TRIGGER IF EXISTS memory_session_erasure_guard ON %I',target);
   EXECUTE format('CREATE TRIGGER memory_session_erasure_guard BEFORE INSERT OR UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION memory_session_erasure_guard()',target);
   field:=CASE WHEN target='artifacts' THEN 'payload->>''session_id''' WHEN target IN ('tasks','interaction_event_embeddings') THEN 'session_id' ELSE 'source_session' END;
-  EXECUTE format('DELETE FROM %I WHERE encode(sha256(convert_to(%s,''UTF8'')),''hex'') IN (SELECT session_digest FROM memory_erasure_sessions)',target,field);
  END LOOP;
 END $session_erasure_payloads$;
 -- END memory erasure intents
@@ -19445,10 +19371,10 @@ INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', '__EMBED_DIM__'
 -- still refuses until every content row has an exact projects.kb_project.
 INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
--- schema_version: BUMP in lockstep with AIMEE_KB_STORE_SCHEMA_VERSION in kb_store/db_schema.h
+-- schema_version: BUMP in lockstep with AIMEE_KB_STORE_SCHEMA_VERSION in db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '45')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '47')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- Utility horizon anchors are protected change events. Exact per-record probes

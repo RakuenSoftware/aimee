@@ -53,6 +53,13 @@ int git_project_derive_org(const char *url, char *out, size_t cap, int *multi_se
  * joined ("group, sub"), for the org_note guidance. 0 or -1. */
 int git_project_org_candidates(const char *url, char *out, size_t cap);
 
+/* Open an exact directory within an actually published, registered clone for
+ * an authenticated webuser. Returns a held O_DIRECTORY fd or -1. The shared
+ * environment namespace does not make arbitrary children or forged .git
+ * directories approved projects. All components remain beneath the held clone
+ * with no symlinks, under the project lifecycle lock. Caller closes the fd. */
+int git_project_open_workspace(const char *principal, const char *cwd);
+
 /* --- delete (webchat project lifecycle proposal, slice 2) ---------------- */
 
 /* The ref did not resolve under the environment (callers 404 — plain "not

@@ -16,7 +16,7 @@ and roundtable. The latter selects a configured CLI agent and owns its bounded
 subprocess lifecycle entirely in Go; no agent-service HTTP call returns to the C
 daemon. Workflow lifecycle fields stay caller-side and never enter this wire.
 
-The C adapter remains a wire-parity fixture. The C daemon still hosts the event
+The C daemon still hosts the event
 bus and external control surfaces, but it is not the producer used by Go
 workflows or module-to-module delegation.
 
@@ -37,8 +37,8 @@ empty declared set against an empty actual set. The empty ephemeral-checkout imp
 delegate must receive a full source worktree. The Go-owned sandbox specification, container lifecycle,
 and post-start posture verifier are declared alongside the remaining C integration surfaces. These
 server/KB-side units follow the same intentional thin-client boundary recorded
-for gateway, learning, workspace, vault, config, and git, though CMake reaches far more of this module
-than of those. `docs/validation/core-modularization-slice-52.md` records the declaration audit and
+for gateway, learning, workspace, vault, config, and git; the CMake thin client compiles only
+`delegate_plan.c`. `docs/validation/core-modularization-slice-52.md` records the declaration audit and
 `docs/validation/core-modularization-slice-53.md` the completeness audit; the two were split so the
 latch reviews declarations merged on their own first. Adding a new module-local source now fails CI on
 `rule=ownership-complete`, and so does adding a module-root header: the absent `private_headers` field
@@ -51,46 +51,31 @@ The module owns `aimee_ir_rescue_tool_calls` in
 `src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h`. This recovery layer handles a delegate
 model capability gap: models without reliable native tool calling may emit XML, Qwen, harmony, Mistral,
 or policy-enabled JSON calls as prose. It reuses the delegate-owned
-`delegate_rescue_parse_tool_calls` dialect parser and converts eligible `AIMEE_BLK_TEXT` content into
+`delegate_rescue_message` entry adapter and converts eligible `AIMEE_BLK_TEXT` content into
 canonical `AIMEE_BLK_TOOL_USE` blocks.
 
 The rescue scans only `AIMEE_BLK_TEXT`. If the response already contains an `AIMEE_BLK_TOOL_USE` block,
-it leaves the entire response unchanged to avoid duplicate dispatch. For a rewritten response, malformed
-or non-object arguments become an empty JSON object, the stop reason becomes `AIMEE_STOP_TOOL_USE`, and
+it leaves the entire response unchanged to avoid duplicate dispatch. Malformed/non-object JSON arguments and overflow refuse recovery without changing the original response. Successful recovery sets `AIMEE_STOP_TOOL_USE`, and
 `ir_rescue_recoveries` is incremented once regardless of the number of calls recovered. Preparation and
 final block-array allocation happen before source content is consumed, so a pre-commit allocation failure
-returns `0` with the response unchanged.
+returns `-1` with the response unchanged. No match or an absent optional capability returns `0`.
+
+Stage 6 request framing is version 2. Its strict JSON response carries a matched flag and an optional canonical owned assistant message. The fixed-width binary reply and `parsed_response_t` bridge are retired; core and the delegates module must be upgraded together. Complete tool names, IDs, exact numeric arguments and bounded dynamic call groups are preserved. Prefix scanning can locate JSON in prose, while selected tool arguments require complete object framing, unique members and native-representable Unicode scalars.
 
 Provider wire parsing remains owned by `translation`; final-answer assembly remains owned by
 `response-composition`; server IR rollout, transport, and shadow controls remain outside this bounded
 delegate capability. The live bridge consumer is `src/posix/agent_ir_parse.c`.
 
-### Panel roster and provider boundary
+### Panel execution
 
-Panel membership is delegate-routing policy even when no deliberation module is active. The public
-`panel_roster.h` contract seeds configured agents, excludes the primary and unauthorized delegates,
-resolves random seats, and filters currently unavailable agents. Sweep and other core consumers call this
-required seam directly; roster selection is not hidden behind optional roundtable execution.
-
-Optional panel engines register at most one startup-lifetime `aimee_panel_provider_t` through
-`panel_provider.h`. Registering the same provider pointer again is idempotent; registering a different
-provider while one is installed is rejected. Core callers use `aimee_panel_aggregate` or
-`aimee_panel_run`. The facade reports explicit unavailable, invalid-input, and provider-error statuses and
-zeroes the output on every failure; if a failing callback supplied an artifact, the facade dispatches its
-release before zeroing the result. All request inputs and options are borrowed for the duration of the
-call. IR owns the `aimee_panel_result_t` layout. A provider allocates the artifact returned in a successful
-result, and the caller must release it exactly once through `aimee_panel_result_release` before the
-provider is unregistered. Unregistration is rejected while a result remains outstanding. Registration
-and unregistration are startup-only: the provider descriptor must remain valid until all calls have
-completed and all results have been released, and concurrent hot unload is unsupported.
-
-When roundtable is omitted at build time, the provider and roster facades remain in core, no optional
-private include path or symbol is linked, and panel calls return the typed unavailable status. This keeps
-delegation and routing usable without substituting a stub implementation for the absent module.
+Optional roundtable execution owns its ensemble and deliberation entry points.
+The unused provider-registration facade and roster scaffold have been retired;
+actual seat selection remains in delegate routing and roundtable presets.
+Shared panel result layouts live in `aimee/core/types/panel_result.h`.
 
 ### Public-header contract
 
-All 21 delegate headers live under `src/modules/delegates/include/aimee/delegates/`, and every consumer
+The delegate headers live under `src/modules/delegates/include/aimee/delegates/`, and every consumer
 uses the `<aimee/delegates/...>` namespace. `src/modules/delegates/module.yaml` declares that complete
 surface in `public_headers`; `scripts/check_module_header_layout.py` rejects flat shadows, bare includes,
 missing canonical headers, or restored flat Make/CMake include roots.
@@ -104,6 +89,7 @@ is a dependency-design concern, not an exception to canonical include ownership.
 
 - `audit`: records delegate decisions, actions, evidence, and terminal outcomes.
 - `config`: supplies agents, roles, providers, limits, backends, and delegate policy inputs.
+- `egress`: owns private-worker Docker execution, resource observations, and joined cleanup.
 - `execution-policy`: authorizes delegation, tools, egress, credentials, and sandbox actions.
 - `ir`: supplies canonical turn, response, tool-call, usage, and streaming structures.
 - `module-runtime`: supplies required lifecycle and extension contracts for delegation.
@@ -134,7 +120,7 @@ the actual execution path binds that backend.
 
 ## Surfaces
 
-Surfaces include `aimee delegate`, native/MCP delegation tools, `/v1/delegate/*` routes, mailbox and status
+Surfaces include `aimee delegate`, native/MCP delegation tools, `/v1/delegate/*` routes, canonical question controls and status
 events, agent/delegate logs, backend/image diagnostics, provider results, and workflow/roundtable seams.
 Tool calls, vault values, workspaces, routing policy, and audit storage remain owned dependencies even
 when their user-facing commands participate in a delegate journey.
@@ -159,9 +145,14 @@ credentialless effective environment containing the sole bus endpoint.
 
 A caller submits a `delegate` role/task; routing selects an eligible configured agent; policy and budgets authorize
 the run; a provider driver and execution/workspace backend conduct bounded turns and tools; messages and
-evidence are recorded; liveness drives a terminal result; and the result returns through CLI/API, mailbox,
+evidence are recorded; liveness drives a terminal result; and the result returns through CLI/API,
 workflow, gateway, or roundtable. Retries remain within the same identity, policy, vault scope, workspace,
 and audit boundaries while reacquiring credentials through the authorized vault path when required.
+
+Post-run delegate learning and the structured exit event are written before terminal completion is
+published. The capture API reports incomplete writes and logs them separately from the execution
+result. No-progress exits also report failed-approach persistence when a goal is available. These
+observations do not constitute an independently graded task outcome.
 
 ## Tests and failure behavior
 
@@ -171,16 +162,14 @@ coordinator, plan, role, sandbox image, XML fallback, gateway-orchestration
 (`test_gw_orch_delegates.c`), IR rescue, and panel provider suites, plus
 `test_delegate_context_shed.c`, `test_delegate_dispatch_reliability.c`, and
 `test_delegate_handoff.c`, which each link only `delegate_prompt.o` and together are that source's
-coverage. Six adjacent `test_delegate*`/`test_panel*`/`test_gw_orch*` files are not claimed because
+coverage. Five adjacent `test_delegate*`/`test_gw_orch*` files are not claimed because
 their subject is another module: `test_delegate_liveness.c` links `server/liveness.o`,
 `test_delegate_token_budget.c` links `server/agent_coord.o`, `test_delegate_ensemble.c` drives
 `modules/roundtable/delegate_ensemble.c`, `test_gw_orch_workflows.c` and
-`test_gw_orchestration_seam.c` link no delegates object, and `test_panel_ir_contract.c` includes
-`<aimee/ir/panel_result.h>`. Together with the CLI/API and workflow suites they cover the
+`test_gw_orchestration_seam.c` link no delegates object. Together with the CLI/API and workflow suites they cover the
 distributed implementation. An unavailable route, provider, or backend must fail concretely; partial runs retain audit
 evidence; policy, budget, or sandbox failure is fail-closed and cannot downgrade to raw local execution.
-`src/tests/test_aimee_ir_rescue.c` directly covers prose rescue. `src/tests/test_panel_provider.c` covers
-unavailable, registration, success, inconsistent failure, ownership, and single-release behavior.
+`src/tests/test_aimee_ir_rescue.c` directly covers prose rescue.
 Consumer-level rescue coverage runs through
 `src/tests/test_agent_ir_parse.c` and `src/tests/test_responses_parity.c`; all three must pass before changes
 to this behavior are considered verified.
@@ -195,9 +184,15 @@ must redact prompts, secrets, command environments, and private tool results.
 ## Compatibility
 
 CLI/API request and result envelopes, role names, provider-driver capabilities, backend lifecycle,
-mailbox/status events, job state, tool evidence, budget semantics, and workspace/source authority are
+canonical controls/status events, job state, tool evidence, budget semantics, and workspace/source authority are
 compatibility contracts. Moving server/root orchestration into `src/modules/delegates` must preserve
 build/link targets, durable jobs, and supported in-flight recovery behavior.
+
+The legacy `/v1/delegate/reply` route always returns an unavailable error. It cannot
+identify or authorize a canonical unanswered question. MCP does not advertise or dispatch
+`delegate_reply`; answers use the operator-only `/v1/chat/control-reply` route with
+the exact session and turn-qualified request ID. Headless delegates retain their
+existing refusal when no reply-enabled canonical control scope exists.
 
 ## Extension and removal
 
@@ -206,3 +201,7 @@ contracts, proving a live caller rather than registry-only tests. Deep-dive self
 backends, fallbacks, and wrappers with definition/caller and supported-journey evidence before retention;
 test-only self-consumption is not liveness. Delegates cannot be optional because routing agents requires
 the delegation contract.
+
+The optional panel provider borrows canonical requests for both execution and
+aggregation. Its facade forwards the admitted request without reconstructing a
+prompt tuple; artifact ownership and release remain with the provider.

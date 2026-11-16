@@ -39,8 +39,6 @@ EXEMPT = {
     "session_context_search": "external client's session plumbing",
     "session_context_status": "external client's session plumbing",
     "compact_context": "external client's context window, not the agent's",
-    # Ensemble/delegate orchestration: an agent using these would spawn agents,
-    # which the delegate-only rail exists to prevent.
 }
 
 
@@ -64,7 +62,6 @@ BASELINE_DRIFT = {
     "create_prospective_memory",
     "dashboard_metrics",
     "get_entity",
-    "get_entity_edges",
     "get_episode",
     "get_help",
     "get_host",

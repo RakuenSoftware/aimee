@@ -96,3 +96,12 @@ char *http_read_body(int fd, const char *prefix, int prefix_len, int declared, i
    *out_len = already;
    return body;
 }
+
+/* Intake policy selects middleware, not additional routes. */
+int server_http_private_content_route(const char *path)
+{
+   return path && (!strncmp(path, "/v1/memory/", 11) || !strncmp(path, "/v1/chat", 8) ||
+                   !strcmp(path, "/v1/runs") || !strcmp(path, "/v1/responses") ||
+                   !strcmp(path, "/v1/messages") || !strcmp(path, "/v1/completions") ||
+                   !strcmp(path, "/v1/chat/completions"));
+}

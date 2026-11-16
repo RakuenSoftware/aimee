@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "wfe_router.h"
+#include "../server/router_advise.c"
 
 static void add_wf(wfe_router_catalog_t *c, const char *id, int is_default, int read_only)
 {
@@ -34,8 +35,84 @@ static const char *route(const wfe_router_catalog_t *c, const char *msg, const c
    return d.workflow_id;
 }
 
+static char observed_query[256];
+static int routed, bound;
+int wfe_router_catalog_load(wfe_router_catalog_t *out, char *error, size_t cap)
+{
+   (void)error;
+   (void)cap;
+   mkcat(out);
+   routed++;
+   return 0;
+}
+const char *ingress_preinject_turn_id(void)
+{
+   return "visible-turn";
+}
+const char *ingress_preinject_session_id(void)
+{
+   return "visible-session";
+}
+const char *ie_event_type_name(ie_event_type_t type)
+{
+   (void)type;
+   return "guardrail_decision";
+}
+int db1_interaction_event_record(const char *session, const char *type, const char *actor,
+                                 const char *payload, const char *outcome)
+{
+   (void)type;
+   (void)actor;
+   (void)payload;
+   (void)outcome;
+   assert(!strcmp(session, "visible-turn"));
+   return 0;
+}
+wfe_enforce_stage_t wfe_enforce_stage_parse(const char *value)
+{
+   (void)value;
+   return WFE_ENFORCE_OFF;
+}
+const char *wfe_enforce_stage_name(wfe_enforce_stage_t stage)
+{
+   (void)stage;
+   return "off";
+}
+int wfe_bind_interactive(const char *session, const char *query, const char *repo)
+{
+   (void)repo;
+   assert(!strcmp(session, "visible-session"));
+   snprintf(observed_query, sizeof observed_query, "%s", query);
+   bound++;
+   return 0;
+}
+static void test_router_uses_only_visible_ir(void)
+{
+   aimee_block_t blocks[3] = {{.type = AIMEE_BLK_TEXT, .text = "visible task"},
+                              {.type = AIMEE_BLK_TEXT, .text = "hidden secret"},
+                              {.type = AIMEE_BLK_TEXT, .text = "restricted secret"}};
+   for (int i = 0; i < 3; i++)
+      aimee_ir_block_set_context(&blocks[i], AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                                 AIMEE_CTX_TRUST_UNVERIFIED,
+                                 i == 2 ? AIMEE_CTX_SENS_RESTRICTED : AIMEE_CTX_SENS_INTERNAL,
+                                 i != 1, NULL, NULL, 0);
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 3};
+   aimee_request_t request = {.messages = &message, .n_messages = 1};
+   aimee_block_t before[3];
+   memcpy(before, blocks, sizeof before);
+   router_advise_ir(&request);
+   assert(routed == 1 && bound == 1 && !strcmp(observed_query, "visible task"));
+   assert(!memcmp(before, blocks, sizeof before));
+   message.blocks = &blocks[1];
+   message.n_blocks = 2;
+   router_advise_ir(&request);
+   assert(routed == 1 && bound == 1);
+   assert(!memcmp(before, blocks, sizeof before));
+}
+
 int main(void)
 {
+   test_router_uses_only_visible_ir();
    printf("wfe-router: ");
    char err[128];
    wfe_router_catalog_t c;

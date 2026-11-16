@@ -242,7 +242,7 @@ static void *ingress_request_thread(void *arg)
    snprintf(ctx.principal, sizeof(ctx.principal), "uid:%d", 7000 + w->id);
    request_context_set(&ctx);
 
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    snprintf(result.agent_name, sizeof(result.agent_name), "ingressbot");
    snprintf(result.model, sizeof(result.model), "gpt-4o");
@@ -274,7 +274,7 @@ static void *runs_worker_thread(void *arg)
    request_context_set(&ctx);
    agent_set_ingress_source("openai-ingress");
 
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    snprintf(result.agent_name, sizeof(result.agent_name), "runbot");
    snprintf(result.model, sizeof(result.model), "gpt-4o");

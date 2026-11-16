@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "exclusions": [
+    "connection values",
+    "database files",
+    "credentials",
+    "host/database configs",
+    "executables"
+  ],
+  "files": {
+    "owner-tests.jsonl.gz": {
+      "bytes": 104200,
+      "sha256": "3cf0604dea501fad13b2a02bd63f803ab577982c5c74a0ef9d40e716f7126d4f",
+      "uncompressed_bytes": 1559164,
+      "uncompressed_sha256": "90aae96e2021f1fdb2672360b455c2c6014e1150863049f4dd624202528a6b5e"
+    },
+    "source-hashes-before.json.gz": {
+      "bytes": 55004,
+      "sha256": "a086722d24e827ab05a4c8f9bb235ef9396c4717dbda8e29a08b329fb7c92e5f",
+      "uncompressed_bytes": 137184,
+      "uncompressed_sha256": "0aa24ff453503819d4f5769ed3d33919ee01fff1c6517416789cf6162c7ca486"
+    },
+    "source-hashes-after.json.gz": {
+      "bytes": 55004,
+      "sha256": "a086722d24e827ab05a4c8f9bb235ef9396c4717dbda8e29a08b329fb7c92e5f",
+      "uncompressed_bytes": 137184,
+      "uncompressed_sha256": "0aa24ff453503819d4f5769ed3d33919ee01fff1c6517416789cf6162c7ca486"
+    },
+    "cross-language.jsonl.gz": {
+      "bytes": 641,
+      "sha256": "aa845080f5365338a5407878134a550f1aebb6872238f1efa9febe27b49dc484",
+      "uncompressed_bytes": 3251,
+      "uncompressed_sha256": "e7859d38f98089717cda4645b1f5b0750f5d48ff3e789637ba002e13616ab7be"
+    },
+    "build-conformance-host.log.gz": {
+      "bytes": 1060,
+      "sha256": "e9d2d54a70660b016b8b31aa1f269537a0f33958994acb2a578773b91f08917b",
+      "uncompressed_bytes": 20371,
+      "uncompressed_sha256": "ca660f198a593b33d980053322af4bac790b5730301cb29335275c14c961bf7b"
+    },
+    "initdb.log.gz": {
+      "bytes": 486,
+      "sha256": "6873e00c855b5dc0457a158e31b27402b498bbfa78aa21f92c7b2e1fceca978c",
+      "uncompressed_bytes": 932,
+      "uncompressed_sha256": "1918d9289c0a0ec8caf04014e7b1b3bec8b479d1ced5f053ece2f37f211b6ae0"
+    },
+    "start-postgres.log.gz": {
+      "bytes": 62,
+      "sha256": "e368673aef8c85b9339c7457c5544c1b856d1529f0a14f786c0e3b9e03511c3d",
+      "uncompressed_bytes": 52,
+      "uncompressed_sha256": "66afd0411ccc09366e99fdd99b85f21899c8d2d064f5835126859618802153ad"
+    },
+    "create-runtime-role.log.gz": {
+      "bytes": 32,
+      "sha256": "757e3a11aa55ed4f8b6fe49e44ddbba62b022b94bfdd35cb9192e0123fdcc141",
+      "uncompressed_bytes": 12,
+      "uncompressed_sha256": "19fe28eff61cdf76665a6150a5ac36e4df175fef2e4679f03b08878f6d8c93d5"
+    },
+    "create-memory_replay.log.gz": {
+      "bytes": 36,
+      "sha256": "2113aeac4b15d728afcf7211f807d06012d4f37a779a5e4a9d7b1a304c1c931b",
+      "uncompressed_bytes": 16,
+      "uncompressed_sha256": "691e4b64d448c6cffd680247056c2f445e4fbf2dcbc9be821934064e906d1ce7"
+    },
+    "create-memory_evaluation.log.gz": {
+      "bytes": 36,
+      "sha256": "2113aeac4b15d728afcf7211f807d06012d4f37a779a5e4a9d7b1a304c1c931b",
+      "uncompressed_bytes": 16,
+      "uncompressed_sha256": "691e4b64d448c6cffd680247056c2f445e4fbf2dcbc9be821934064e906d1ce7"
+    },
+    "bootstrap-schema.log.gz": {
+      "bytes": 7510,
+      "sha256": "b70f8ff00378523d14dae51bafc680625b222d724f7d0033136b8728b21b83ac",
+      "uncompressed_bytes": 104262,
+      "uncompressed_sha256": "586905618088c4945d2e4a6c6a09891eba02e6ca9a594b7b9eeff071c0a67cde"
+    },
+    "stop-postgres.log.gz": {
+      "bytes": 68,
+      "sha256": "da5bb8e75cbab141a9164b24c1330658be919fc88a9a3838063a58df033740bd",
+      "uncompressed_bytes": 56,
+      "uncompressed_sha256": "ca19178a35ab4153b75b494963b66ce8243e1b94c173107c87b44d09db23652d"
+    },
+    "validation.json": {
+      "bytes": 2620,
+      "sha256": "22251f7739446ffe2d76b48067524e5b2918fc7e7a98e99e4b69f3fc32a7d58b"
+    },
+    "conformance-source-hashes.json": {
+      "bytes": 3701,
+      "sha256": "931550b7bfd07413d8fba2f918e792a444437f25f0d418ca926c07271ff81acb"
+    },
+    "README.md": {
+      "bytes": 2418,
+      "sha256": "41a794e15940c907ea0f4b16638f385ca7d7363a9228757584bcb80b2bf93366"
+    }
+  }
+}

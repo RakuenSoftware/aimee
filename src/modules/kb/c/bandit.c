@@ -7,7 +7,7 @@
 #include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "aimee.h"
-#include "../support/kb_store_log.h" /* aimee_log */
+#include "log.h" /* aimee_log */
 
 #include <stdio.h>
 #include <string.h>

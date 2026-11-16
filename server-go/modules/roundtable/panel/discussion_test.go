@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 	"sync"
 	"testing"
 )
 
 func TestDiscussionPromptUsesJSONIdentityEscaping(t *testing.T) {
-	prompt := buildDiscussionPrompt("run\x01\"\\", "hash\x02", 1, nil, nil)
+	procedure, data := buildDiscussionParts("run\x01\"\\", "hash\x02", 1, nil, nil)
+	prompt := procedure + "\n" + data
 	if strings.Contains(prompt, `\x01`) || strings.Contains(prompt, `\x02`) {
 		t.Fatalf("discussion identity used Go quoting instead of JSON escaping: %q", prompt)
 	}
@@ -33,7 +35,7 @@ func (a *discussionTestAgents) One(_ context.Context, _ Run, request SeatRequest
 	a.requests = append(a.requests, request)
 	a.mu.Unlock()
 	response, err := a.respond(request)
-	return SeatResult{Response: response, Err: err}
+	return SeatResult{Output: canonical.TextResponse(response), Err: err}
 }
 
 // Seats run concurrently in production, so the double does too: a data race
@@ -53,7 +55,7 @@ func (a *discussionTestAgents) Group(ctx context.Context, run Run, requests []Se
 			defer wg.Done()
 			result := a.One(ctx, run, requests[i])
 			if result.Err == nil {
-				result.Response = withTestIdentity(result.Response, run, requests[i])
+				result.Output = canonical.TextResponse(withTestIdentity(result.Output.DisplayText(), run, requests[i]))
 				result.Participant = fmt.Sprintf("test-participant:%d", i)
 			}
 			out[i] = result

@@ -1,0 +1,21 @@
+{
+  "baseline": {
+    "violations": 110,
+    "returncode": 1
+  },
+  "cleanup": {
+    "violations": 102,
+    "returncode": 1
+  },
+  "introduced": [],
+  "removed": [
+    "server-go/modules/memory/backend.go: imports peer module github.com/JBailes/aimee/server-go/modules/module-runtime/identity",
+    "server-go/modules/memory/external_recall_test.go: imports peer module github.com/JBailes/aimee/server-go/modules/module-runtime/identity",
+    "server-go/modules/memory/external_store.go: imports peer module github.com/JBailes/aimee/server-go/modules/audit",
+    "server-go/modules/memory/external_store.go: imports peer module github.com/JBailes/aimee/server-go/modules/egress",
+    "server-go/modules/memory/external_store.go: imports peer module github.com/JBailes/aimee/server-go/modules/module-runtime/identity",
+    "server-go/modules/memory/external_store_test.go: imports peer module github.com/JBailes/aimee/server-go/modules/egress",
+    "server-go/modules/memory/external_store_test.go: imports peer module github.com/JBailes/aimee/server-go/modules/module-runtime/identity",
+    "server-go/modules/memory/store_adapter_test.go: imports peer module github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
+  ]
+}

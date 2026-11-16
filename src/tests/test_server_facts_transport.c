@@ -48,6 +48,18 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    *result = reply ? cJSON_Parse(reply) : NULL;
    return internal_result;
 }
+/* This fixture exercises the unbound envelope helper above. A caller-bound
+ * operation must not silently reuse that peer and fabricate caller custody. */
+int aimee_module_commands_dispatch_internal_caller_timeout(const char *method, const cJSON *args,
+                                                           int timeout_ms, cJSON **result)
+{
+   (void)method;
+   (void)args;
+   (void)timeout_ms;
+   (void)result;
+   fputs("facts envelope fixture unexpectedly entered caller-bound dispatch\n", stderr);
+   abort();
+}
 static void test_named_module_envelope(void)
 {
    cJSON *args = cJSON_Parse("{\"id\":42,\"operation\":\"delete\"}");

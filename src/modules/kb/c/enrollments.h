@@ -43,16 +43,6 @@ int kb_store_enrollment_list(int limit, kb_store_enrollment_row_t *out, int max)
  * the revoked row. Returns 0, -1 on error, 1 if the id does not exist. */
 int kb_store_enrollment_revoke(int64_t id, kb_store_enrollment_row_t *out);
 
-/* Is a cert (by fingerprint) revoked? 1 = revoked, 0 = active/unknown. Uses a
- * short-TTL in-process cache over the DB (revoked_at is the source of truth). */
-int kb_store_enrollment_is_revoked(const char *fingerprint);
-
-/* Per-request revocation by the immutable (cert_issuer, cert_serial_norm) key
- * (P1 I5/I6): reads the source of truth each call (no cache), so a revoked cert
- * stops authorizing on the next request even over a keep-alive connection.
- * Returns 1 revoked, 0 active/unknown. */
-int kb_store_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_serial_norm);
-
 /* Primary-authoritative per-request status by immutable certificate key.
  * Returns 1 only for an enrolled active identity, 0 for revoked or unknown,
  * and -1 when the authority cannot be queried or returns an invalid state.
@@ -64,18 +54,11 @@ int kb_store_enrollment_is_active_by_key(const char *cert_issuer, const char *ce
 int kb_store_enrollment_authority_resolve(const char *fingerprint, const char *cert_issuer,
                                           const char *cert_serial_norm, char out_authority[33]);
 
-/* Eager one-time backfill of cert_issuer/cert_serial_norm on legacy enrollments
- * (P1 I5), so revocation-by-key has no key-less window. Returns rows updated or -1. */
-int kb_store_enrollment_backfill_cert_keys(const char *ca_issuer_dn);
-
 /* Best-effort, debounced "cert was used" write: bumps last_seen, and if the cert
  * predates this table (issued before S2a) backfills a legacy row for `scope` so
  * it becomes listable/revocable. Debounced so hot auth paths do not storm the DB.
  * The conflict path never touches state/revoked_at (a revoked cert stays revoked). */
 void kb_store_enrollment_touch_last_seen(const char *fingerprint, const char *scope);
-
-/* Drop the is-revoked cache (called after a revoke so the change is seen now). */
-void kb_store_enrollment_cache_flush(void);
 
 /* --- console OIDC login config (single row id=1) --- */
 typedef struct

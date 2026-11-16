@@ -1,6 +1,6 @@
 package delegates
 
-import "github.com/JBailes/aimee/server-go/bus"
+import "github.com/RakuenSoftware/ouroboros-ring/go/ring"
 
 // Did the delegate touch the files its brief named?
 //
@@ -23,15 +23,15 @@ const (
 	driftFlagPathDiff      uint32 = 1 << 1
 )
 
-func handleNamedFileDrift(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleNamedFileDrift(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	r := &wireReader{buf: request}
 	if r.u32() != driftRequestMagic || r.u32() != uint32(wireVersion) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	flags := r.u32()
 	if flags&^driftFlagWritesAllowed != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	facts := DriftFacts{
@@ -46,7 +46,7 @@ func handleNamedFileDrift(invocation bus.ModuleInvocation, request []byte) ([]by
 		p := NamedPath{Path: r.str()}
 		pathFlags := r.u32()
 		if pathFlags&^(driftFlagPathExist|driftFlagPathDiff) != 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		p.Exists = pathFlags&driftFlagPathExist != 0
 		p.InDiff = pathFlags&driftFlagPathDiff != 0
@@ -55,10 +55,10 @@ func handleNamedFileDrift(invocation bus.ModuleInvocation, request []byte) ([]by
 	}
 
 	if !r.done() {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	v := JudgeNamedFileDrift(facts)
@@ -67,5 +67,5 @@ func handleNamedFileDrift(invocation bus.ModuleInvocation, request []byte) ([]by
 	w.u32(driftResponseMagic)
 	w.u32(uint32(v.Severity))
 	w.str(v.Message)
-	return w.buf, bus.ModuleStatusOK
+	return w.buf, ring.ModuleStatusOK
 }

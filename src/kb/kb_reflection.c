@@ -123,9 +123,18 @@ static int run_synthesis_pass(const kb_store_artifact_proposed_t *row)
        * sidecar. A NULL return is a fail — skip this attempt (fail-closed: no
        * durable write happens on a failed/empty response). */
       char serr[256];
-      char *out = kb_curator_llm_run(
-          KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, REFLECTION_SYNTH_SYSTEM_PROMPT, req_str, NULL,
-          config_kb_synthesize_command(), REFLECTION_SYNTH_OUTBUF, serr, sizeof(serr));
+      aimee_request_t model_request = {0};
+      aimee_response_t model_response = {0};
+      int model_rc = kb_curator_llm_request_init(&model_request, REFLECTION_SYNTH_SYSTEM_PROMPT,
+                                                 req_str, NULL);
+      if (!model_rc)
+         model_rc = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, &model_request,
+                                       &model_response, serr, sizeof(serr));
+      else
+         snprintf(serr, sizeof(serr), "invalid canonical curator request");
+      char *out = model_rc ? NULL : kb_curator_llm_text(&model_response, serr, sizeof(serr));
+      aimee_request_free(&model_request);
+      aimee_response_free(&model_response);
       free(req_str);
 
       if (!out)

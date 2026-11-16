@@ -880,22 +880,6 @@ done:
    return ok;
 }
 
-int server_tls_local_fingerprint(SSL *ssl, char out[65])
-{
-   if (!ssl || !out)
-      return 0;
-   out[0] = '\0';
-   X509 *cert = SSL_get_certificate(ssl); /* owned by SSL */
-   unsigned char md[32];
-   unsigned int n = 0;
-   if (!cert || X509_digest(cert, EVP_sha256(), md, &n) != 1 || n != 32)
-      return 0;
-   for (size_t i = 0; i < 32; i++)
-      snprintf(out + i * 2, 3, "%02x", md[i]);
-   out[64] = '\0';
-   return 1;
-}
-
 int server_tls_local_cert(SSL *ssl, server_tls_peer_cert_t *out)
 {
    if (!out)

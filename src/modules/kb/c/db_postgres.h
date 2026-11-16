@@ -90,7 +90,6 @@ int aimee_pg_bind_blob(aimee_pg_stmt_t *stmt, const char *name, const void *valu
 int aimee_pg_bind_null(aimee_pg_stmt_t *stmt, const char *name);
 
 int aimee_pg_column_count(aimee_pg_stmt_t *stmt);
-const char *aimee_pg_column_name(aimee_pg_stmt_t *stmt, int col);
 int aimee_pg_column_type(aimee_pg_stmt_t *stmt, int col);
 const void *aimee_pg_column_blob(aimee_pg_stmt_t *stmt, int col);
 int aimee_pg_column_bytes(aimee_pg_stmt_t *stmt, int col);

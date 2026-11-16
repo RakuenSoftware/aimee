@@ -105,10 +105,9 @@ int verify_worktree_has_changes(const char *project_root)
 {
    cJSON *reply = verify_state_call(verify_state_request("worktree-dirty", project_root));
    if (!reply)
-      return 0; /* Unchanged from the shell form: a git that could not answer
-                 * reported a clean tree. Preserved deliberately -- this port
-                 * moves the work, not the policy. */
-   int dirty = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "dirty"));
+      return 1; /* Unknown state cannot authorize reuse of a verified tree. */
+   const cJSON *state = cJSON_GetObjectItemCaseSensitive(reply, "dirty");
+   int dirty = !cJSON_IsBool(state) || cJSON_IsTrue(state);
    cJSON_Delete(reply);
    return dirty;
 }

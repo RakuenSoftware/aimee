@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "source_commit": "67b1b3611ec83303904381f972c5907910435996",
+  "runtime": "b10219",
+  "images": {
+    "aimee-llm-e2b": {
+      "model": "gemma-4-E2B-it",
+      "tag": "qat-UD-Q4_K_XL-b10219-7bc9d6c31053",
+      "digest": "sha256:3b6bd9676988589adae656b2ad6187f6973181c3703a81f5623ef999173503d0"
+    },
+    "aimee-llm-e4b": {
+      "model": "gemma-4-E4B-it",
+      "tag": "UD-Q6_K_XL-b10219-7bc9d6c31053",
+      "digest": "sha256:756c5952edba8ddb38e9d8b476519763533da9aba70b7c48154d3deb382f52a1"
+    }
+  }
+}

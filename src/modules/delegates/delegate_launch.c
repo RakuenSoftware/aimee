@@ -1,3 +1,4 @@
+#include <aimee/ir/session_event.h>
 /* delegate_launch.c -- turn a delegate plan into a running coordinator job.
  *
  * What is decided here and what is not:
@@ -448,10 +449,15 @@ int delegate_launch_coord_job(cJSON *plan, int max_concurrent, const char *cwd,
       char *files_json = files ? cJSON_PrintUnformatted(files) : NULL;
       cJSON_Delete(files);
 
-      if (!r.bad && files_json && prompt &&
+      aimee_message_t message = {0};
+      cJSON *input = prompt ? cJSON_Parse(prompt) : NULL;
+      int input_rc = input ? aimee_ir_message_parse(input, &message) : -1;
+      cJSON_Delete(input);
+      if (!r.bad && files_json && !input_rc &&
           db1_coord_job_add_task(job_id, i < (uint32_t)stored.step_count ? stored.steps[i].id : 0,
-                                 files_json, role, prompt, cwd, "engineer") > 0)
+                                 files_json, role, &message, cwd, "engineer") > 0)
          added++;
+      aimee_message_free(&message);
       free(files_json);
       free(prompt);
    }

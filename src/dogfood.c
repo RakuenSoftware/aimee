@@ -90,14 +90,6 @@ char *dogfood_inline_hint_json(const dogfood_config_t *cfg, const char *record_i
    return out;
 }
 
-void dogfood_log_moment_live(const char *tool, const char *query, const int64_t *retrieved_ids,
-                             int retrieved_count, const char *notes)
-{
-   dogfood_config_t dcfg;
-   dogfood_config_current(&dcfg);
-   dogfood_log_moment(&dcfg, tool, query, retrieved_ids, retrieved_count, notes);
-}
-
 void dogfood_metrics(int64_t *records_out, int64_t *failures_out)
 {
    if (records_out)
@@ -960,33 +952,6 @@ int dogfood_autolabel_apply(const dogfood_config_t *cfg_in, const char *record_i
    if (rc != 0)
       g_failures++;
    return rc;
-}
-
-void dogfood_autolabel_next_turn_live(const char *text)
-{
-   if (!g_last_record_id[0])
-      return;
-   dogfood_config_t cfg;
-   dogfood_config_current(&cfg);
-   if (!cfg.enabled)
-      return;
-   if (!cfg.autolabel_repair && !cfg.autolabel_continuation)
-      return;
-
-   dogfood_autolabel_kind_t kind = dogfood_classify_next_turn(text);
-   if (kind == DOGFOOD_AUTOLABEL_REPAIR && !cfg.autolabel_repair)
-      kind = DOGFOOD_AUTOLABEL_NONE;
-   if (kind == DOGFOOD_AUTOLABEL_CONTINUATION && !cfg.autolabel_continuation)
-      kind = DOGFOOD_AUTOLABEL_NONE;
-   if (kind == DOGFOOD_AUTOLABEL_NONE)
-      return;
-
-   char rid_copy[24];
-   snprintf(rid_copy, sizeof(rid_copy), "%s", g_last_record_id);
-   /* Clear before apply so a re-entrant call can't double-label. */
-   g_last_record_id[0] = '\0';
-   g_last_record_month[0] = '\0';
-   (void)dogfood_autolabel_apply(&cfg, rid_copy, kind);
 }
 
 int dogfood_query_is_repeat(const dogfood_config_t *cfg, const char *session_id, const char *tool,

@@ -1,11 +1,19 @@
 package panel
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
+)
 
 // Run is the identity and budget a review executes under. The panel needs these
 // to key durable delegate slots, bound spend and reach the worktree; it needs
 // nothing else about the workflow item that may own the review.
 type Run struct {
+	Focus   string
+	Brief   json.RawMessage
+	Request *canonical.Request
 	// ID is the review identity. It is echoed by every seat and checked, so a
 	// report about a different run is detectable.
 	ID string
@@ -22,10 +30,6 @@ type Run struct {
 	// CostLimitUSD is the whole review's ceiling, zero meaning unbounded. The
 	// panel subdivides it across concurrent seats itself.
 	CostLimitUSD float64
-	// OriginalRequest is what the artifact is judged against. Alignment to it is
-	// the first question every seat answers, so a review without it is not a
-	// weaker review -- it is a different one.
-	OriginalRequest string
 	// Reviewed is the exact artifact under review.
 	Reviewed Artifact
 }
@@ -53,7 +57,7 @@ type SeatRequest struct {
 	// Participant continues an existing seat rather than opening a new one, and
 	// is opaque: the panel returns it without interpreting it.
 	Participant string
-	Prompt      string
+	Input       *canonical.Request
 	// DurableSlot distinguishes concurrent seats that would otherwise look
 	// identical, so two capacity seats cannot collapse onto one remote result.
 	DurableSlot   string
@@ -71,7 +75,7 @@ type SeatRequest struct {
 // SeatResult is what a seat returned, or why it did not.
 type SeatResult struct {
 	Participant string
-	Response    string
+	Output      *canonical.Response
 	CostUSD     float64
 	// CostUnknown means no measurement was recorded, so CostUSD is a lower bound
 	// rather than actual spend. It must never be committed as a measured zero.
@@ -102,4 +106,14 @@ type SeatResult struct {
 type Delegates interface {
 	Group(ctx context.Context, run Run, requests []SeatRequest) []SeatResult
 	One(ctx context.Context, run Run, request SeatRequest) SeatResult
+}
+
+func (s SeatResult) semanticText() (string, error) {
+	if s.Err != nil {
+		return "", s.Err
+	}
+	if s.Output == nil {
+		return "", fmt.Errorf("seat has no canonical response")
+	}
+	return s.Output.SemanticText()
 }

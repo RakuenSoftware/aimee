@@ -2,7 +2,7 @@ package economizer
 
 import (
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 )
@@ -40,8 +40,8 @@ func TestTaskCostIncludesRetriesUnknownAndExactIntegerAmounts(t *testing.T) {
 		t.Fatalf("incorrect accounting: %+v", out)
 	}
 	raw, _ := json.Marshal(req)
-	body, status := NewHandler()(bus.ModuleInvocation{StageID: StageTaskCost}, raw)
-	if status != bus.ModuleStatusOK || !strings.Contains(string(body), `"9007199254741000"`) {
+	body, status := NewHandler()(ring.ModuleInvocation{StageID: StageTaskCost}, raw)
+	if status != ring.ModuleStatusOK || !strings.Contains(string(body), `"9007199254741000"`) {
 		t.Fatalf("wire amount lost: %s, %v", body, status)
 	}
 }

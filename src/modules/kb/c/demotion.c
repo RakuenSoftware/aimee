@@ -1,4 +1,5 @@
 #include "json_int64.h"
+#include "module_source_ref.h"
 /* kb_store/demotion.c: retrieval attribution evidence transport (scoring lives in Go).
  * See docs/proposals/done/outcome-driven-demotion-and-poison-resilience.md */
 
@@ -44,6 +45,7 @@ static cJSON *make_memory_ref(int64_t id)
    cJSON *args = cJSON_CreateObject(), *reply = NULL;
    cJSON_AddStringToObject(args, "operation", "record");
    cJSON_AddItemToObject(args, "id", jo_i64_value_exact(id));
+   cJSON_AddBoolToObject(args, "include_version", 1);
    if (aimee_module_commands_dispatch_internal &&
        aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) == 1)
    {
@@ -53,6 +55,19 @@ static cJSON *make_memory_ref(int64_t id)
       const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status"));
       if (status && strcmp(status, "ok") == 0 && version && version[0])
          cJSON_AddStringToObject(r, "v", version);
+      if (status && strcmp(status, "ok") == 0)
+      {
+         if (module_source_ref_copy(r, record, "source_ref", id) < 0 ||
+             module_source_ref_copy(r, record, "state_ref", id) < 0)
+         {
+            cJSON_Delete(reply);
+            cJSON_Delete(args);
+            cJSON_Delete(r);
+            return NULL;
+         }
+         if (cJSON_HasObjectItem(r, "source_ref"))
+            cJSON_AddStringToObject(r, "reference_origin", "observed_lookup");
+      }
    }
    cJSON_Delete(reply);
    cJSON_Delete(args);
@@ -62,11 +77,11 @@ static cJSON *make_memory_ref(int64_t id)
 /* Regenerate surfaced_ids + surfaced_items from the memory-typed entries of
  * surfaced_refs (the unified source of truth), so the back-compat projections
  * always match after any mutation. */
-static void project_memory_refs(cJSON *p)
+static int project_memory_refs(cJSON *p)
 {
    cJSON *refs = cJSON_GetObjectItemCaseSensitive(p, "surfaced_refs");
    if (!cJSON_IsArray(refs))
-      return; /* nothing to project from — leave any existing projections intact */
+      return 1; /* no canonical array: leave existing projections intact */
    /* Build the replacements as DETACHED arrays first, then swap them in only once
     * both exist — so an allocation failure never leaves the event with the old
     * projections deleted and no replacements (no destruction window). */
@@ -76,7 +91,7 @@ static void project_memory_refs(cJSON *p)
    {
       cJSON_Delete(ids);
       cJSON_Delete(items);
-      return;
+      return 0;
    }
    int n = cJSON_GetArraySize(refs);
    for (int i = 0; i < n; i++)
@@ -88,18 +103,48 @@ static void project_memory_refs(cJSON *p)
       if (!cJSON_IsString(t) || strcmp(t->valuestring, "memory") != 0 ||
           !jo_read_i64_exact(idj, &id))
          continue;
-      cJSON_AddItemToArray(ids, jo_i64_value_exact(id));
+      cJSON *id_value = jo_i64_value_exact(id);
       cJSON *it = cJSON_CreateObject();
-      cJSON_AddItemToObject(it, "id", jo_i64_value_exact(id));
+      if (!id_value || !it)
+      {
+         cJSON_Delete(id_value);
+         cJSON_Delete(it);
+         cJSON_Delete(ids);
+         cJSON_Delete(items);
+         return 0;
+      }
+      cJSON_AddItemToArray(ids, id_value);
+      id_value = jo_i64_value_exact(id);
+      if (!id_value || !cJSON_AddItemToObject(it, "id", id_value))
+      {
+         cJSON_Delete(id_value);
+         cJSON_Delete(it);
+         cJSON_Delete(ids);
+         cJSON_Delete(items);
+         return 0;
+      }
       cJSON *v = cJSON_GetObjectItemCaseSensitive(r, "v");
-      if (cJSON_IsString(v) && v->valuestring)
-         cJSON_AddStringToObject(it, "v", v->valuestring);
+      const char *origin =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "reference_origin"));
+      if ((cJSON_IsString(v) && v->valuestring &&
+           !cJSON_AddStringToObject(it, "v", v->valuestring)) ||
+          module_source_ref_copy(it, r, "source_ref", id) < 0 ||
+          module_source_ref_copy(it, r, "state_ref", id) < 0 ||
+          (origin && !cJSON_AddStringToObject(it, "reference_origin", origin)))
+      {
+         cJSON_Delete(it);
+         cJSON_Delete(ids);
+         cJSON_Delete(items);
+         return 0;
+      }
       cJSON_AddItemToArray(items, it);
    }
    cJSON_DeleteItemFromObjectCaseSensitive(p, "surfaced_ids");
    cJSON_DeleteItemFromObjectCaseSensitive(p, "surfaced_items");
-   cJSON_AddItemToObject(p, "surfaced_ids", ids);
-   cJSON_AddItemToObject(p, "surfaced_items", items);
+   /* Static keys make the final swap allocation-free. */
+   cJSON_AddItemToObjectCS(p, "surfaced_ids", ids);
+   cJSON_AddItemToObjectCS(p, "surfaced_items", items);
+   return 1;
 }
 
 /* Return p's surfaced_refs array, back-filling it from the legacy surfaced_ids/
@@ -113,11 +158,19 @@ static cJSON *ensure_surfaced_refs(cJSON *p)
       const cJSON *row;
       cJSON_ArrayForEach(row, refs)
       {
-         int64_t id;
+         int64_t id = 0;
          const cJSON *type = cJSON_GetObjectItemCaseSensitive(row, "type");
          if (cJSON_IsString(type) && !strcmp(type->valuestring, "memory") &&
              !jo_read_i64_exact(cJSON_GetObjectItemCaseSensitive(row, "id"), &id))
             return NULL; /* Cannot recover a previously rounded source identity. */
+         if (cJSON_IsString(type) && !strcmp(type->valuestring, "memory"))
+            for (const char **field = (const char *[]){"source_ref", "state_ref", NULL}; *field;
+                 ++field)
+            {
+               const cJSON *value = cJSON_GetObjectItemCaseSensitive(row, *field);
+               if (value && !module_source_ref_valid(value, id))
+                  return NULL;
+            }
       }
       return refs;
    }
@@ -151,6 +204,16 @@ static cJSON *ensure_surfaced_refs(cJSON *p)
                cJSON *v = cJSON_GetObjectItemCaseSensitive(it, "v");
                if (cJSON_IsString(v) && v->valuestring)
                   cJSON_AddStringToObject(r, "v", v->valuestring);
+               if (module_source_ref_copy(r, it, "source_ref", id) < 0 ||
+                   module_source_ref_copy(r, it, "state_ref", id) < 0)
+               {
+                  cJSON_Delete(r);
+                  return NULL;
+               }
+               const char *origin =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "reference_origin"));
+               if (origin)
+                  cJSON_AddStringToObject(r, "reference_origin", origin);
                break;
             }
          }
@@ -200,14 +263,27 @@ int kb_store_demotion_retrieval_event_write(const char *query_fingerprint, const
    cJSON_AddStringToObject(p, "query_fingerprint", query_fingerprint ? query_fingerprint : "");
    cJSON_AddStringToObject(p, "role", role ? role : "");
    cJSON *refs = cJSON_AddArrayToObject(p, "surfaced_refs");
+   if (!refs)
+   {
+      cJSON_Delete(p);
+      return -1;
+   }
    /* surfaced_ids may be NULL (proactive/no-surface events); guard so n is 0. */
    for (int i = 0; surfaced_ids && refs && i < n_surfaced; i++)
    {
       cJSON *r = make_memory_ref(surfaced_ids[i]);
-      if (r)
-         cJSON_AddItemToArray(refs, r);
+      if (!r)
+      {
+         cJSON_Delete(p);
+         return -1;
+      }
+      cJSON_AddItemToArray(refs, r);
    }
-   project_memory_refs(p);
+   if (!project_memory_refs(p))
+   {
+      cJSON_Delete(p);
+      return -1;
+   }
    char *payload = cJSON_PrintUnformatted(p);
    cJSON_Delete(p);
    if (!payload)
@@ -454,8 +530,12 @@ int kb_store_demotion_retrieval_event_merge_turn(const char *turn_id, const char
          break;
       }
 
-      if (added > 0)
-         project_memory_refs(p); /* keep the back-compat projections in sync */
+      if (added > 0 && !project_memory_refs(p))
+      {
+         cJSON_Delete(p);
+         result = -1;
+         break;
+      }
 
       if (added == 0)
       {
@@ -625,8 +705,12 @@ int kb_store_demotion_retrieval_event_merge_refs_turn(const char *turn_id,
 
       /* typed refs don't change the memory-only legacy projections, but a migrated
        * legacy event still needs them rebuilt so surfaced_ids/items exist. */
-      if (added > 0)
-         project_memory_refs(p);
+      if (added > 0 && !project_memory_refs(p))
+      {
+         cJSON_Delete(p);
+         result = -1;
+         break;
+      }
 
       if (added == 0)
       {

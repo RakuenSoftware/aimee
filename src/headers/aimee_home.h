@@ -25,6 +25,8 @@ extern "C"
    /* Resolve the active aimee config-root path. NULL on unrecoverable
     * env failure (no HOME and no AIMEE_HOME override). */
    const char *aimee_home(void);
+   /* Pure per-call variant; no environment mutation. */
+   const char *aimee_home_profile(const char *profile);
 
    /* Resolve the profiles container directory (parent of all named
     * profiles). Honours AIMEE_HOME. NULL on env failure. */

@@ -1,6 +1,6 @@
 /* peer_client.h: the server's side of peer messaging.
  *
- * The aimee module (principal ref 31) serves four stages and, until this file
+ * The aimee module (principal ref 30) serves four stages and, until this file
  * existed, NOTHING in the product called any of them. The module was validated
  * on hardware by a probe binary written for the purpose, which is a test of the
  * engine and not of the feature: no agent had ever sent a message to another
@@ -171,11 +171,6 @@ extern "C"
     * conditions wearing one sentence -- absent, denied, timed out, reply too
     * large -- and they need different responses from whoever reads it. */
    const char *peer_client_transport_name(int transport);
-
-   /* Is anything serving peer delivery on this daemon's bus? A local check
-    * against the bus registry, not a probe: with no module attached there is no
-    * call to make, and saying so beats waiting out a deadline. */
-   int peer_client_available(void);
 
 #ifdef __cplusplus
 }

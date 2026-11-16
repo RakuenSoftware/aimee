@@ -284,16 +284,6 @@ void anchor_snapshot_dispose(anchor_snapshot_t *out)
    out->line_digests = NULL;
 }
 
-void anchor_snapshot_gc(void)
-{
-   time_t now = time(NULL);
-   pthread_mutex_lock(&g_store_lock);
-   for (int i = 0; i < ANCHOR_STORE_SLOTS; i++)
-      if (g_store_used[i] && now - g_store[i].created >= ANCHOR_SNAPSHOT_TTL)
-         slot_free(i);
-   pthread_mutex_unlock(&g_store_lock);
-}
-
 char *anchor_format_read(const char *bytes, size_t len, int offset, int limit,
                          const char *snapshot_id)
 {

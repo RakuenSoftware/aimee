@@ -30,14 +30,6 @@ extern "C"
     * by DISTINCT path. */
    int db1_session_write_path_record(const char *session_id, const char *path);
 
-   /* Find every distinct path that the parent session has READ AND that
-    * the child session has WRITTEN. Writes up to `max` paths into
-    * `out_paths`, each a NUL-terminated string of length up to
-    * DB1_SESSION_PATH_LEN. Returns the count written, 0 on no overlap,
-    * -1 on error. */
-   int db1_session_stale_reads(const char *parent_session_id, const char *child_session_id,
-                               char (*out_paths)[DB1_SESSION_PATH_LEN], int max);
-
 #ifdef __cplusplus
 }
 #endif

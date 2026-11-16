@@ -4,7 +4,9 @@
 #endif
 
 #include "headers/module_commands.h"
-#include <aimee/core/event_bus/module_protocol.h>
+#include "headers/memory_stage_contract.h"
+extern int vault_content_protect_json(const char *, char **) __attribute__((weak));
+#include <ouroboros/module_protocol.h>
 
 #include "aimee/audit/obs_bus.h"
 #include "aimee_sha256.h"
@@ -20,8 +22,43 @@
 #include <string.h>
 #include <time.h>
 
-/* Declaration wire format. MUST match server-go/modules/memory/commands.go and
- * server-go/modules/mcp/commands.go -- one decoder for both, which is the point:
+extern int aimee_module_owner_action_request(const char *, const cJSON *, int, char **)
+    __attribute__((weak));
+int aimee_module_commands_owner_action_raw(const char *method, const cJSON *args, int timeout_ms,
+                                           char **result)
+{
+   if (!result)
+      return -1;
+   *result = NULL;
+   if (!method || !method[0] || !cJSON_IsObject(args) || timeout_ms <= 0)
+      return -1;
+   if (!aimee_module_owner_action_request)
+      return 0;
+   char *raw = NULL;
+   int selected = aimee_module_owner_action_request(method, args, timeout_ms, &raw);
+   if (selected != 1)
+   {
+      int invalid = raw != NULL;
+      free(raw);
+      return selected == 0 && !invalid ? 0 : -1;
+   }
+   cJSON *parsed =
+       raw && strnlen(raw, OURO_MODULE_MESSAGE_MAX_BODY + 1u) <= OURO_MODULE_MESSAGE_MAX_BODY
+           ? cJSON_ParseWithOpts(raw, NULL, 1)
+           : NULL;
+   int valid = cJSON_IsObject(parsed);
+   cJSON_Delete(parsed);
+   if (!valid)
+   {
+      free(raw);
+      return -1;
+   }
+   *result = raw; /* Validate without normalizing native integer tokens. */
+   return 1;
+}
+
+/* Declaration wire format. MUST match server-go/modules/mcp/commands.go and
+ * independently installed command owners -- one host decoder, which is the point:
  * a second format for plugin commands would rebuild the divergence the registry
  * removed.
  *
@@ -65,7 +102,7 @@
 #define INVOKE_RESPONSE_MAGIC  0x53504d43u /* "CMPS" */
 #define INVOKE_REQUEST_HEADER  16u
 #define INVOKE_RESPONSE_HEADER 12u
-#define INVOKE_MAX_RESPONSE    AIMEE_MODULE_MESSAGE_MAX_BODY
+#define INVOKE_MAX_RESPONSE    OURO_MODULE_MESSAGE_MAX_BODY
 #define INVOKE_TIMEOUT_MS      60000
 
 /* One registered command's owned backing.
@@ -181,119 +218,269 @@ static void wr_u16(unsigned char *p, uint16_t v)
 /* Encodes the shared invoke frame and returns the owner's JSON result.
  * Fixed modules use their declared stage; plugins retain their stage-1 route. Returns NULL on any
  * failure; the surface that called decides what that means, exactly as module_json_call.c does. */
+typedef struct
+{
+   char *args_json;
+   char *privacy_redacted;
+   char *context_json;
+   unsigned char *request;
+   unsigned char *response;
+   char *body;
+   cJSON *parsed;
+} command_call_scope_t;
+static void command_call_cleanup(void *opaque)
+{
+   volatile command_call_scope_t *scope = opaque;
+   free(scope->args_json);
+   free(scope->privacy_redacted);
+   free(scope->context_json);
+   free(scope->request);
+   free(scope->response);
+   free(scope->body);
+   cJSON_Delete(scope->parsed);
+}
+static void command_outcome_reset(aimee_module_command_outcome_v1 *outcome)
+{
+   if (outcome)
+      *outcome = (aimee_module_command_outcome_v1){1, AIMEE_COMMAND_UNSENT, -1};
+}
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_module_command_outcome_contract_v1 = 1;
+static cJSON *command_call_timeout_outcome(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                           const cJSON *args, const cJSON *context, int timeout_ms,
+                                           int raw_result, aimee_module_command_outcome_v1 *outcome)
+{
+   command_outcome_reset(outcome);
+   if (!event_kind || !stage_id || !verb || !verb[0] || strlen(verb) > 127)
+      return NULL;
+   /* pthread_cleanup_push may setjmp; read the verb only from this frame's
+    * own copy so no argument register is live across it (-Wclobbered). */
+   char verb_copy[128];
+   snprintf(verb_copy, sizeof(verb_copy), "%s", verb);
+   volatile command_call_scope_t owned = {0};
+   cJSON *volatile result = NULL;
+   pthread_cleanup_push(command_call_cleanup, (void *)&owned);
+   size_t args_len = 0;
+   if (args)
+   {
+      owned.args_json = cJSON_PrintUnformatted((cJSON *)args);
+      if (!owned.args_json)
+         goto done;
+      /* Host Vault intake precedes the first raw-value bus frame. Never rewrite
+       * signed source/projection operations or their authenticated context. */
+      const char *operation =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation"));
+      int intake = !strcmp(verb_copy, "store") || !strcmp(verb_copy, "supersede") ||
+                   !strcmp(verb_copy, "search") || !strcmp(verb_copy, "recall") ||
+                   !strcmp(verb_copy, "screen_content") || !strcmp(verb_copy, "facts") ||
+                   !strcmp(verb_copy, "search_graph") || !strcmp(verb_copy, "entity_edges") ||
+                   !strcmp(verb_copy, "serve") || !strcmp(verb_copy, "claim_card") ||
+                   (!strcmp(verb_copy, "runtime") && operation &&
+                    (!strncmp(operation, "user-", 5) || !strncmp(operation, "shared-", 7) ||
+                     !strcmp(operation, "memory-query")));
+      if (event_kind == AIMEE_MEMORY_EVENT_COMMAND && intake && vault_content_protect_json)
+      {
+         char *safe = NULL;
+         if (vault_content_protect_json(owned.args_json, &safe))
+            goto done;
+         if (safe)
+         {
+            if (!strcmp(verb_copy, "screen_content"))
+            {
+               cJSON *intake = cJSON_ParseWithOpts(safe, NULL, 1);
+               const char *text =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(intake, "content"));
+               owned.privacy_redacted = text ? strdup(text) : NULL;
+               cJSON_Delete(intake);
+               if (!owned.privacy_redacted)
+               {
+                  free(safe);
+                  goto done;
+               }
+            }
+            free(owned.args_json);
+            owned.args_json = safe;
+         }
+         /* HTTP intake may already have transformed this text. A screen
+          * response must return that safe text rather than tell a caller to
+          * keep its original private input. Locators remain ordinary data. */
+         if (!strcmp(verb_copy, "screen_content") && !owned.privacy_redacted)
+         {
+            cJSON *screen = cJSON_ParseWithOpts(owned.args_json, NULL, 1);
+            const char *text =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(screen, "content"));
+            if (text && strstr(text, "[[vault:v1:"))
+               owned.privacy_redacted = strdup(text);
+            int failed = text && strstr(text, "[[vault:v1:") && !owned.privacy_redacted;
+            cJSON_Delete(screen);
+            if (failed)
+               goto done;
+         }
+      }
+      args_len = strlen(owned.args_json);
+   }
+   owned.context_json = context && cJSON_IsObject(context) ? cJSON_PrintUnformatted(context) : NULL;
+   if (context && !owned.context_json)
+      goto done;
+   size_t context_len = owned.context_json ? strlen(owned.context_json) : 0;
+   size_t header_len = context ? 20 : INVOKE_REQUEST_HEADER;
+   size_t verb_len = strlen(verb_copy);
+   size_t request_len = header_len + verb_len + args_len + context_len;
+   if (request_len > OURO_MODULE_MESSAGE_MAX_BODY || context_len > 4096)
+      goto done;
+   owned.request = malloc(request_len);
+   if (!owned.request)
+      goto done;
+   wr_u32(owned.request, INVOKE_REQUEST_MAGIC);
+   wr_u32(owned.request + 4, context ? 2 : DECL_WIRE_VERSION);
+   wr_u16(owned.request + 8, (uint16_t)verb_len);
+   wr_u16(owned.request + 10, 0);
+   wr_u32(owned.request + 12, (uint32_t)args_len);
+   if (context)
+      wr_u32(owned.request + 16, (uint32_t)context_len);
+   memcpy(owned.request + header_len, verb_copy, verb_len);
+   if (args_len)
+      memcpy(owned.request + header_len + verb_len, owned.args_json, args_len);
+   if (context_len)
+      memcpy(owned.request + header_len + verb_len + args_len, owned.context_json, context_len);
+   free(owned.context_json);
+   owned.context_json = NULL;
+   free(owned.args_json);
+   owned.args_json = NULL;
+   owned.response = malloc(INVOKE_MAX_RESPONSE);
+   if (!owned.response)
+      goto done;
+   uint32_t response_len = 0;
+   ouro_module_call_result_t rc = obs_bus_module_call(
+       event_kind, stage_id, 0, aimee_module_call_deadline_ns(timeout_ms), owned.request,
+       (uint32_t)request_len, owned.response, INVOKE_MAX_RESPONSE, &response_len, NULL, NULL);
+   free(owned.request);
+   owned.request = NULL;
+   if (outcome)
+   {
+      outcome->stage = AIMEE_COMMAND_SDK_RESULT;
+      outcome->sdk_result = (int)rc;
+   }
+   if (rc != OURO_MODULE_CALL_OK)
+   {
+      LOG_WARN("commands", "command %s: invoke failed: %s", verb_copy,
+               ouro_module_call_result_name(rc));
+      goto done;
+   }
+   if (outcome)
+      outcome->stage = AIMEE_COMMAND_FRAME_INVALID;
+   if (response_len < INVOKE_RESPONSE_HEADER || rd_u32(owned.response) != INVOKE_RESPONSE_MAGIC ||
+       rd_u32(owned.response + 4) != DECL_WIRE_VERSION)
+   {
+      LOG_WARN("commands", "command %s: malformed frame", verb_copy);
+      goto done;
+   }
+   uint32_t body_len = rd_u32(owned.response + 8);
+   if ((uint64_t)INVOKE_RESPONSE_HEADER + body_len != response_len)
+   {
+      LOG_WARN("commands", "command %s: frame length disagrees with its header", verb_copy);
+      goto done;
+   }
+   /* The raw sibling transports untrusted response bytes without normalizing
+    * JSON tokens. Its caller must validate the complete body before use. */
+   if (outcome)
+      outcome->stage = AIMEE_COMMAND_LOCAL_FAILURE;
+   owned.body = malloc((size_t)body_len + 1);
+   if (!owned.body)
+      goto done;
+   memcpy(owned.body, owned.response + INVOKE_RESPONSE_HEADER, body_len);
+   owned.body[body_len] = '\0';
+   if (owned.privacy_redacted)
+   {
+      /* Preserve the screen API's combined result: the host established actual
+       * Vault custody, then the selected owner screened only the safe text. */
+      cJSON *screen = cJSON_ParseWithOpts(owned.body, NULL, 1);
+      const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(screen, "status"));
+      const char *verdict =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(screen, "verdict"));
+      if (status && !strcmp(status, "ok") && verdict && !strcmp(verdict, "allow"))
+      {
+         if (!cJSON_ReplaceItemInObjectCaseSensitive(screen, "verdict",
+                                                     cJSON_CreateString("redact")) ||
+             !cJSON_ReplaceItemInObjectCaseSensitive(screen, "redacted",
+                                                     cJSON_CreateString(owned.privacy_redacted)))
+         {
+            cJSON_Delete(screen);
+            goto done;
+         }
+         char *combined = cJSON_PrintUnformatted(screen);
+         if (!combined)
+         {
+            cJSON_Delete(screen);
+            goto done;
+         }
+         free(owned.body);
+         owned.body = combined;
+         body_len = (uint32_t)strlen(combined);
+      }
+      cJSON_Delete(screen);
+   }
+
+   free(owned.response);
+   owned.response = NULL;
+   if (outcome)
+      outcome->stage = AIMEE_COMMAND_BODY_INVALID;
+   if (raw_result == 2)
+   {
+      /* A cJSON Raw node owns a C string. Reject literal NUL bytes rather than
+       * truncate; escaped JSON NUL remains exact bytes for the receiver parser. */
+      if (!memchr(owned.body, '\0', body_len))
+         owned.parsed = cJSON_CreateRaw(owned.body);
+   }
+   else
+   {
+      const char *end = NULL;
+      owned.parsed = cJSON_ParseWithLengthOpts(owned.body, (size_t)body_len + 1, &end, 1);
+      if (owned.parsed && end != owned.body + body_len)
+      {
+         cJSON_Delete(owned.parsed);
+         owned.parsed = NULL;
+      }
+      if (owned.parsed && raw_result == 1)
+      {
+         cJSON_Delete(owned.parsed);
+         owned.parsed = cJSON_CreateRaw(owned.body);
+      }
+   }
+   result = owned.parsed;
+   owned.parsed = NULL;
+   if (outcome && result)
+      outcome->stage = AIMEE_COMMAND_BODY_READY;
+done:
+   pthread_cleanup_pop(1);
+   return result;
+}
+
 static cJSON *command_call_timeout(uint32_t event_kind, uint32_t stage_id, const char *verb,
                                    const cJSON *args, const cJSON *context, int timeout_ms,
                                    int raw_result)
 {
-   if (!event_kind || !stage_id || !verb || !verb[0] || strlen(verb) > 127)
-      return NULL;
+   return command_call_timeout_outcome(event_kind, stage_id, verb, args, context, timeout_ms,
+                                       raw_result, NULL);
+}
 
-   char *args_json = NULL;
-   size_t args_len = 0;
-   if (args)
-   {
-      args_json = cJSON_PrintUnformatted((cJSON *)args);
-      if (!args_json)
-         return NULL;
-      args_len = strlen(args_json);
-   }
+cJSON *aimee_module_command_call_context_timeout(uint32_t event_kind, uint32_t stage_id,
+                                                 const char *verb, const cJSON *args,
+                                                 const cJSON *context, int timeout_ms)
+{
+   return timeout_ms > 0
+              ? command_call_timeout(event_kind, stage_id, verb, args, context, timeout_ms, 0)
+              : NULL;
+}
 
-   char *context_json = context && cJSON_IsObject(context) ? cJSON_PrintUnformatted(context) : NULL;
-   if (context && !context_json)
-   {
-      free(args_json);
-      return NULL;
-   }
-   size_t context_len = context_json ? strlen(context_json) : 0;
-   size_t header_len = context ? 20 : INVOKE_REQUEST_HEADER;
-   size_t verb_len = strlen(verb);
-   size_t request_len = header_len + verb_len + args_len + context_len;
-   if (request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || context_len > 4096)
-   {
-      free(context_json);
-      free(args_json);
-      return NULL;
-   }
-   unsigned char *request = malloc(request_len);
-   if (!request)
-   {
-      free(context_json);
-      free(args_json);
-      return NULL;
-   }
-   wr_u32(request, INVOKE_REQUEST_MAGIC);
-   wr_u32(request + 4, context ? 2 : DECL_WIRE_VERSION);
-   wr_u16(request + 8, (uint16_t)verb_len);
-   wr_u16(request + 10, 0);
-   wr_u32(request + 12, (uint32_t)args_len);
-   if (context)
-      wr_u32(request + 16, (uint32_t)context_len);
-   memcpy(request + header_len, verb, verb_len);
-   if (args_len)
-      memcpy(request + header_len + verb_len, args_json, args_len);
-   if (context_len)
-      memcpy(request + header_len + verb_len + args_len, context_json, context_len);
-   free(context_json);
-   free(args_json);
-
-   unsigned char *response = malloc(INVOKE_MAX_RESPONSE);
-   if (!response)
-   {
-      free(request);
-      return NULL;
-   }
-   uint32_t response_len = 0;
-   aimee_module_call_result_t rc = obs_bus_module_call(
-       event_kind, stage_id, 0, aimee_module_call_deadline_ns(timeout_ms), request,
-       (uint32_t)request_len, response, INVOKE_MAX_RESPONSE, &response_len, NULL, NULL);
-   free(request);
-
-   if (rc != AIMEE_MODULE_CALL_OK)
-   {
-      LOG_WARN("commands", "command %s: invoke failed: %s", verb,
-               aimee_module_call_result_name(rc));
-      free(response);
-      return NULL;
-   }
-   if (response_len < INVOKE_RESPONSE_HEADER || rd_u32(response) != INVOKE_RESPONSE_MAGIC ||
-       rd_u32(response + 4) != DECL_WIRE_VERSION)
-   {
-      LOG_WARN("commands", "command %s: malformed frame", verb);
-      free(response);
-      return NULL;
-   }
-   uint32_t body_len = rd_u32(response + 8);
-   if ((uint64_t)INVOKE_RESPONSE_HEADER + body_len != response_len)
-   {
-      LOG_WARN("commands", "command %s: frame length disagrees with its header", verb);
-      free(response);
-      return NULL;
-   }
-   /* Validate the complete body before forwarding its exact JSON tokens. Native
-    * numeric nodes use double and cannot round-trip the owner's int64 IDs. */
-   char *body = malloc((size_t)body_len + 1);
-   if (!body)
-   {
-      free(response);
-      return NULL;
-   }
-   memcpy(body, response + INVOKE_RESPONSE_HEADER, body_len);
-   body[body_len] = '\0';
-   free(response);
-   const char *end = NULL;
-   cJSON *parsed = cJSON_ParseWithLengthOpts(body, (size_t)body_len + 1, &end, 1);
-   if (parsed && end != body + body_len)
-   {
-      cJSON_Delete(parsed);
-      parsed = NULL;
-   }
-   if (parsed && raw_result)
-   {
-      cJSON_Delete(parsed);
-      parsed = cJSON_CreateRaw(body);
-   }
-   free(body);
-   return parsed;
+__attribute__((used, externally_visible, retain)) cJSON *
+aimee_module_command_call_raw_context_timeout(uint32_t event_kind, uint32_t stage_id,
+                                              const char *verb, const cJSON *args,
+                                              const cJSON *context, int timeout_ms)
+{
+   return timeout_ms > 0
+              ? command_call_timeout(event_kind, stage_id, verb, args, context, timeout_ms, 2)
+              : NULL;
 }
 
 cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id, const char *verb,
@@ -463,20 +650,30 @@ static int admit_pending(uint32_t declare_kind, const char *module_id, const uns
    if (!ack)
       return 0;
    uint32_t out_len = 0;
-   aimee_module_call_result_t rc = obs_bus_module_call(
+   ouro_module_call_result_t rc = obs_bus_module_call(
        declare_kind, AIMEE_PLUGIN_STAGE_DECLARE, 0, aimee_module_call_deadline_ns(60000), request,
        sizeof request, ack, DECL_MAX_RESPONSE, &out_len, NULL, NULL);
    free(ack);
-   if (rc != AIMEE_MODULE_CALL_OK)
+   if (rc != OURO_MODULE_CALL_OK)
    {
       LOG_WARN("commands", "module %s: admission verdict not delivered: %s", module_id,
-               aimee_module_call_result_name(rc));
+               ouro_module_call_result_name(rc));
       return 0;
    }
    LOG_INFO("commands", "module %s: plugin %s by the OSV gate", module_id,
             blocked ? "REFUSED" : "admitted");
    return 1;
 }
+
+/* Weak so unit binaries that stub the bus without it link; with no fingerprint
+ * the registry falls back to its time-to-live alone. */
+uint64_t obs_bus_slot_fingerprint(void) __attribute__((weak));
+
+static uint64_t g_last_collect_ms;
+/* The bus's slot fingerprint when the registry was last collected, and whether
+ * some module failed to answer then (so the next refresh asks again). */
+static uint64_t g_last_collect_fingerprint;
+static int g_collect_incomplete;
 
 static int collect_one(uint32_t declare_kind, uint32_t declare_stage, uint32_t invoke_kind,
                        uint32_t version, const char *module_id, aimee_plugin_state_t *state_out,
@@ -498,19 +695,20 @@ static int collect_one(uint32_t declare_kind, uint32_t declare_stage, uint32_t i
     * and the second is the declaration that follows it. One retry only -- a
     * module that keeps asking is misbehaving, and looping would spin the gate. */
    int rounds = 0;
-   aimee_module_call_result_t rc;
+   ouro_module_call_result_t rc;
    for (;;)
    {
       response_len = 0;
       rc = obs_bus_module_call(declare_kind, declare_stage, 0, aimee_module_call_deadline_ns(5000),
                                request, sizeof request, response, DECL_MAX_RESPONSE, &response_len,
                                NULL, NULL);
-      if (rc != AIMEE_MODULE_CALL_OK)
+      if (rc != OURO_MODULE_CALL_OK)
       {
+         g_collect_incomplete = 1; /* ask this module again on the next refresh */
          LOG_WARN("commands", "module %s declaration failed: %s", module_id,
-                  aimee_module_call_result_name(rc));
+                  ouro_module_call_result_name(rc));
          if (err_out)
-            snprintf(err_out, err_cap, "declaration failed: %s", aimee_module_call_result_name(rc));
+            snprintf(err_out, err_cap, "declaration failed: %s", ouro_module_call_result_name(rc));
          free(response);
          return -1;
       }
@@ -802,7 +1000,6 @@ static uint64_t now_ms(void)
    return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
 }
 
-static uint64_t g_last_collect_ms;
 static pthread_mutex_t g_collect_lock = PTHREAD_MUTEX_INITIALIZER;
 
 int aimee_module_commands_refresh(int ttl_ms)
@@ -811,13 +1008,27 @@ int aimee_module_commands_refresh(int ttl_ms)
       ttl_ms = 0;
    pthread_mutex_lock(&g_collect_lock);
    uint64_t now = now_ms();
+   /* What modules declare can only change when one attaches or leaves. While
+    * that has not happened and the last collection heard from every module, the
+    * registry is current: asking every module again -- which this used to do
+    * every two seconds of tool traffic -- would only return the same answer.
+    * ttl_ms still paces retries after a collection some module did not answer. */
+   uint64_t fingerprint = obs_bus_slot_fingerprint ? obs_bus_slot_fingerprint() : 0;
+   if (g_last_collect_ms != 0 && fingerprint != 0 && fingerprint == g_last_collect_fingerprint &&
+       !g_collect_incomplete)
+   {
+      pthread_mutex_unlock(&g_collect_lock);
+      return 0;
+   }
    if (now != 0 && g_last_collect_ms != 0 && now - g_last_collect_ms < (uint64_t)ttl_ms)
    {
       pthread_mutex_unlock(&g_collect_lock);
       return 0;
    }
+   g_collect_incomplete = 0;
    int registered = aimee_module_commands_collect();
    g_last_collect_ms = now;
+   g_last_collect_fingerprint = fingerprint;
    pthread_mutex_unlock(&g_collect_lock);
    return registered;
 }
@@ -881,10 +1092,73 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
                                                                   result);
 }
 
-int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
-                                                            const cJSON *context, int timeout_ms,
-                                                            cJSON **result)
+/* Optional verifier-owned host context. Opt-in callers alone select v2 framing. */
+extern cJSON *aimee_module_host_command_context(void) __attribute__((weak));
+
+int aimee_module_commands_capture_caller_context(cJSON **context)
 {
+   if (!context)
+      return -1;
+   *context = NULL;
+   if (!aimee_module_host_command_context)
+      return 0;
+   cJSON *value = aimee_module_host_command_context();
+   const cJSON *auth = cJSON_GetObjectItemCaseSensitive(value, "authenticated");
+   const cJSON *user = cJSON_GetObjectItemCaseSensitive(value, "user_authority");
+   const cJSON *principal = cJSON_GetObjectItemCaseSensitive(value, "principal");
+   const cJSON *transport = cJSON_GetObjectItemCaseSensitive(value, "transport_identity");
+   const cJSON *kind = cJSON_GetObjectItemCaseSensitive(value, "scope_kind");
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(value, "scope_id");
+   int scoped = kind || id;
+   int valid = cJSON_IsObject(value) && cJSON_GetArraySize(value) == (scoped ? 6 : 4) &&
+               cJSON_IsBool(auth) && cJSON_IsBool(user) && cJSON_IsString(principal) &&
+               cJSON_IsString(transport);
+   if (valid && cJSON_IsTrue(auth))
+      valid = principal->valuestring[0] && transport->valuestring[0];
+   if (valid && !cJSON_IsTrue(auth))
+      valid = !cJSON_IsTrue(user) && !principal->valuestring[0] && !transport->valuestring[0] &&
+              !scoped;
+   if (valid && scoped)
+      valid = cJSON_IsTrue(auth) && cJSON_IsString(kind) && kind->valuestring[0] &&
+              cJSON_IsString(id) && id->valuestring[0];
+   char *encoded = valid ? cJSON_PrintUnformatted(value) : NULL;
+   valid = encoded && strlen(encoded) <= 4096;
+   cJSON_free(encoded);
+   if (!valid)
+   {
+      cJSON_Delete(value);
+      return -1;
+   }
+   *context = value;
+   return 1;
+}
+
+int aimee_module_commands_dispatch_internal_caller_timeout(const char *method, const cJSON *args,
+                                                           int timeout_ms, cJSON **result)
+{
+   if (!result)
+      return 0;
+   *result = NULL;
+   cJSON *context = NULL;
+   if (aimee_module_commands_capture_caller_context(&context) < 0)
+      return -1;
+   int rc = aimee_module_commands_dispatch_internal_context_timeout(method, args, context,
+                                                                    timeout_ms, result);
+   cJSON_Delete(context);
+   return rc;
+}
+
+int aimee_module_commands_dispatch_internal_caller(const char *method, const cJSON *args,
+                                                   cJSON **result)
+{
+   return aimee_module_commands_dispatch_internal_caller_timeout(method, args, 125000, result);
+}
+
+static int commands_dispatch_internal_context_timeout_outcome(
+    const char *method, const cJSON *args, const cJSON *context, int timeout_ms, cJSON **result,
+    int raw_result, int declared_fixed, aimee_module_command_outcome_v1 *outcome)
+{
+   command_outcome_reset(outcome);
    if (!result)
       return 0;
    *result = NULL;
@@ -898,7 +1172,8 @@ int aimee_module_commands_dispatch_internal_context_timeout(const char *method, 
    for (size_t i = 0; i < g_owned_count; ++i)
    {
       const owned_command_t *owned = g_owned[i];
-      if (!owned->internal)
+      if (declared_fixed ? (!owned->module || strncmp(owned->module, "module:", 7) != 0)
+                         : !owned->internal)
          continue;
       size_t group_len = strlen(owned->group);
       if (strncmp(method, owned->group, group_len) != 0 || method[group_len] != '.' ||
@@ -912,8 +1187,64 @@ int aimee_module_commands_dispatch_internal_context_timeout(const char *method, 
    pthread_mutex_unlock(&g_collect_lock);
    if (matches != 1 || !kind)
       return matches ? -1 : 0;
-   *result = command_call_timeout(kind, stage, verb, args, context, timeout_ms, 0);
+   *result = command_call_timeout_outcome(kind, stage, verb, args, context, timeout_ms, raw_result,
+                                          outcome);
    return *result ? 1 : -1;
+}
+
+static int commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
+                                                      const cJSON *context, int timeout_ms,
+                                                      cJSON **result, int raw_result,
+                                                      int declared_fixed)
+{
+   return commands_dispatch_internal_context_timeout_outcome(
+       method, args, context, timeout_ms, result, raw_result, declared_fixed, NULL);
+}
+__attribute__((used, externally_visible, retain)) int
+aimee_module_commands_dispatch_internal_raw_outcome_context_timeout_v1(
+    const char *method, const cJSON *args, const cJSON *context, int timeout_ms, cJSON **result,
+    aimee_module_command_outcome_v1 *outcome)
+{
+   if (!outcome)
+      return -1;
+   return commands_dispatch_internal_context_timeout_outcome(method, args, context, timeout_ms,
+                                                             result, 1, 0, outcome);
+}
+
+int aimee_module_commands_dispatch_internal_outcome_context_timeout_v1(
+    const char *method, const cJSON *args, const cJSON *context, int timeout_ms, cJSON **result,
+    aimee_module_command_outcome_v1 *outcome)
+{
+   if (!outcome)
+      return -1;
+   return commands_dispatch_internal_context_timeout_outcome(method, args, context, timeout_ms,
+                                                             result, 0, 0, outcome);
+}
+
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result)
+{
+   return commands_dispatch_internal_context_timeout(method, args, context, timeout_ms, result, 0,
+                                                     0);
+}
+
+int aimee_module_commands_dispatch_internal_raw_context_timeout(const char *method,
+                                                                const cJSON *args,
+                                                                const cJSON *context,
+                                                                int timeout_ms, cJSON **result)
+{
+   return commands_dispatch_internal_context_timeout(method, args, context, timeout_ms, result, 1,
+                                                     0);
+}
+
+__attribute__((used, externally_visible, retain)) int
+aimee_module_commands_dispatch_declared_raw_context_timeout(const char *method, const cJSON *args,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result)
+{
+   return commands_dispatch_internal_context_timeout(method, args, context, timeout_ms, result, 1,
+                                                     1);
 }
 
 void aimee_module_commands_reset(void)

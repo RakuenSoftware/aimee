@@ -154,6 +154,13 @@ int vault_hwm_verify(const char *key_id, uint64_t version, const uint8_t *att, s
 uint64_t vault_use_epoch_snapshot(void);
 int vault_use_begin(uint64_t expected_epoch, uint64_t admitted_primary_epoch,
                     uint8_t kek[VAULT_KEK_LEN]);
+/* Independent local seal-lifetime primitive. No primary/kb_control admission is
+ * implied: NOT for OrgKeyUse. Requires the actual current unsealed local epoch;
+ * holds the seal read guard and disables cancellation until vault_use_end().
+ * Caller independently authorizes the exact entry/value and cleanses its key
+ * before end; no Native/Vault RPC is permitted inside a generation callback. */
+extern const unsigned aimee_vault_local_use_contract_v1;
+int vault_local_use_begin(uint64_t expected_local_epoch, uint8_t kek[VAULT_KEK_LEN]);
 void vault_use_end(void);
 
 /* Exclusive maintenance guard used by crash recovery and DEK re-wrap. The

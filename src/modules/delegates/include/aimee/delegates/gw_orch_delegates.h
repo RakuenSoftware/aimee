@@ -30,6 +30,6 @@ int gw_orch_delegates_enabled(void);
  *       decides what a missed spawn means (the coord dispatcher releases the task claim and
  *       retries on the next sweep). */
 int gw_orch_delegates_run(const gw_turn_capabilities_t *caps, const char *turn_id, const char *role,
-                          const char *brief, int enabled);
+                          const aimee_message_t *message, int enabled);
 
 #endif /* DEC_GW_ORCH_DELEGATES_H */

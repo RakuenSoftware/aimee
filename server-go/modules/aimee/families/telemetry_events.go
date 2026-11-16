@@ -2,6 +2,10 @@ package families
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
+
+	canonical "github.com/JBailes/aimee/server-go/ir"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
@@ -138,7 +142,90 @@ func interactionRow(scan func(...any) error) ([]string, error) {
 	}, nil
 }
 
+// Execution observations are derived from the immutable canonical log. Serialize
+// retries on its session row, including retries after a crash between append and
+// observation. Learning still owns grading; this store checks source integrity.
+func interactionExecutionRetry(ctx context.Context, q store.Queryer, f []string) (uint32, bool, error) {
+	var observation struct {
+		Schema       int    `json:"schema_version"`
+		Verification string `json:"verification"`
+		Status       string `json:"observed_status"`
+		Error        string `json:"error,omitempty"`
+		Source       struct {
+			Kind     string `json:"kind"`
+			Session  string `json:"session_id"`
+			Sequence string `json:"sequence"`
+			Event    string `json:"event_id"`
+			Turn     string `json:"turn_id"`
+			Actor    string `json:"actor"`
+		} `json:"source"`
+	}
+	if !canonical.Decode([]byte(f[3]), &observation) || observation.Schema != 1 ||
+		observation.Verification != "ungraded" || f[2] != "system" || f[4] != "observed" {
+		return store.StatusInvalid, false, nil
+	}
+	source := observation.Source
+	sequence, err := strconv.ParseInt(source.Sequence, 10, 64)
+	if err != nil || sequence <= 0 || strconv.FormatInt(sequence, 10) != source.Sequence ||
+		source.Kind != "canonical_session_log" || source.Session != f[0] || source.Event == "" || source.Turn == "" || source.Actor == "" {
+		return store.StatusInvalid, false, nil
+	}
+	var owner string
+	if err = q.QueryRow(ctx, sessionIRLockSQL, source.Session).Scan(&owner); err != nil {
+		if store.IsNoRows(err) {
+			return store.StatusMissing, false, nil
+		}
+		return store.StatusFailed, false, err
+	}
+	if owner != source.Actor {
+		return store.StatusInvalid, false, nil
+	}
+	var payload string
+	err = q.QueryRow(ctx, `SELECT payload FROM session_ir_events WHERE session_id=$1 AND sequence=$2 AND event_id=$3 AND turn_id=$4 AND actor=$5`,
+		source.Session, sequence, source.Event, source.Turn, source.Actor).Scan(&payload)
+	if err != nil {
+		if store.IsNoRows(err) {
+			return store.StatusMissing, false, nil
+		}
+		return store.StatusFailed, false, err
+	}
+	var event struct {
+		Kind    string                     `json:"kind"`
+		Payload canonical.ExecutionPayload `json:"payload"`
+	}
+	if json.Unmarshal([]byte(payload), &event) != nil || event.Kind != "execution" ||
+		(event.Payload.Status != "completed" && event.Payload.Status != "failed" && event.Payload.Status != "cancelled") ||
+		observation.Status != event.Payload.Status || observation.Error != event.Payload.Error {
+		return store.StatusInvalid, false, nil
+	}
+	var identical bool
+	err = q.QueryRow(ctx, `SELECT payload::jsonb=$3::jsonb FROM interaction_events WHERE session_id=$1 AND event_type='task_outcome' AND outcome='observed' AND payload::jsonb->'source'->>'sequence'=$2 ORDER BY id LIMIT 1`,
+		source.Session, source.Sequence, f[3]).Scan(&identical)
+	if store.IsNoRows(err) {
+		return store.StatusOK, false, nil
+	}
+	if err != nil {
+		return store.StatusFailed, false, err
+	}
+	if !identical {
+		return store.StatusInvalid, false, nil
+	}
+	return store.StatusOK, true, nil
+}
+
 func interactionEventRecord(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	if f[1] == "delegate_experience" {
+		return store.StatusInvalid, nil, nil
+	}
+	if f[1] == "task_outcome" {
+		status, duplicate, err := interactionExecutionRetry(ctx, q, f)
+		if err != nil || status != store.StatusOK {
+			return status, nil, err
+		}
+		if duplicate {
+			return store.StatusOK, []string{"0"}, nil
+		}
+	}
 	if f[1] == "" {
 		return store.StatusInvalid, nil, nil
 	}

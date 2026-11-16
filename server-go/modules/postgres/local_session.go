@@ -10,7 +10,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -84,7 +84,7 @@ func ServeLocalSession(ctx context.Context, input io.Reader, output io.Writer) e
 	h := &sessionHandler{sessions: make(map[uint64]*postgresSession), poolFn: func(context.Context) (*pgxpool.Pool, error) { return pool, nil }, idle: 90 * time.Second, ctx: lifetime}
 	defer h.close()
 	for {
-		body, err := readLocalFrame(input, int(bus.ModuleMessageMaxBody)+8)
+		body, err := readLocalFrame(input, int(ring.ModuleMessageMaxBody)+8)
 		if err == io.EOF {
 			return nil
 		}
@@ -95,8 +95,8 @@ func ServeLocalSession(ctx context.Context, input io.Reader, output io.Writer) e
 			return errors.New("postgres: local request deadline missing")
 		}
 		deadline := binary.LittleEndian.Uint64(body[:8])
-		reply, status := h.handle(bus.ModuleInvocation{StageID: StageSession, DeadlineNS: deadline}, body[8:])
-		if status != bus.ModuleStatusOK {
+		reply, status := h.handle(ring.ModuleInvocation{StageID: StageSession, DeadlineNS: deadline}, body[8:])
+		if status != ring.ModuleStatusOK {
 			reply = refuse(statusFailed, "08006", "PostgreSQL local request refused")
 		}
 		if err := writeLocalFrame(output, reply); err != nil {

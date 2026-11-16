@@ -20,8 +20,7 @@ and unclassified faults as `502 Bad Gateway`. The server obtains that decision t
 and includes the returned status in the existing error envelope. The physical `aimee-runtime-web`
 provider consumes the status without importing or reimplementing the classification policy; a missing
 or invalid status remains a generic `502 Bad Gateway`. Listener, TLS, authentication, sessions, route
-dispatch, proxy I/O, and assets remain in the physical provider; the C `module_adapter.c` exists only
-as a wire-parity fixture.
+dispatch, proxy I/O, and assets remain in the physical provider.
 
 ## Dependencies and consumers
 
@@ -48,7 +47,7 @@ imply a running GUI.
 
 When `runtime.web.enabled` is false, no GUI process/listener, assets, web routes, background work, or
 module metrics may start. CLI, environment, config-file, MCP/ACP, and non-web API operation remain.
-Current containers use `AIMEE_WEBCHAT_ENABLED` and the `WITH_RUNTIME_WEB` image build argument,
+Current containers use `AIMEE_RUNTIME_WEB_ENABLED` and the `WITH_RUNTIME_WEB` image build argument,
 while ordinary `make all` builds `aimee-runtime-web`. The `AIMEE_WEBCHAT_*` configuration names are
 compatibility seams that remain during descriptor-driven unification.
 Configuration pages expose only active settings with a real production consumer.

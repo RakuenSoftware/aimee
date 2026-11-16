@@ -27,7 +27,7 @@ import (
 // fixed-size (routing 12 bytes, workspace 140) and none of them could carry an
 // 8KB message body. That was the wrong conclusion: the fixed sizes are those
 // modules' choices, not a limit of the transport — ModuleCaller fragments and
-// reassembles in both directions, bounded only by bus.ModuleMessageMaxBody
+// reassembles in both directions, bounded only by ring.ModuleMessageMaxBody
 // (16MiB). A second dialect would have bought nothing and cost every future
 // reader an extra thing to learn.
 const (
@@ -152,7 +152,7 @@ const (
 // caller polling for a reply waits forever on a session that was torn down.
 //
 // This matches db1, which draws the same three-way line: its family handler
-// returns a domain status alongside bus.ModuleStatusOK, and carries outcomes
+// returns a domain status alongside ring.ModuleStatusOK, and carries outcomes
 // like a jti replay as a VALUE at StatusOK rather than as a refusal.
 type Status uint32
 

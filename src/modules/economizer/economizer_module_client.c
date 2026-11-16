@@ -65,10 +65,10 @@ static uint8_t *call_bytes(uint32_t event_kind, uint32_t stage_id, const void *r
       return NULL;
    static const uint8_t empty_request;
    const void *body = request_len ? request : &empty_request;
-   aimee_module_call_result_t rc = obs_bus_module_call(
+   ouro_module_call_result_t rc = obs_bus_module_call(
        event_kind, stage_id, 0, aimee_module_call_deadline_ns(ECON_MODULE_CALL_TIMEOUT_MS), body,
        (uint32_t)request_len, response, (uint32_t)response_capacity, response_len, NULL, NULL);
-   if (rc != AIMEE_MODULE_CALL_OK)
+   if (rc != OURO_MODULE_CALL_OK)
    {
       free(response);
       return NULL;
@@ -211,7 +211,7 @@ int econ_module_reduce(const cJSON *messages, const char *system_prompt, econ_mo
     * declined: both surface as "no reduction", both are silent, and the only
     * visible difference is a token bill that does not fall. That ambiguity cost a
     * full night of bisecting a deployment which turned out to be fine. */
-   aimee_module_call_result_t call_result = AIMEE_MODULE_CALL_OK;
+   ouro_module_call_result_t call_result = OURO_MODULE_CALL_OK;
    cJSON *reply =
        aimee_module_json_call(AIMEE_ECONOMIZER_EVENT_REDUCE, AIMEE_ECONOMIZER_STAGE_REDUCE, payload,
                               ECON_MODULE_CALL_MAX_BODY, ECON_MODULE_CALL_TIMEOUT_MS, &call_result);

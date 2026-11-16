@@ -19,7 +19,6 @@ from pathlib import Path
 
 ALLOWED_TRANSPORT_SHIMS = {
     "posix/agent_bridge.o",
-    "windows/agent_bridge.o",
 }
 
 ALLOWED_AGENT_NAMED_SOURCES = {
@@ -27,7 +26,6 @@ ALLOWED_AGENT_NAMED_SOURCES = {
     "modules/kb/c/agent_hints.c",
     "modules/kb/c/agent_outcomes.c",
     "kb/kb_store_adapters/kb_service_backend_agent.c",
-    "kb/kb_store_adapters/kb_service_backend_runtime.c",
     "modules/kb/c/server_registry.c",
 }
 

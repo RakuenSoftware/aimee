@@ -1,0 +1,685 @@
+{
+  "recorded_at": "2026-11-13T21:38:37.447816+00:00",
+  "release": "1.1.0 candidate",
+  "release_ready": false,
+  "application_source_commit": "c7d797e74a47a596c452d2f8ae78de79502a37b6",
+  "application_image_id": "sha256:f5f4d3e68fcab29eb68a9fdca14f34a5b2cc69743b04a7badbaee6e34aaa198e",
+  "postgres_image_id": "sha256:8296fd32b3c22de347b68bc9e4b128e3ff0527554defef3b21a3bbcafca997bd",
+  "memory_bundle_sha256": "d0fb57cb2dd4cb9a5797b3c065991bb14cb333bab2628d4afca0733575489cda",
+  "memory_source_commit": "5bdbad7a4c8498024ba10b686474b352b335ef64",
+  "rust_binaries_source_commit": "810c05b47db2fe458b3382446cf812792a319a4a",
+  "production_rust_sources_unchanged_since_binary_build": true,
+  "private_adversarial_test_commit": "c7c08421660c4935e9709532d60db108366b71d9",
+  "gate_command": "scripts/validation/release-candidate.sh",
+  "gates_passed": [
+    "kb-typed-facts-e4b",
+    "kb-typed-facts-e2b",
+    "server-typed-facts-e4b",
+    "server-typed-facts-e2b",
+    "T1",
+    "T2",
+    "T3",
+    "private-verifier",
+    "egress-vault",
+    "postgres-plain",
+    "kb-upgrade-plain"
+  ],
+  "gates_failed": [],
+  "post_promotion_restart": {
+    "kb-typed-facts-e4b": {
+      "checks_passed": 19,
+      "healthy_after_restart": true,
+      "promoted_fact_readable_after_restart": true
+    },
+    "kb-typed-facts-e2b": {
+      "checks_passed": 19,
+      "healthy_after_restart": true,
+      "promoted_fact_readable_after_restart": true
+    },
+    "server-typed-facts-e4b": {
+      "checks_passed": 19,
+      "healthy_after_restart": true,
+      "promoted_fact_readable_after_restart": true
+    },
+    "server-typed-facts-e2b": {
+      "checks_passed": 19,
+      "healthy_after_restart": true,
+      "promoted_fact_readable_after_restart": true
+    }
+  },
+  "existing_owner_upgrade": {
+    "checks_passed": 75,
+    "checks_failed": 0,
+    "read_only_journal_snapshots": 4,
+    "scopes": [
+      "Server personal",
+      "KB global",
+      "KB project"
+    ],
+    "verified": [
+      "Reproduced the old bootstrap refusal after real model-driven ontology promotion.",
+      "Upgraded the same retained volumes from the old image to the fixed image.",
+      "Preserved producer, scope and record owner when adding served accounts or narrowing supported KB access policy.",
+      "Original record contents, owners and versions survive upgrade, normal restart and forced restart.",
+      "Newly promoted facts remain readable through real graph tools with signed custody.",
+      "Every old canonical journal frame remains a byte-identical prefix, and original canary bytes remain in history."
+    ],
+    "processing_identities": {
+      "server": {
+        "before": {
+          "producer": {
+            "extraction": "aimee-ordinary-processing-v1",
+            "synthesis_model": "gemma-4-E4B-it/reviewer",
+            "embedding_generation": "9a1775cb-2dcf-4d5f-a62b-fdcb34861a3d"
+          },
+          "scope": {
+            "kind": "user",
+            "principal": {
+              "kind": "pam",
+              "identity": "aimee",
+              "verified_by": "5619f0e1-9a84-4de6-80bb-75d4efd9c65f"
+            }
+          },
+          "record_owner": "e43c2fd9-e68c-4f97-9d77-8beba6920924",
+          "account_count": 1,
+          "scope_count": 0
+        },
+        "after": {
+          "producer": {
+            "extraction": "aimee-ordinary-processing-v1",
+            "synthesis_model": "gemma-4-E4B-it/reviewer",
+            "embedding_generation": "9a1775cb-2dcf-4d5f-a62b-fdcb34861a3d"
+          },
+          "scope": {
+            "kind": "user",
+            "principal": {
+              "kind": "pam",
+              "identity": "aimee",
+              "verified_by": "5619f0e1-9a84-4de6-80bb-75d4efd9c65f"
+            }
+          },
+          "record_owner": "e43c2fd9-e68c-4f97-9d77-8beba6920924",
+          "account_count": 3,
+          "scope_count": 0
+        }
+      },
+      "kb": {
+        "before": {
+          "producer": {
+            "extraction": "aimee-ordinary-processing-v1",
+            "synthesis_model": "gemma-4-E4B-it/reviewer",
+            "embedding_generation": "cc4ea6e0-fbae-45e9-afa9-c62ee973b44d"
+          },
+          "scope": {
+            "kind": "global"
+          },
+          "record_owner": "92fdcf20-3c91-4e75-bf1f-d59e9ed02fd4",
+          "account_count": 1,
+          "scope_count": 3
+        },
+        "after": {
+          "producer": {
+            "extraction": "aimee-ordinary-processing-v1",
+            "synthesis_model": "gemma-4-E4B-it/reviewer",
+            "embedding_generation": "cc4ea6e0-fbae-45e9-afa9-c62ee973b44d"
+          },
+          "scope": {
+            "kind": "global"
+          },
+          "record_owner": "92fdcf20-3c91-4e75-bf1f-d59e9ed02fd4",
+          "account_count": 1,
+          "scope_count": 2
+        }
+      }
+    }
+  },
+  "fixed_defects": [
+    "KB runtime schema minimum stayed at 45, so installed databases skipped the retired-function cleanup. Bumped both runtime and SQL marker to 46; actual previous-image upgrade and seeded-v45 recreation pass.",
+    "Bootstrap supervision now accepts only verified signed descendants of its pinned ontology root, retaining namespace, signature, authority and history validation. Unrelated roots remain refused.",
+    "Rebuilding unchanged processing inputs preserves the existing producer identity when served accounts or supported access policy change; actual pipeline changes retain Native baseline enforcement."
+  ],
+  "focused_validation": {
+    "public_lint_checks_passed": 76,
+    "bootstrap_tests_passed": 52,
+    "bootstrap_tests_ignored": 1,
+    "real_sdk_tests_passed": 2,
+    "core_governance_tests_passed": 24,
+    "packaging_ontology_tests_passed": 5,
+    "processing_tests_passed": 19,
+    "public_provision_tests_passed": 19,
+    "strict_clippy": [
+      "SDK all targets",
+      "bootstrap all targets"
+    ]
+  },
+  "retention_cleanup": {
+    "checks_passed": 160,
+    "checks_failed": 0,
+    "read_only_journal_snapshots": 10,
+    "scopes": [
+      "Server personal",
+      "KB global",
+      "KB project"
+    ],
+    "verified": [
+      "Actual previous-image upgrade preserves owner and record versions.",
+      "All eleven obsolete callable SQL routines are absent after upgrade.",
+      "Legacy SQL payload, retained historical revision, session and receipt fixtures survive startup and restart.",
+      "Original and replacement journal entries remain byte-identical prefixes after retirement and restart.",
+      "Retired records stay unavailable to reads/search and cannot be reactivated by old creation retries.",
+      "Stale versions, malformed IDs and wrong-project mutations are refused."
+    ]
+  },
+  "coverage_limits": [
+    "The original 11-gate run used plain storage; additional_qualification separately pins the successful LUKS, browser, concurrent-retention and onboarding runs.",
+    "The additional candidate build includes runtime-web and omits code-server, matching E2E CI.",
+    "Required CI includes two unresolved failures recorded in additional_qualification; no image publication or release promotion."
+  ],
+  "release_blockers": [
+    "PII must be vaulted with opaque memory references. Ordinary writes meet this in 0/36 tested cases: 18 store raw PII and 18 refuse without Vault custody.",
+    "Raw PII reaches Native journals, real embedding inputs, controlled model requests, SQL/capture persistence and backups.",
+    "The default software Vault silently generates a different master key when the original is missing beside existing ciphertext.",
+    "Source audit: legacy Vault delete/retirement can remove encrypted values, conflicting with retained-history policy. No delete was invoked.",
+    "Latest completed CI (43595095611) passes T1, T2, T2-luks and T3, but still fails integration-tests and live-auth-rigs; required checks must pass before promotion.",
+    "Healthy standalone Server code indexing remains unavailable even after actual workspace registration (HTTP 503, dependency local_code).",
+    "Readiness reports db1:ok and ready:true during a SQL outage that makes actual canonical session creation fail with HTTP 502."
+  ],
+  "documented_functional_limits": [
+    "Typed facts are not pre-injected.",
+    "Automatic evidence-based demotion is not ported.",
+    "Only the Server runtime account receives typed-fact processing."
+  ],
+  "evidence_archive": "ontology-fix-evidence.tar.gz",
+  "evidence_archive_sha256": "2adff1b8545e02f541e66810f22ff87125500c2bdfdbbbf2e8604ca0c1d85ec4",
+  "evidence_handling": "Successful and failed runs retained. Credential fields redacted; raw diagnostics and network override YAML excluded. All 96 exported file hashes verified; secret scan passed.",
+  "cleanup": {
+    "proxmox_host": "192.168.1.253",
+    "vmid": 9474,
+    "hostname": "aimee-ontology-fix",
+    "deleted": true,
+    "confirmation": "Root disk removed; /etc/pve/lxc/9474.conf and /dev/storage/vm-9474-disk-0 absent."
+  },
+  "retention_policy": "Records and history are retained; invalid or retired data becomes unavailable. Subject erasure is not a feature to implement. The obsolete destructive coordinator is removed.",
+  "historical_blocked_qualification": {
+    "recorded_at": "2026-11-13T20:16:56.106602+00:00",
+    "release": "1.1.0 candidate",
+    "release_ready": false,
+    "application_source_commit": "bba508b86562324278613789368759dad32f0465",
+    "validation_followup_commit": "cc9827b7f3f909cf5374fc43f014c233f82bb6bb",
+    "application_image_id": "sha256:70b18c031fe9be57c903e6c7cbb11580afdf3911e7c449d07ddb887dbcf8d28b",
+    "postgres_image_id": "sha256:45d1babc536a0f14c83812284f49cac44eff49cd1dff8cee94ef0a6f3a4d27da",
+    "memory_bundle_sha256": "296caa7f6c677d52f56ec19d56712dc5f9c086be84b05b8d9a6b25319a5fe5d3",
+    "memory_source_commit": "75bf4a16cc113e78287b128b43c63816da2f93d4",
+    "gate_command": "scripts/validation/release-candidate.sh",
+    "gates_passed": [
+      "kb-typed-facts-e4b",
+      "kb-typed-facts-e2b",
+      "server-typed-facts-e4b",
+      "T1",
+      "T2",
+      "T3",
+      "private-verifier",
+      "egress-vault",
+      "postgres-plain",
+      "kb-upgrade-plain"
+    ],
+    "gates_failed": [
+      "server-typed-facts-e2b: added post-promotion restart regression"
+    ],
+    "retention_cleanup": {
+      "checks_passed": 160,
+      "checks_failed": 0,
+      "read_only_journal_snapshots": 10,
+      "scopes": [
+        "Server personal",
+        "KB global",
+        "KB project"
+      ],
+      "verified": [
+        "Actual previous-image upgrade preserves owner and record versions.",
+        "All eleven obsolete callable SQL routines are absent after upgrade.",
+        "Legacy SQL payload, retained historical revision, session and receipt fixtures survive startup and restart.",
+        "Original and replacement journal entries remain byte-identical prefixes after retirement and restart.",
+        "Retired records stay unavailable to reads/search and cannot be reactivated by old creation retries.",
+        "Stale versions, malformed IDs and wrong-project mutations are refused."
+      ]
+    },
+    "native_async_checks": {
+      "T2": 95,
+      "T3": 87
+    },
+    "fixed_defects": [
+      "KB runtime schema minimum stayed at 45, so installed databases skipped the retired-function cleanup. Bumped both runtime and SQL marker to 46; actual previous-image upgrade and seeded-v45 recreation pass."
+    ],
+    "post_promotion_restart": {
+      "application": "aimee-e2e-server-f468c900b0-aimee-server-1",
+      "checks": [
+        {
+          "name": "promoted ontology survives application restart",
+          "passed": false
+        }
+      ],
+      "elapsed_seconds": 183.0,
+      "health": "starting",
+      "bootstrap_package_refusal_count": 535,
+      "refusal": "ontology startup refuses a different active package"
+    },
+    "test_followup": [
+      "Server E2B failed request construction after a successful graph tool in two initial attempts. All four settled queries then passed on the same stack. A fresh run passed all 17 graph/promotion checks with zero retries. The exact internal refusal cause is not proven.",
+      "The E2E now bounds fresh full-read retries for that exact continuation failure; it still requires both provider requests.",
+      "Keeping the successful E2B stack revealed bootstrap package refusal after automatic ontology promotion. The new permanent restart assertion reproduces this failure."
+    ],
+    "coverage_limits": [
+      "Plain storage only; privileged LUKS remains a separate CI requirement.",
+      "The additional Server post-promotion restart check fails. KB post-promotion restart is not independently qualified.",
+      "No image was published or release promoted. Required GitHub checks remain separate."
+    ],
+    "release_blockers": [
+      "The supervised Native bootstrap pins the original ontology package and refuses the automatically promoted active package. Server does not become healthy after restart. Correct authorized-successor validation is required; the integrity guard was not weakened.",
+      "Complete required GitHub checks, including privileged LUKS, before promotion."
+    ],
+    "documented_functional_limits": [
+      "Typed facts are not pre-injected.",
+      "Automatic evidence-based demotion is not ported.",
+      "Only the Server runtime account receives typed-fact processing."
+    ],
+    "evidence_archive": "retention-qualification-evidence.tar.gz",
+    "evidence_archive_sha256": "0f075d020f5298a34ddda4cb4f958577d4b2eed6bd378db63075a57ba2687058",
+    "evidence_handling": "Successful and failed runs retained. Credential fields redacted, raw credential diagnostics and network override YAML excluded, all 121 exported file hashes verified, final secret scan passed.",
+    "cleanup": {
+      "proxmox_host": "192.168.1.253",
+      "vmid": 9474,
+      "hostname": "aimee-retention-e2e",
+      "deleted": true,
+      "confirmation": "Root disk removed; /etc/pve/lxc/9474.conf absent."
+    },
+    "retention_policy": "Records and history are retained; invalid or retired data becomes unavailable. Subject erasure is not a feature to implement. The obsolete destructive coordinator is removed.",
+    "historical_pre_cleanup_qualification": {
+      "recorded_at": "2026-11-13T16:13:10.843083+00:00",
+      "release": "1.1.0 candidate",
+      "release_ready": false,
+      "application_image_id": "sha256:37f8af1884f2ae63ae4e65f7298646d5fb7eb5424396c60df492ccf0a37a19c5",
+      "postgres_image_id": "sha256:473985fb32bdba24d72dcdcb7d89a7c7edec0757a3d0ca4edf88aa5c159b814e",
+      "memory_bundle_sha256": "1625395f3fd6a658e29731de5ff26bc6cd29b15e3a7c11cd27d3fd573d5a32b0",
+      "memory_source_commit": "75bf4a16cc113e78287b128b43c63816da2f93d4",
+      "gate_command": "scripts/validation/release-candidate.sh",
+      "gates_passed": [
+        "kb-typed-facts-e4b",
+        "kb-typed-facts-e2b",
+        "server-typed-facts-e4b",
+        "server-typed-facts-e2b",
+        "T1",
+        "T2",
+        "T3",
+        "private-verifier",
+        "egress-vault",
+        "postgres-plain",
+        "kb-upgrade-plain"
+      ],
+      "gates_failed": [],
+      "native_async_checks": {
+        "T2": 95,
+        "T3": 87
+      },
+      "coverage_limits": [
+        "This historical full image run predates the subsequent removal of obsolete SQL subject-erasure plumbing. A final image must be rebuilt and qualified against the cleaned release source.",
+        "LUKS requires the separate privileged GitHub CI gate; the disposable LXC supports plain storage only.",
+        "Full public and private GitHub suites were still running at evidence capture."
+      ],
+      "earlier_run_failures": [
+        "T2 stable native multi-turn run refused source release; final run passed without a production guard relaxation.",
+        "T3 ungraceful restart missed its health deadline; final run recovered and preserved receipts. Root cause of the earlier failure remains undiagnosed.",
+        "Private verifier and egress runner initially lacked Go on PATH; corrected in the final launcher."
+      ],
+      "release_blockers": [
+        "Complete all required GitHub checks and qualify the final image before promotion."
+      ],
+      "documented_functional_limits": [
+        "Typed facts are not pre-injected.",
+        "Automatic evidence-based demotion is not ported.",
+        "Only the Server runtime account receives typed-fact processing."
+      ],
+      "evidence_archive": "release-qualification-evidence.tar.gz",
+      "evidence_archive_sha256": "11e0c2814971b2b6763041f3f77326a43bb9915210c7698908512a5de0d4445c",
+      "evidence_handling": "Includes successful and earlier failed runs. Credential fields in synthetic custody evidence are redacted; secret scan passed. Network override files and raw application logs are excluded.",
+      "retention_policy": "Records and history are retained; invalid or retired data becomes unavailable. Subject erasure is not a feature to implement. The obsolete destructive coordinator is removed."
+    }
+  },
+  "additional_qualification": {
+    "recorded_at": "2026-11-13T22:39:52.690788+00:00",
+    "release_ready": false,
+    "inputs": {
+      "application_source_commit": "fcecd3761eb8da3dba27679a738e6b4d53ce10c2",
+      "application_archive_sha256": "6544ce92e977738126faa22e4ebd8f3ec22bd0a0db97dbbaf55c91ed1860c6dd",
+      "test_metadata_followup_commit": "b3f57f44d04a65ef6780f290d369e4df7dd4f10e",
+      "test_archive_sha256": "d2af0807fa684f73207dd9e6d8167589e43442fcb6d7d32ee76801724e573a69",
+      "memory_source_commit": "5bdbad7a4c8498024ba10b686474b352b335ef64",
+      "memory_bundle_sha256": "d0fb57cb2dd4cb9a5797b3c065991bb14cb333bab2628d4afca0733575489cda",
+      "private_adversarial_test_commit": "c7c08421660c4935e9709532d60db108366b71d9",
+      "application_image_id": "sha256:76436d0ca96c44f6a728619badbbb2b7a0a33b7f86282d83d50cdb35ac290f85",
+      "build_args": {
+        "WITH_VSCODE": "0",
+        "AIMEE_VERSION": "1.1.0-fcecd3761"
+      },
+      "host": "192.168.1.253",
+      "vmid": 9474,
+      "hostname": "aimee-release-continued",
+      "address": "192.168.0.166/23",
+      "privileged": true,
+      "resources": {
+        "cores": 24,
+        "memory_mib": 32768,
+        "root_disk_gib": 180
+      },
+      "harness_sha256": {
+        "concurrency-diagnostic.py": "b680b2999189f5bf32ac8d0d2c0df2e02bed9e167fe3ecf250135b93141315ad",
+        "client-pairing-configured-owner.py": "b63ad1e0df473a6dac5a1517a068e63da0afb65014859475bfe6b6a6ec459e46",
+        "export-evidence.py": "182bf95e7288b5b5c6b9c5209c6ba42d49f333cd7909811e6e5c58cf7181f59a",
+        "account-onboarding-recovery.py": "7cb8ce5b918700667fa1fa5d022fdb27db468e1121601f757dd9ec0d388cdfb0",
+        "concurrent-retention.py": "e2b63cda0ac5beb8cb5745e48c3a4cf31a52487357da39ef6a9cb46d863942bb",
+        "client-pairing-continued.py": "dd94b53f9be133d2a5b4c01650970c9693f3dce744544d81a35c8888afc30678"
+      }
+    },
+    "image_identities": [
+      {
+        "reference": "aimee:continued",
+        "Id": "sha256:76436d0ca96c44f6a728619badbbb2b7a0a33b7f86282d83d50cdb35ac290f85",
+        "RepoDigests": [],
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Created": "2026-11-13T22:19:20.034868137Z"
+      },
+      {
+        "reference": "aimee-postgres:continued",
+        "Id": "sha256:616f891afe00a3b390f10ff7806fbc07c44b111f4fdec8d893926789596c2aae",
+        "RepoDigests": [],
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Created": "2026-11-13T22:17:19.946364204Z"
+      },
+      {
+        "reference": "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:ceb4ad977fdd7062b425f0cd6e67c358302889be3b9793eb8825923d9718767a",
+        "Id": "sha256:76ebc2420959fdb9cdb18c6ae2e5c3cc419d713f1dd708a359573418e0fd3638",
+        "RepoDigests": [
+          "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:ceb4ad977fdd7062b425f0cd6e67c358302889be3b9793eb8825923d9718767a"
+        ],
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Created": "2026-10-31T21:26:27.368535201Z"
+      },
+      {
+        "reference": "postgres:18-bookworm",
+        "Id": "sha256:ce679a28809b6d048dc4838e925826fcda6bc0f491eb8d697b6c07108315ff55",
+        "RepoDigests": [
+          "postgres@sha256:ece55f7868da684e400f82f1030a050718adbdd65c23aa500c486f6e2950dc0f"
+        ],
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Created": "2026-11-12T20:53:30.610568907Z"
+      },
+      {
+        "reference": "ghcr.io/rakuensoftware/aimee-llm-e4b@sha256:756c5952edba8ddb38e9d8b476519763533da9aba70b7c48154d3deb382f52a1",
+        "Id": "sha256:46c711bd580c5bb89ca3317ae98a177d49306028692870c3969fdff4ab5e7f32",
+        "RepoDigests": [
+          "ghcr.io/rakuensoftware/aimee-llm-e4b@sha256:756c5952edba8ddb38e9d8b476519763533da9aba70b7c48154d3deb382f52a1"
+        ],
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Created": "2026-09-07T10:09:26.84947583Z"
+      }
+    ],
+    "checks_passed": {
+      "linked_luks_boot": 5,
+      "luks_fresh_recovery": 11,
+      "luks_legacy_migration": 13,
+      "kb_luks_recreation": 20,
+      "server_encrypted_facts": 19,
+      "kb_encrypted_facts": 19,
+      "concurrent_retention_and_recovery": 30,
+      "browser_account_prepared_restart": 10,
+      "independent_client_pairing_and_browser": 69,
+      "thin_client_proxy_with_real_codex": 30
+    },
+    "checks_failed": 0,
+    "check_counts_are_named_assertions_not_independent_journeys": true,
+    "memory_owner_recovery_seconds": {
+      "server_memory_owner_recovery_seconds": 1.22,
+      "kb_memory_owner_recovery_seconds": 1.21
+    },
+    "verified": [
+      "Fresh encrypted PostgreSQL, migration, clean restart, crash recovery and missing/corrupt Vault key refusal.",
+      "No plaintext database canary in the LUKS image; retained legacy source remains unchanged.",
+      "Schema 46 removes every obsolete callable SQL routine during encrypted KB recreation while preserving scoped canaries.",
+      "Both roles promote ontology and remain healthy with promoted-fact reads after restart on LUKS-backed PostgreSQL.",
+      "Concurrent commits, duplicate retries and retirement preserve canonical record identity; stale creation retries cannot reactivate retired data.",
+      "All 23 surviving records in each role retain exact contents and versions after forced restart.",
+      "Configured-owner device pairing, browser Settings, invitation expiry/replay and revocation persist across restart.",
+      "New browser account remains unavailable until prepared restart; that restart preserves the node and original runtime record contents and version."
+    ],
+    "public_lint_checks_passed": 76,
+    "ci_followup": {
+      "source_commit": "b3f57f44d04a65ef6780f290d369e4df7dd4f10e",
+      "script_regression_suite": "passed",
+      "go_unit_tests": "passed",
+      "remaining_failures": [
+        {
+          "job": "integration-tests",
+          "url": "https://github.com/RakuenSoftware/aimee/actions/runs/43518560154/job/132206935206",
+          "observed": "The independently graded execution and scoped reuse journey fails. The cause is not established by this LXC qualification."
+        },
+        {
+          "job": "live-auth-rigs",
+          "url": "https://github.com/RakuenSoftware/aimee/actions/runs/43518560154/job/132206934878",
+          "observed": "Nine enforcement assertions fail with unavailable writes. The KB log also reports hardened schema verification failure: no recorded embedding dimension and a runtime role unable to migrate."
+        }
+      ]
+    },
+    "resolved_ci_defects": [
+      "The Aimee module ownership descriptor still referenced the removed erasure test and omitted its replacement queryer test and retained-history cleanup SQL. Ownership and application source locks were refreshed without changing runtime behavior.",
+      "The KB recreation unit fixture lacked the new v45 SQL setup. It now models the migration and refuses stale schema or retained obsolete functions, as well as content or authority loss."
+    ],
+    "expected_boundary_and_harness_corrections": [
+      "The first pairing run attempted personal memory for a newly created browser account before a prepared restart. This is documented as unavailable. A separate recovery run verifies the required prepared restart, unchanged node and existing record versions, and continued access from the already paired device.",
+      "The positive pairing/browser lifecycle run explicitly configured pairingowner in AIMEE_MEMORY_ACCOUNTS before first start.",
+      "The first concurrency fixture used idempotency keys shorter than the supported 16-character minimum; all were correctly refused. The final fixture uses full UUID keys.",
+      "The initial owner-kill probe used the retired process basename. The final probe targets the actual shipped aimee-memory-module process.",
+      "The onboarding policy reader initially used a nonexistent fixture path; it was corrected to OPERATOR_POLICY_SAFE.json. These harness failures are retained alongside successful runs."
+    ],
+    "coverage_limits": [
+      "Linux amd64 Docker inside a privileged Debian 13 LXC; the host kernel supplies dm-crypt and loop devices.",
+      "The application build includes runtime-web and omits code-server, matching the E2E CI build profile.",
+      "The additional model runs use E4B with LUKS-backed PostgreSQL; both model variants were qualified in the prior plain-storage run.",
+      "LUKS checks qualify PostgreSQL storage and do not claim that the separate Native memory home volume is LUKS-backed.",
+      "No image publication, merge or release promotion. Required GitHub checks still determine release readiness."
+    ],
+    "evidence_archive": "continued-evidence.tar.gz",
+    "evidence_archive_sha256": "699120703b6c72e3b4bfeecb2c89fcbcc805e9f90c26ca56ce7c55eea62f98b9",
+    "evidence_files_verified": 68,
+    "secret_scan": "passed; two initial manifest-filename/hash false positives resolved by renaming fixture evidence files",
+    "cleanup": {
+      "proxmox_host": "192.168.1.253",
+      "vmid": 9474,
+      "hostname": "aimee-release-continued",
+      "deleted": true,
+      "config_absent": true,
+      "root_disk_absent": true,
+      "host_crypt_mappings_and_loop_attachments_empty": true
+    }
+  },
+  "privacy_vault_qualified": false,
+  "privacy_vault_audit": {
+    "record": "pii-vault-2026-11-14.json",
+    "report": "pii-vault-2026-11-14.md",
+    "audit_completed": true,
+    "qualified": false,
+    "content_cases": 36,
+    "vault_and_reference_successes": 0,
+    "raw_memory_cases": 18,
+    "refused_without_vault_cases": 18,
+    "raw_phone_observed_in_real_embedding": true,
+    "raw_original_input_observed_in_provider_and_persistence": true,
+    "missing_master_replaced": true,
+    "documentation_corrected": true,
+    "runtime_fixes_implemented": false,
+    "lxc_deleted": true,
+    "evidence_archive_sha256": "2cd2e264505925304bc7a0931d48b46d0a577756558ead4e2690d4e931645a58"
+  },
+  "general_release_qualification": {
+    "report": "general-e2e-2026-11-14.json",
+    "qualification_completed": true,
+    "release_ready": false,
+    "application_source_commit": "d137610e88a9ac652414cdb0f4d6c43667eebd31",
+    "application_image_id": "sha256:b435b8f022a3400c89d85dd9cb64ded5218e8f6590e372b9ac7877fe1159de38",
+    "T2_passed": true,
+    "native_export_checks_passed": 19,
+    "new_blockers": [
+      "standalone-code-index-unavailable",
+      "readiness-misreports-sql-dependency"
+    ],
+    "latest_completed_ci_run": 43595095611,
+    "ci_failures": [
+      "integration-tests",
+      "live-auth-rigs"
+    ],
+    "cleanup": {
+      "completed": true,
+      "ct_config_absent": true,
+      "root_disk_absent": true,
+      "other_workloads_modified": false
+    },
+    "evidence": {
+      "archive": "general-e2e-evidence.tar.gz",
+      "sha256": "09fa51232f3a3b028998b8e44468a2964f695fd135fe1f977b16a322e8ea9b64",
+      "files": 41,
+      "hashes_verified": true,
+      "secret_scan": "passed",
+      "local_directory": "/home/virant/dev/aimee-general-e2e-20261114",
+      "receipt_capabilities_exported": false
+    }
+  },
+  "index_readiness_fix_qualification": {
+    "requested_defects_fixed": true,
+    "application_runtime_commit": "87710a802f12effe3549773c64ff35e3bb86d086",
+    "qualification_harness_commit": "4d94516bac147da3c59d01d70f13bd39799a6ed3",
+    "application_image_id": "sha256:e56a2305f48bd17735f2245bed5b4ca907a8ba6ae8148329bfe7cec4cacaddbc",
+    "memory_source_commit": "9be71b7679e13fe3adfd03f7fca3b3433ca7909f",
+    "release_ready": false,
+    "cleanup": {
+      "completed": true,
+      "ct_config_absent": true,
+      "root_disk_absent": true,
+      "unrelated_ct9473_running": true,
+      "other_workloads_modified": false
+    },
+    "report": "index-readiness-fix-2026-11-14.json",
+    "results": {
+      "T2-final": {
+        "identity.json": {
+          "passed": 6,
+          "failed": 0
+        },
+        "local-memory.json": {
+          "passed": 9,
+          "failed": 0
+        },
+        "native-async.json": {
+          "passed": 60,
+          "failed": 1
+        },
+        "provider-boundary.json": {
+          "passed": 353,
+          "failed": 0
+        },
+        "shared-memory.json": {
+          "passed": 17,
+          "failed": 0
+        },
+        "topology.json": {
+          "passed": 40,
+          "failed": 1
+        }
+      },
+      "T2-repeat": {
+        "identity.json": {
+          "passed": 6,
+          "failed": 0
+        },
+        "local-memory.json": {
+          "passed": 9,
+          "failed": 0
+        },
+        "native-async.json": {
+          "passed": 95,
+          "failed": 0
+        },
+        "provider-boundary.json": {
+          "passed": 353,
+          "failed": 0
+        },
+        "shared-memory.json": {
+          "passed": 17,
+          "failed": 0
+        },
+        "topology.json": {
+          "passed": 41,
+          "failed": 0
+        }
+      },
+      "T3-final": {
+        "local-memory.json": {
+          "passed": 9,
+          "failed": 0
+        },
+        "native-async.json": {
+          "passed": 87,
+          "failed": 0
+        },
+        "provider-boundary.json": {
+          "passed": 353,
+          "failed": 0
+        },
+        "standalone-index/standalone-index.json": {
+          "passed": 34,
+          "failed": 0
+        },
+        "topology.json": {
+          "passed": 6,
+          "failed": 0
+        }
+      },
+      "standalone-final-r3": {
+        "standalone-index.json": {
+          "passed": 34,
+          "failed": 0
+        }
+      },
+      "server-e4b-final": {
+        "kb-typed-facts.json": {
+          "passed": 19,
+          "failed": 0
+        }
+      },
+      "kb-e4b-final": {
+        "kb-typed-facts.json": {
+          "passed": 19,
+          "failed": 0
+        }
+      }
+    },
+    "evidence": {
+      "archive": "index-readiness-evidence.tar.gz",
+      "sha256": "5a6dceb5714584941f21ac1f22edbaf7c76a7fc188cad9986cc2db57b6a9c511",
+      "files": 44,
+      "hashes_verified": true,
+      "secret_scan": "passed",
+      "local_directory": "/home/virant/dev/aimee-index-readiness-fix-20261114",
+      "receipt_capabilities_exported": false,
+      "note": "Only verdicts, counts, public source hashes and build metadata exported. Scanner false positives on path-to-hash mappings were resolved by separating path and sha256 fields; no scanner allowlist was added."
+    },
+    "remaining_release_blockers": [
+      "PII/Vault routing and missing-master behavior remain unfixed; see pii-vault-2026-11-14.json.",
+      "Prior completed CI has integration-tests and live-auth-rigs failures. Final pushed revision requires its own checks.",
+      "The first T2 Native source-release refusal remains an intermittent qualification concern."
+    ]
+  }
+}

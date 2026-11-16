@@ -18,6 +18,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class ConfigureHooksMatrixTest(unittest.TestCase):
     def test_supported_adapter_matrix_is_merge_safe_and_idempotent(self):
+        self.assert_adapter_matrix()
+
+    def test_large_existing_configs_are_merge_safe_and_idempotent(self):
+        # Exceed pipe capacity so an early-exiting output check cannot race the
+        # writer and accidentally store the combined MCP/hooks output as JSON.
+        self.assert_adapter_matrix(padding="x" * (48 * 1024))
+
+    def assert_adapter_matrix(self, padding=""):
         with tempfile.TemporaryDirectory(prefix="aimee-hook-matrix-") as tmp:
             home = Path(tmp)
             adapters = {
@@ -31,6 +39,7 @@ class ConfigureHooksMatrixTest(unittest.TestCase):
                 hooks_path.write_text(
                     json.dumps(
                         {
+                            "padding": padding,
                             "unrelated": {"adapter": name, "keep": True},
                             "hooks": {
                                 "UnrelatedEvent": [
@@ -45,7 +54,11 @@ class ConfigureHooksMatrixTest(unittest.TestCase):
                 )
                 if mcp_path:
                     mcp_path.write_text(
-                        json.dumps({"unrelated": name, "mcpServers": {"keep": {"command": "x"}}})
+                        json.dumps({
+                            "unrelated": name,
+                            "padding": padding,
+                            "mcpServers": {"keep": {"command": "x"}},
+                        })
                     )
 
             vscode = home / ".config/Code/User/mcp.json"
@@ -67,6 +80,7 @@ class ConfigureHooksMatrixTest(unittest.TestCase):
 
             for name, (hooks_path, mcp_path) in adapters.items():
                 hooks = json.loads(hooks_path.read_text())
+                self.assertEqual(hooks["padding"], padding)
                 self.assertEqual(hooks["unrelated"], {"adapter": name, "keep": True})
                 self.assertIn("UnrelatedEvent", hooks["hooks"])
                 managed_commands = [
@@ -81,6 +95,7 @@ class ConfigureHooksMatrixTest(unittest.TestCase):
                 mcp = json.loads((mcp_path or hooks_path).read_text())
                 self.assertIn("aimee", mcp["mcpServers"])
                 if mcp_path:
+                    self.assertEqual(mcp["padding"], padding)
                     self.assertEqual(mcp["unrelated"], name)
                     self.assertIn("keep", mcp["mcpServers"])
 

@@ -12,6 +12,7 @@ type entry struct {
 
 var consoleAdminACL = []entry{
 	{"GET", "/v1/console/overview"},
+	{"POST", "/v1/console/memory"},
 	{"GET", "/v1/console/typed_facts"},
 	{"POST", "/v1/console/typed_facts/config"},
 	{"POST", "/v1/console/typed_facts/relation"},

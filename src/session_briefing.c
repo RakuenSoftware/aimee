@@ -9,6 +9,7 @@
 
 #include "aimee.h"
 #include "session_briefing.h"
+#include "session_briefing_source.h"
 #include "module_commands.h"
 #include "json_fluent.h"
 #include "cJSON.h"
@@ -69,52 +70,6 @@ static int sb_appendf(sb_str_t *s, const char *fmt, ...)
    va_end(ap2);
    s->len += (size_t)n;
    return 0;
-}
-
-char *session_briefing_render_commitments(int limit)
-{
-   cJSON *args = cJSON_CreateObject();
-   if (!args)
-      return NULL;
-   cJSON_AddNumberToObject(args, "limit", limit);
-   cJSON *response = NULL;
-   cJSON_AddStringToObject(args, "operation", "prospective-briefing");
-   int rc =
-       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
-   if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
-   {
-      cJSON_Delete(response);
-      response = NULL;
-   }
-   cJSON_Delete(args);
-   const char *block =
-       response ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block")) : NULL;
-   char *result = block && block[0] ? strdup(block) : NULL;
-   cJSON_Delete(response);
-   return result;
-}
-
-char *session_briefing_render_directives(int limit)
-{
-   cJSON *args = cJSON_CreateObject();
-   if (!args)
-      return NULL;
-   cJSON_AddNumberToObject(args, "limit", limit);
-   cJSON *response = NULL;
-   cJSON_AddStringToObject(args, "operation", "directive-briefing");
-   int rc =
-       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
-   if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
-   {
-      cJSON_Delete(response);
-      response = NULL;
-   }
-   cJSON_Delete(args);
-   const char *block =
-       response ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block")) : NULL;
-   char *result = block && block[0] ? strdup(block) : NULL;
-   cJSON_Delete(response);
-   return result;
 }
 
 char *session_briefing_render_skill_index(const char *project_root, int limit)

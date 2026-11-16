@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -66,16 +66,16 @@ func (c *economicsCursor) str(n int) string {
 // Tasks arrive as content: the four fields the rule reads, nothing else from
 // the row. Agent tiers arrive the same way, because which seat is dear is the
 // caller's configuration, not this module's state.
-func handleEconomics(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleEconomics(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < economicsReqHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != economicsRequestMagic ||
 		request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	taskCount := int(binary.LittleEndian.Uint32(request[8:12]))
 	agentCount := int(binary.LittleEndian.Uint32(request[12:16]))
 	if taskCount > economicsMaxTasks || agentCount > economicsMaxAgents {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	c := &economicsCursor{buf: request, at: economicsReqHeaderLen}
@@ -90,7 +90,7 @@ func handleEconomics(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 			Result:    c.str(resultLen),
 		}
 		if c.bad {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		tasks = append(tasks, task)
 	}
@@ -100,15 +100,15 @@ func handleEconomics(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 		name := c.str(nameLen)
 		tier := int(int32(c.u32()))
 		if c.bad {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		agents = append(agents, AgentTier{Name: name, Tier: tier})
 	}
 	if c.bad || c.at != len(request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	report := BuildEconomicsReport(tasks, agents)
@@ -137,5 +137,5 @@ func handleEconomics(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 	at += economicsAdviceLen
 	putFixed(response[at:at+economicsLabelLen], EconomicsVerdictText(report.Verdict))
 	putFixed(response[at+economicsLabelLen:], EconomicsCostModelLabel())
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

@@ -1,3 +1,4 @@
+#include <aimee/core/codec/base64.h>
 #include "kb_mgmt_status_authority.h"
 #include "cJSON.h"
 
@@ -46,43 +47,17 @@ static int printable(const char *s, size_t min, size_t max)
    return 1;
 }
 
-static int b64_value(unsigned char c)
-{
-   if (c >= 'A' && c <= 'Z')
-      return c - 'A';
-   if (c >= 'a' && c <= 'z')
-      return c - 'a' + 26;
-   if (c >= '0' && c <= '9')
-      return c - '0' + 52;
-   return c == '-' ? 62 : (c == '_' ? 63 : -1);
-}
-
 /* A 32-byte value has exactly 43 unpadded base64url characters.  Requiring
  * zero unused low bits makes the accepted spelling canonical. */
 static int nonce_decode(const char *encoded, unsigned char out[KB_MGMT_STATUS_NONCE_LEN])
 {
-   if (!encoded || strlen(encoded) != 43)
-      return -1;
-   size_t o = 0;
-   uint32_t acc = 0;
-   unsigned bits = 0;
-   for (size_t i = 0; i < 43; ++i)
-   {
-      int v = b64_value((unsigned char)encoded[i]);
-      if (v < 0)
-         return -1;
-      acc = (acc << 6) | (uint32_t)v;
-      bits += 6;
-      if (bits >= 8)
-      {
-         bits -= 8;
-         if (o >= KB_MGMT_STATUS_NONCE_LEN)
-            return -1;
-         out[o++] = (unsigned char)(acc >> bits);
-         acc &= bits ? ((1u << bits) - 1u) : 0u;
-      }
-   }
-   return o == KB_MGMT_STATUS_NONCE_LEN && bits == 2 && acc == 0 ? 0 : -1;
+   size_t written = 0;
+   return encoded && strlen(encoded) == 43 &&
+                  aimee_codec_base64_decode(encoded, 43, out, KB_MGMT_STATUS_NONCE_LEN,
+                                            AIMEE_BASE64_URL_CANONICAL, &written) &&
+                  written == KB_MGMT_STATUS_NONCE_LEN
+              ? 0
+              : -1;
 }
 
 static int copy_field(char *out, size_t cap, const char *value)
@@ -235,30 +210,12 @@ static int uint64_string(const char *s, uint64_t *out)
 
 static int b64url_decode(const char *in, unsigned char *out, size_t cap, size_t *out_len)
 {
-   if (!in || !out || !out_len || strlen(in) % 4 == 1)
+   size_t written = 0;
+   if (!in || !out_len ||
+       !aimee_codec_base64_decode(in, strlen(in), out, cap, AIMEE_BASE64_URL_CANONICAL, &written) ||
+       !written)
       return -1;
-   uint32_t acc = 0;
-   unsigned bits = 0;
-   size_t used = 0;
-   for (const unsigned char *p = (const unsigned char *)in; *p; ++p)
-   {
-      int v = b64_value(*p);
-      if (v < 0)
-         return -1;
-      acc = (acc << 6) | (uint32_t)v;
-      bits += 6;
-      if (bits >= 8)
-      {
-         bits -= 8;
-         if (used == cap)
-            return -1;
-         out[used++] = (unsigned char)(acc >> bits);
-         acc &= bits ? (1u << bits) - 1u : 0;
-      }
-   }
-   if ((bits && acc) || !used)
-      return -1;
-   *out_len = used;
+   *out_len = written;
    return 0;
 }
 

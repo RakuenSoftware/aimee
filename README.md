@@ -10,12 +10,12 @@ index and hand bounded work to a delegate. A correction updates the stored recor
 future recall checks that revision before provider dispatch. You can carry the project's state
 forward while choosing a different model for the next task.
 
-The design puts ownership in the runtime. Aimee selects and authorizes memory, holds credentials,
+The design puts ownership in the runtime. Aimee authorizes memory access, holds credentials,
 and governs what an agent may read, execute, send and change. A model consumes the selected context
 and proposes actions. Durable workflows retain their execution state across individual model
 calls. You take on a server, its backups and its upgrades in exchange for control of that state.
 
-![Aimee overview: enrolled tools and browser use a personal Server; shared knowledge and Cognee retrieval are optional](docs/images/architecture/overview.svg)
+![Aimee overview: enrolled tools and browser use a personal Server; shared knowledge is optional and memory is served by the implementation provisioned in each instance](docs/images/architecture/overview.svg)
 
 ## Security and Governance are the core of the runtime
 
@@ -61,8 +61,19 @@ negative tests and limits.
 Aimee's state belongs to your runtime, independent of the harness that calls it. A coding client
 can use MCP tools over stdio; an agent UI can use the ACP bridge; a model-facing application can
 connect through OpenAI Chat Completions or Responses, or Anthropic Messages ingress. A custom
-application can call the named HTTP API or use a generated SDK. The browser is another client of
-that same runtime.
+application can call the named HTTP API or use a generated SDK. Browser chat carries the signed-in
+actor to Runtime and displays tool start/completion activity; provider credentials stay in Vault.
+The browser is another client of that same runtime. Direct primary model changes retain
+canonical conversation history through the owner-checked session log.
+The ongoing IR migration also runs qualified Linux Codex and Claude schedulers against the
+Server's selected model and supervised tool registry. Their private launch homes carry a local
+capability; Vault credentials and original model/tool history remain with the Server. See the
+[current migration status](docs/IR_MIGRATION_HANDOFF.md) for qualification and remaining work.
+Session-selected models persist across restarts. Canonical child controls and source-bound
+unknown-outcome permissions use the same authenticated browser reply path; reconnecting does
+not reopen declined requests or repeat effects.
+Internal HTTP and host-owned native results retain their complete canonical response through
+selection and repair; optional pure-text result reuse binds the exact request and authenticated owner.
 
 This is the basis of compatibility with any harness or UI that implements one of those contracts.
 It does not require a particular vendor's agent loop. Claude Code, Codex, VS Code, GitHub Copilot,
@@ -114,26 +125,26 @@ still has these two roles. See [Server and KB](docs/SERVER_AND_KB.md).
   External witnesses are needed for evidence against a compromised host.
   See [Security](docs/SECURITY.md) and [WORM worker](docs/WORM_WORKER.md).
 
-## Memory engines can change without changing ownership
+## Memory ships in the image
 
-The replaceable-memory implementation in [PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005)
-introduced a generic contract for the memory API and is merged into the integration tree. Native Aimee memory remains the default;
-Cognee 1.6.2 is the first alternative retrieval engine. Aimee retains canonical records,
-authorization, identity, audit and lifecycle. A replacement uses the existing module infrastructure.
+From 1.1.0 the application image carries its memory implementation as a vendored binary bundle
+([`vendor/aims-memory`](vendor/aims-memory/README.md)); its source lives in a separate, private
+repository. Each deployment provisions its own installation at first boot: the one-shot
+`aimee-memory-init` service generates the instance's memory identity, grants and owner key, and
+the application then mounts the result read-only. Records live in the instance's home volume.
+After an image update the installation is prepared again and the stored memory is kept.
 
-Native memory passed deployed private/shared API and lifecycle checks in disposable containers.
-The published testing image passed [119 Cognee checks](docs/validation/egress-vault-repair-2026-10-05.md),
-including HTTP, CLI and MCP access, provider-outage recovery, derived-state cleanup and managed
-subject erasure across both application stores. The fixture and erasure coverage limits are
-recorded with the results. The first adapter bounds a retrieval scope to 256 eligible records
-and refuses larger scopes explicitly. This implementation
-is part of the 1.0.0 release work and is absent from the older 0.4.6 image. The
-[contract and authoring guide](docs/modules/memory.md#memory-backend-contract) describes integration,
-configuration and limits.
+Aimee itself keeps the generic memory contract, the module transport and the host-side guarantees
+of a provider-bound request: authenticated callers, context pre-injection, source release and
+revalidation, the byte budget, the send guard and provider receipts. The bundle exists for
+`linux/amd64`; an image for another platform carries no memory, reports `missing_module: memory`
+and is not ready. [Memory boundary](docs/MEMORY.md) states the contract,
+[Deployment](docs/DEPLOYMENT.md#memory) covers provisioning and backup, and
+[Upgrading](docs/UPGRADING.md#upgrade-from-102) covers moving existing 1.0.x memories across.
 
 The separate [native-memory vLLM plugin](docs/NATIVE_MEMORY_PLUGIN.md) lets supported local models
 consume selected Aimee records as native attention memory. That model-side delivery mechanism and
-a replaceable retrieval engine solve different parts of the memory path. The 1.0.1 release preparation includes [five signed model bundles](docs/releases/v1.0.1/README.md):
+the installed memory implementation solve different parts of the memory path. The 1.0.1 release prepared [five signed model bundles](docs/releases/v1.0.1/README.md):
 Gemma4 E2B, E4B, 12B, 26B A4B and Qwen3.8 27B. Each includes plugin 0.3.3 and its required runtime.
 All five passed [native-memory smokes](docs/releases/native-memory-v0.3.3/qualification/README.md)
 on a 7900 XTX with existing NAS GGUFs and no CPU weight offload. The server prerequisite,
@@ -156,13 +167,14 @@ shared knowledge is needed.
 socket. Use the standard composition when you want to manage those containers yourself.
 Back up each instance's home, Vault, database and audit evidence together before upgrading.
 
-## 1.0.1 is the release target
+## Releases
 
-This tree prepares **1.0.1** with five signed native-memory model bundles and installation docs.
-[1.0.0](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.0) is published. The declared
-application series remains `1.0`; the regular release process resolves the next patch from tags.
-Plugin versions remain independent: these model bundles carry plugin **0.3.3**, shared-runtime
-build 5 and their verified signatures.
+[1.0.2](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.2) is the latest published
+release. This tree is the next release in preparation; the regular release process resolves its
+version from the declared series and existing tags, and a human approves it. Its largest change is
+that memory moved out of the application image, so read
+[Upgrading](docs/UPGRADING.md#upgrade-from-102) before starting it on an existing deployment.
+Plugin versions remain independent of the application version.
 
 Use [What's new](docs/WHATS_NEW.md) for the release scope and history,
 [Feature status](docs/STATUS.md) for implementation and qualification, and
@@ -179,7 +191,7 @@ The [documentation index](docs/README.md) maps the full set of guides.
 | Operate CLI, browser and memory | [Manual](MANUAL.md) |
 | Understand processes and trust | [Architecture](docs/ARCHITECTURE.md) |
 | Deploy, back up or restore | [Deployment](docs/DEPLOYMENT.md) |
-| Implement a memory backend | [Memory contract](docs/modules/memory.md#memory-backend-contract) |
+| Install or implement memory | [Memory boundary](docs/MEMORY.md), [memory module](docs/modules/memory.md) |
 | Connect an enrolled local vLLM model | [Native memory plugin](docs/NATIVE_MEMORY_PLUGIN.md) |
 | Call a named API or configure a field | [Public API](docs/PUBLIC_API.md), [commands](docs/gen/cli-commands.md), [configuration](docs/gen/configuration.md) |
 | Diagnose a failure | [Troubleshooting](docs/TROUBLESHOOTING.md) |

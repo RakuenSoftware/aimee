@@ -21,6 +21,18 @@ typedef enum
    AIMEE_CMD_TIER_ADMIN = 2,
 } aimee_cmd_tier_t;
 
+typedef struct
+{
+   const char *name;
+   const char *help;
+   aimee_cmd_tier_t tier;
+   /* Listed only under `aimee help --all`. Not secrecy: these are commands whose
+    * audience is narrow enough that showing them by default costs every other
+    * reader attention. */
+   int hidden_default;
+   const char *subcommands;
+} cli_command_def_t;
+
 /* The catalogue as a JSON array of
  * {name, summary, tier, hidden_default?, subcommands?}. Caller owns it.
  * NULL on allocation failure. */

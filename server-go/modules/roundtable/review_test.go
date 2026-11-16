@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type stubReviewer struct {
@@ -35,8 +35,8 @@ func TestReviewHandlerRoundTripsTheJSONContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, status := handler(bus.ModuleInvocation{StageID: StageReview}, request)
-	if status != bus.ModuleStatusOK {
+	body, status := handler(ring.ModuleInvocation{StageID: StageReview}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	if stub.calls != 1 || stub.got.OriginalRequest != "two bugs" || stub.got.ArtifactStage != "frozen_diff" {
@@ -56,7 +56,7 @@ func TestReviewHandlerRoundTripsTheJSONContract(t *testing.T) {
 func TestReviewHandlerRejectsAnotherStage(t *testing.T) {
 	stub := &stubReviewer{}
 	handler := NewReviewHandler(stub)
-	if _, status := handler(bus.ModuleInvocation{StageID: StageDeliberate}, []byte(`{}`)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageDeliberate}, []byte(`{}`)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("status = %v, want InvalidRequest", status)
 	}
 	if stub.calls != 0 {
@@ -67,7 +67,7 @@ func TestReviewHandlerRejectsAnotherStage(t *testing.T) {
 func TestReviewHandlerRejectsMalformedBody(t *testing.T) {
 	stub := &stubReviewer{}
 	handler := NewReviewHandler(stub)
-	if _, status := handler(bus.ModuleInvocation{StageID: StageReview}, []byte("not json")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageReview}, []byte("not json")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("status = %v, want InvalidRequest", status)
 	}
 	if stub.calls != 0 {
@@ -85,8 +85,8 @@ func TestReviewHandlerRejectsMalformedBody(t *testing.T) {
 // whoever has to work out why reviews stopped.
 func TestReviewHandlerReportsReviewerFailure(t *testing.T) {
 	handler := NewReviewHandler(&stubReviewer{err: errors.New("panel unavailable")})
-	body, status := handler(bus.ModuleInvocation{StageID: StageReview}, []byte(`{}`))
-	if status != bus.ModuleStatusInternal {
+	body, status := handler(ring.ModuleInvocation{StageID: StageReview}, []byte(`{}`))
+	if status != ring.ModuleStatusInternal {
 		t.Fatalf("status = %v, want Internal", status)
 	}
 	if string(body) != "panel unavailable" {
@@ -96,7 +96,7 @@ func TestReviewHandlerReportsReviewerFailure(t *testing.T) {
 
 func TestReviewHandlerWithoutReviewerFailsClosed(t *testing.T) {
 	handler := NewReviewHandler(nil)
-	if _, status := handler(bus.ModuleInvocation{StageID: StageReview}, []byte(`{}`)); status != bus.ModuleStatusInternal {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageReview}, []byte(`{}`)); status != ring.ModuleStatusInternal {
 		t.Fatalf("status = %v, want Internal", status)
 	}
 }
@@ -131,7 +131,7 @@ func TestHandlerRoutesEachStageToItsOwnContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageReview}, request); status != bus.ModuleStatusOK {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageReview}, request); status != ring.ModuleStatusOK {
 		t.Fatalf("review stage status = %v", status)
 	}
 	if stub.calls != 1 {
@@ -139,10 +139,10 @@ func TestHandlerRoutesEachStageToItsOwnContract(t *testing.T) {
 	}
 	// The deliberate rubric has a fixed 40-byte contract; a review body is not
 	// one, and must be rejected rather than reaching the reviewer.
-	if _, status := handler(bus.ModuleInvocation{StageID: StageDeliberate}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageDeliberate}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("deliberate stage accepted a review body: %v", status)
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: 99}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: 99}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("unknown stage was served: %v", status)
 	}
 	if stub.calls != 1 {
@@ -157,8 +157,8 @@ func TestHandlerRoutesEachStageToItsOwnContract(t *testing.T) {
 func TestReviewHandlerReportsAPermanentlyBadRequestAsInvalid(t *testing.T) {
 	handler := NewReviewHandler(&stubReviewer{
 		err: panel.ValidationError{Message: `roundtable unsupported artifact stage "proposal"`}})
-	body, status := handler(bus.ModuleInvocation{StageID: StageReview}, []byte(`{}`))
-	if status != bus.ModuleStatusInvalidRequest {
+	body, status := handler(ring.ModuleInvocation{StageID: StageReview}, []byte(`{}`))
+	if status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("status = %v, want InvalidRequest so the caller stops retrying", status)
 	}
 	if !strings.Contains(string(body), "unsupported artifact stage") {

@@ -10,16 +10,15 @@
 # blob), and Hugging Face is touched only when the model or quant actually
 # changes — which is what the tag encodes.
 #
-# The fetch stage is pinned to BUILDPLATFORM deliberately. The payload is
-# architecture-independent, so pinning it means a linux/amd64 + linux/arm64 build
-# runs the fetch ONCE and both manifests point at the same layer, rather than
-# downloading the same gigabytes twice to produce identical content.
+# The fetch stage is pinned to BUILDPLATFORM deliberately: the payload is
+# architecture-independent, so the fetch never runs under emulation. Images are
+# built for linux/amd64.
 #
 # Built and pushed by .github/workflows/publish-images.yml, which skips the build
 # entirely when the tag already exists.
 #
 #   docker buildx build -f Dockerfile.model \
-#     --platform linux/amd64,linux/arm64 \
+#     --platform linux/amd64 \
 #     --build-arg AIMEE_SYNTHESIS_MODEL=gemma-4-E2B-it \
 #     -t ghcr.io/<owner>/aimee-model-gemma-4-e2b-it:UD-Q6_K_XL .
 #

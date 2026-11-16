@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { toDashData, fmtDuration, fmtCompact, fmtUsd, loadLayout } from './Dashboard';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryPanel, toDashData, fmtDuration, fmtCompact, fmtUsd, loadLayout } from './Dashboard';
 import live from './__fixtures__/dashboard-all.json';
 
 /**
@@ -170,5 +172,40 @@ describe('loadLayout — saved panel ids survive a rename', () => {
     withStoredLayout(JSON.stringify(['readiness', 'no-such-panel']), () => {
       expect(loadLayout()).toEqual(['readiness']);
     });
+  });
+});
+
+
+describe('native memory statistics', () => {
+  it('retains native kind totals without inventing tier attribution', () => {
+    const data = toDashData({ memory_stats: { tier_kinds: null, kinds: [
+      { kind: 'fact', count: 7 }, { kind: 'preference', count: 2 },
+    ] } });
+    expect(data.memory).toEqual([
+      { tier: null, kind: 'fact', count: 7 },
+      { tier: null, kind: 'preference', count: 2 },
+    ]);
+    const html = renderToStaticMarkup(createElement(MemoryPanel, { data: data.memory }));
+    expect(html).toContain('Unavailable');
+    expect(html).toContain('preference');
+    expect(html).not.toContain('No memories recorded');
+    expect(html).not.toContain('L0');
+    expect(html).not.toContain('conflict');
+  });
+
+  it('preserves explicit empty legacy tier rows instead of falling back', () => {
+    expect(toDashData({ memory_stats: { tier_kinds: [], kinds: [{ kind: 'fact', count: 7 }] } }).memory).toEqual([]);
+  });
+
+  it('prefers populated legacy tier rows and renders their known tier', () => {
+    const row = { tier: 'L2', kind: 'fact', count: 3 };
+    const data = toDashData({ memory_stats: { tier_kinds: [row], kinds: [{ kind: 'fact', count: 7 }] } });
+    expect(data.memory).toEqual([row]);
+    expect(renderToStaticMarkup(createElement(MemoryPanel, { data: data.memory }))).toContain('L2');
+  });
+
+  it('handles unavailable and known-empty native kind arrays', () => {
+    expect(toDashData({ memory_stats: { tier_kinds: null, kinds: null } }).memory).toEqual([]);
+    expect(toDashData({ memory_stats: { kinds: [] } }).memory).toEqual([]);
   });
 });

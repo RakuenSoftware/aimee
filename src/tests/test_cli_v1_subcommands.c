@@ -667,6 +667,32 @@ static void test_memory_health_arguments(void)
    assert(!marshal_memory_health(2, missing));
 }
 
+static void test_learning_approaches_scope_and_historical_output(void)
+{
+   char *args[] = {"inspect the observed calls"};
+   cJSON *request = marshal_learning_approaches(1, args);
+   char cwd[4096];
+   assert(getcwd(cwd, sizeof cwd));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "cwd")), cwd));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "goal")), args[0]));
+   assert(!cJSON_HasObjectItem(request, "principal"));
+   assert(!cJSON_HasObjectItem(request, "project"));
+   cJSON_Delete(request);
+   char out[4096];
+   capture_printer(pt_print_learning_approaches, "learning.approaches",
+                   "{\"approaches\":[{\"verdict\":\"passed\",\"source_ref\":\"sha256:receipt\","
+                   "\"actions\":[{\"namespace\":\"git\",\"name\":\"verify\"}]},"
+                   "{\"verdict\":\"failed\",\"source_ref\":\"sha256:failed\",\"actions\":[]}]}",
+                   out, sizeof out);
+   assert(strstr(out, "Configured tests passed; observed tool calls: git:verify"));
+   assert(strstr(out, "Configured tests failed; observed tool calls:"));
+   assert(strstr(out, "Receipt: sha256:receipt"));
+   assert(!strstr(out, "SIMILAR") && !strstr(out, "APPROACH -> FAILURE"));
+   capture_printer(pt_print_learning_approaches, "learning.approaches", "{\"approaches\":[]}", out,
+                   sizeof out);
+   assert(strstr(out, "No scoped configured-test approach observations are available."));
+}
+
 int main(void)
 {
    test_every_mcp_tool_has_cli_dispatch();
@@ -675,6 +701,7 @@ int main(void)
    test_memory_get_as_of_is_wired();
    test_memory_recall_query_feeds_the_hint();
    test_memory_health_arguments();
+   test_learning_approaches_scope_and_historical_output();
    test_memory_validity_arguments();
    test_memory_hygiene_explicit_scope();
    test_kb_status_warns_about_undrainable_queue();

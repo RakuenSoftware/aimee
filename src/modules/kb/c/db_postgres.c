@@ -1274,13 +1274,6 @@ int aimee_pg_column_count(aimee_pg_stmt_t *s)
    return s && s->result ? (int)aimee_postgres_result_columns(s->result) : 0;
 }
 
-const char *aimee_pg_column_name(aimee_pg_stmt_t *s, int col)
-{
-   if (!s || !s->result || col < 0 || col >= (int)aimee_postgres_result_columns(s->result))
-      return NULL;
-   return aimee_postgres_result_name(s->result, (size_t)col);
-}
-
 int aimee_pg_column_type(aimee_pg_stmt_t *s, int col)
 {
    if (!s || !s->result || s->row_index < 0 || s->row_index >= s->nrows || col < 0 ||

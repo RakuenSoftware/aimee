@@ -16,20 +16,6 @@ func mk(persona string, kind VerdictKind, hash string, blockers int) Verdict {
 	}
 }
 
-func TestEffectiveQuorumSingleLensFloor(t *testing.T) {
-	cases := []struct{ requested, nreq, want int }{
-		{0, 4, 4},
-		{1, 1, 2}, // floor of 2
-		{3, 2, 3},
-		{5, 4, 5},
-	}
-	for _, c := range cases {
-		if got := EffectiveQuorum(c.requested, c.nreq); got != c.want {
-			t.Fatalf("EffectiveQuorum(%d,%d) = %d, want %d", c.requested, c.nreq, got, c.want)
-		}
-	}
-}
-
 func TestGateDecisionMatrix(t *testing.T) {
 	req2 := []string{"security", "architect"}
 

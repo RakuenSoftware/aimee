@@ -93,8 +93,8 @@ jobs:
       # the run reported success. That is precisely how the mTLS fix in this image
       # would have failed to ship.
       #
-      # The content tag also protects release promotion: wrapper changes waiting
-      # for an upstream release cannot silently promote an older implementation.
+      # Integration builds use current sources. Release promotion uses the
+      # reviewed source/digest lock: wrapper edits wait for a new runtime.
       - name: Has this exact build already been published?
         id: have
         run: |
@@ -106,6 +106,12 @@ jobs:
           rev=$(cat Dockerfile.llm deploy/container/aimee-llm-entrypoint.sh \
                 scripts/synthesis-model-table.sh | sha256sum | cut -c1-12)
           pinned="ghcr.io/${OWNER}/${{ matrix.name }}:${quant}-${llamacpp_version}-${rev}"
+          if [ -n '${{ inputs.version }}' ]; then
+            source=$(python3 -c 'import json; print(json.load(open("dependencies/synthesis-images.lock.json"))["source_commit"])')
+            git fetch --no-tags --depth=1 origin "$source"
+            python3 scripts/synthesis-promotion-source.py '${{ matrix.name }}' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "sidecar sources hash to $rev"
           echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
           if docker manifest inspect "$pinned" >/dev/null 2>&1; then
@@ -153,6 +159,18 @@ jobs:
           docker pull "${{ steps.have.outputs.pinned }}"
           bash scripts/test-synthesis-portability.sh "${{ steps.have.outputs.pinned }}"
 
+      - name: Verify locked source tag and digest
+        if: inputs.version != ''
+        run: |
+          set -euo pipefail
+          source='${{ steps.have.outputs.source_tag }}'
+          pinned='${{ steps.have.outputs.pinned }}'
+          actual=$(docker buildx imagetools inspect "$source" --format '{{.Manifest.Digest}}')
+          test "$actual" = "${pinned##*@}" || {
+            echo '::error::Synthesis source tag no longer matches the reviewed digest'
+            exit 1
+          }
+
       # Registry-side promotion of the pinned build. This intentionally does not
       # pull or rebuild the multi-gigabyte synthesis images during a release.
       - name: Promote to :${{ inputs.version }} and :latest
@@ -185,7 +203,9 @@ jobs:
 
       - name: Report
         run: |
-          if [ "${{ steps.have.outputs.exists }}" = "true" ]; then
+          if [ -n '${{ inputs.version }}' ]; then
+            echo "verified promotion source: ${{ steps.have.outputs.pinned }}"
+          elif [ "${{ steps.have.outputs.exists }}" = "true" ]; then
             echo "skipped: ${{ steps.have.outputs.pinned }} already published"
           else
             echo "published ${{ steps.have.outputs.pinned }} and :testing"

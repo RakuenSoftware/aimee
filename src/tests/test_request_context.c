@@ -21,6 +21,21 @@ static void test_unset_defaults(void)
    PASS("context: unset -> empty, never NULL");
 }
 
+static void test_session_actor(void)
+{
+   request_context_t ctx = {0};
+   assert(!request_context_session_actor(NULL)[0]);
+   snprintf(ctx.principal, sizeof(ctx.principal), "webchat:alice");
+   snprintf(ctx.vault_principal, sizeof(ctx.vault_principal), "webuser:alice");
+   assert(!strcmp(request_context_session_actor(&ctx), "webchat:alice"));
+   ctx.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   assert(!strcmp(request_context_session_actor(&ctx), "webuser:alice"));
+   assert(!strcmp(ctx.principal, "webchat:alice"));
+   ctx.vault_principal[0] = 0;
+   assert(!request_context_session_actor(&ctx)[0]);
+   PASS("context: canonical session actor preserves distinct account and fails closed");
+}
+
 static void test_set_get_roundtrip(void)
 {
    request_context_t ctx;
@@ -184,13 +199,68 @@ static void test_memory_receipt_requirement_is_host_state(void)
    request_context_clear();
 }
 
+static void test_owned_snapshot_and_absent_restore(void)
+{
+   request_context_t owner = {0};
+   owner.capabilities = 7;
+   owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   snprintf(owner.vault_principal, sizeof owner.vault_principal, "webuser:owner");
+   snprintf(owner.caller_authorization, sizeof owner.caller_authorization, "test-only-proof");
+   request_context_set(&owner);
+   request_context_snapshot_t snapshot, absent;
+   request_context_snapshot(&snapshot);
+   request_context_clear();
+   request_context_snapshot(&absent);
+   request_context_restore(&snapshot);
+   assert(request_context_get() && !memcmp(request_context_get(), &owner, sizeof owner));
+   request_context_restore(&absent);
+   assert(!request_context_get());
+   request_context_snapshot_clear(&snapshot);
+   for (size_t i = 0; i < sizeof snapshot; i++)
+      assert(!((const unsigned char *)&snapshot)[i]);
+   request_context_restore(NULL);
+   assert(!request_context_get());
+   PASS("context: owned actor/proof copy, absence restoration and wipe");
+}
+
+static void test_model_intent_scope(void)
+{
+   request_context_clear();
+   assert(request_context_set_model_execution(1) == -1 && !request_context_get());
+   request_context_t owner = {.trusted = 1};
+   strcpy(owner.principal, "alice");
+   request_context_set(&owner);
+   assert(request_context_set_operator_script_origin(1) == 0);
+   assert(request_context_get()->operator_script_origin);
+   int previous = request_context_set_model_execution(1);
+   assert(!request_context_get()->operator_script_origin);
+   assert(previous == 0 && request_context_get()->model_execution);
+   assert(request_context_set_model_execution(1) == 1);
+   assert(!request_context_set_source_release("source-added-inside-model"));
+   request_context_snapshot_t snapshot;
+   request_context_snapshot(&snapshot);
+   request_context_clear();
+   request_context_restore(&snapshot);
+   assert(request_context_get()->model_execution);
+   assert(request_context_set_model_execution(previous) == 1);
+   assert(!request_context_get()->model_execution);
+   assert(!strcmp(request_context_get()->principal, "alice"));
+   assert(!strcmp(request_context_get()->memory_source_release, "source-added-inside-model"));
+   request_context_snapshot_clear(&snapshot);
+   request_context_clear();
+   PASS("context: model intent nests, survives handoff and preserves accumulated receipts");
+}
+
 int main(void)
 {
+   test_model_intent_scope();
+   test_owned_snapshot_and_absent_restore();
    test_memory_receipt_requirement_is_host_state();
    test_assembly_refusal_lifetime();
    test_budget_header();
    printf("request_context: unit tests\n");
    test_unset_defaults();
+   test_session_actor();
    test_set_get_roundtrip();
    test_clear_and_null_set();
    printf("All request_context tests passed.\n");

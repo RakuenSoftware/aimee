@@ -44,21 +44,6 @@ int agent_name_valid(const char *name)
    return 1;
 }
 
-/* Is `endpoint` plausibly an address rather than a mis-parsed flag?
- *
- * `agent add` takes three POSITIONAL arguments, so a flag typed in the endpoint's
- * place was stored as the endpoint: `agent add x --provider openai --endpoint URL`
- * saved endpoint="--provider", reported the agent ON, and returned success. The only
- * symptom came later, from `agent probe`: "GET --provider/models returned -1".
- *
- * Deliberately narrow. A leading '-' is unambiguous evidence of a mis-parsed flag,
- * because no address starts with one. Requiring a scheme would reject the host:port
- * forms this command has always accepted, which is a guess, not evidence. */
-int agent_endpoint_valid(const char *endpoint)
-{
-   return endpoint && endpoint[0] && endpoint[0] != '-';
-}
-
 /* Per-turn session id, set from the request in the chat/delegate workers (setter
  * below) and carried in the creds snapshot so a fan-out worker inherits the
  * originating turn's session identity. (Credentials no longer ride this: the
@@ -102,25 +87,6 @@ int agent_endpoint_is_localish(const char *endpoint)
           strstr(endpoint, "://172.28.") || strstr(endpoint, "://172.29.") ||
           strstr(endpoint, "://172.30.") || strstr(endpoint, "://172.31.") ||
           strncmp(endpoint, "unix://", 7) == 0 || endpoint[0] == '/';
-}
-
-/* Registration prefix of a route-target name: everything before the first ':'.
- * Provider-general registration names targets `<registration>:<model>`, so this
- * identifies siblings that share credentials, endpoint and wire protocol. A
- * legacy single-model agent has no ':' and is its own registration. */
-void agent_registration_prefix(const char *name, char *out, size_t out_len)
-{
-   if (!out || out_len == 0)
-      return;
-   out[0] = '\0';
-   if (!name || !name[0])
-      return;
-   const char *colon = strchr(name, ':');
-   size_t n = colon ? (size_t)(colon - name) : strlen(name);
-   if (n >= out_len)
-      n = out_len - 1;
-   memcpy(out, name, n);
-   out[n] = '\0';
 }
 
 /* See agent_config.h for why this compares the stored registration rather than
@@ -301,12 +267,33 @@ int agent_registry_default_primary(agent_t *out)
    return agent_registry_pick(out, agent_registry_pick_default, NULL);
 }
 
+static _Thread_local const agent_t *g_ingress_model;
+
+const agent_t *agent_registry_bind_ingress_model(const agent_t *selected)
+{
+   const agent_t *previous = g_ingress_model;
+   g_ingress_model = selected;
+   return previous;
+}
+
 int agent_registry_resolve_ingress_model(const char *model, agent_t *out)
 {
    int rc;
 
    if (!out)
       return -1;
+   if (g_ingress_model)
+   {
+      /* SDKs send vendor model IDs rather than Aimee registration names. Only
+       * this host-selected snapshot can resolve either spelling. An unrelated
+       * model must not escape into the ambient registry or another account. */
+      if (!g_ingress_model->enabled ||
+          (model && model[0] && strcmp(model, "aimee") && strcmp(model, g_ingress_model->name) &&
+           strcmp(model, g_ingress_model->model)))
+         return -1;
+      *out = *g_ingress_model;
+      return 0;
+   }
    if (model && model[0] && strcmp(model, "aimee") != 0)
       rc = agent_registry_find(model, out);
    else
@@ -688,6 +675,15 @@ int agent_load_config(agent_config_t *cfg)
          v = cJSON_GetObjectItem(a, "cli_kind");
          if (v && cJSON_IsString(v))
             snprintf(ag->cli_kind, sizeof(ag->cli_kind), "%s", v->valuestring);
+         if (!strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI))
+         {
+            snprintf(ag->backend, sizeof ag->backend, "%s", AGENT_BACKEND_PROVIDER_CLI);
+            if (!ag->cli_kind[0])
+               snprintf(ag->cli_kind, sizeof ag->cli_kind, "%s", ag->provider);
+         }
+         if (!strcmp(ag->backend, AGENT_BACKEND_PROVIDER_CLI) &&
+             (!strcmp(ag->cli_kind, "claude-code") || !strcmp(ag->cli_kind, "claude-oauth")))
+            snprintf(ag->cli_kind, sizeof ag->cli_kind, "claude");
          v = cJSON_GetObjectItem(a, "is_server_hosted");
          if (v && cJSON_IsBool(v))
             ag->is_server_hosted = cJSON_IsTrue(v);

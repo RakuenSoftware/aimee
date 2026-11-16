@@ -70,7 +70,6 @@ extern "C"
    int db1_pki_ramp_init(int configured_mode);
    int db1_pki_ramp_ready(long now);
    int db1_pki_ramp_advance(long now);
-   int db1_pki_ramp_get(int *state_out, char *hash_out, size_t hash_len, long *advanced_at_out);
 
 #ifdef __cplusplus
 }

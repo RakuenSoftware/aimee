@@ -159,10 +159,6 @@ int main(void)
    REQUIRES_PG(kb_store_membership_teams("k", teams, 4), "kb_store_membership_teams");
    REQUIRES_PG(kb_store_membership_default_team("k", teams), "kb_store_membership_default_team");
 
-   REQUIRES_PG(kb_store_admin_grant_add("k", "oidc", "by", &id), "kb_store_admin_grant_add");
-   REQUIRES_PG(kb_store_admin_grant_revoke("k"), "kb_store_admin_grant_revoke");
-   REQUIRES_PG(kb_store_admin_grant_is_active("k"), "kb_store_admin_grant_is_active");
-
    {
       kb_identity_tier_t tier;
       kb_store_write_tier_grant_row_t rows[2];

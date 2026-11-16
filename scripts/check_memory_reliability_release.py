@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run frozen MR-18 invariants; incomplete/failed runs never publish a pass artifact."""
+"""Historical full MR18 gate (unavailable); generic fail-closed event helpers remain."""
 from __future__ import annotations
 import argparse
 import hashlib
@@ -32,69 +32,46 @@ def verify_events(events, required):
     return {name: outcomes[name] for name in sorted(required)}
 
 
+def load_recorded_events(paths):
+    """Group recorded `go test -json` events by import path.
+
+    A recorded package counts only if its stream ends with the package-level
+    result; a truncated or interrupted record is not evidence of anything.
+    """
+    events, finished = {}, set()
+    for path in paths:
+        for line in Path(path).read_text(encoding='utf-8').splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict) or not event.get('Package'):
+                continue
+            events.setdefault(event['Package'], []).append(event)
+            if event.get('Action') in ('pass', 'fail', 'skip') and not event.get('Test'):
+                finished.add(event['Package'])
+    return {package: rows for package, rows in events.items() if package in finished}
+
+
+def import_path(package, module_root=ROOT / 'server-go'):
+    """`./modules/memory` -> `<module path>/modules/memory`, as `go test -json` names it."""
+    for line in (module_root / 'go.mod').read_text(encoding='utf-8').splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[0] == 'module':
+            relative = package[2:] if package.startswith('./') else package
+            return fields[1] + ('/' + relative.strip('/') if relative.strip('/.') else '')
+    raise ValueError('server-go/go.mod declares no module path')
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Historical full MR18 certification is unavailable after evaluator extraction.")
     parser.add_argument('--output', type=Path, required=True)
-    args = parser.parse_args()
-    manifest = json.loads(MANIFEST.read_text())
-    if manifest['version'] != 1 or len(manifest['groups']) != 12:
-        raise ValueError('invalid frozen group manifest')
-    for path, expected in manifest['inputs'].items():
-        if digest(ROOT / path) != expected:
-            raise ValueError('frozen input changed; explicit fixture review required: ' + path)
-    required_env = ('AIMEE_MEMORY_EVAL_URL', 'AIMEE_KB_STORE_REPLAY_URL', 'AIMEE_TEST_PG_URL', 'AIMEE_DB_TEST_URL')
-    if any(not os.environ.get(key) for key in required_env):
-        raise ValueError('disposable memory, KB_STORE, DB1 and evaluation databases required')
-    packages = {}
-    for group in manifest['groups']:
-        if not group['cases']:
-            raise ValueError('empty adversarial group')
-        for case in group['cases']:
-            packages.setdefault(case['package'], set()).add(case['test'])
-    python_code = """
-import importlib, json, sys, unittest
-manifest = json.load(open(sys.argv[1]))
-suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromName(name) for name in manifest['python_tests'])
-result = unittest.TextTestRunner(stream=sys.stderr).run(suite)
-print(json.dumps({'executed': result.testsRun, 'expected': len(manifest['python_tests']), 'skipped': len(result.skipped)}))
-sys.exit(0 if result.wasSuccessful() and not result.skipped and result.testsRun == len(manifest['python_tests']) else 1)
-"""
-    python_run = subprocess.run([os.sys.executable, '-c', python_code, str(MANIFEST)], cwd=ROOT, text=True, capture_output=True, timeout=180)
-    if python_run.returncode:
-        raise ValueError('frozen Python metric/denominator/release tests failed or skipped')
-    python_result = json.loads(python_run.stdout)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    report = {'version': 1, 'status': 'pass', 'manifest_sha256': digest(MANIFEST),
-              'implementation': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
-              'working_diff_sha256': hashlib.sha256(subprocess.check_output(['git', 'diff', 'HEAD'], cwd=ROOT)).hexdigest(),
-              'packages': {}, 'python': python_result, 'groups': manifest['groups'],
-              'promotion': 'unqualified: deterministic invariants do not measure live-model task quality or cost'}
-    # Databases and package tests are intentionally serialized. The memory tests
-    # include a real non-owner role; the bootstrap connection is administrative.
-    for package, required in packages.items():
-        command = ['go', 'test', '-json', '-race', '-count=1', '-timeout=20m', package,
-                   '-run', '^(' + '|'.join(sorted(required)) + ')$']
-        result = subprocess.run(command, cwd=ROOT / 'server-go', text=True, capture_output=True, timeout=1260)
-        events = []
-        for line in result.stdout.splitlines():
-            events.append(json.loads(line))
-        if result.returncode:
-            # Do not copy private connection strings or SQL/provider payloads to
-            # a public artifact. Diagnostics stay in the operator's test runner.
-            names = sorted({e.get('Test', '<package>') for e in events if e.get('Action') == 'fail'})
-            raise ValueError(f'{package}: test exit {result.returncode}; failing tests={names}')
-        report['packages'][package] = verify_events(events, required)
-        print(f'{package}: {len(required)} required tests passed', flush=True)
-    fd, temporary = tempfile.mkstemp(dir=args.output.parent, prefix='.' + args.output.name)
-    try:
-        with os.fdopen(fd, 'w') as out:
-            json.dump(report, out, indent=2, allow_nan=False)
-            out.write('\n')
-        os.replace(temporary, args.output)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-    return 0
+    parser.add_argument('--go-events', type=Path, action='append', default=[])
+    parser.parse_args()
+    parser.error('full historical MR18 certification is unavailable in the public adapter checkout; '
+                 'the extracted evaluator and immutable baseline are private aims-db experiments/legacy-aimee-go. '
+                 'Use check_current_memory_contracts.py for the distinct transitional serving-contract gate; '
+                 'it does not recertify MR18.')
 
 
 if __name__ == '__main__':

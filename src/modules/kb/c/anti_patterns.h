@@ -44,24 +44,11 @@ extern "C"
    int kb_store_anti_pattern_check(const char *file_path, const char *command, anti_pattern_t *out,
                                    int max);
 
-   /* Returns 1 iff a row exists with pattern equal to the given string
-    * (exact match, used by trace_mining to avoid duplicate inserts). */
-   int kb_store_anti_pattern_exists_exact(const char *pattern);
-
-   /* Returns 1 iff a row exists with the given source_ref (used by
-    * extract-from-* loops to avoid duplicate inserts). */
-   int kb_store_anti_pattern_exists_by_source_ref(const char *source_ref);
-
    /* Increment hit_count for the row with the given id. */
    int kb_store_anti_pattern_bump(int64_t id);
 
    /* Delete the row with the given id. Returns 0 on success, -1 otherwise. */
    int kb_store_anti_pattern_delete(int64_t id);
-
-   /* List anti-patterns whose hit_count is at least threshold, ordered by
-    * hit_count DESC. Used by the escalation pass that promotes hot anti-
-    * patterns to blocking rules. Returns count written to out. */
-   int kb_store_anti_pattern_list_hot(int threshold, anti_pattern_t *out, int max);
 
 #ifdef __cplusplus
 }

@@ -28,7 +28,7 @@ database transport.
 DB1 contains server-local and same-user state. It includes sessions, working memory, agent jobs,
 workflow rows, checkpoints, policy and audit state, caches, and management state.
 
-KB owns a separate PostgreSQL/pgvector corpus through its knowledge and Go memory domains.
+KB owns a separate PostgreSQL/pgvector corpus through its knowledge domains.
 Both roles use the same Go PostgreSQL provider implementation, with distinct deployment stores.
 Server-to-KB access uses typed `/v1`, never cross-instance SQL. The former KB_STORE/DB2 process
 and native libpq pool are retired. Server audit and the separately credentialed KB WORM worker

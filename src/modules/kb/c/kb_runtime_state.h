@@ -31,16 +31,6 @@ extern "C"
    /* Upsert `key` = datetime('now'). */
    int kb_store_kb_runtime_state_set_now(const char *key);
 
-   /* Vector rebuild-lock predicate: returns 1 if a fresh lock row exists. */
-   int kb_store_kb_runtime_state_vector_rebuild_lock_held(void);
-
-   /* Non-atomic try-acquire: if no fresh lock is held, plant a
-    * datetime('now') row and return 1.  Otherwise 0. */
-   int kb_store_kb_runtime_state_vector_rebuild_lock_try_acquire(void);
-
-   /* Unconditionally drop the vector rebuild-lock row. */
-   void kb_store_kb_runtime_state_vector_rebuild_lock_release(void);
-
    /* ── Project-purge generation fence (webchat-project-lifecycle slice 2) ──
     * Fence rows: `project_purging:<key>` = "<generation> <purge_id>" plus a
     * `project_purging_ts:<key>` heartbeat written via pg_now_text(). A fence

@@ -143,6 +143,13 @@ Back up the application home and PostgreSQL volume as a matched instance. In LUK
 Vault loses the LUKS key. Losing the application's own Vault root key also makes that Vault
 unreadable. Never regenerate either as a recovery shortcut.
 
+The default software-custody Vault stores its root key beside its encrypted entries. A complete
+backup therefore includes both key and ciphertext. Encrypt matched backups independently and
+keep that backup recovery key separate; an unencrypted matched copy is recoverable, not
+self-protecting against backup theft. Vault does not encrypt the separate Native memory home,
+canonical source history or all application logs. PII must reach those stores only as opaque
+Vault references; the candidate's ordinary write path is not yet qualified for that contract.
+
 Take PostgreSQL-native consistent dumps while the store is open, or stop writes and shut down the
 composition before taking matched volume snapshots. Protect plaintext dump exports separately.
 Include workspace files, audit ledgers, seals, and off-host witness state. Test restoring into an
@@ -213,12 +220,53 @@ Automatic adoption of older database layouts is removed. Startup does not rename
 `aimee_shared`, discover an `aimee` administrator, or transfer existing application
 objects. Existing volumes must already use the current database and role layout.
 
-## Optional memory engine
+## Memory
 
-Native memory is the default. The replaceable-memory build in
-[PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005) can select Cognee through the
-[generic memory contract](modules/memory.md#memory-backend-contract). Configure the selected
-instance's backend URL and seal its API credential into its existing Vault before starting it.
-The backend's durable live store is a separate recovery dependency; it does not replace the
-instance's canonical PostgreSQL store or Vault. Follow the guide's authentication, JWT persistence,
-capacity, timeout, erasure and backup limits. There is no standard Cognee service in `compose.yaml`.
+The application image carries the memory implementation as a vendored binary bundle and provisions
+it per deployment. `compose.yaml` and `compose.kb.yaml` define a one-shot `aimee-memory-init`
+service that runs `aimee-memory-provision` before the application starts:
+
+| Situation | What provisioning does |
+| --- | --- |
+| First start | Generates the instance's memory identity, grants and owner key; prepares the installation in the `aimee-memory` volume; creates `private-memory/<role>` in the home volume. |
+| Later starts | Verifies the installation and changes nothing. |
+| After an image update, or a change in the served accounts, shared scopes or embedder | Prepares the installation again under the same identity; the owner key and stored memory are kept. An image update is refused while the application is running: stop the stack, then start it again. A changed account list, shared scope or embedder found while the application runs, such as a browser login created since the last start, keeps the current installation and takes effect at the next start. |
+
+Start and restart the stack through `scripts/compose-local.sh` (or `scripts/compose-vault-init.py`
+followed by `docker compose up`). The helper reads the embedder image's identity, which memory pins
+for vector retrieval, and runs provisioning before it seals credentials. A plain
+`docker compose up` still verifies an existing installation but cannot supply that identity.
+
+Storage and recovery:
+
+- The application mounts the `aimee-memory` volume read-only. It holds prepared executables,
+  grants and configuration only and can be regenerated; it needs no backup.
+- Memory records, configuration and the owner key live under `private-memory/` in the home volume
+  (`aimee-server-home`). Back that volume up and restore it together with the Vault and the
+  PostgreSQL store. Without `private-memory/inputs-<role>` an installation cannot be re-prepared.
+- A Server serves personal memory for the runtime account `aimee`, every browser login, and any
+  further account named in `AIMEE_MEMORY_ACCOUNTS` (comma-separated), at most 32 in all. The
+  list is re-evaluated at each start; a browser login created while the stack runs gets personal
+  memory after the next restart, and until then its memory commands are refused.
+- A KB serves the shared scopes in `AIMEE_MEMORY_SHARED_SCOPES`, comma-separated: `global`,
+  `project:NAME`, `workspace:NAME`, and `project:*` / `workspace:*` for every project or
+  workspace. The default, `global,project:*,workspace:*`, serves any scope a caller names, as
+  1.0.x did. `global` is always included. With an exact list, a project or workspace that is not
+  listed cannot be written; a store into one is refused with a message naming this setting, and
+  reads there return only global memory. Add it and restart the KB.
+  Shared facts are stored as written, with no extraction pipeline.
+- `AIMEE_MEMORY_PROVISION=off` skips provisioning and creates only the mount points. An instance
+  with no installation then runs without memory (`missing_module: memory`, not ready); an existing
+  installation is left untouched and stays active.
+
+Requirements and limits:
+
+- Docker Engine 26 or later and Compose 2.26 or later, for volume subpath mounts.
+- Server images are published for `linux/amd64` only; the memory bundle exists for that platform,
+  and the image build refuses any other.
+- An instance without a provisioned installation is not ready (`/v1/ready` returns `503`) and
+  answers memory commands with `503`.
+- A composition without a local `aimee-embedder` service is provisioned without vector retrieval.
+
+See [Memory boundary](MEMORY.md) and the [memory module](modules/memory.md).
+

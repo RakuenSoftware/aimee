@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func encodeLaunchArgs(req launchArgsRequest) []byte {
@@ -71,16 +71,16 @@ func decodeLaunchArgs(t *testing.T, response []byte) (string, []string) {
 	return name, args
 }
 
-func callLaunchArgs(t *testing.T, req launchArgsRequest) ([]string, bus.ModuleStatus) {
+func callLaunchArgs(t *testing.T, req launchArgsRequest) ([]string, ring.ModuleStatus) {
 	t.Helper()
 	_, args, status := callLaunchArgsNamed(t, req)
 	return args, status
 }
 
-func callLaunchArgsNamed(t *testing.T, req launchArgsRequest) (string, []string, bus.ModuleStatus) {
+func callLaunchArgsNamed(t *testing.T, req launchArgsRequest) (string, []string, ring.ModuleStatus) {
 	t.Helper()
-	response, status := Handle(bus.ModuleInvocation{StageID: StageLaunchArgs}, encodeLaunchArgs(req))
-	if status != bus.ModuleStatusOK {
+	response, status := Handle(ring.ModuleInvocation{StageID: StageLaunchArgs}, encodeLaunchArgs(req))
+	if status != ring.ModuleStatusOK {
 		return "", nil, status
 	}
 	name, args := decodeLaunchArgs(t, response)
@@ -122,7 +122,7 @@ func TestLaunchArgsAlwaysHasNoNetwork(t *testing.T) {
 			role = "a read-only delegate"
 		}
 		args, status := callLaunchArgs(t, req)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("role %q: status = %v", role, status)
 		}
 		i := argIndex(args, "--network")
@@ -136,7 +136,7 @@ func TestLaunchArgsAlwaysHasNoNetwork(t *testing.T) {
 // metadata read-only. The parent checkout's working files are not mounted.
 func TestLaunchArgsWriteRoleMountLayering(t *testing.T) {
 	args, status := callLaunchArgs(t, writeRequest())
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	joined := strings.Join(args, " ")
@@ -164,7 +164,7 @@ func TestLaunchArgsReadOnlyRoleGetsReadOnlyMount(t *testing.T) {
 	req.WorkDir = req.Worktree
 
 	args, status := callLaunchArgs(t, req)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	joined := strings.Join(args, " ")
@@ -195,7 +195,7 @@ func TestLaunchArgsRefusesUnsafeRequests(t *testing.T) {
 	for name, mutate := range cases {
 		req := writeRequest()
 		mutate(&req)
-		if _, status := callLaunchArgs(t, req); status != bus.ModuleStatusInvalidRequest {
+		if _, status := callLaunchArgs(t, req); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: status = %v, want InvalidRequest", name, status)
 		}
 	}
@@ -209,7 +209,7 @@ func TestLaunchArgsRefusesTheRuntimeSocket(t *testing.T) {
 	} {
 		req := writeRequest()
 		req.ParentSocketHost = sock
-		if _, status := callLaunchArgs(t, req); status != bus.ModuleStatusInvalidRequest {
+		if _, status := callLaunchArgs(t, req); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: status = %v, want InvalidRequest", sock, status)
 		}
 	}
@@ -223,7 +223,7 @@ func TestLaunchArgsTranslatesMountSources(t *testing.T) {
 	req.MountTable = "/repo\t/host/checkout"
 
 	args, status := callLaunchArgs(t, req)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	joined := strings.Join(args, " ")
@@ -242,7 +242,7 @@ func TestLaunchArgsCarriesTheEgressProxy(t *testing.T) {
 	req.EgressProxy = "http://127.0.0.1:3129"
 
 	args, status := callLaunchArgs(t, req)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	joined := strings.Join(args, " ")
@@ -258,7 +258,7 @@ func TestLaunchArgsCarriesTheCommand(t *testing.T) {
 	req.Command = []string{"sleep", "infinity"}
 
 	args, status := callLaunchArgs(t, req)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if len(args) < 2 || args[len(args)-2] != "sleep" || args[len(args)-1] != "infinity" {
@@ -296,16 +296,16 @@ func TestLaunchArgsRejectsMalformedRequests(t *testing.T) {
 	cases["role length overruns"] = overrun
 
 	for name, request := range cases {
-		_, status := Handle(bus.ModuleInvocation{StageID: StageLaunchArgs}, request)
-		if status != bus.ModuleStatusInvalidRequest {
+		_, status := Handle(ring.ModuleInvocation{StageID: StageLaunchArgs}, request)
+		if status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: status = %v, want InvalidRequest", name, status)
 		}
 	}
 }
 
 func TestLaunchArgsHonoursCancellation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageLaunchArgs, DeadlineNS: 1}
-	if _, status := Handle(invocation, encodeLaunchArgs(writeRequest())); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageLaunchArgs, DeadlineNS: 1}
+	if _, status := Handle(invocation, encodeLaunchArgs(writeRequest())); status != ring.ModuleStatusCancelled {
 		t.Errorf("status = %v, want Cancelled", status)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Which files a brief actually names as targets.
@@ -175,20 +175,20 @@ func ExtractNamedPaths(prompt string, max int) []string {
 	return out
 }
 
-func handlePaths(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handlePaths(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < pathsHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != pathsRequestMagic ||
 		request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	max := int(request[5])
 	length := int(binary.LittleEndian.Uint32(request[8:12]))
 	if max == 0 || max > pathsMax || length > pathsPromptMax ||
 		len(request) != pathsHeaderLen+length {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	found := ExtractNamedPaths(string(request[pathsHeaderLen:]), max)
@@ -203,5 +203,5 @@ func handlePaths(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.M
 		response = append(response, n[0], n[1])
 		response = append(response, p...)
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

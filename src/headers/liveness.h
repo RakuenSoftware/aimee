@@ -37,8 +37,8 @@
  * are enough to bring the initial checkpoint forward. */
 #define LIVENESS_PROGRESS_DUPLICATE_HITS 2
 
-#define LIVENESS_PROGRESS_WINDOW 12
-#define LIVENESS_PROGRESS_TOOL_MAX 64
+#define LIVENESS_PROGRESS_WINDOW     12
+#define LIVENESS_PROGRESS_TOOL_MAX   64
 #define LIVENESS_PROGRESS_TARGET_MAX 256
 
 typedef enum
@@ -77,10 +77,10 @@ void liveness_progress_init(liveness_progress_state_t *state);
  * (normally a path, query, or canonical arguments). Ranges are inclusive.
  * Unsuccessful calls do not advance the guard. A successful mutation clears
  * all no-progress evidence. */
-liveness_progress_action_t
-liveness_progress_observe(liveness_progress_state_t *state, const char *tool, const char *target,
-                          int range_start, int range_end, int has_range, int successful,
-                          int mutation);
+liveness_progress_action_t liveness_progress_observe(liveness_progress_state_t *state,
+                                                     const char *tool, const char *target,
+                                                     int range_start, int range_end, int has_range,
+                                                     int successful, int mutation);
 
 /* Format the model-visible instruction associated with CHECKPOINT or ESCALATE. */
 void liveness_format_progress_hint(const liveness_progress_state_t *state,
@@ -100,26 +100,6 @@ int liveness_is_degenerate_response(const char *content);
  * prose plus fenced shell commands, but no actual findings. Callers should
  * only treat this as fatal when the delegate recorded zero tool calls. */
 int liveness_is_unexecuted_tool_plan_response(const char *content);
-
-/* Reject a degenerate owned response before it is recorded as successful output.
- * On rejection, frees *response, clears it, writes error_message into error, and
- * returns 1. Returns 0 when the response has usable semantic signal. */
-int liveness_reject_degenerate_response(char **response, char *error, size_t error_sz,
-                                        const char *error_message);
-
-/* Fill buf with a human-readable failure diagnostic for an empty delegate response.
- * agent_name may be NULL. */
-void liveness_format_empty_diagnostic(const char *agent_name, char *buf, size_t bufsz);
-
-/* Fill buf with a final-response diagnostic when the loop has disabled tools
- * for the forced final turn but the model still attempts a tool call.
- * partial_text may contain any useful text the model emitted before the tool
- * call marker. */
-void liveness_format_final_tool_call_diagnostic(const char *agent_name, const char *attempted_tool,
-                                                const char *partial_text,
-                                                const char *last_tool_name,
-                                                const char *last_tool_result, int total_tool_calls,
-                                                char *buf, size_t bufsz);
 
 /* Returns 1 if the circuit breaker should trip.
  * total_triggers: number of warning injections so far (incremented by caller).

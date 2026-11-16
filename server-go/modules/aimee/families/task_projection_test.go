@@ -12,8 +12,8 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -57,8 +57,8 @@ func TestTaskProjectionAtomicOwnerPostgres(t *testing.T) {
 		t.Helper()
 		raw, _ := json.Marshal(req)
 		frame, _ := wire.EncodeFields(9, []string{principal, "session", string(raw)})
-		reply, status := handler(bus.ModuleInvocation{StageID: StageGuardrailState, PrincipalRef: ref}, frame)
-		if status != bus.ModuleStatusOK {
+		reply, status := handler(ring.ModuleInvocation{StageID: StageGuardrailState, PrincipalRef: ref}, frame)
+		if status != ring.ModuleStatusOK {
 			return map[string]any{"status": "denied"}
 		}
 		code, fields, e := wire.DecodeFields(reply)

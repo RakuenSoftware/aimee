@@ -1,17 +1,5 @@
-/* test_kb_reflection.c: idle-reflection synthesis write-gate.
- *
- * Covers the proposal §3/§4 changes to kb_reflection.c::run_synthesis_pass:
- *   - the LLM step routes through the shared curator path (kb_curator_llm_run),
- *     driven here deterministically via the sidecar command seam (a `printf`
- *     fallback command, no provider configured) — no network, no GPU;
- *   - fail-closed durable writes (the sharpest risk): a garbage response, a
- *     failed command, and shadow mode must each write ZERO session_synthesis
- *     artifacts; only a valid response in normal mode writes exactly one.
- *
- * run_synthesis_pass is static, so the unit is reached by including the .c
- * directly (same pattern as the other curator unit tests). kb_store writes land in
- * the in-memory sqlite shim and are counted via SQL.
- */
+/* Canonical curator provider transport and reflection artifact write gates.
+ * The model is faked at HTTP; requests/responses use the real IR codec. */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* strptime, used by the included kb_reflection.c */
 #endif
@@ -35,6 +23,7 @@ void reflection_test_release_idle(void);
 
 /* The unit under test (pulls its own headers). */
 #include "../kb/kb_reflection.c"
+#include "support/curator_model_fixture.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 #undef kb_store_lease_release_idle
 
@@ -100,8 +89,7 @@ static int count_session_synthesis(void)
    return n;
 }
 
-/* A config wired to run synthesis via the command seam (no provider ⇒ the
- * reflection Tier-B stage falls back to kb_synthesize_command). */
+/* The provider fixture selects only an owned local mock HTTP endpoint. */
 /* run_synthesis_pass reads config through accessors now instead of taking a
  * legacy_config_record. This suite links the REAL config module (TEST_CORE_OBJS), so the
  * settings come from a real aimee.yaml under an isolated HOME rather than from
@@ -112,7 +100,6 @@ static char g_home[256];
 static int g_mdl_tiebreak = 1;
 static int g_n_attempts = 2;
 static int g_shadow = 0;
-static char g_synth_cmd[512] = "";
 
 static void write_cfg(void)
 {
@@ -124,18 +111,11 @@ static void write_cfg(void)
    fprintf(fp, "    mdl_tiebreak_enabled: %s\n", g_mdl_tiebreak ? "true" : "false");
    fprintf(fp, "    synthesize_n_attempts: %d\n", g_n_attempts);
    fprintf(fp, "    reflection_shadow: %s\n", g_shadow ? "true" : "false");
-   cJSON *command = cJSON_CreateString(g_synth_cmd);
-   char *encoded_command = command ? cJSON_PrintUnformatted(command) : NULL;
-   assert(encoded_command != NULL);
-   fprintf(fp, "    synthesize_command: %s\n", encoded_command);
-   free(encoded_command);
-   cJSON_Delete(command);
    fclose(fp);
    /* Prove the file round-tripped rather than trusting it: a silently unparsed
     * key would turn every assertion below into a test of the defaults. */
    assert(config_kb_synthesize_n_attempts() == g_n_attempts);
    assert(config_kb_reflection_synthesis_shadow() == g_shadow);
-   assert(strcmp(config_kb_synthesize_command(), g_synth_cmd) == 0);
 }
 
 static void isolate_home(void)
@@ -148,12 +128,11 @@ static void isolate_home(void)
    assert(setenv("AIMEE_NO_CACHE", "1", 1) == 0);
 }
 
-static void base_cfg(const char *cmd)
+static void base_cfg(void)
 {
    g_mdl_tiebreak = 1;
    g_n_attempts = 2;
    g_shadow = 0;
-   snprintf(g_synth_cmd, sizeof(g_synth_cmd), "%s", cmd);
    write_cfg();
 }
 
@@ -172,7 +151,8 @@ static void test_valid_writes_one(void)
 {
    g_idle_release_calls = 0;
    kb_store_test_shim_open();
-   base_cfg("printf '%s' '" VALID_JSON "'");
+   curator_fixture_reply(VALID_JSON);
+   base_cfg();
    kb_store_artifact_proposed_t row;
    mk_row(&row);
 
@@ -189,7 +169,8 @@ static void test_shadow_writes_none(void)
 {
    g_idle_release_calls = 0;
    kb_store_test_shim_open();
-   base_cfg("printf '%s' '" VALID_JSON "'");
+   curator_fixture_reply(VALID_JSON);
+   base_cfg();
    g_shadow = 1;
    write_cfg();
    kb_store_artifact_proposed_t row;
@@ -208,7 +189,8 @@ static void test_garbage_writes_none(void)
 {
    g_idle_release_calls = 0;
    kb_store_test_shim_open();
-   base_cfg("printf '%s' 'not json at all'");
+   curator_fixture_reply("not json at all");
+   base_cfg();
    kb_store_artifact_proposed_t row;
    mk_row(&row);
 
@@ -220,12 +202,13 @@ static void test_garbage_writes_none(void)
    printf("  garbage response → defer, 0 candidates written OK\n");
 }
 
-/* Command failure (non-zero exit ⇒ kb_curator_llm_run returns NULL) ⇒ no write. */
+/* Provider transport failure (canonical execution returns failure) ⇒ no write. */
 static void test_command_failure_writes_none(void)
 {
    g_idle_release_calls = 0;
    kb_store_test_shim_open();
-   base_cfg("false");
+   curator_fixture_failure();
+   base_cfg();
    kb_store_artifact_proposed_t row;
    mk_row(&row);
 
@@ -241,7 +224,8 @@ static void test_empty_pass_releases_before_backoff(void)
 {
    g_idle_release_calls = 0;
    kb_store_test_shim_open();
-   base_cfg("false");
+   curator_fixture_failure();
+   base_cfg();
    run_reflection_pass_releasing_lease();
    assert(g_idle_release_calls == 1);
    kb_store_test_shim_close();

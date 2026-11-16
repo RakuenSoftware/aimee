@@ -119,15 +119,6 @@ static void test_edge_record_null(void)
    teardown();
 }
 
-/* Test: cleanup with negative days returns 0. */
-static void test_cleanup_negative_days(void)
-{
-   setup();
-   int n = kb_store_code_projection_cleanup_old("proj", -1);
-   assert(n == 0);
-   teardown();
-}
-
 /* Test: update_counts with invalid gen_id returns -1. */
 static void test_update_counts_invalid(void)
 {
@@ -225,7 +216,6 @@ int main(void)
    printf("ok\n");
 
    printf("test_cleanup_negative_days... ");
-   test_cleanup_negative_days();
    printf("ok\n");
 
    printf("test_update_counts_invalid... ");

@@ -5,13 +5,14 @@
 #include "vault_crypto.h"
 
 #include <stddef.h>
+#include "sealed_envelope.h"
 #include <stdint.h>
 
 #define KB_MGMT_ROOT_CUSTODY_ID_MAX 600
 #define KB_MGMT_ROOT_BOOTSTRAP_LEN  64
 #define KB_MGMT_MANIFEST_ID_MAX     64
 #define KB_MGMT_ROOT_ATTEST_MAX     512
-#define KB_MGMT_ROOT_SECRET_MAX     4096
+#define KB_MGMT_ROOT_SECRET_MAX     AIMEE_SEALED_ENVELOPE_CIPHERTEXT_MAX
 #define KB_MGMT_PUBLIC_BUNDLE_MAX   1536
 
 typedef enum
@@ -48,15 +49,7 @@ typedef enum
    KB_MGMT_ROOTS_INTEGRITY = 6,
 } kb_mgmt_roots_result_t;
 
-typedef struct
-{
-   int64_t version;
-   uint8_t wrapped_dek[VAULT_WRAPPED_DEK_LEN];
-   uint8_t nonce[VAULT_GCM_NONCE_LEN];
-   uint8_t ciphertext[KB_MGMT_ROOT_SECRET_MAX];
-   size_t ciphertext_len;
-   uint8_t tag[VAULT_GCM_TAG_LEN];
-} kb_mgmt_root_envelope_t;
+typedef aimee_sealed_envelope_t kb_mgmt_root_envelope_t;
 
 typedef struct
 {

@@ -51,28 +51,11 @@ extern "C"
     * process boundary, and the caller already holds the text. */
    int db1_execution_plan_create(const char *agent_name, const char *task, const char *steps_json);
    int db1_execution_plan_get(int plan_id, plan_t *out);
-   /* list_ids is what the store does; _list is that plus a get per id, which
-    * is composition rather than storage and lives beside the caller. Whole
-    * plans do not travel in one reply: each is a nested row of 32 steps, so
-    * twenty of them is a reply nobody reads twenty of. */
-   int db1_execution_plan_list_ids(int *out_ids, int max);
    int db1_execution_plan_list(plan_t *out, int max);
    int db1_execution_plan_exists(int plan_id);
    int db1_execution_plan_count_steps(int plan_id);
-   int db1_execution_plan_list_running_ids(int *out_ids, int max);
    int db1_execution_plan_list_recent_summaries(db1_execution_plan_summary_t *out, int max);
-   int db1_execution_plan_set_status(int plan_id, const char *status);
    int db1_execution_plan_cancel_by_id(int plan_id, const char *reason);
-   int db1_execution_plan_cancel_stale(int threshold_seconds, const char *reason);
-
-   int db1_plan_step_set_status(int step_id, const char *status);
-   int db1_plan_step_set_status_output(int step_id, const char *status, const char *output);
-   int db1_plan_step_cancel_active_for_plan(int plan_id);
-   int db1_plan_step_cancel_orphans(void);
-
-   int db1_step_evidence_insert(int plan_id, int step_id, const char *kind, const char *content,
-                                int passed, const char *strength);
-   int db1_step_evidence_get_latest(int step_id, db1_step_evidence_latest_t *out);
 
 #ifdef __cplusplus
 }

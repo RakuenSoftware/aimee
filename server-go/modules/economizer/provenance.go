@@ -92,21 +92,3 @@ func (c *ProvenanceCapability) Consume(expected ProvenanceBinding, source []byte
 	}
 	return nil
 }
-
-// Destroy releases the capability.
-//
-// The C original cleanses the struct because the digest lived in process memory
-// the caller could later read. Go's GC gives no such guarantee, so this zeroes
-// what it can and exists mainly so callers keep the same lifecycle shape; it is
-// deliberately NOT relied on as a secrecy boundary.
-func (c *ProvenanceCapability) Destroy() {
-	if c == nil {
-		return
-	}
-	for i := range c.digest {
-		c.digest[i] = 0
-	}
-	c.binding = ProvenanceBinding{}
-	c.sourceLen = 0
-	c.consumed.Store(true) // a destroyed capability can never be consumed
-}

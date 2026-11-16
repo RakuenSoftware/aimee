@@ -15,6 +15,8 @@ import (
 // It is a commitment, never a bearer capability. The durable owner must also
 // authenticate the principal/root and serialize every transition for that root.
 type ActionIntent struct {
+	TurnSession          string    `json:"turn_session_id,omitempty"`
+	Turn                 string    `json:"turn_id,omitempty"`
 	SchemaVersion        int       `json:"schema_version"`
 	ID                   string    `json:"action_id"`
 	Request              string    `json:"request_id"`

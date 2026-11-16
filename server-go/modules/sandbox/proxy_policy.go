@@ -6,7 +6,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -398,13 +398,13 @@ func rewriteProxyHead(head string) (string, bool) {
 	return result.String(), true
 }
 
-func handleProxyRequest(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleProxyRequest(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var decoded ProxyRequestPolicyRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	kind, host, port := classifyProxyRequestLine(decoded.Line)
 	allowlist := DefaultPackageAllowlist
@@ -426,13 +426,13 @@ func handleProxyRequest(invocation bus.ModuleInvocation, request []byte) ([]byte
 	return encode(response)
 }
 
-func handleProxyAddress(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleProxyAddress(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var decoded ProxyAddressPolicyRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	return encode(ProxyAddressPolicyResponse{Blocked: proxyIPBlocked(net.ParseIP(decoded.IP))})
 }

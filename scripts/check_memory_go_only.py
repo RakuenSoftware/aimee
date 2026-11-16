@@ -19,7 +19,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = Path("tests/baselines/modules/memory-native-retirement.json")
-MEMORY_ROOTS = (Path("src/modules/memory"), Path("server-go/modules/memory"))
+MEMORY_ROOTS = (Path("src/modules/memory"), Path("server-go/modules/memory/adapter"), Path("server-go/memory"))
+RETIRED_MEMORY_ROOT = Path("server-go/modules/memory")
 NATIVE_SUFFIXES = {".c", ".h", ".cc", ".hh", ".cpp", ".hpp", ".cxx", ".hxx", ".inc", ".inl",
                    ".m", ".mm", ".s", ".asm", ".syso", ".o", ".a", ".so", ".dll"}
 SOURCE_SUFFIXES = NATIVE_SUFFIXES - {".syso", ".o", ".a", ".so", ".dll"}
@@ -82,7 +83,7 @@ def module_violations(root: Path) -> list[dict[str, str]]:
     def fail(rule: str, path: Path, detail: str) -> None:
         failures.append({"rule": rule, "file": path.relative_to(root).as_posix(), "detail": detail})
 
-    for relative in MEMORY_ROOTS:
+    for relative in (*MEMORY_ROOTS, *([RETIRED_MEMORY_ROOT] if (root / RETIRED_MEMORY_ROOT).exists() else [])):
         directory = root / relative
         if directory.is_symlink():
             fail("memory-source-symlink", directory, "the module root must not be a forwarding link")

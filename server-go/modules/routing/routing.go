@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"sync/atomic"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -36,32 +36,32 @@ func mix64(value uint64) uint64 {
 }
 
 // Handle mirrors the C routing adapter exactly.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	return defaultSelector.Handle(invocation, request)
 }
 
 // Handle selects a candidate using this selector's independent cursor.
-func (s *Selector) Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func (s *Selector) Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.StageID == StagePlan {
 		return handlePlan(invocation, request)
 	}
 	if invocation.StageID != StageSelect {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	// The C adapter observes cancellation before decoding the route body. Preserve
 	// that precedence so a cancelled malformed request has the same result.
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	if len(request) != requestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
 		binary.LittleEndian.Uint16(request[4:6]) != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	mode := binary.LittleEndian.Uint16(request[6:8])
 	candidateCount := binary.LittleEndian.Uint32(request[8:12])
 	if candidateCount == 0 || (mode != selectBalanced && mode != selectRandomized) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	var selected uint32
 	if mode == selectBalanced {
@@ -70,10 +70,10 @@ func (s *Selector) Handle(invocation bus.ModuleInvocation, request []byte) ([]by
 		selected = uint32(mix64(invocation.TraceID) % uint64(candidateCount))
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], selected)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

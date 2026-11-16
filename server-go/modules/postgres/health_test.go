@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func healthRequest() []byte {
@@ -36,8 +36,8 @@ func TestHealthReportsSchemaAndExtensionEvidence(t *testing.T) {
 			handler := newHandler(func(context.Context) (healthEvidence, error) {
 				return test.evidence, nil
 			})
-			response, status := handler(bus.ModuleInvocation{StageID: StageHealth}, healthRequest())
-			if status != bus.ModuleStatusOK {
+			response, status := handler(ring.ModuleInvocation{StageID: StageHealth}, healthRequest())
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("status = %v", status)
 			}
 			if len(response) != responseLen || binary.LittleEndian.Uint32(response[0:4]) != responseMagic ||
@@ -63,14 +63,14 @@ func TestHealthRejectsMalformedOrWrongStageRequests(t *testing.T) {
 		append(append([]byte(nil), valid[:4]...), 2, 0, 0, 0),
 	}
 	for _, request := range cases {
-		if _, status := handler(bus.ModuleInvocation{StageID: StageHealth}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageHealth}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Fatalf("request %x status = %v", request, status)
 		}
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageHealth + 1}, valid); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageHealth + 1}, valid); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong stage status = %v", status)
 	}
-	if _, status := newHandler(nil)(bus.ModuleInvocation{StageID: StageHealth}, valid); status != bus.ModuleStatusInternal {
+	if _, status := newHandler(nil)(ring.ModuleInvocation{StageID: StageHealth}, valid); status != ring.ModuleStatusInternal {
 		t.Fatalf("nil probe status = %v", status)
 	}
 }
@@ -79,12 +79,12 @@ func TestHealthMapsProbeFailureAndCancellation(t *testing.T) {
 	failing := newHandler(func(context.Context) (healthEvidence, error) {
 		return healthEvidence{}, errors.New("unavailable")
 	})
-	if response, status := failing(bus.ModuleInvocation{StageID: StageHealth}, healthRequest()); status != bus.ModuleStatusInternal || response != nil {
+	if response, status := failing(ring.ModuleInvocation{StageID: StageHealth}, healthRequest()); status != ring.ModuleStatusInternal || response != nil {
 		t.Fatalf("failure = (%x, %v)", response, status)
 	}
 
-	invocation := bus.ModuleInvocation{StageID: StageHealth, DeadlineNS: 1}
-	if response, status := failing(invocation, healthRequest()); status != bus.ModuleStatusCancelled || response != nil {
+	invocation := ring.ModuleInvocation{StageID: StageHealth, DeadlineNS: 1}
+	if response, status := failing(invocation, healthRequest()); status != ring.ModuleStatusCancelled || response != nil {
 		t.Fatalf("cancelled = (%x, %v)", response, status)
 	}
 }

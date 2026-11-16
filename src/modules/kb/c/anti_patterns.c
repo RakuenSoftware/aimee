@@ -212,46 +212,6 @@ int kb_store_anti_pattern_check(const char *file_path, const char *command, anti
    return count;
 }
 
-int kb_store_anti_pattern_exists_exact(const char *pattern)
-{
-   void *conn = kb_store_conn();
-   if (!conn || !pattern)
-      return 0;
-
-   char err[AP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT COUNT(*) FROM anti_patterns WHERE pattern = ?1", err, sizeof(err));
-   if (!st)
-      return 0;
-   aimee_pg_bind_text(st, "?1", pattern);
-
-   int exists = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      exists = aimee_pg_column_int(st, 0) > 0;
-   aimee_pg_finalize(st);
-   return exists;
-}
-
-int kb_store_anti_pattern_exists_by_source_ref(const char *source_ref)
-{
-   void *conn = kb_store_conn();
-   if (!conn || !source_ref)
-      return 0;
-
-   char err[AP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT COUNT(*) FROM anti_patterns WHERE source_ref = ?1", err, sizeof(err));
-   if (!st)
-      return 0;
-   aimee_pg_bind_text(st, "?1", source_ref);
-
-   int exists = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      exists = aimee_pg_column_int(st, 0) > 0;
-   aimee_pg_finalize(st);
-   return exists;
-}
-
 int kb_store_anti_pattern_bump(int64_t id)
 {
    void *conn = kb_store_conn();
@@ -287,36 +247,4 @@ int kb_store_anti_pattern_delete(int64_t id)
    if (step_rc != AIMEE_PG_DONE)
       return -1;
    return changes > 0 ? 0 : -1;
-}
-
-int kb_store_anti_pattern_list_hot(int threshold, anti_pattern_t *out, int max)
-{
-   void *conn = kb_store_conn();
-   if (!conn || !out || threshold <= 0)
-      return 0;
-
-   char err[AP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "SELECT id, pattern, description, source, source_ref, hit_count, confidence "
-       "FROM anti_patterns WHERE hit_count >= ?1 ORDER BY hit_count DESC",
-       err, sizeof(err));
-   if (!st)
-      return 0;
-   aimee_pg_bind_int(st, "?1", threshold);
-
-   int count = 0;
-   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW && count < max)
-   {
-      out[count].id = aimee_pg_column_int64(st, 0);
-      kb_store_copy_col_text(out[count].pattern, sizeof(out[count].pattern), st, 1);
-      kb_store_copy_col_text(out[count].description, sizeof(out[count].description), st, 2);
-      kb_store_copy_col_text(out[count].source, sizeof(out[count].source), st, 3);
-      kb_store_copy_col_text(out[count].source_ref, sizeof(out[count].source_ref), st, 4);
-      out[count].hit_count = aimee_pg_column_int(st, 5);
-      out[count].confidence = aimee_pg_column_double(st, 6);
-      count++;
-   }
-   aimee_pg_finalize(st);
-   return count;
 }

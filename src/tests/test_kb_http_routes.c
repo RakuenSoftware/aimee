@@ -1,4 +1,3 @@
-static int derived_cleanup_failure, derived_cleanup_calls;
 #include <aimee/postgres/client.h>
 #include "module_commands.h"
 #include "support/module_runtime_fixture.h"
@@ -46,11 +45,11 @@ extern int handle_get_code_context(const char *query_string, char *out_buf, int 
 #include "runtime_secret.h"
 
 #include <aimee/control-web/module_api.h>
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 
-extern aimee_module_status_t aimee_control_web_module_handler(const aimee_module_invocation_t *,
-                                                              const uint8_t *, uint32_t, uint8_t *,
-                                                              uint32_t, uint32_t *, void *);
+extern ouro_module_status_t aimee_control_web_module_handler(const ouro_module_invocation_t *,
+                                                             const uint8_t *, uint32_t, uint8_t *,
+                                                             uint32_t, uint32_t *, void *);
 
 static int self_signed_ec_cert(char *out, size_t cap)
 {
@@ -84,7 +83,7 @@ static int self_signed_ec_cert(char *out, size_t cap)
    return ok ? 0 : -1;
 }
 
-int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+int ouro_module_invocation_cancelled(const ouro_module_invocation_t *invocation)
 {
    (void)invocation;
    return 0;
@@ -95,12 +94,12 @@ static int control_web_module_provider(const char *method, const char *path, int
    uint8_t request[AIMEE_CONTROL_WEB_REQUEST_LEN];
    uint8_t response[AIMEE_CONTROL_WEB_RESPONSE_LEN];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_CONTROL_WEB_STAGE_AUTHORIZE};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_CONTROL_WEB_STAGE_AUTHORIZE};
    if (aimee_control_web_request_encode(AIMEE_CONTROL_WEB_TARGET_CONSOLE_ADMIN, method, path,
                                         request, sizeof(request)) != 0 ||
        aimee_control_web_module_handler(&invocation, request, sizeof(request), response,
                                         sizeof(response), &response_len,
-                                        NULL) != AIMEE_MODULE_STATUS_OK)
+                                        NULL) != OURO_MODULE_STATUS_OK)
       return -1;
    return aimee_control_web_response_decode(response, response_len, allowed);
 }
@@ -145,49 +144,6 @@ void kb_store_lease_release_idle(void)
 {
 }
 
-static int g_erasure_begin_calls;
-static int g_erasure_complete_calls;
-static int g_erasure_reconcile_calls;
-static int g_erasure_pending_owners;
-
-int kb_store_subject_erasure_begin(const char *request_id, const char *subject,
-                                   const char *sessions_json, int64_t *memory_count,
-                                   int64_t *document_count, int *already_done)
-{
-   assert(strcmp(request_id, "erase-route-0123456789") == 0);
-   assert(strcmp(subject, "subject@example.test") == 0);
-   assert(strcmp(sessions_json, "[\"session-a\"]") == 0);
-   g_erasure_begin_calls++;
-   *memory_count = 2;
-   *document_count = 3;
-   *already_done = 0;
-   return 0;
-}
-
-int kb_store_subject_erasure_complete(const char *request_id, const char *actor, int64_t db1_count,
-                                      int *event_created)
-{
-   assert(strcmp(request_id, "erase-route-0123456789") == 0);
-   assert(actor && actor[0]);
-   assert(db1_count == 1);
-   g_erasure_complete_calls++;
-   *event_created = 1;
-   return 0;
-}
-
-int kb_store_subject_erasure_ack(const char *request_id, const char *actor, const char *transport,
-                                 int64_t db1_count, int *event_created, int *coverage_complete,
-                                 int64_t *pending_owners)
-{
-   assert(transport != NULL);
-   int rc = kb_store_subject_erasure_complete(request_id, actor, db1_count, event_created);
-   *pending_owners = g_erasure_pending_owners;
-   *coverage_complete = g_erasure_pending_owners == 0;
-   if (g_erasure_pending_owners)
-      *event_created = 0;
-   return rc;
-}
-
 static const char *g_stub_kb_mode = "";
 const char *config_kb_mode(void)
 {
@@ -205,7 +161,6 @@ int kb_blob_reconcile_run(int alarm_mb, int grace_secs, kb_blob_recon_stats_t *o
    assert(grace_secs == 0);
    memset(out, 0, sizeof(*out));
    out->orphans_unlinked = 4;
-   g_erasure_reconcile_calls++;
    return 0;
 }
 /* /v1/health reports pool starvation, so the route layer now reads the pool.
@@ -393,8 +348,6 @@ typedef struct
 typedef struct
 {
    int rc;
-   int64_t mem_pruned;
-   int64_t mem_kept;
    int64_t kb_pruned;
    int64_t kb_kept;
 } pgvec_kb_service_reconcile_result_t;
@@ -1193,7 +1146,6 @@ static int g_complete_chunks;
 static int g_complete_embeddings;
 static int64_t g_fail_job_id;
 static char g_fail_error[256];
-static char g_snapshot_project[256];
 static char g_delete_project[256];
 static char g_delete_path[256];
 static int g_delete_ids_called;
@@ -1777,17 +1729,6 @@ int kb_store_kb_ingest_queue_fail(int64_t job_id, const char *error_message)
    return 0;
 }
 
-cJSON *kb_store_kb_file_index_snapshot_json(const char *project)
-{
-   snprintf(g_snapshot_project, sizeof(g_snapshot_project), "%s", project ? project : "");
-   cJSON *arr = cJSON_CreateArray();
-   cJSON *file = cJSON_CreateObject();
-   cJSON_AddStringToObject(file, "rel_path", "src/a.c");
-   cJSON_AddStringToObject(file, "hash", "hash-a");
-   cJSON_AddItemToArray(arr, file);
-   return arr;
-}
-
 int kb_store_kb_documents_list_chunk_ids_for_file(const char *project, const char *file_path,
                                                   int64_t *out, int max)
 {
@@ -2026,23 +1967,15 @@ int kb_store_kb_service_clear_current_project(const char *project)
    return kb_store_kb_service_clear_project(project);
 }
 
-int kb_store_kb_service_memory_record_exists(int64_t record_id)
-{
-   (void)record_id;
-   return 1;
-}
-
 int kb_store_kb_service_kb_document_exists(int64_t document_id)
 {
    (void)document_id;
    return 1;
 }
 
-int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn mem_exists,
-                                       pgvec_kb_service_record_exists_fn kb_exists, int dry_run,
+int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn kb_exists, int dry_run,
                                        pgvec_kb_service_reconcile_result_t *out)
 {
-   assert(mem_exists != NULL);
    assert(kb_exists != NULL);
    g_reconcile_dry_run = dry_run;
    if (g_reconcile_rc != 0)
@@ -2050,8 +1983,6 @@ int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn mem_exi
    if (out)
    {
       out->rc = 0;
-      out->mem_kept = 4;
-      out->mem_pruned = 1;
       out->kb_kept = 6;
       out->kb_pruned = 2;
    }
@@ -2163,7 +2094,6 @@ static void test_capabilities(void)
  *    exercised without a live KB_STORE. ─────────────────────────────────────────── */
 #include "modules/kb/c/enrollments.h"
 #include "kb_identity.h"
-static int g_stub_revoked_calls = 0;
 static char g_stub_enrollment_expires_at[32];
 int kb_http_egress_route(const char *method, const char *path, const char *body, int body_len,
                          const kb_principal_t *transport, const char *fingerprint, char *out,
@@ -2238,19 +2168,13 @@ int kb_store_enrollment_revoke(int64_t id, kb_store_enrollment_row_t *out)
    }
    return 0;
 }
-int kb_store_enrollment_is_revoked(const char *fingerprint)
-{
-   g_stub_revoked_calls++;
-   return fingerprint && strcmp(fingerprint, "revoked-fp") == 0;
-}
+
 void kb_store_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
 {
    (void)fingerprint;
    (void)scope;
 }
-void kb_store_enrollment_cache_flush(void)
-{
-}
+
 static kb_store_console_oidc_t g_stub_oidc;
 int kb_store_console_oidc_get(kb_store_console_oidc_t *out)
 {
@@ -4813,9 +4737,15 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    *result = cJSON_CreateObject();
    int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
    cJSON_AddBoolToObject(*result, "unauthorized", g_vec_unauthorized);
-   if (!g_vec_enabled || max_dim < 2560)
+   if (g_vec_unauthorized || !g_vec_enabled || max_dim < 2560)
+   {
+      cJSON_AddNumberToObject(*result, "dim", 0);
+      cJSON_AddStringToObject(*result, "error",
+                              g_vec_unauthorized ? "embed: HTTP 403" : "embed: unavailable");
       return 1;
+   }
    int dim = 2560;
+   cJSON_AddNumberToObject(*result, "dim", dim);
    cJSON *vector = cJSON_AddArrayToObject(*result, "vector");
    for (int i = 0; i < dim; ++i)
       cJSON_AddItemToArray(vector, cJSON_CreateNumber(0.01f * (float)(i % 7)));
@@ -6544,64 +6474,24 @@ static void test_maintenance_routes_are_owner_gated(void)
    assert(s == 403);
 }
 
-static void test_subject_erasure_routes_are_owner_gated_and_idempotent(void)
+static void test_retired_subject_erasure_routes_are_absent(void)
 {
-   char buf[1024];
-   const char *begin = "{\"request_id\":\"erase-route-0123456789\","
-                       "\"subject\":\"subject@example.test\","
-                       "\"session_ids\":[\"session-a\"]}";
-   int s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/begin", NULL,
-                            "Bearer scope:project:x:secret", "scope:project:x:secret", begin,
-                            (int)strlen(begin), buf, sizeof(buf));
-   assert(s == 403);
-   assert(g_erasure_begin_calls == 0);
-
-   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/begin", NULL, OWNER_AUTH, OWNER_TOK,
-                        begin, (int)strlen(begin), buf, sizeof(buf));
-   assert(s == 200);
-   assert(g_erasure_begin_calls == 1);
-   assert(strstr(buf, "\"memory_count\":2") != NULL);
-   assert(strstr(buf, "\"document_count\":3") != NULL);
-
-   const char *invalid_complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1.5}";
-   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
-                        invalid_complete, (int)strlen(invalid_complete), buf, sizeof(buf));
-   assert(s == 400);
-   assert(g_erasure_complete_calls == 0);
-   assert(g_erasure_reconcile_calls == 0);
-
-   const char *legacy_complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1}";
-   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
-                        legacy_complete, (int)strlen(legacy_complete), buf, sizeof(buf));
-   assert(s == 409 && g_erasure_complete_calls == 0 && g_erasure_reconcile_calls == 0);
-   const char *complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1,\"receipt_"
-                          "policy\":\"memory-erasure-v2\"}";
-   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
-                        complete, (int)strlen(complete), buf, sizeof(buf));
-   assert(s == 200);
-   assert(g_erasure_complete_calls == 1);
-   assert(g_erasure_reconcile_calls == 1);
-   assert(strstr(buf, "\"event_created\":true") != NULL);
-   assert(strstr(buf, "\"orphan_blobs_unlinked\":4") != NULL);
-   assert(strstr(buf, "\"coverage_complete\":true") != NULL);
-   g_erasure_pending_owners = 1;
-   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
-                        complete, (int)strlen(complete), buf, sizeof(buf));
-   assert(s == 200 && strstr(buf, "\"status\":\"pending_owners\"") != NULL);
-   assert(strstr(buf, "\"coverage_complete\":false") != NULL);
-   assert(strstr(buf, "\"event_created\":false") != NULL);
-   /* A failed remote cleanup cannot emit completion evidence. The same
-    * existing request ID can retry after partial/unknown remote outcomes. */
-   int completed_before = g_erasure_complete_calls;
-   derived_cleanup_failure = 1;
-   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
-                        complete, (int)strlen(complete), buf, sizeof(buf));
-   assert(s == 503 && g_erasure_complete_calls == completed_before);
-   derived_cleanup_failure = 0;
-   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
-                        complete, (int)strlen(complete), buf, sizeof(buf));
-   assert(s == 200 && g_erasure_complete_calls == completed_before + 1);
-   g_erasure_pending_owners = 0;
+   char expected[1024], actual[1024];
+   const char *paths[] = {"/v1/privacy/erase-subject/begin", "/v1/privacy/erase-subject/complete"};
+   const char *methods[] = {"GET", "POST"};
+   for (size_t m = 0; m < sizeof(methods) / sizeof(methods[0]); m++)
+   {
+      int unregistered =
+          kb_http_route_ex(methods[m], "/v1/unregistered-retention-probe", NULL, OWNER_AUTH,
+                           OWNER_TOK, "{}", 2, expected, sizeof(expected));
+      assert(unregistered == 404 || unregistered == 405);
+      for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++)
+      {
+         int status = kb_http_route_ex(methods[m], paths[i], NULL, OWNER_AUTH, OWNER_TOK, "{}", 2,
+                                       actual, sizeof(actual));
+         assert(status == unregistered && strcmp(actual, expected) == 0);
+      }
+   }
 }
 
 static void test_maintenance_repair_missing_project(void)
@@ -6622,8 +6512,9 @@ static void test_maintenance_reconcile_ok(void)
    assert(s == 200);
    assert(g_reconcile_dry_run == 1);
    assert(strstr(buf, "\"dry_run\":true") != NULL);
-   assert(strstr(buf, "\"pruned\":1") != NULL);
+   assert(strstr(buf, "\"pruned\":2") != NULL);
    assert(strstr(buf, "\"kept\":6") != NULL);
+   assert(strstr(buf, "\"memory\"") == NULL);
 }
 
 static void test_maintenance_clear_ok(void)
@@ -7807,7 +7698,7 @@ static void test_content_read_identity_boundary(void)
    assert(kb_reqctx_resolved() == NULL);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
    /* Match kb_main's process contract. TLS readiness probes deliberately open
     * and close sockets; under parallel suite load a server write can race that
@@ -7816,6 +7707,12 @@ int main(void)
    signal(SIGPIPE, SIG_IGN);
    kb_route_acl_register_authorization_provider(control_web_module_provider);
    printf("kb_http_routes: ");
+   if (argc == 2 && strcmp(argv[1], "--retired-routes-only") == 0)
+   {
+      test_retired_subject_erasure_routes_are_absent();
+      puts("retired subject-erasure routes absent");
+      return 0;
+   }
 
    test_health();
    test_health_ex_rich();
@@ -7948,7 +7845,7 @@ int main(void)
    test_scoped_token_cannot_ingest_all_projects();
    test_service_scope_is_data_plane_not_admin();
    test_maintenance_routes_are_owner_gated();
-   test_subject_erasure_routes_are_owner_gated_and_idempotent();
+   test_retired_subject_erasure_routes_are_absent();
    test_maintenance_repair_missing_project();
    test_maintenance_reconcile_ok();
    test_maintenance_clear_ok();
@@ -7996,20 +7893,5 @@ int main(void)
    test_code_build_queues_instead_of_embedding_inline();
    test_maintenance_repair_queues_too();
    printf("ok\n");
-   return 0;
-}
-
-int kb_module_memory_reset_derived(void)
-{
-   derived_cleanup_calls++;
-   return derived_cleanup_failure ? -1 : 0;
-}
-
-int kb_module_memory_erase_subject(const char *request_id, const char *subject,
-                                   const cJSON *sessions)
-{
-   (void)request_id;
-   (void)subject;
-   (void)sessions;
    return 0;
 }

@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
 
 /* Lossless integer transport through cJSON's double-backed number nodes.
  * Preserve compatible numeric values within the safe integer range; use canonical
@@ -55,6 +56,31 @@ static inline int jo_read_i64_exact(const cJSON *value, int64_t *out)
    }
    *out = negative ? (parsed == (uint64_t)INT64_MAX + 1 ? INT64_MIN : -(int64_t)parsed)
                    : (int64_t)parsed;
+   return 1;
+}
+
+/* Vendored parser numbers retain their original token. Accept a canonical i64
+ * token only while it still describes this node's numeric value. Constructed
+ * unsafe doubles have no token and remain refused by the portable reader above.
+ * This reader never recovers an original integer from an unsafe constructed double. */
+static inline int jo_read_i64_token_exact(const cJSON *value, int64_t *out)
+{
+   if (!out)
+      return 0;
+   if (!cJSON_IsNumber(value) || !value->number_lexeme)
+      return jo_read_i64_exact(value, out);
+   cJSON token = {0};
+   token.type = cJSON_Raw;
+   token.valuestring = value->number_lexeme;
+   int64_t parsed;
+   if (!jo_read_i64_exact(&token, &parsed))
+      return 0;
+   char *end = NULL;
+   double number = strtod(value->number_lexeme, &end);
+   if (!end || *end || !isfinite(number) || number != value->valuedouble ||
+       (number == 0.0 && signbit(number) != signbit(value->valuedouble)))
+      return 0;
+   *out = parsed;
    return 1;
 }
 

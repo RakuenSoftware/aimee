@@ -18,25 +18,16 @@
  * stack, which is 32 MB — so 32 panelists (~50KB frame) is well within budget. */
 #define ENSEMBLE_MAX_REFS 32
 
-typedef struct
-{
-   char response[8192];
-   int success;
-   double cost_usd;
-   int degraded;            /* 1 = returned best single candidate, not synthesized */
-   int cost_capped;         /* 1 = aborted before aggregation due to cost cap */
-   int participants_total;  /* reference models fanned out this run */
-   int participants_failed; /* participants that returned no usable response (partial failure) */
-} delegate_ensemble_result_t;
-
+typedef aimee_panel_aggregate_result_t delegate_ensemble_result_t;
 
 /* Fill *out from the live config. */
 void ensemble_panel_from_config(ensemble_panel_t *out);
 
-int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *prompt,
-                          delegate_ensemble_result_t *out);
+int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel,
+                          const aimee_request_t *request, delegate_ensemble_result_t *out);
 
-double delegate_ensemble_cost_usd(const delegate_ensemble_result_t *r);
+/* Releases owned canonical output, retaining scalar/display diagnostics. */
+void delegate_ensemble_result_free(delegate_ensemble_result_t *result);
 
 /* Estimate the USD cost of a single delegate/model call. Routes through the
  * shared cache-aware pricing authority (token_estimate_cost), falling back to
@@ -52,10 +43,6 @@ double delegate_cost_estimate_usd(const char *provider, const char *model, int p
  * chair/verify headers need the result type). The delegate_roundtable_* entry
  * points below still produce and free those types. */
 
-int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
-                            const roundtable_opts_t *opts, roundtable_result_t *out);
-void delegate_roundtable_result_free(roundtable_result_t *r);
-
 /* 1 if `ag` may sit on a panel: enabled + named, NOT primary-only (agents.json
  * `primary_only`), and a claude-CLI only when server-hosted (is_server_hosted). */
 int ensemble_panelist_eligible(const agent_t *ag);
@@ -63,8 +50,8 @@ int ensemble_panelist_eligible(const agent_t *ag);
 /* Validate explicit positive pins before any filter can remove them. A concrete
  * pin is a hard must-use requirement: missing, unauthorized, or unavailable
  * returns -1 and describes the pin in err. "$random" is not a concrete pin. */
-int ensemble_validate_panel_pins(const ensemble_panel_t *panel, const agent_config_t *acfg, char *err,
-                                 size_t err_n);
+int ensemble_validate_panel_pins(const ensemble_panel_t *panel, const agent_config_t *acfg,
+                                 char *err, size_t err_n);
 
 /* Replace each "$random" seat in ensemble.reference_models with a concretely
  * picked review-capable agent (excluding already-seated models for diversity);
@@ -95,24 +82,6 @@ void ensemble_fill_implicit_panel(ensemble_panel_t *panel, const agent_config_t 
  * named/default saved preset as an exact panel, or construct the bounded
  * two-seat fallback when no preset exists. */
 int ensemble_prepare_runtime_panel(const char *requested, ensemble_panel_t *panel,
-                                   const agent_config_t *acfg,
-                                   char *err, size_t err_n);
-
-/* Persona name for panelist `model_index`: a configured
- * ensemble.reference_personas[model_index] if set (any mode), else a mode default
- * — DRAFT uses the built-in `engineer` persona for every panelist, REVIEW
- * round-robins the diverse default lineup keyed on the stable model index.
- * Borrowed pointer (string literal or config field) — do not free. Exposed for
- * tests. */
-/* Lifetime: the returned string is either a compile-time constant or an
- * accessor's thread-local buffer, so it is valid until the next call to the
- * SAME accessor on this thread. Consume it before calling back in. */
-const char *panel_persona_name(roundtable_mode_t mode, int model_index);
-
-/* The pure resolution table behind panel_persona_name, exposed for testing:
- * configured_slot is the slot's configured persona (NULL/"" when unset or out of
- * range), default_persona the configured default. No config read, no I/O. */
-const char *panel_persona_for_slot(roundtable_mode_t mode, int model_index,
-                                   const char *configured_slot, const char *default_persona);
+                                   const agent_config_t *acfg, char *err, size_t err_n);
 
 #endif /* DEC_DELEGATE_ENSEMBLE_H */

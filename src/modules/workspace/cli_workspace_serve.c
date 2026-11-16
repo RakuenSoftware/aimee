@@ -15,11 +15,14 @@
  * server on another host (e.g. a container). */
 #include "cli_client.h"
 #include "cli_v1_routes_internal.h"
+#include "mirror_sync_wire.h"
 #include "platform_process.h"
 #include "platform_random.h"
 #include "workspace_provider_detached.h"
 #include "util.h" /* safe_exec_capture: the client's own vcs coordinates */
 #include <aimee/workspace/client_diff.h>
+#include <aimee/workspace/module_api.h>
+#include <openssl/rand.h>
 #include "cJSON.h"
 
 #include <signal.h>
@@ -27,6 +30,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <limits.h>
+#include <sys/stat.h>
 
 /* Threading for the background reverse-channel: pthreads co-located, the CRT's
  * _beginthreadex on Windows (always present in MinGW, no winpthreads needed). */
@@ -223,8 +229,9 @@ int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const c
  *
  * The scoped helper below finds the longest registered detached root containing
  * the current directory and serves it on a background thread for exactly one
- * forwarded Git command.  It never registers, converts, or removes a workspace;
- * the server remains the authority for the provider choice. */
+ * forwarded Git command. An explicit Git command may register an uncovered local
+ * repository without indexing it. Configured providers are never converted or
+ * removed; the server remains the authority for the provider choice. */
 static volatile sig_atomic_t g_git_runner_stop;
 static int g_git_runner_active;
 static char g_git_runner_workspace[CLI_TUI_PATH_MAX];
@@ -261,6 +268,145 @@ static int workspace_root_contains(const char *root, const char *cwd)
    return strncmp(root, cwd, n) == 0 && (cwd[n] == '\0' || cwd[n] == '/');
 }
 
+#if defined(AIMEE_POSIX)
+/* Where a clone lands, made ready for the detached runner.
+ *
+ * Git runs on a remote server only through a runner serving a registered detached
+ * workspace, and a clone's destination is by definition not one yet. With no
+ * runner the server ran the clone in its own filesystem at the client's path:
+ * `git clone ... ~/dev/ouroboros-ring` failed with "could not create leading
+ * directories ... Permission denied" (2026-10-27), and had the path existed on
+ * the server the checkout would have been invisible to the caller. So create the
+ * destination here, register it when no detached workspace already covers it,
+ * and clone into it as `path=.` with it as the cwd. Returns 0, or -1 with the
+ * reason printed. */
+int cli_workspace_git_clone_prepare(cJSON *args)
+{
+   const char *url = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "url"));
+   const char *path = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "path"));
+   if (!url || !url[0])
+      return 0; /* the server names the missing argument */
+
+   char name[256] = "";
+   if (!path || !path[0])
+   {
+      /* git's own default: the last URL component, without ".git". */
+      size_t n = strlen(url);
+      while (n > 1 && url[n - 1] == '/')
+         n--;
+      size_t start = n;
+      while (start > 0 && url[start - 1] != '/' && url[start - 1] != ':')
+         start--;
+      size_t len = n - start;
+      if (len > 4 && strncmp(url + start + len - 4, ".git", 4) == 0)
+         len -= 4;
+      if (len == 0 || len >= sizeof(name))
+      {
+         fprintf(stderr, "aimee: cannot tell a clone directory from '%s'; pass path=<dir>\n", url);
+         return -1;
+      }
+      memcpy(name, url + start, len);
+      name[len] = '\0';
+      path = name;
+   }
+
+   char dest[PATH_MAX];
+   char here[PATH_MAX];
+   if (path[0] != '/' && !getcwd(here, sizeof(here)))
+      return -1;
+   if ((size_t)snprintf(dest, sizeof(dest), "%s%s%s", path[0] == '/' ? "" : here,
+                        path[0] == '/' ? "" : "/", path) >= sizeof(dest))
+      return -1;
+   if (mkdir(dest, 0755) != 0 && errno != EEXIST)
+   {
+      fprintf(stderr, "aimee: cannot create clone directory %s: %s\n", dest, strerror(errno));
+      return -1;
+   }
+   char real[PATH_MAX];
+   if (!realpath(dest, real))
+      return -1;
+
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "path");
+   cJSON_AddStringToObject(args, "path", ".");
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "cwd");
+   cJSON_AddStringToObject(args, "cwd", real);
+
+   char *endpoint = cli_v1_client_endpoint();
+   char *bearer = endpoint ? cli_v1_client_bearer() : NULL;
+   int status = 0;
+   cJSON *list =
+       endpoint ? cli_http_request(endpoint, "GET", "/v1/workspaces", NULL, bearer, 15000, &status)
+                : NULL;
+   free(endpoint);
+   free(bearer);
+   if (!list || status < 200 || status >= 300)
+   {
+      cJSON_Delete(list);
+      fprintf(stderr, "aimee: cannot list workspaces to place the clone (HTTP %d)\n", status);
+      return -1;
+   }
+   int covered = 0;
+   const cJSON *w = NULL;
+   cJSON_ArrayForEach(w, cJSON_GetObjectItemCaseSensitive(list, "workspaces"))
+   {
+      const char *prov = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(w, "provider"));
+      const char *root = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(w, "path"));
+      size_t n = root ? strlen(root) : 0;
+      if (prov && strcmp(prov, "detached") == 0 && n > 0 && workspace_root_contains(root, real))
+         covered = 1;
+   }
+   cJSON_Delete(list);
+   return covered || cli_workspace_add_remote(real, 0, 0) == 0 ? 0 : -1;
+}
+#endif
+
+#if defined(AIMEE_POSIX)
+/* A source upload deliberately does not authorize an executable workspace.
+ * An explicit Git command does need that workspace: register only its verified
+ * local repository root, without scanning/uploading content or changing any
+ * existing provider. Re-list below before admitting the runner. */
+static int git_runner_register_local_repo(const char *cwd, const char *endpoint, const char *bearer)
+{
+   const char *argv[] = {"git", "-C", cwd, "rev-parse", "--show-toplevel", NULL};
+   char *out = NULL;
+   if (safe_exec_capture(argv, &out, CLI_TUI_PATH_MAX) != 0 || !out)
+   {
+      free(out);
+      return 0; /* Not a local repository; preserve server-side resolution. */
+   }
+   out[strcspn(out, "\r\n")] = '\0';
+   char root[CLI_TUI_PATH_MAX];
+   int valid = realpath(out, root) && workspace_root_contains(root, cwd);
+   free(out);
+   if (!valid)
+      return -1;
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "root", root);
+   cJSON_AddStringToObject(req, "provider", "detached");
+   char *body = cJSON_PrintUnformatted(req);
+   cJSON_Delete(req);
+   if (!body)
+      return -1;
+   int status = 0;
+   cJSON *response =
+       cli_http_request(endpoint, "POST", "/v1/workspaces", body, bearer, 60000, &status);
+   free(body);
+   const char *state = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+   const cJSON *error = cJSON_GetObjectItemCaseSensitive(response, "error");
+   int failed = !response || status < 200 || status >= 300 || (error && !cJSON_IsNull(error)) ||
+                cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(response, "ok")) ||
+                (state && strcmp(state, "error") == 0);
+   cJSON_Delete(response);
+   if (failed)
+   {
+      fprintf(stderr, "aimee: cannot register local Git workspace %s (HTTP %d)\n", root, status);
+      return -1;
+   }
+   return 1;
+}
+#endif
+
 int cli_workspace_git_runner_start(const char *target)
 {
    if (g_git_runner_active || !cli_v1_has_remote_endpoint())
@@ -282,40 +428,71 @@ int cli_workspace_git_runner_start(const char *target)
       return 0;
    }
 
-   int status = 0;
-   cJSON *list = cli_http_request(endpoint, "GET", "/v1/workspaces", NULL, bearer, 15000, &status);
-   if (!list || status < 200 || status >= 300)
-   {
-      cJSON_Delete(list);
-      free(endpoint);
-      free(bearer);
-      return -1;
-   }
-
    const char *best = NULL;
    size_t best_len = 0;
-   const cJSON *arr = cJSON_GetObjectItemCaseSensitive(list, "workspaces");
-   const cJSON *row = NULL;
-   cJSON_ArrayForEach(row, arr)
+   cJSON *list = NULL;
+   for (int attempt = 0; attempt < 2; attempt++)
    {
-      const cJSON *provider = cJSON_GetObjectItemCaseSensitive(row, "provider");
-      const cJSON *path = cJSON_GetObjectItemCaseSensitive(row, "path");
-      if (!cJSON_IsString(provider) || strcmp(provider->valuestring, "detached") != 0 ||
-          !cJSON_IsString(path) || !workspace_root_contains(path->valuestring, cwd))
-         continue;
-      size_t n = strlen(path->valuestring);
-      if (n > best_len)
+      int status = 0;
+      list = cli_http_request(endpoint, "GET", "/v1/workspaces", NULL, bearer, 15000, &status);
+      const cJSON *arr = list ? cJSON_GetObjectItemCaseSensitive(list, "workspaces") : NULL;
+      if (!list || status < 200 || status >= 300 || !cJSON_IsArray(arr))
+         break;
+
+      int covered = 0;
+      const cJSON *row = NULL;
+      cJSON_ArrayForEach(row, arr)
       {
-         best = path->valuestring;
-         best_len = n;
+         const char *provider =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "provider"));
+         const char *path = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "path"));
+         if (!path || !workspace_root_contains(path, cwd))
+            continue;
+         covered = 1;
+         if (!provider || strcmp(provider, "detached") != 0)
+            continue;
+         size_t n = strlen(path);
+         if (n > best_len)
+         {
+            best = path;
+            best_len = n;
+         }
       }
+      if (best)
+         break;
+      if (covered)
+      {
+         cJSON_Delete(list);
+         free(endpoint);
+         free(bearer);
+         return 0; /* An existing shared/mirror provider remains authoritative. */
+      }
+      cJSON_Delete(list);
+      list = NULL;
+      if (attempt != 0)
+         break; /* Registration was not visible; do not dispatch Git. */
+#if defined(AIMEE_POSIX)
+      int registered = git_runner_register_local_repo(cwd, endpoint, bearer);
+      if (registered == 0)
+      {
+         free(endpoint);
+         free(bearer);
+         return 0;
+      }
+      if (registered < 0)
+         break;
+#else
+      free(endpoint);
+      free(bearer);
+      return 0;
+#endif
    }
    if (!best)
    {
       cJSON_Delete(list);
       free(endpoint);
       free(bearer);
-      return 0; /* shared/mirror/unregistered: no detached runner to service */
+      return -1;
    }
    if (best_len >= sizeof(g_git_runner_workspace) ||
        strlen(endpoint) >= sizeof(g_git_runner_endpoint))
@@ -325,7 +502,24 @@ int cli_workspace_git_runner_start(const char *target)
       free(bearer);
       return -1;
    }
-   snprintf(g_git_runner_workspace, sizeof(g_git_runner_workspace), "%s", best);
+   /* Serve this command on a private channel, not the tree's own id. Every aimee
+    * command in the tree runs a runner like this one, so a shared id let another
+    * session's process claim this command's op and run it -- a push with that
+    * process's environment and credentials. The server routes this command's
+    * ops to the channel it names (X-Aimee-Runner); only this process polls it. */
+   unsigned char raw[16];
+   char hex[33];
+   if (RAND_bytes(raw, sizeof(raw)) != 1)
+   {
+      cJSON_Delete(list);
+      free(endpoint);
+      free(bearer);
+      return -1;
+   }
+   for (size_t i = 0; i < sizeof(raw); i++)
+      snprintf(hex + 2 * i, 3, "%02x", raw[i]);
+   snprintf(g_git_runner_workspace, sizeof(g_git_runner_workspace), "%s%s",
+            AIMEE_WS_RUNNER_CHANNEL_PREFIX, hex);
    snprintf(g_git_runner_endpoint, sizeof(g_git_runner_endpoint), "%s", endpoint);
    cJSON_Delete(list);
    free(endpoint);
@@ -338,6 +532,8 @@ int cli_workspace_git_runner_start(const char *target)
    serve_ctx_t initial = {
        NULL, g_git_runner_workspace, g_git_runner_endpoint, g_git_runner_bearer, 1, 0};
    (void)ws_runner_serve_once(serve_fetch, serve_post, &initial);
+   if (initial.registered)
+      cli_http_set_runner_channel(g_git_runner_workspace);
    if (!initial.registered)
    {
       free(g_git_runner_bearer);
@@ -380,6 +576,20 @@ void cli_workspace_git_runner_stop(void)
 #else
    (void)pthread_join(g_git_runner_thread, NULL);
 #endif
+   cli_http_set_runner_channel(NULL);
+   /* Close the channel, so a server op still waiting on it fails now. */
+   cJSON *close_req = cJSON_CreateObject();
+   if (close_req && cJSON_AddStringToObject(close_req, "workspace_id", g_git_runner_workspace) &&
+       cJSON_AddTrueToObject(close_req, "close"))
+   {
+      char *body = cJSON_PrintUnformatted(close_req);
+      int status = 0;
+      if (body)
+         cJSON_Delete(cli_http_request(g_git_runner_endpoint, "POST", "/v1/runner/poll", body,
+                                       g_git_runner_bearer, 5000, &status));
+      free(body);
+   }
+   cJSON_Delete(close_req);
    g_git_runner_active = 0;
    g_git_runner_workspace[0] = '\0';
    g_git_runner_endpoint[0] = '\0';
@@ -631,13 +841,17 @@ static int rc_ship_chunk(const char *endpoint, const char *bearer, const char *r
       client then sees only EPIPE on a write it had not finished -- reported as
       "could not reach the endpoint", which blames a server that is up and
       answering. Refuse it here, where the size is known and can be said. */
+   /* The binding limit is the server's per-method one for mirror-sync, not the
+      listener's CLI_V1_MAX_BODY: a body between them draws 413 after the
+      whole upload. mirror_sync_next_slice keeps a slice inside it; this only
+      catches an envelope that outgrew its reserve. */
    size_t body_len = strlen(body);
-   if (body_len >= CLI_V1_MAX_BODY)
+   if (body_len > MIRROR_SYNC_MAX_BODY)
    {
       fprintf(stderr,
-              "aimee: a single mirror-sync chunk came to %zu bytes, over the %d-byte request "
-              "ceiling; the working-tree diff cannot be shipped\n",
-              body_len, (int)CLI_V1_MAX_BODY);
+              "aimee: a single mirror-sync chunk came to %zu bytes, over the %u-byte "
+              "mirror-sync limit; the working-tree diff cannot be shipped\n",
+              body_len, (unsigned)MIRROR_SYNC_MAX_BODY);
       free(body);
       return -1;
    }
@@ -690,12 +904,10 @@ static int rc_ship_client_diff(const char *endpoint, const char *bearer, const c
    const char *text = patch ? patch : "";
    size_t total = strlen(text);
 
-   /* Raw bytes per chunk. Well under the ceiling so that JSON escaping, which
-      can lengthen a byte into six, cannot push a chunk over it. */
-   const size_t chunk_max = 512u * 1024u;
-
+   /* Slices are sized by their JSON-escaped length against the server's
+      mirror-sync limit (mirror_sync_wire.h), not by a raw byte count. */
    int rc;
-   if (total <= chunk_max)
+   if (mirror_sync_next_slice(text, total) == total)
    {
       /* One request, and deliberately WITHOUT seq/final: a server that predates
          chunking treats a bare request as a whole transfer, which is what this
@@ -714,9 +926,9 @@ static int rc_ship_client_diff(const char *endpoint, const char *bearer, const c
       }
       rc = 0;
       int seq = 0;
-      for (size_t at = 0; at < total && rc == 0; at += chunk_max, seq++)
+      for (size_t at = 0, len = 0; at < total && rc == 0; at += len, seq++)
       {
-         size_t len = total - at < chunk_max ? total - at : chunk_max;
+         len = mirror_sync_next_slice(text + at, total - at);
          int final = (at + len >= total);
          rc = rc_ship_chunk(endpoint, bearer, root, base, branch, upstream, transfer, seq, final,
                             text + at, len);

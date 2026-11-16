@@ -1,5 +1,6 @@
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 /* kb_curator_index_narrative.c: deep-curator narrative vector indexer.
  *
  * Claims one proposed doc_summary / synthesis / open_question artifact, embeds
@@ -117,8 +118,7 @@ int kb_curator_index_narrative_one(const kb_curator_extract_opts_t *opts)
    cJSON_AddNumberToObject(embed_0_args, "max_dim", CURATOR_NARRATIVE_DIM);
    (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
    cJSON_Delete(embed_0_args);
-   int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
-                            CURATOR_NARRATIVE_DIM);
+   int dim = embed_reply_vector(embed_0_reply, vec, CURATOR_NARRATIVE_DIM);
    cJSON_Delete(embed_0_reply);
    if (dim > 0)
    {

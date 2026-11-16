@@ -1,0 +1,96 @@
+{
+  "aimee_base": "35418e47e13a1d690e402a093d72002c0e1ad7b3",
+  "source_stable": true,
+  "steps": [
+    {
+      "check": "initdb",
+      "exit_code": 0,
+      "seconds": 0.7904086639173329
+    },
+    {
+      "check": "start-postgres",
+      "exit_code": 0,
+      "seconds": 0.10517118498682976
+    },
+    {
+      "check": "create-runtime-role",
+      "exit_code": 0,
+      "seconds": 0.014226483996026218
+    },
+    {
+      "check": "create-memory_replay",
+      "exit_code": 0,
+      "seconds": 0.04040915705263615
+    },
+    {
+      "check": "create-memory_evaluation",
+      "exit_code": 0,
+      "seconds": 0.02505579707212746
+    },
+    {
+      "check": "bootstrap-schema",
+      "exit_code": 0,
+      "seconds": 0.6366203340003267
+    },
+    {
+      "check": "owner-tests",
+      "exit_code": 0,
+      "seconds": 222.7403706460027
+    },
+    {
+      "check": "stop-postgres",
+      "exit_code": 0,
+      "seconds": 0.11049092095345259
+    }
+  ],
+  "packages": [
+    "./modules/memory/...",
+    "./memory",
+    "./cmd/aimee-module",
+    "./modules/egress",
+    "./bus",
+    "./modules/module-runtime/..."
+  ],
+  "go": "go1.26.10",
+  "postgres": "postgres (PostgreSQL) 18.0",
+  "runtime_role": "aimee_store_runtime actual LOGIN/NOSUPERUSER/NOINHERIT/NOBYPASSRLS",
+  "encoding": "UTF8",
+  "timezone": "UTC",
+  "bootstrap_embedding_dimension": 384,
+  "test_events": {
+    "pass": 1244,
+    "skip": 1
+  },
+  "failed_tests": [],
+  "skipped_tests": [
+    "TestCrossLanguageConformance"
+  ],
+  "package_events": {
+    "pass": 8,
+    "skip": 3
+  },
+  "limitations": "Disposable local process regression, not aims-db equivalence or production workload; test/subtest events are not distinct guarantees.",
+  "cross_language_followup": {
+    "test": "TestCrossLanguageConformance",
+    "status": "pass",
+    "race": true,
+    "test_events": {
+      "pass": 1,
+      "skip": 0,
+      "fail": 0
+    },
+    "host": "freshly built in-source C conformance host, strict compiler warnings",
+    "initial_skip_retained": true
+  },
+  "test_pass_events_per_package": {
+    "github.com/JBailes/aimee/server-go/modules/memory": 1062,
+    "github.com/JBailes/aimee/server-go/modules/memory/cmd/aimee-memory-eval": 20,
+    "github.com/JBailes/aimee/server-go/memory": 3,
+    "github.com/JBailes/aimee/server-go/cmd/aimee-module": 26,
+    "github.com/JBailes/aimee/server-go/modules/egress": 52,
+    "github.com/JBailes/aimee/server-go/bus": 66,
+    "github.com/JBailes/aimee/server-go/modules/module-runtime/identity": 10,
+    "github.com/JBailes/aimee/server-go/modules/module-runtime/supervisor": 5
+  },
+  "owned_postgres_stopped": true
+}

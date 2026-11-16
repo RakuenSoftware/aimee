@@ -20,6 +20,8 @@
 #include "../kb_curator_queue.h"
 #include "../kb_curator_extract.h"
 #include "config.h"
+#include "support/curator_model_fixture.h"
+#include "support/config_test_setters.h"
 
 /* An upstream outage must not be charged to the job. The gateway opens a circuit
  * breaker and 503s everything for its cooldown, so three claims inside one
@@ -126,43 +128,6 @@ static void test_polymorphic_async_subject(sqlite3 *db)
    printf("  PASS: polymorphic async subject accepts a memory id without a document row\n");
 }
 
-/* A backlog nothing will drain has to be countable, and countable SEPARATELY from
- * work already finished.
- *
- * memory.store enqueues a memory_facts job whenever typed_facts is on (the
- * default); the only consumer runs on the curator LLM lane, which does not start
- * without a synthesis endpoint. On an install with no synth provider -- a
- * supported configuration -- that queue grows by one row per stored memory and is
- * never claimed. Observed on the e2e VM: 4 pending for 11.5 hours, attempts=0,
- * while health reported ok with an empty warnings array.
- *
- * The health surface reports it, and to do that it needs PENDING, not total:
- * total cannot tell a queue that is draining from one that never will. */
-static void test_pending_count_excludes_finished(sqlite3 *db)
-{
-   seed(db, "DELETE FROM kb_async_jobs WHERE kind='memory_facts'");
-   assert(kb_store_kb_async_count_kind_pending("memory_facts") == 0);
-
-   assert(kb_store_kb_async_enqueue("memory_facts", 881001, "memory") == 0);
-   assert(kb_store_kb_async_enqueue("memory_facts", 881002, "memory") == 0);
-   assert(kb_store_kb_async_count_kind_pending("memory_facts") == 2);
-   assert(kb_store_kb_async_count_kind("memory_facts") == 2);
-
-   /* One finishes. The backlog is 1, even though two rows exist -- reporting 2
-    * here would keep warning about work that already completed. */
-   seed(db, "UPDATE kb_async_jobs SET status='done' WHERE kind='memory_facts'"
-            " AND document_id=881001");
-   assert(kb_store_kb_async_count_kind_pending("memory_facts") == 1);
-   assert(kb_store_kb_async_count_kind("memory_facts") == 2);
-
-   /* Other kinds are not counted into this backlog: kb_async_jobs is shared. */
-   assert(kb_store_kb_async_enqueue("extract_doc", 881003, "p") == 0);
-   assert(kb_store_kb_async_count_kind_pending("memory_facts") == 1);
-
-   seed(db, "DELETE FROM kb_async_jobs WHERE document_id IN (881001,881002,881003)");
-   printf("  PASS: pending count is the backlog, not the row total\n");
-}
-
 static const char *job_status(sqlite3 *db, int64_t id)
 {
    static char buf[64];
@@ -236,7 +201,7 @@ static void test_reclaim_stale_running_extract_doc(sqlite3 *db)
    kb_curator_extract_opts_t opts;
    memset(&opts, 0, sizeof(opts));
    opts.max_attempts = 1;
-   snprintf(opts.extract_command, sizeof(opts.extract_command), "%s", "true");
+   curator_fixture_reply("malformed business JSON");
    (void)kb_curator_extract_one(&opts);
 
    assert(strcmp(job_status(db, 9001), "failed") == 0);  /* orphan reclaimed */
@@ -275,7 +240,7 @@ static void test_retry_backoff_defers_reclaim(sqlite3 *db)
    kb_curator_extract_opts_t opts;
    memset(&opts, 0, sizeof(opts));
    opts.max_attempts = 1;
-   snprintf(opts.extract_command, sizeof(opts.extract_command), "%s", "true");
+   curator_fixture_reply("malformed business JSON");
 
    (void)kb_curator_extract_one(&opts);
    assert(job_attempts(db, 9401) == 1); /* untouched: still deferred */
@@ -303,11 +268,34 @@ static void test_retry_backoff_ignores_fresh_jobs(sqlite3 *db)
    kb_curator_extract_opts_t opts;
    memset(&opts, 0, sizeof(opts));
    opts.max_attempts = 1;
-   snprintf(opts.extract_command, sizeof(opts.extract_command), "%s", "true");
+   curator_fixture_reply("malformed business JSON");
 
    (void)kb_curator_extract_one(&opts);
    assert(job_attempts(db, 9102) == 1); /* '' never defers */
    printf("  PASS: test_retry_backoff_ignores_fresh_jobs\n");
+}
+
+/* Missing model configuration is a global outage, not a poison document. */
+static void test_unconfigured_provider_preserves_attempts(sqlite3 *db)
+{
+   seed(db, "UPDATE kb_async_jobs SET status='done' WHERE status='pending'");
+   seed(db, "INSERT INTO kb_documents (id,project,file_path,file_hash,chunk_index,content,doc_kind)"
+            " VALUES (9701,'p','unconfigured.md','uc',0,'t','')");
+   seed(db,
+        "INSERT INTO kb_async_jobs (id,kind,document_id,project,status,attempts,next_attempt_at)"
+        " VALUES (9701,'extract_doc',9701,'p','pending',0,'')");
+   platform_unsetenv("SYNTHESIS_ENDPOINT");
+   kb_curator_provider_backoff_recovered();
+   kb_curator_extract_opts_t opts = {.max_attempts = 3};
+   assert(kb_curator_extract_one(&opts) == -1);
+   assert(job_attempts(db, 9701) == 0);
+   assert(!strcmp(job_status(db, 9701), "pending"));
+   assert(kb_curator_provider_backoff_active());
+   assert(kb_curator_extract_one(&opts) == 0);
+   assert(job_attempts(db, 9701) == 0);
+   assert(!strcmp(job_status(db, 9701), "pending"));
+   kb_curator_provider_backoff_recovered();
+   printf("  PASS: unconfigured canonical provider preserves attempts and gates the queue\n");
 }
 
 /* The delay curve itself: exponential, clamped, never zero (a zero would
@@ -381,7 +369,6 @@ int main(void)
             " VALUES ('p','/p','2026-01-01 00:00:00')");
 
    test_polymorphic_async_subject(db);
-   test_pending_count_excludes_finished(db);
 
    /* Contract: every non-pdf doc gets one extract_doc job; PDFs are excluded;
     * re-running enqueues nothing. Guard for "docs present but zero jobs". */
@@ -417,6 +404,7 @@ int main(void)
    test_provider_unavailable_is_not_a_job_failure();
    test_provider_outage_arms_global_backoff();
    test_provider_outage_requeues(db);
+   test_unconfigured_provider_preserves_attempts(db);
    test_only_current_document_generation_queues(db);
 
    assert(config_set_kb_curator_extract_docs_enabled(0) == 0);

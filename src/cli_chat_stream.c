@@ -1,400 +1,556 @@
-/* cli_chat_stream.c: headless /v1 chat streaming for non-interactive callers.
- *
- * Was cli_tui.c, which hosted the OpenCode frontend, the native fallback loop
- * and `aimee chat`. Those are gone and nothing here touches a terminal, so the
- * TUI name no longer described the file. acp-serve is the only caller. */
+#include "cli_ir.h"
+/* First-party canonical chat subscriber; ACP alone projects callbacks to its wire. */
 #include "aimee_home.h"
 #include "cli_client.h"
-#include "cli_agent_keys.h"
 #include "cli_chat_stream.h"
-#include "aimee_client.h"
-#include "history.h"
-#include "markdown.h"
-#include "platform.h"
-#include "platform_path.h"
-#include "platform_process.h"
-#include "session_compact.h"
 #include "cJSON.h"
-#include <ctype.h>
-#include <dirent.h>
-#include <errno.h>
-#include <limits.h>
+#include <aimee/ir/session_event.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
-#include <time.h>
 #include <unistd.h>
-#ifdef AIMEE_POSIX
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <pthread.h>
-#include <signal.h>
-#include <sys/socket.h>
-#include <sys/select.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <termios.h>
 
-#endif
-
-/* Formerly in the retired frontend's internal header, which went with it. Only
- * this file uses them now, so they live here rather than in a header. */
-#define CHAT_STREAM_PATH_MAX              4096
-#define BUILTIN_CHAT_SEND_TRANSPORT_ERROR 2
-
+typedef struct part
+{
+   char *message, *text, *tool, *name, *key;
+   size_t length, capacity;
+   int index, kind, begun, final, announced, finished;
+   struct part *next;
+} part_t;
 typedef struct
 {
-   int (*should_abort)(void *userdata);
-   void (*set_stream_fd)(int fd, void *userdata);
-   void *userdata;
-   int aborted;
-} builtin_chat_stream_control_t;
+   const char *session;
+   char *turn, *actor, *reply;
+   size_t length, capacity, parts;
+   uint64_t sequence;
+   int http_status;
+   int started, completed, failed, project_text;
+   part_t *blocks;
+   void (*text)(const char *, void *);
+   cli_chat_tool_fn tool;
+   void *context;
+   aimee_request_t conversation;
+   char **message_ids;
+   unsigned char *message_final;
+} subscriber_t;
 
-#define BUILTIN_CHAT_STREAM_IDLE_TIMEOUT_MS -1
-#define BUILTIN_CHAT_SEND_OK                0
-#define BUILTIN_CHAT_SEND_ERROR             1
-typedef struct
+static int retain_message(subscriber_t *s, const char *id, const aimee_message_t *message,
+                          int final)
 {
-   char *reply;
-   size_t reply_len;
-   size_t reply_cap;
-   char provider_session_id[256];
-   md_stream_t *md;
-   FILE *out;
-   void (*text_cb)(const char *text, void *userdata);
-   void (*event_cb)(const char *event, void *userdata);
-   void (*tool_cb)(const char *phase, const char *tool_name, void *userdata);
-   void *text_cb_data;
-   builtin_chat_stream_control_t *control;
-   int wrote_text;
-   int rendered_flushed;
-   int final_newline;
-   int saw_error;
-} builtin_chat_stream_t;
-
-static int append_text(char **buf, size_t *len, size_t *cap, const char *text)
-{
-   if (!buf || !len || !cap || !text)
+   int index = 0;
+   for (; index < s->conversation.n_messages; index++)
+      if (!strcmp(s->message_ids[index], id))
+         break;
+   aimee_request_t source = {.messages = (aimee_message_t *)message, .n_messages = 1}, copy = {0};
+   if (aimee_ir_request_clone(&source, &copy))
       return -1;
-   size_t n = strlen(text);
-   if (n == 0)
-      return 0;
-   if (*len + n + 1 > *cap)
+   if (index == s->conversation.n_messages)
    {
-      size_t next = *cap ? *cap : 1024;
-      while (*len + n + 1 > next)
-         next *= 2;
-      char *tmp = realloc(*buf, next);
-      if (!tmp)
-         return -1;
-      *buf = tmp;
-      *cap = next;
+      if (index >= AIMEE_IR_MAX_BLOCKS)
+         goto failed;
+      aimee_message_t *messages =
+          realloc(s->conversation.messages, (size_t)(index + 1) * sizeof *messages);
+      if (!messages)
+         goto failed;
+      s->conversation.messages = messages;
+      char **ids = realloc(s->message_ids, (size_t)(index + 1) * sizeof *ids);
+      if (!ids)
+         goto failed;
+      s->message_ids = ids;
+      unsigned char *complete = realloc(s->message_final, (size_t)index + 1);
+      if (!complete)
+         goto failed;
+      s->message_final = complete;
+      ids[index] = strdup(id);
+      if (!ids[index])
+         goto failed;
+      s->conversation.n_messages++;
    }
-   memcpy(*buf + *len, text, n);
-   *len += n;
-   (*buf)[*len] = '\0';
-   return 0;
-}
-/* on_open hook for cli_http_request_stream_ndjson: surface the live stream
- * socket fd to the TUI's abort machinery (an input thread force-closes it to
- * interrupt a turn). ud is the chat stream control, or NULL when unused. */
-static void chat_stream_on_open(int fd, void *ud)
-{
-   builtin_chat_stream_control_t *control = (builtin_chat_stream_control_t *)ud;
-   if (control && control->set_stream_fd)
-      control->set_stream_fd(fd, control->userdata);
-}
-
-/* Resolve the /v1 HTTP endpoint for chat. A configured remote aimee-server is
- * used when set (the agent runs there; this client serves its working tree over
- * the reverse-channel set up by cli_main); otherwise the co-located server's
- * HTTP UDS ("unix:<home>/aimee-http.sock"). Returns 0 on success. */
-static int chat_v1_endpoint(char *out, size_t out_len)
-{
-   if (!out || out_len == 0)
-      return -1;
-   if (cli_v1_has_remote_endpoint())
-   {
-      char *ep = cli_v1_client_endpoint();
-      if (ep)
-      {
-         int n = snprintf(out, out_len, "%s", ep);
-         free(ep);
-         return (n > 0 && (size_t)n < out_len) ? 0 : -1;
-      }
-   }
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return -1;
-   if (snprintf(out, out_len, "unix:%s/aimee-http.sock", home) >= (int)out_len)
-      return -1;
-   return 0;
-}
-
-/* Bearer for the chat /v1 endpoint: the configured token for a remote endpoint,
- * NULL for the local UDS (no auth needed). Caller frees. */
-static char *chat_v1_bearer(void)
-{
-   return cli_v1_has_remote_endpoint() ? cli_v1_client_bearer() : NULL;
-}
-
-static int chat_stream_event_cb(cJSON *event, void *userdata)
-{
-   builtin_chat_stream_t *st = (builtin_chat_stream_t *)userdata;
-   if (st && st->control && st->control->should_abort &&
-       st->control->should_abort(st->control->userdata))
-   {
-      st->control->aborted = 1;
-      return -1;
-   }
-   FILE *out = st ? st->out : NULL;
-   cJSON *jev = cJSON_GetObjectItemCaseSensitive(event, "event");
-   const char *ev = cJSON_IsString(jev) ? jev->valuestring : "";
-
-   if (strcmp(ev, "text") == 0)
-   {
-      cJSON *jcontent = cJSON_GetObjectItemCaseSensitive(event, "content");
-      const char *content = cJSON_IsString(jcontent) ? jcontent->valuestring : "";
-      if (content[0])
-      {
-         if (out)
-         {
-            if (st->md)
-               md_stream_feed(st->md, content, strlen(content), out);
-            else
-            {
-               fputs(content, out);
-               fflush(out);
-            }
-            st->wrote_text = 1;
-         }
-         (void)append_text(&st->reply, &st->reply_len, &st->reply_cap, content);
-         if (st->text_cb)
-            st->text_cb(content, st->text_cb_data);
-      }
-   }
-   else if (strcmp(ev, "error") == 0)
-   {
-      cJSON *jmsg = cJSON_GetObjectItemCaseSensitive(event, "message");
-      fprintf(stderr, "aimee chat: %s\n",
-              cJSON_IsString(jmsg) ? jmsg->valuestring : "server error");
-      st->saw_error = 1;
-   }
-   else if (strcmp(ev, "turn_end") == 0 || strcmp(ev, "done") == 0)
-   {
-      if (out && st->md && !st->rendered_flushed)
-      {
-         md_stream_flush(st->md, out);
-         st->rendered_flushed = 1;
-      }
-      if (out && st->wrote_text && !st->final_newline &&
-          (st->reply_len == 0 || st->reply[st->reply_len - 1] != '\n'))
-      {
-         fputc('\n', out);
-         fflush(out);
-         st->final_newline = 1;
-      }
-   }
-   else if (strcmp(ev, "turn_start") == 0)
-   {
-      if (st->event_cb)
-         st->event_cb(ev, st->text_cb_data);
-   }
-   else if (strncmp(ev, "tool_call.", 10) == 0)
-   {
-      /* tool_call.started / tool_call.completed — surface phase + tool name. */
-      if (st->tool_cb)
-      {
-         cJSON *jname = cJSON_GetObjectItemCaseSensitive(event, "name");
-         st->tool_cb(ev + 10, cJSON_IsString(jname) ? jname->valuestring : "", st->text_cb_data);
-      }
-   }
-   else if (strcmp(ev, "session") == 0)
-   {
-      cJSON *jid = cJSON_GetObjectItemCaseSensitive(event, "id");
-      if (cJSON_IsString(jid) && jid->valuestring[0])
-         snprintf(st->provider_session_id, sizeof(st->provider_session_id), "%s", jid->valuestring);
-   }
-
-   return 0;
-}
-static void chat_stream_finish(builtin_chat_stream_t *st)
-{
-   if (!st)
-      return;
-   FILE *out = st->out;
-   if (out && st->md && !st->rendered_flushed)
-   {
-      md_stream_flush(st->md, out);
-      st->rendered_flushed = 1;
-   }
-   if (out && st->wrote_text && !st->final_newline &&
-       (st->reply_len == 0 || st->reply[st->reply_len - 1] != '\n'))
-   {
-      fputc('\n', out);
-      fflush(out);
-      st->final_newline = 1;
-   }
-}
-
-static int
-builtin_chat_send_ex(const char *sock, const char *provider_session_id,
-                     const char *aimee_session_id, const char *message, char **reply_out,
-                     char *provider_session_out, size_t provider_session_out_len, FILE *out,
-                     int render_markdown, void (*text_cb)(const char *text, void *userdata),
-                     void (*event_cb)(const char *event, void *userdata),
-                     void (*tool_cb)(const char *phase, const char *tool_name, void *userdata),
-                     void *text_cb_data, builtin_chat_stream_control_t *control)
-{
-   if (reply_out)
-      *reply_out = NULL;
-   if (provider_session_out && provider_session_out_len > 0)
-      provider_session_out[0] = '\0';
-   if (!message || !message[0])
-      return 0;
-   if (control)
-      control->aborted = 0;
-
-   (void)sock; /* chat targets the /v1 HTTP endpoint (local UDS or remote) */
-   if (control && control->should_abort && control->should_abort(control->userdata))
-   {
-      control->aborted = 1;
-      return BUILTIN_CHAT_SEND_ERROR;
-   }
-
-   char endpoint[CHAT_STREAM_PATH_MAX + 32];
-   if (chat_v1_endpoint(endpoint, sizeof(endpoint)) != 0)
-   {
-      fprintf(stderr, "aimee chat: cannot resolve server endpoint\n");
-      return BUILTIN_CHAT_SEND_TRANSPORT_ERROR;
-   }
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "message", message);
-   char cwd[CHAT_STREAM_PATH_MAX];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(req, "cwd", cwd);
-   /* Ephemeral operating mode (engineer/novel) from the /novel|/engineer TUI
-    * toggle; the server resolves this per turn in chat_ctx_mode. */
-   {
-      const char *mode_env = getenv("AIMEE_MODE");
-      if (mode_env && mode_env[0])
-         cJSON_AddStringToObject(req, "mode", mode_env);
-   }
-   /* When this turn runs under a unified-presence attachment, forward the attach
-    * id so the server serializes turns across surfaces — declining a racing
-    * submit with presence_busy. Absent → unarbitrated. The interactive surface
-    * that used to set this transiently is gone; acp-serve does not, so today this
-    * is always absent. Kept because the server contract still honours it. */
-   {
-      const char *attach_env = getenv("AIMEE_ATTACH_ID");
-      if (attach_env && attach_env[0])
-         cJSON_AddStringToObject(req, "attach_id", attach_env);
-   }
-   /* Client type of the host driving this turn (e.g. "acp" for an editor over the
-    * ACP serve loop). The server records it on the server_sessions row via
-    * chat_session_register, so a turn is logged under its real surface instead of
-    * the generic "chat" default. Absent → server defaults to "chat", as before. */
-   {
-      const char *ct_env = getenv("AIMEE_CLIENT_TYPE");
-      if (ct_env && ct_env[0])
-         cJSON_AddStringToObject(req, "client_type", ct_env);
-   }
-   if (aimee_session_id && aimee_session_id[0])
-      cJSON_AddStringToObject(req, "aimee_session_id", aimee_session_id);
-   if (provider_session_id && provider_session_id[0])
-   {
-      cJSON_AddStringToObject(req, "provider_session_id", provider_session_id);
-      /* Keep the existing webchat/server field working while chat state is
-       * renamed away from Claude-specific storage. */
-      cJSON_AddStringToObject(req, "claude_session_id", provider_session_id);
-   }
-
-   builtin_chat_stream_t st;
-   memset(&st, 0, sizeof(st));
-   st.out = out;
-   st.text_cb = text_cb;
-   st.event_cb = event_cb;
-   st.tool_cb = tool_cb;
-   st.text_cb_data = text_cb_data;
-   st.control = control;
-   if (out)
-      st.md = md_stream_new(render_markdown);
-   char *body = cJSON_PrintUnformatted(req);
-   cJSON_Delete(req);
-   int http_status = 0;
-   /* on_open surfaces the live stream fd to control->set_stream_fd (and -1 on
-    * close) so the TUI's abort path can interrupt the turn exactly as before. */
-   char *bearer = chat_v1_bearer();
-   cJSON *resp = body ? cli_http_request_stream_ndjson(endpoint, "POST", "/v1/chat/stream", body,
-                                                       bearer, BUILTIN_CHAT_STREAM_IDLE_TIMEOUT_MS,
-                                                       &http_status, chat_stream_event_cb, &st,
-                                                       chat_stream_on_open, control)
-                      : NULL;
-   free(bearer);
-   free(body);
-   chat_stream_finish(&st);
-   md_stream_free(st.md);
-
-   if (!resp)
-   {
-      if (control && control->should_abort && control->should_abort(control->userdata))
-         control->aborted = 1;
-      free(st.reply);
-      if (!(control && control->aborted))
-         fprintf(stderr, "aimee chat: no final response from server\n");
-      return BUILTIN_CHAT_SEND_TRANSPORT_ERROR;
-   }
-   if (control && control->should_abort && control->should_abort(control->userdata))
-      control->aborted = 1;
-   if (control && control->aborted)
-   {
-      cJSON_Delete(resp);
-      free(st.reply);
-      return BUILTIN_CHAT_SEND_ERROR;
-   }
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
-   if (!ok)
-   {
-      cJSON *jmsg = cJSON_GetObjectItemCaseSensitive(resp, "message");
-      if (!st.saw_error)
-         fprintf(stderr, "aimee chat: %s\n",
-                 cJSON_IsString(jmsg) ? jmsg->valuestring : "server error");
-      cJSON_Delete(resp);
-      free(st.reply);
-      return BUILTIN_CHAT_SEND_ERROR;
-   }
-
-   cJSON_Delete(resp);
-   if (provider_session_out && provider_session_out_len > 0 && st.provider_session_id[0])
-      snprintf(provider_session_out, provider_session_out_len, "%s", st.provider_session_id);
-   if (reply_out)
-      *reply_out = st.reply;
    else
-      free(st.reply);
-   return BUILTIN_CHAT_SEND_OK;
-}
-
-/* Like cli_chat_once, but invokes `text_cb(delta, ud)` for each incremental text
- * chunk as the turn streams (used by acp-serve to emit session/update events).
- * Still returns the full reply (heap, caller frees) or NULL on error; no stdout. */
-char *cli_chat_stream(const char *sock, const char *session_id, const char *message,
-                      void (*text_cb)(const char *delta, void *ud),
-                      void (*tool_cb)(const char *phase, const char *tool_name, void *ud), void *ud)
-{
-   char *reply = NULL;
-   char provider_session[256] = "";
-   int rc =
-       builtin_chat_send_ex(sock, "", session_id, message, &reply, provider_session,
-                            sizeof(provider_session), NULL, 0, text_cb, NULL, tool_cb, ud, NULL);
-   if (rc != BUILTIN_CHAT_SEND_OK)
    {
-      free(reply);
+      if ((s->message_final[index] && !final) ||
+          strcmp(s->conversation.messages[index].role, message->role))
+         goto failed;
+      aimee_message_free(s->conversation.messages + index);
+   }
+   s->message_final[index] = (unsigned char) final;
+   s->conversation.messages[index] = copy.messages[0];
+   free(copy.messages);
+   return 0;
+failed:
+   aimee_request_free(&copy);
+   return -1;
+}
+static const char *string(const cJSON *o, const char *key)
+{
+   return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, key));
+}
+static int append(char **out, size_t *length, size_t *capacity, const char *text)
+{
+   size_t n = strlen(text);
+   if (n > CLIENT_MAX_RESPONSE_SIZE - *length - 1)
+      return -1;
+   if (*length + n + 1 > *capacity)
+   {
+      size_t cap = *capacity ? *capacity : 256;
+      while (cap < *length + n + 1)
+         cap *= 2;
+      char *copy = realloc(*out, cap);
+      if (!copy)
+         return -1;
+      *out = copy;
+      *capacity = cap;
+   }
+   memcpy(*out + *length, text, n + 1);
+   *length += n;
+   return 0;
+}
+static part_t *part(subscriber_t *s, const char *message, int index, int kind)
+{
+   if (!message || !message[0] || strlen(message) > 1024 || index < 0 ||
+       index >= AIMEE_IR_MAX_BLOCKS)
+      return NULL;
+   for (part_t *p = s->blocks; p; p = p->next)
+      if (p->index == index && !strcmp(p->message, message))
+         return p->kind == kind ? p : NULL;
+   if (s->parts >= AIMEE_IR_MAX_BLOCKS)
+      return NULL;
+   part_t *p = calloc(1, sizeof *p);
+   if (!p || !(p->message = strdup(message)))
+   {
+      free(p);
       return NULL;
    }
+   p->index = index;
+   p->kind = kind;
+   p->next = s->blocks;
+   s->blocks = p;
+   s->parts++;
+   return p;
+}
+static int text(subscriber_t *s, part_t *p, const char *value, int snapshot)
+{
+   if (!p || !value)
+      return -1;
+   if (snapshot)
+   {
+      if ((p->final && strlen(value) != p->length) || strlen(value) < p->length ||
+          (p->length && memcmp(value, p->text, p->length)))
+         return -1;
+      value += p->length;
+   }
+   if (!value[0])
+      return 0;
+   if (append(&p->text, &p->length, &p->capacity, value) ||
+       (s->project_text && append(&s->reply, &s->length, &s->capacity, value)))
+      return -1;
+   if (s->text)
+      s->text(value, s->context);
+   return 0;
+}
+static int tool(subscriber_t *s, part_t *p, const aimee_block_t *b)
+{
+   if (!p || !b->tool_id || !b->tool_name || strlen(b->tool_id) > 1024 ||
+       strlen(b->tool_name) > 1024)
+      return -1;
+   if (p->announced)
+      return strcmp(p->tool, b->tool_id) || strcmp(p->name, b->tool_name) ? -1 : 0;
+   for (part_t *other = s->blocks; other; other = other->next)
+      if (other != p && other->tool && !other->finished && !strcmp(other->tool, b->tool_id))
+         return -1;
+   size_t n = strlen(s->turn) + strlen(p->message) + 32;
+   p->tool = strdup(b->tool_id);
+   p->name = strdup(b->tool_name);
+   p->key = malloc(n);
+   if (!p->tool || !p->name || !p->key)
+      return -1;
+   snprintf(p->key, n, "%s:%s:%d", s->turn, p->message, p->index);
+   p->announced = 1;
+   if (s->tool)
+      s->tool("started", p->key, p->name, s->context);
+   return 0;
+}
+static int message(subscriber_t *s, const cJSON *event)
+{
+   aimee_message_t m = {0};
+   if (aimee_ir_message_parse(cJSON_GetObjectItemCaseSensitive(event, "payload"), &m))
+      return -1;
+   const char *id = string(event, "message_id");
+   const cJSON *partial = cJSON_GetObjectItemCaseSensitive(event, "partial");
+   aimee_request_t admitted = {.messages = &m, .n_messages = 1};
+   const char *role = string(event, "role");
+   int rc = (partial && !cJSON_IsBool(partial)) || (role && strcmp(role, m.role)) ||
+                    aimee_ir_request_admit(&admitted)
+                ? -1
+                : 0;
+   for (int i = 0; !rc && i < m.n_blocks; i++)
+   {
+      aimee_block_t *b = &m.blocks[i];
+      if (!strcmp(m.role, "assistant") && b->type == AIMEE_BLK_TEXT)
+      {
+         part_t *p = part(s, id, (int)i, AIMEE_BLK_TEXT);
+         rc = text(s, p, b->text, 1);
+         if (p)
+         {
+            p->begun = 1;
+            p->final = !cJSON_IsTrue(partial);
+         }
+      }
+      else if (!strcmp(m.role, "assistant") && b->type == AIMEE_BLK_TOOL_USE)
+         rc = tool(s, part(s, id, (int)i, AIMEE_BLK_TOOL_USE), b);
+      else if (b->type == AIMEE_BLK_TOOL_RESULT)
+      {
+         if (strcmp(m.role, "tool") || cJSON_IsTrue(partial))
+         {
+            rc = -1;
+            break;
+         }
+         part_t *p = s->blocks;
+         while (p && (!p->tool || p->finished || strcmp(p->tool, b->tool_id)))
+            p = p->next;
+         if (!p || p->finished)
+            rc = -1;
+         else
+         {
+            p->finished = 1;
+            if (s->tool)
+               s->tool(b->tool_is_error ? "failed" : "completed", p->key, p->name, s->context);
+         }
+      }
+   }
+   if (!rc)
+      rc = retain_message(s, id, &m, !cJSON_IsTrue(partial));
+   aimee_message_free(&m);
+   return rc;
+}
+static int consume(cJSON *envelope, void *context)
+{
+   subscriber_t *s = context;
+   const char *sid = string(envelope, "session_id"), *turn = string(envelope, "turn_id"),
+              *actor = string(envelope, "actor"), *seq = string(envelope, "sequence"),
+              *id = string(envelope, "event_id");
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(envelope, "version"),
+               *event = cJSON_GetObjectItemCaseSensitive(envelope, "event"),
+               *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
+   const char *kind = string(event, "kind");
+   if (s->failed || s->http_status != 200 || !aimee_ir_json_unique(envelope) ||
+       !cJSON_IsNumber(version) || version->valuedouble != 1 || !sid || strcmp(sid, s->session) ||
+       !turn || !turn[0] || strlen(turn) > 127 || !actor || !actor[0] || strlen(actor) > 255 ||
+       !id || !id[0] || strlen(id) > 1024 || !seq || seq[0] < '1' || seq[0] > '9' ||
+       strlen(seq) > 20 || !kind)
+      goto fail;
+   uint64_t sequence = 0;
+   for (const char *p = seq; *p; p++)
+   {
+      if (*p < '0' || *p > '9' || sequence > (UINT64_MAX - (unsigned)(*p - '0')) / 10)
+         goto fail;
+      sequence = sequence * 10 + (unsigned)(*p - '0');
+   }
+   if ((s->sequence && (s->sequence == UINT64_MAX || sequence != s->sequence + 1)) ||
+       (s->actor && strcmp(actor, s->actor)))
+      goto fail;
+   s->sequence = sequence;
+   if (!s->actor && !(s->actor = strdup(actor)))
+      goto fail;
+   if (!strcmp(kind, "execution"))
+   {
+      const char *status = string(payload, "status");
+      if (!status)
+         goto fail;
+      if (!strcmp(status, "running") && !s->started && !s->completed)
+      {
+         if (!(s->turn = strdup(turn)))
+            goto fail;
+         s->started = 1;
+         return 0;
+      }
+      if (!s->started || s->completed || strcmp(turn, s->turn) || strcmp(status, "completed"))
+         goto fail;
+      for (part_t *p = s->blocks; p; p = p->next)
+         if ((p->kind == AIMEE_BLK_TEXT && !p->final) || (p->announced && !p->finished))
+            goto fail;
+      for (int i = 0; i < s->conversation.n_messages; i++)
+         if (!s->message_final[i])
+            goto fail;
+      s->completed = 1;
+      return 1; /* POSIX closes after the durable host terminal; Windows may keep draining. */
+   }
+   if (!strcmp(kind, "history") || !strcmp(kind, "projection") ||
+       !strcmp(kind, "child_execution") || !strcmp(kind, "replay_proof") ||
+       !strcmp(kind, "native_checkpoint") || !strcmp(kind, "native_compaction") ||
+       !strcmp(kind, "tool_interruption"))
+      return 0;
+   if (!s->started || s->completed || strcmp(turn, s->turn) || !string(event, "message_id") ||
+       !string(event, "message_id")[0])
+      goto fail;
+   if (!strcmp(kind, "message"))
+   {
+      if (message(s, event))
+         goto fail;
+      return 0;
+   }
+   if (!strcmp(kind, "delta"))
+   {
+      const char *type = string(payload, "type"), *role = string(event, "role"),
+                 *block_kind = string(payload, "kind");
+      if (!type || !strcmp(type, "ERROR"))
+         goto fail;
+      if (!strcmp(type, "TURN_START") || !strcmp(type, "TURN_STOP") || !strcmp(type, "BLOCK_STOP"))
+         return 0;
+      if (strcmp(type, "BLOCK_START") && strcmp(type, "BLOCK_DELTA"))
+         goto fail;
+      const cJSON *index = cJSON_GetObjectItemCaseSensitive(payload, "block_id");
+      if (!role || strcmp(role, "assistant") || !block_kind || !cJSON_IsNumber(index) ||
+          index->valuedouble != index->valueint || index->valueint < 0 ||
+          index->valueint >= AIMEE_IR_MAX_BLOCKS)
+         goto fail;
+      if (!strcmp(block_kind, "text"))
+      {
+         const char *chunk = string(payload, "text_delta");
+         part_t *p = part(s, string(event, "message_id"), index->valueint, AIMEE_BLK_TEXT);
+         int start = !strcmp(type, "BLOCK_START");
+         if (!p || p->final || (start ? p->begun : !p->begun) || (!chunk && !start) ||
+             (chunk && text(s, p, chunk, 0)))
+            goto fail;
+         p->begun = 1;
+      }
+      else if (strcmp(block_kind, "thinking") && strcmp(block_kind, "tool_use"))
+         goto fail;
+      return 0;
+   }
+fail:
+   s->failed = 1;
+   return -1;
+}
+static char *request_stream(const char *endpoint, const char *bearer, const cJSON *request,
+                            int timeout, void (*text_cb)(const char *, void *),
+                            cli_chat_tool_fn tool_cb, void *context,
+                            cli_chat_result_t *conversation, cli_http_stream_t *stream,
+                            const cli_http_options_t *options)
+{
+   subscriber_t s = {.session = string(request, "aimee_session_id"),
+                     .text = text_cb,
+                     .tool = tool_cb,
+                     .context = context,
+                     .project_text = conversation == NULL};
+   cJSON *copy = cJSON_IsObject(request) && aimee_ir_json_unique(request)
+                     ? cJSON_Duplicate(request, 1)
+                     : NULL;
+   cJSON *version = cJSON_CreateNumber(1), *controls = cJSON_CreateFalse();
+   int ok = copy && s.session && s.session[0] && version && controls;
+   if (ok)
+      ok = cJSON_GetObjectItemCaseSensitive(copy, "ir_version")
+               ? cJSON_ReplaceItemInObjectCaseSensitive(copy, "ir_version", version)
+               : cJSON_AddItemToObject(copy, "ir_version", version);
+   if (ok)
+      version = NULL;
+   if (ok)
+      ok = cJSON_GetObjectItemCaseSensitive(copy, "control_replies")
+               ? cJSON_ReplaceItemInObjectCaseSensitive(copy, "control_replies", controls)
+               : cJSON_AddItemToObject(copy, "control_replies", controls);
+   if (ok)
+      controls = NULL;
+   char *body = ok ? cJSON_PrintUnformatted(copy) : NULL;
+   cJSON_Delete(version);
+   cJSON_Delete(controls);
+   cJSON_Delete(copy);
+   cli_http_options_t selected =
+       options ? *options
+               : (cli_http_options_t){.endpoint = endpoint,
+                                      .bearer = bearer,
+                                      .connect_timeout_ms =
+                                          timeout > 0 ? timeout : CLIENT_CONNECT_TIMEOUT_MS,
+                                      .io_timeout_ms = timeout < 0 ? 0
+                                                       : timeout   ? timeout
+                                                                   : CLIENT_DEFAULT_TIMEOUT_MS};
+   selected.method = "POST";
+   selected.path = "/v1/chat/stream";
+   selected.body = body;
+   selected.body_length = body ? strlen(body) : 0;
+   int delivery = -1;
+   if (body && selected.body_length < CLIENT_MAX_RESPONSE_SIZE)
+   {
+      cli_http_stream_t *owned = stream ? NULL : cli_http_stream_new();
+      delivery = (stream || owned)
+                     ? cli_http_request_stream_ndjson_on(stream ? stream : owned, &selected,
+                                                         &s.http_status, consume, &s)
+                     : -1;
+      cli_http_stream_free(owned);
+   }
+   free(body);
+   for (part_t *p = s.blocks; p;)
+   {
+      part_t *next = p->next;
+      free(p->message);
+      free(p->text);
+      free(p->tool);
+      free(p->name);
+      free(p->key);
+      free(p);
+      p = next;
+   }
+   free(s.turn);
+   free(s.actor);
+   for (int i = 0; i < s.conversation.n_messages; i++)
+      free(s.message_ids[i]);
+   free(s.message_ids);
+   free(s.message_final);
+   if (delivery || s.http_status != 200 || s.failed || !s.completed)
+   {
+      aimee_request_free(&s.conversation);
+      free(s.reply);
+      fprintf(stderr, "aimee chat: canonical turn failed or stream ended before completion\n");
+      return NULL;
+   }
+   if (conversation)
+      *conversation = (cli_chat_result_t){.messages = s.conversation.messages,
+                                          .n_messages = s.conversation.n_messages};
+   else
+      aimee_request_free(&s.conversation);
+   return s.reply ? s.reply : strdup("");
+}
+void cli_chat_result_free(cli_chat_result_t *result)
+{
+   if (!result)
+      return;
+   aimee_request_t owner = {.messages = result->messages, .n_messages = result->n_messages};
+   aimee_request_free(&owner);
+   memset(result, 0, sizeof *result);
+}
+int cli_chat_request_stream_ir(const char *endpoint, const char *bearer, const cJSON *request,
+                               int timeout, cli_chat_result_t *conversation)
+{
+   if (!conversation)
+      return -1;
+   memset(conversation, 0, sizeof *conversation);
+   char *display = request_stream(endpoint, bearer, request, timeout, NULL, NULL, NULL,
+                                  conversation, NULL, NULL);
+   if (!display)
+   {
+      cli_chat_result_free(conversation);
+      return -1;
+   }
+   free(display);
+   return 0;
+}
+int cli_chat_request_stream_ir_on(cli_http_stream_t *stream, const cli_http_options_t *options,
+                                  const cJSON *request, cli_chat_result_t *conversation)
+{
+   if (!stream || !options || !conversation)
+      return -1;
+   memset(conversation, 0, sizeof *conversation);
+   char *display =
+       request_stream(NULL, NULL, request, 0, NULL, NULL, NULL, conversation, stream, options);
+   if (!display)
+   {
+      cli_chat_result_free(conversation);
+      return -1;
+   }
+   free(display);
+   return 0;
+}
+int cli_chat_request_stream_json(cli_http_stream_t *stream, const cli_http_options_t *options,
+                                 const char *request_json, char **messages_json)
+{
+   if (!messages_json)
+      return -1;
+   *messages_json = NULL;
+   if (!request_json || strlen(request_json) > 1024 * 1024)
+      return -1;
+   cJSON *request = aimee_ir_json_parse_frame(request_json, strlen(request_json));
+   cli_chat_result_t result = {0};
+   aimee_message_t input = {0};
+   int rc = !request ||
+            aimee_ir_message_parse(cJSON_GetObjectItemCaseSensitive(request, "message"), &input);
+   if (!rc)
+   {
+      aimee_request_t admission = {.messages = &input, .n_messages = 1};
+      rc = aimee_ir_request_admit(&admission);
+   }
+   aimee_message_free(&input);
+   if (!rc)
+      rc = cli_chat_request_stream_ir_on(stream, options, request, &result);
+   cJSON_Delete(request);
+   cJSON *reply = rc ? NULL : cJSON_CreateObject();
+   cJSON *messages = reply ? cJSON_AddArrayToObject(reply, "messages") : NULL;
+   for (int i = 0; messages && i < result.n_messages; i++)
+   {
+      cJSON *message = aimee_ir_message_json(result.messages + i);
+      if (!message || !cJSON_AddItemToArray(messages, message))
+      {
+         cJSON_Delete(message);
+         rc = -1;
+         break;
+      }
+   }
+   if (!rc && messages)
+      *messages_json = cJSON_PrintUnformatted(reply);
+   if (*messages_json && strlen(*messages_json) > CLIENT_MAX_RESPONSE_SIZE)
+   {
+      free(*messages_json);
+      *messages_json = NULL;
+   }
+   cJSON_Delete(reply);
+   cli_chat_result_free(&result);
+   return *messages_json ? 0 : -1;
+}
+void cli_chat_string_free(char *value)
+{
+   free(value);
+}
+char *cli_chat_request_stream(const char *endpoint, const char *bearer, const cJSON *request,
+                              int timeout, void (*text_cb)(const char *, void *),
+                              cli_chat_tool_fn tool_cb, void *context)
+{
+   return request_stream(endpoint, bearer, request, timeout, text_cb, tool_cb, context, NULL, NULL,
+                         NULL);
+}
+#ifndef AIMEE_CLIENT_LIBRARY
+char *cli_chat_stream(const char *sock, const char *session, const char *message,
+                      void (*text_cb)(const char *, void *), cli_chat_tool_fn tool_cb,
+                      void *context)
+{
+   (void)sock;
+   if (!message || !message[0])
+      return NULL;
+   char *endpoint = cli_v1_has_remote_endpoint() ? cli_v1_client_endpoint() : NULL;
+   char local[4096];
+   if (!endpoint)
+   {
+      const char *home = aimee_home();
+      if (!home ||
+          snprintf(local, sizeof local, "unix:%s/aimee-http.sock", home) >= (int)sizeof local)
+         return NULL;
+   }
+   char *bearer = cli_v1_has_remote_endpoint() ? cli_v1_client_bearer() : NULL;
+   cJSON *request = cJSON_CreateObject();
+   cJSON *canonical = cli_ir_user_message(message, NULL, NULL);
+   if (!canonical || !cJSON_AddItemToObject(request, "message", canonical))
+   {
+      cJSON_Delete(canonical);
+      cJSON_Delete(request);
+      free(endpoint);
+      free(bearer);
+      return NULL;
+   }
+   cJSON_AddStringToObject(request, "aimee_session_id", session ? session : "");
+   char cwd[4096];
+   if (getcwd(cwd, sizeof cwd))
+      cJSON_AddStringToObject(request, "cwd", cwd);
+   const char *mode = getenv("AIMEE_MODE"), *attach = getenv("AIMEE_ATTACH_ID"),
+              *client_type = getenv("AIMEE_CLIENT_TYPE");
+   if (mode && mode[0])
+      cJSON_AddStringToObject(request, "mode", mode);
+   if (attach && attach[0])
+      cJSON_AddStringToObject(request, "attach_id", attach);
+   if (client_type && client_type[0])
+      cJSON_AddStringToObject(request, "client_type", client_type);
+   char *reply = cli_chat_request_stream(endpoint ? endpoint : local, bearer, request, -1, text_cb,
+                                         tool_cb, context);
+   cJSON_Delete(request);
+   free(endpoint);
+   free(bearer);
    return reply;
 }
+#endif /* CLI-only process configuration convenience wrapper */

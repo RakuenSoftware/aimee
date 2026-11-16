@@ -6,16 +6,13 @@
 /* agent_policy.c: validation, policy, trace, metrics, env, manifest, contract */
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/kb/c/tool_registry.h"
 #include "agent.h"
 #include <aimee/tools/agent_tools.h>
 #include "kb_client.h"
 #include "headers/memory.h"
 #include "headers/agent_exec.h"
-#include "compact.h"
 #include "computer_use.h"
 #include "config.h"
-#include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "log.h"
 #include "dstr.h"
 #include "otel.h"
@@ -27,31 +24,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "tool_prompts_data.h"
-
-/* Look up an embedded per-tool prompt by tool name. Returns NULL if no file
- * exists for this tool in src/tool_prompts/. The table is generated at build
- * time from src/tool_prompts/ and sorted alphabetically. */
-static const char *tool_prompts_lookup_embedded(const char *name)
-{
-   if (!name)
-      return NULL;
-   int lo = 0, hi = TOOL_PROMPTS_EMBEDDED_COUNT - 1;
-   while (lo <= hi)
-   {
-      int mid = (lo + hi) / 2;
-      int cmp = strcmp(TOOL_PROMPTS_EMBEDDED[mid].name, name);
-      if (cmp == 0)
-         return TOOL_PROMPTS_EMBEDDED[mid].prompt;
-      if (cmp < 0)
-         lo = mid + 1;
-      else
-         hi = mid - 1;
-   }
-   return NULL;
-}
-
-static int validate_against_schema(const char *args_json, cJSON *schema, char *err_out,
+static int validate_against_schema(const char *args_json, const cJSON *schema, char *err_out,
                                    size_t err_len)
 {
    if (!schema)
@@ -198,149 +171,79 @@ const char *tool_suggest(const char *name)
 
 /* --- Tool registry validation --- */
 
-int tool_validate(const char *tool_name, const char *args_json, char *err_out, size_t err_len)
+/* Execution validates the exact post-policy IR catalog that was advertised.
+ * Registry state may still disable a tool, but cannot replace that schema with
+ * a stale or differently shaped KB copy after the model has answered. */
+int tool_validate_ir(const aimee_tool_t *tool, const char *args_json, char *err_out, size_t err_len)
 {
-   if (!tool_name || !args_json)
-      return 0;
-
-   if (strchr(tool_name, ':') != NULL)
+   if (!err_out || !err_len)
+      return -1;
+   err_out[0] = 0;
+   if (!tool || tool->kind != AIMEE_TOOL_FUNCTION || !tool->name || !tool->name[0] ||
+       !cJSON_IsObject(tool->schema) || !args_json)
    {
-      cJSON *remote_tool = NULL;
-      if (mcp_client_registry_get_tool_schema(tool_name, 1000, &remote_tool, err_out, err_len) == 0)
+      snprintf(err_out, err_len, "canonical function/schema is unavailable");
+      return -1;
+   }
+   if (!strchr(tool->name, ':'))
+   {
+      int found = 0, enabled = 0;
+      if (!kb_client_tool_registry_lookup(tool->name, NULL, 0, NULL, 0, &enabled, &found) &&
+          found && !enabled)
       {
-         cJSON *schema = cJSON_GetObjectItemCaseSensitive(remote_tool, "inputSchema");
-         int rc = validate_against_schema(args_json, schema, err_out, err_len);
-         cJSON_Delete(remote_tool);
-         return rc;
+         snprintf(err_out, err_len, "tool '%s' is disabled", tool->name);
+         return -1;
       }
-      /* Not a plugin THIS server hosts: it may be federated from aimee-kb (config
-       * install: kb), whose schema we do not hold locally. Defer validation to the
-       * kb, which owns the plugin and validates on tools/call; dispatch routes the
-       * call there (agent_tools_dispatch.c) and surfaces any error. */
-      if (err_out && err_len)
-         err_out[0] = '\0';
-      return 0;
    }
-
-   tool_registry_entry_t entry;
-   memset(&entry, 0, sizeof(entry));
-   int found = 0;
-   if (kb_client_tool_registry_lookup(tool_name, entry.input_schema, sizeof(entry.input_schema),
-                                      entry.side_effect, sizeof(entry.side_effect), &entry.enabled,
-                                      &found) != 0 ||
-       !found)
-   {
-      cJSON *builtin_schema = agent_tool_get_schema_cached(tool_name);
-      if (builtin_schema)
-         return validate_against_schema(args_json, builtin_schema, err_out, err_len);
-
-      const char *suggestion = tool_suggest(tool_name);
-      if (suggestion)
-         snprintf(err_out, err_len, "unknown tool '%s'. Did you mean '%s'?", tool_name, suggestion);
-      else
-         snprintf(err_out, err_len, "unknown tool '%s'", tool_name);
-      return -1;
-   }
-
-   if (!entry.enabled)
-   {
-      snprintf(err_out, err_len, "tool '%s' is disabled", tool_name);
-      return -1;
-   }
-
-   if (!entry.input_schema[0])
-      return 0;
-
-   cJSON *schema = cJSON_Parse(entry.input_schema);
-   if (!schema)
-      return 0;
-   int rc = validate_against_schema(args_json, schema, err_out, err_len);
-   cJSON_Delete(schema);
-   return rc;
+   return validate_against_schema(args_json, tool->schema, err_out, err_len);
 }
 
-const char *tool_side_effect(const char *tool_name)
+int tool_policy_metadata(const char *tool, aimee_tool_metadata_t *metadata, char *effect,
+                         size_t effect_len, char *reason, size_t reason_len)
 {
-   /* Fall through aimee-kb so the lookup works in the daemon (KB_STORE-less)
-    * process.  Thread-local buffer mirrors kb_store_tool_registry_side_effect's
-    * legacy contract — caller can treat the pointer as valid until the
-    * next tool_side_effect() call on this thread. */
-   static __thread char buf[32];
-   buf[0] = '\0';
-   int found = 0;
-   if (kb_client_tool_registry_lookup(tool_name ? tool_name : "", NULL, 0, buf, sizeof(buf), NULL,
-                                      &found) != 0 ||
-       !found || !buf[0])
-      snprintf(buf, sizeof(buf), "%s", "read");
-   return buf;
-}
-
-/* --- Tool prompt collection --- */
-
-/* Collect usage prompts from all enabled tools that have a non-empty tool_prompt.
- * Returns a heap-allocated string of the form:
- *
- *   ## Tool Usage Notes
- *
- *   ### bash
- *   <prompt>
- *
- *   ### read_file
- *   <prompt>
- *
- * Returns NULL if no tools have prompts or the DB is unavailable. Caller must free(). */
-struct tool_prompts_ctx
-{
-   dstr_t out;
-   int count;
-};
-
-static int collect_tool_prompts_cb(const char *name, const char *prompt, void *user)
-{
-   struct tool_prompts_ctx *ctx = (struct tool_prompts_ctx *)user;
-   if (!prompt || !*prompt)
-      prompt = tool_prompts_lookup_embedded(name);
-   if (!prompt || !*prompt)
-      return 0;
-
-   if (ctx->count == 0)
-      dstr_append_str(&ctx->out, "## Tool Usage Notes\n");
-
-   dstr_appendf(&ctx->out, "\n### %s\n%s\n", name, prompt);
-   ctx->count++;
+   if (reason && reason_len)
+      reason[0] = 0;
+   if (metadata)
+      memset(metadata, 0, sizeof(*metadata));
+   if (effect && effect_len)
+      effect[0] = 0;
+   if (!effect || !effect_len || agent_tools_metadata(tool, metadata) != 0)
+   {
+      if (reason && reason_len)
+         snprintf(reason, reason_len, "tool policy metadata unavailable");
+      return -1;
+   }
+   /* Optional operator metadata can add a policy label or disable a tool. It
+    * cannot replace the tools owner's classification or remove its categories.
+    * No KB is required for built-in policy metadata. */
+   char configured[32] = "";
+   int found = 0, enabled = 1;
+   if (!strchr(tool, ':') &&
+       !kb_client_tool_registry_lookup(tool, NULL, 0, configured, sizeof(configured), &enabled,
+                                       &found) &&
+       found)
+   {
+      if (!enabled)
+      {
+         if (reason && reason_len)
+            snprintf(reason, reason_len, "tool '%s' is disabled", tool);
+         memset(metadata, 0, sizeof(*metadata));
+         return -1;
+      }
+   }
+   else
+      configured[0] = 0;
+   const char *label = configured[0] ? configured : aimee_tool_policy_name(metadata->primary);
+   int n = snprintf(effect, effect_len, "%s", label);
+   if (n < 0 || (size_t)n >= effect_len)
+   {
+      effect[0] = 0;
+      memset(metadata, 0, sizeof(*metadata));
+      if (reason && reason_len)
+         snprintf(reason, reason_len, "tool policy label exceeds capacity");
+      return -1;
+   }
    return 0;
-}
-
-char *agent_collect_tool_prompts(void)
-{
-   struct tool_prompts_ctx ctx = {0};
-   dstr_init(&ctx.out);
-
-   /* Pull all enabled tool prompts via aimee-kb (KB_STORE owner). */
-   char *envelope = kb_client_tool_registry_snapshot_json();
-   cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
-   free(envelope);
-   cJSON *prompts = resp ? cJSON_GetObjectItemCaseSensitive(resp, "prompts") : NULL;
-   if (cJSON_IsArray(prompts))
-   {
-      cJSON *p;
-      cJSON_ArrayForEach(p, prompts)
-      {
-         cJSON *name_j = cJSON_GetObjectItemCaseSensitive(p, "name");
-         cJSON *prompt_j = cJSON_GetObjectItemCaseSensitive(p, "prompt");
-         const char *name = cJSON_IsString(name_j) ? name_j->valuestring : "";
-         const char *prompt = cJSON_IsString(prompt_j) ? prompt_j->valuestring : "";
-         collect_tool_prompts_cb(name, prompt, &ctx);
-      }
-   }
-   cJSON_Delete(resp);
-
-   if (ctx.count == 0)
-   {
-      dstr_free(&ctx.out);
-      return NULL;
-   }
-   return dstr_steal(&ctx.out);
 }
 
 /* --- Execution trace --- */
@@ -505,147 +408,6 @@ void agent_write_metrics(void)
    /* KB_STORE metrics (incl. pgvector) are owned by aimee-kb, not aimee-server. */
 
    fclose(f);
-}
-
-/* --- Environment introspection --- */
-
-static void env_set(const char *key, const char *value)
-{
-   (void)db1_env_capability_set(key, value);
-}
-static int check_command(const char *cmd)
-{
-   const char *argv[] = {"which", cmd, NULL};
-   char *output = NULL;
-   int rc = safe_exec_capture(argv, &output, 256);
-   free(output);
-   return rc == 0;
-}
-
-void agent_introspect_env(void)
-{
-   /* Toolchains */
-   static const char *tools[] = {"gcc",  "clang", "make",  "dotnet", "node", "npm",    "python3",
-                                 "pip3", "go",    "rustc", "java",   "mvn",  "gradle", "docker",
-                                 "git",  "ssh",   "curl",  "jq",     NULL};
-
-   for (int i = 0; tools[i]; i++)
-   {
-      env_set(tools[i], check_command(tools[i]) ? "available" : "missing");
-   }
-
-   /* Package managers */
-   static const char *pkg_mgrs[] = {"apt-get", "brew", "dnf", "yum", "pacman", "apk", NULL};
-   for (int i = 0; pkg_mgrs[i]; i++)
-   {
-      if (check_command(pkg_mgrs[i]))
-      {
-         env_set("package_manager", pkg_mgrs[i]);
-         break;
-      }
-   }
-
-   /* OS info — use safe argv execution instead of popen shell pipeline */
-   {
-      const char *argv[] = {"uname", "-s", "-r", "-m", NULL};
-      char *out = NULL;
-      if (safe_exec_capture(argv, &out, 256) == 0 && out)
-      {
-         size_t len = strlen(out);
-         while (len > 0 && out[len - 1] == '\n')
-            out[--len] = '\0';
-         if (out[0])
-            env_set("os", out);
-      }
-      free(out);
-   }
-
-   /* Disk space — use safe argv execution */
-   {
-      const char *argv[] = {"df", "-h", "/", NULL};
-      char *out = NULL;
-      if (safe_exec_capture(argv, &out, 1024) == 0 && out)
-      {
-         /* Parse last line, 4th field (Available) */
-         char *last_line = out;
-         char *nl;
-         while ((nl = strchr(last_line, '\n')) != NULL && nl[1])
-            last_line = nl + 1;
-         /* Skip whitespace-separated fields to get 4th */
-         int field = 0;
-         char *p = last_line;
-         while (*p && field < 3)
-         {
-            while (*p && *p != ' ' && *p != '\t')
-               p++;
-            while (*p == ' ' || *p == '\t')
-               p++;
-            field++;
-         }
-         if (*p)
-         {
-            char avail[64] = {0};
-            size_t ai = 0;
-            while (*p && *p != ' ' && *p != '\t' && *p != '\n' && ai < sizeof(avail) - 1)
-               avail[ai++] = *p++;
-            avail[ai] = '\0';
-            if (avail[0])
-               env_set("disk_free", avail);
-         }
-      }
-      free(out);
-   }
-
-   /* Memory — read from /proc/meminfo if available, fall back to safe exec */
-   {
-      FILE *f = fopen("/proc/meminfo", "r");
-      if (f)
-      {
-         char line[128];
-         while (fgets(line, sizeof(line), f))
-         {
-            if (strncmp(line, "MemTotal:", 9) == 0)
-            {
-               /* Parse "MemTotal:    XXXX kB" */
-               char *p = line + 9;
-               while (*p == ' ')
-                  p++;
-               long kb = strtol(p, NULL, 10);
-               char mem_str[32];
-               if (kb > 1048576)
-                  snprintf(mem_str, sizeof(mem_str), "%.1fGi", (double)kb / 1048576.0);
-               else
-                  snprintf(mem_str, sizeof(mem_str), "%ldMi", kb / 1024);
-               env_set("total_memory", mem_str);
-               break;
-            }
-         }
-         fclose(f);
-      }
-      else
-      {
-         const char *argv[] = {"free", "-h", NULL};
-         char *out = NULL;
-         if (safe_exec_capture(argv, &out, 512) == 0 && out)
-         {
-            char *mem_line = strstr(out, "Mem:");
-            if (mem_line)
-            {
-               char *p = mem_line + 4;
-               while (*p == ' ' || *p == '\t')
-                  p++;
-               char total[32] = {0};
-               size_t ti = 0;
-               while (*p && *p != ' ' && *p != '\t' && *p != '\n' && ti < sizeof(total) - 1)
-                  total[ti++] = *p++;
-               total[ti] = '\0';
-               if (total[0])
-                  env_set("total_memory", total);
-            }
-         }
-         free(out);
-      }
-   }
 }
 
 /* --- Change manifests --- */

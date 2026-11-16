@@ -328,19 +328,3 @@ const char *aws_es_status_str(aws_es_status_t st)
    }
    return "?";
 }
-
-const char *aws_es_msg_type_str(aws_es_msg_type_t t)
-{
-   switch (t)
-   {
-   case AWS_ES_MSG_EVENT:
-      return "event";
-   case AWS_ES_MSG_EXCEPTION:
-      return "exception";
-   case AWS_ES_MSG_ERROR:
-      return "error";
-   case AWS_ES_MSG_UNKNOWN:
-      return "unknown";
-   }
-   return "?";
-}

@@ -21,6 +21,12 @@ int server_error_kind_http_status(const char *kind)
    return 0;
 }
 
+static int transport_notifications;
+static void transport_completed(void *expected, int status)
+{
+   assert(expected == &transport_notifications && status != HTTP_RETRY_ADMISSION_REFUSED);
+   transport_notifications++;
+}
 static request_context_t context;
 static econ_request_budget_result_t admission;
 static int admission_calls;
@@ -54,12 +60,8 @@ econ_request_budget_result_t econ_module_request_budget_with_policy(unsigned rou
 
 static void operator_policy(const char *value)
 {
-#ifdef _WIN32
-   assert(_putenv_s("AIMEE_PROVIDER_CONTEXT_LIMITS", value ? value : "") == 0);
-#else
    assert((value ? setenv("AIMEE_PROVIDER_CONTEXT_LIMITS", value, 1)
                  : unsetenv("AIMEE_PROVIDER_CONTEXT_LIMITS")) == 0);
-#endif
 }
 
 static void test_external_backend_cannot_ignore_hard_limits(void)
@@ -251,6 +253,51 @@ static void test_context_refusal_blocks_every_route(void)
    assert(wire_fence_select(0, WIRE_FENCE_OPENAI_CHAT, "abc", 3, &snapshot, &selected) == 0);
    assert(selected.len == 3);
 }
+/* An owner may refuse an oversized input before the fence; the deployment
+ * budget still classifies a definite overflow, and nothing else changes. */
+static void test_context_refusal_reports_budget_overflow(void)
+{
+   const econ_request_budget_result_t results[] = {
+       ECON_REQUEST_BUDGET_OVERFLOW, ECON_REQUEST_BUDGET_ADMITTED, ECON_REQUEST_BUDGET_UNAVAILABLE,
+       ECON_REQUEST_BUDGET_INVALID};
+   for (int with_policy = 0; with_policy <= 1; with_policy++)
+      for (size_t i = 0; i < sizeof(results) / sizeof(results[0]); i++)
+      {
+         memset(&context, 0, sizeof(context));
+         have_context = 1;
+         context.context_refused = 1;
+         strcpy(context.context_refusal_kind, "source_release_refused");
+         if (with_policy)
+            operator_policy("opaque operator policy");
+         else
+         {
+            context.request_budget_present = 1;
+            strcpy(context.request_budget_limits, "limits");
+         }
+         admission = results[i];
+         int before = admission_calls;
+         wire_fence_t *snapshot = NULL;
+         wire_fence_bytes_t selected = {0};
+         int rc = wire_fence_select(0, WIRE_FENCE_OPENAI_CHAT, "abc", 3, &snapshot, &selected);
+         assert(admission_calls == before + 1);
+         assert(!snapshot && !selected.data && !selected.len);
+         if (results[i] == ECON_REQUEST_BUDGET_OVERFLOW)
+         {
+            assert(rc == -1);
+            assert(strcmp(wire_fence_last_error(), "request_budget_exceeded") == 0);
+            assert(wire_fence_error_http_status(wire_fence_last_error()) == 413);
+         }
+         else
+         {
+            assert(rc == WIRE_FENCE_CONTEXT_REFUSED);
+            assert(strcmp(wire_fence_last_error(), "source_release_refused") == 0);
+         }
+         operator_policy(NULL);
+      }
+   admission = ECON_REQUEST_BUDGET_ADMITTED;
+   memset(&context, 0, sizeof(context));
+}
+
 static void test_source_handle_requires_host_transport(void)
 {
    memset(&context, 0, sizeof(context));
@@ -273,6 +320,8 @@ int ingress_preinject_acquire_send_guard(void **state)
 {
    send_acquires++;
    *state = &send_acquires;
+   if (send_refuse == 2)
+      strcpy(context.context_refusal_kind, "protected_context_overflow");
    return send_refuse ? -1 : 0;
 }
 void ingress_preinject_release_send_guard(void *state)
@@ -363,9 +412,14 @@ static void test_stream_receipt_admission_and_commitment(void)
          stream_after_failure = scenario == 3 ? -1 : 0;
          stream_before_calls = stream_after_calls = stream_transport_calls = 0;
          stream_consumed = stream_observed_bytes = 0;
+         transport_notifications = 0;
+         wire_fence_transport_observer_t previous = wire_fence_transport_observer_bind(
+             (wire_fence_transport_observer_t){transport_completed, &transport_notifications});
          int status = wire_fence_post_stream("fixture", "secret-header", "abc", 3, consume_stream,
                                              NULL, 1000, "secret-extra", "fixture", "fixture-model",
                                              (wire_fence_route_t)route);
+         (void)wire_fence_transport_observer_bind(previous);
+         assert(transport_notifications == stream_transport_calls);
          if (stream_refuse)
          {
             assert(status == HTTP_RETRY_ADMISSION_REFUSED && stream_before_calls == 1);
@@ -398,6 +452,38 @@ static void test_stream_receipt_admission_and_commitment(void)
    puts("stream admission and exact incremental commitments survive partial/failed observations");
 }
 
+static void test_send_guard_refusal_replaces_stale_pipeline_error(void)
+{
+   for (unsigned route = 1; route <= 3; route++)
+      for (int refusal = 1; refusal <= 2; refusal++)
+      {
+         memset(&context, 0, sizeof(context));
+         have_context = 1;
+         wire_fence_t *snapshot = NULL;
+         wire_fence_bytes_t selected = {0};
+         assert(wire_fence_select(0, (wire_fence_route_t)route, "abc", 3, &snapshot, &selected) ==
+                0);
+         /* A successful selection leaves the old default error behind. The
+          * later socket-send refusal must classify its own failure. */
+         assert(!strcmp(wire_fence_last_error(), "request_pipeline_unavailable"));
+         strcpy(context.memory_source_release, "opaque-source-handle");
+         send_refuse = refusal;
+         send_acquires = send_releases = 0;
+         stream_refuse = stream_abort = stream_after_failure = 0;
+         stream_before_calls = stream_after_calls = stream_transport_calls = 0;
+         stream_consumed = 0;
+         int status =
+             wire_fence_post_stream("fixture", "", "abc", 3, consume_stream, NULL, 1000, "",
+                                    "fixture", "fixture-model", (wire_fence_route_t)route);
+         assert(status == HTTP_RETRY_ADMISSION_REFUSED);
+         assert(send_acquires == 1 && send_releases == 1 && !stream_transport_calls);
+         assert(!strcmp(wire_fence_last_error(),
+                        refusal == 2 ? "protected_context_overflow" : "unavailable"));
+      }
+   memset(&context, 0, sizeof(context));
+   send_refuse = 0;
+}
+
 static int retry_calls, retry_refuse, retry_transport_calls;
 int server_clean_retry_admit(const void *body, size_t length, const char *receipt)
 {
@@ -418,6 +504,7 @@ int http_retry_post_observed_bytes(const char *url, const char *auth, const void
       if (observer->before(observer->context, body, length) != 0)
          return HTTP_RETRY_ADMISSION_REFUSED;
       retry_transport_calls++;
+      observer->after(observer->context, 200, NULL, 0);
    }
    return 200;
 }
@@ -435,8 +522,16 @@ static void test_retry_reserves_every_actual_provider_attempt(void)
          retry_calls = retry_transport_calls = 0;
          retry_refuse = refuse;
          char *response = NULL;
-         int rc = wire_fence_post("fixture", "", "abc", 3, &response, 1000, "", 2, 0, 0, "fixture",
-                                  "fixture-model", "session", WIRE_FENCE_OPENAI_CHAT);
+         wire_fence_observation_t observation = {.transport_attempts = 99};
+         transport_notifications = 0;
+         wire_fence_transport_observer_t previous = wire_fence_transport_observer_bind(
+             (wire_fence_transport_observer_t){transport_completed, &transport_notifications});
+         int rc = wire_fence_post_observed("fixture", "", "abc", 3, &response, 1000, "", 2, 0, 0,
+                                           "fixture", "fixture-model", "session",
+                                           WIRE_FENCE_OPENAI_CHAT, &observation);
+         (void)wire_fence_transport_observer_bind(previous);
+         assert(transport_notifications == retry_transport_calls);
+         assert(observation.transport_attempts == (refuse ? refuse - 1 : 2));
          assert(rc == (refuse ? HTTP_RETRY_ADMISSION_REFUSED : 200));
          assert(retry_calls == (refuse ? refuse : 2));
          assert(retry_transport_calls == (refuse ? refuse - 1 : 2));
@@ -450,6 +545,7 @@ int main(void)
    test_retry_reserves_every_actual_provider_attempt();
    test_external_backend_cannot_ignore_hard_limits();
    test_stream_receipt_admission_and_commitment();
+   test_send_guard_refusal_replaces_stale_pipeline_error();
    operator_policy(NULL);
    test_source_handle_requires_host_transport();
    test_context_refusal_blocks_every_route();
@@ -460,6 +556,7 @@ int main(void)
    test_invalid_inputs_fail_without_snapshot();
    test_off_bypasses_snapshot();
    test_proof_gated_empty_registry_is_byte_identical_on_every_route();
+   test_context_refusal_reports_budget_overflow();
    puts("economizer_wire_snapshot: ALL PASS");
    return 0;
 }

@@ -215,12 +215,11 @@ int main(void)
       /* The binding invariant: a child exec'd with this env + the inherited fd can
        * read the token via /proc/self/fd/<target> (what the askpass does), but the
        * token is NOT in its /proc/self/environ. */
-      const char *argv[] = {
-          "/bin/sh", "-c",
-          "cat /proc/self/fd/" STR(
-              GIT_CRED_TOKEN_TARGET_FD) "; printf '\\n--ENVIRON--\\n'; tr '\\0' '\\n' < "
-                                        "/proc/self/environ",
-          NULL};
+      const char *argv[] = {"/bin/sh", "-c",
+                            "cat /proc/self/fd/" STR(
+                                GIT_CRED_TOKEN_TARGET_FD) "; printf '\\n--ENVIRON--\\n'; "
+                                                          "cat /proc/self/environ | tr '\\0' '\\n'",
+                            NULL};
       char *out = NULL;
       int rc = safe_exec_capture_cwd_env_fd_timeout(argv, NULL, fe, &out, 1 << 16, 10000, tfd,
                                                     GIT_CRED_TOKEN_TARGET_FD);
@@ -328,6 +327,52 @@ int main(void)
       snprintf(rmrt, sizeof(rmrt), "rm -rf %s", rt);
       assert(system(rmrt) == 0);
       unsetenv("AIMEE_RUNTIME_DIR");
+   }
+
+   /* --- transport URL: an SSH remote is used over SSH only with a vaulted key ---
+    * The mirror runner and the clone path both ask this which URL to give git.
+    * The server holds no SSH key, so without an agent an SSH remote must go
+    * over HTTPS, where the vaulted token authenticates (2026-11-02: every Git
+    * tool call failed because a git@github.com: origin could not be mirrored). */
+   {
+      char *no_agent[] = {"PATH=/usr/bin:/bin", "GIT_ASKPASS=/x", NULL};
+      char *agent[] = {"PATH=/usr/bin:/bin", "SSH_AUTH_SOCK=/run/agent.sock", NULL};
+      assert(!git_cred_env_has_ssh_agent(no_agent));
+      assert(git_cred_env_has_ssh_agent(agent));
+      assert(!git_cred_env_has_ssh_agent(NULL));
+
+      struct
+      {
+         const char *url;
+         char **env;
+         const char *want;
+      } cases[] = {
+          {"git@github.com:RakuenSoftware/smoothnas.git", no_agent,
+           "https://github.com/rakuensoftware/smoothnas"},
+          {"ssh://git@github.com/RakuenSoftware/smoothnas.git", no_agent,
+           "https://github.com/rakuensoftware/smoothnas"},
+          {"git@github.com:RakuenSoftware/smoothnas.git", NULL,
+           "https://github.com/rakuensoftware/smoothnas"},
+          /* A vaulted key is loaded: honour the SSH URL so key auth is used. */
+          {"git@bitbucket.corp:team/repo.git", agent, "git@bitbucket.corp:team/repo.git"},
+          /* Already HTTPS (or not SSH): returned as given, never rewritten. */
+          {"https://github.com/RakuenSoftware/smoothnas.git", no_agent,
+           "https://github.com/RakuenSoftware/smoothnas.git"},
+          {"/srv/git/local.git", no_agent, "/srv/git/local.git"},
+      };
+      for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+      {
+         char *got = git_cred_transport_url(cases[i].url, cases[i].env);
+         if (!got || strcmp(got, cases[i].want) != 0)
+         {
+            fprintf(stderr, "transport_url(%s): want %s, got %s\n", cases[i].url, cases[i].want,
+                    got ? got : "(null)");
+            abort();
+         }
+         free(got);
+      }
+      assert(git_cred_transport_url(NULL, no_agent) == NULL);
+      assert(git_cred_transport_url("", no_agent) == NULL);
    }
 
    char clean[320];

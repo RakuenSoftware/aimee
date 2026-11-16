@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"net"
+	"github.com/JBailes/aimee/server-go/thinclient"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -84,11 +84,7 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 	// own audit identity, which is not trusted.
 	webUser := s.sessionUsername(r)
 	proxy := &httputil.ReverseProxy{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, "unix", sock)
-			},
-		},
+		Transport: &thinclient.Transport{Endpoint: "unix:" + sock},
 		Director: func(req *http.Request) {
 			req.URL.Scheme = "http"
 			req.URL.Host = "aimee"

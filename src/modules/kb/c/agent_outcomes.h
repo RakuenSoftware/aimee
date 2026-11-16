@@ -33,24 +33,12 @@ extern "C"
       char reason[256];
    } kb_store_agent_outcome_failure_t;
 
-   /* Distinct (role, reason) over the last `window_days` rows whose outcome
-    * is failure or error, newest first. Returns count written to out
-    * (capped at max). */
-   int kb_store_agent_outcome_recent_failures(int window_days,
-                                              kb_store_agent_outcome_failure_t *out, int max);
-
    /* repeated tool_error_pattern with its observed count. */
    typedef struct
    {
       char pattern[256];
       int count;
    } kb_store_agent_outcome_pattern_count_t;
-
-   /* GROUP BY tool_error_pattern HAVING COUNT(*) >= min_count. Returns
-    * count written to out (capped at max). */
-   int kb_store_agent_outcome_repeated_error_patterns(int min_count,
-                                                      kb_store_agent_outcome_pattern_count_t *out,
-                                                      int max);
 
 #ifdef __cplusplus
 }

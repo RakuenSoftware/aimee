@@ -13,7 +13,6 @@
 #include "server_http.h"
 #include "server_http_identity.h"
 #include "runtime_secret.h"
-#include <aimee/core/connection/endpoint.h>
 #include <string.h>
 
 /* config.show: return every allowlisted field and its current value. */
@@ -116,7 +115,7 @@ int handle_config_deploy_env(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* The backend selection is one atomic non-secret config-owner document value.
  * Admit no dotted child writes: those could leave a partial configuration or
- * introduce a credential field outside the Vault-only token surface. */
+ * introduce a credential field for a retired external backend. */
 static int memory_backend_value_valid(const cJSON *value)
 {
    if (!cJSON_IsObject(value) || cJSON_GetArraySize(value) != 3)
@@ -126,27 +125,10 @@ static int memory_backend_value_valid(const cJSON *value)
    const cJSON *auth = cJSON_GetObjectItemCaseSensitive(value, "auth");
    if (!cJSON_IsString(engine) || !cJSON_IsString(endpoint) || !cJSON_IsString(auth))
       return 0;
-   int native = !strcmp(engine->valuestring, "native");
-   int cognee = !strcmp(engine->valuestring, "cognee");
-   if (!native && !cognee && strcmp(engine->valuestring, "hillock"))
-      return 0;
-   if (strcmp(auth->valuestring, "bearer") && strcmp(auth->valuestring, "none") &&
-       (!cognee || strcmp(auth->valuestring, "api-key")))
-      return 0;
-   if (native)
-      return endpoint->valuestring[0] == 0;
-   const char *url = endpoint->valuestring;
-   const char *host = !strncmp(url, "http://", 7)    ? url + 7
-                      : !strncmp(url, "https://", 8) ? url + 8
-                                                     : NULL;
-   if (!host || !host[0] || host[0] == '/' || strlen(url) > 2048)
-      return 0;
-   for (const unsigned char *p = (const unsigned char *)url; *p; p++)
-      if (*p <= 32 || *p == 127 || *p == '@' || *p == '?' || *p == '#' || *p == '\\')
-         return 0;
-   const char *path = strchr(host, '/');
-   aimee_core_endpoint_t parsed;
-   return (!path || !strcmp(path, "/")) && aimee_core_endpoint_parse(url, &parsed) == 0;
+   return (!strcmp(engine->valuestring, "native") ||
+           !strcmp(engine->valuestring, "aimee-native")) &&
+          endpoint->valuestring[0] == 0 &&
+          (!strcmp(auth->valuestring, "bearer") || !strcmp(auth->valuestring, "none"));
 }
 
 /* config.set: assign one field and persist aimee.yaml. */
@@ -214,10 +196,10 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       {
          cJSON *value = cJSON_GetObjectItemCaseSensitive(req, "value");
          if (!memory_backend_value_valid(value))
-            return server_send_error(
-                conn,
-                "memory: select native, cognee or hillock with a valid endpoint and authentication",
-                NULL);
+            return server_send_error(conn,
+                                     "memory: only native is supported; export and migrate retired "
+                                     "backend data before switching",
+                                     NULL);
          if (config_client_set_value(key, cJSON_Duplicate(value, 1)) != 0 || config_reload() < 0)
             return server_send_error(conn, "memory: could not save backend configuration", NULL);
          cJSON *resp = jo_ok();
@@ -227,9 +209,10 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_AddBoolToObject(resp, "applied_live", 0);
          return server_send_ok(conn, resp);
       }
-      if (strcmp(key, "memory_backend_token"))
-         return server_send_error(conn, "memory: save the complete memory.backend configuration",
-                                  NULL);
+      return server_send_error(
+          conn,
+          "memory: save the complete memory.backend configuration; external backends are retired",
+          NULL);
    }
 
    /* Do not let the generic config surface bypass the roundtable preset API's

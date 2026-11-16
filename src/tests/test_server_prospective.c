@@ -13,23 +13,21 @@ static int sends, audits, unavailable;
 static cJSON *sent;
 static const char *expected;
 
-int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
+int vault_content_protect_text(const char *text, char **safe)
 {
-   assert(strcmp(method, "memory.screen_content") == 0);
-   *result = NULL;
-   if (unavailable)
+   /* This consumer fixture supplies host custody; real encryption and raw-value
+    * bus exclusion are covered by test_vault_content_privacy and image E2E. */
+   *safe = NULL;
+   if (unavailable || strstr(text, "reject-me"))
       return -1;
-   const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "content"));
-   assert(text);
-   *result = cJSON_CreateObject();
-   cJSON_AddStringToObject(*result, "status", "ok");
-   cJSON_AddStringToObject(*result, "verdict",
-                           strstr(text, "reject-me")   ? "reject"
-                           : strstr(text, "redact-me") ? "redact"
-                                                       : "allow");
-   cJSON_AddStringToObject(*result, "redacted", "[REDACTED]");
-   return 1;
+   if (strstr(text, "redact-me"))
+   {
+      *safe = strdup("[REDACTED]");
+      return *safe ? 0 : -1;
+   }
+   return 0;
 }
+
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
    assert(strcmp(method, expected) == 0);

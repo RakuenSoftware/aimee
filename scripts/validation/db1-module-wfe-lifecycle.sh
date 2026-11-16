@@ -8,7 +8,7 @@
 # for: that a run submitted to the workflow engine is created, listed, paused,
 # resumed and stopped THROUGH the module, in the topology the container runs.
 #
-# So this one submits a real run over the engine's socket and, at every step,
+# So this one submits a real run through the authenticated C daemon socket and, at every step,
 # checks the answer against the module's store read independently with sqlite3.
 # The API agreeing with itself is not evidence; the API agreeing with the file
 # the module owns is.
@@ -34,11 +34,10 @@ require_store_url() {
 
 PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 export PATH
-MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-aimee}
-GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/aimee.grant}
-WFE_GRANT=${AIMEE_WFE_GRANT:-/opt/payload/grants/wfe.grant}
-SERVER=${AIMEE_SERVER_BIN:-/usr/local/bin/aimee-server}
-WFE=${AIMEE_WFE_BIN:-/usr/local/bin/aimee-wfe}
+
+. "$(dirname "$0")/workflow-fixture-runtime.sh"
+cleanup() { workflow_fixture_stop_runtime "${WPID:-}" "${MPID:-}" "${SPID:-}"; }
+trap cleanup EXIT
 
 PASS=0
 FAIL=0
@@ -57,32 +56,13 @@ export AIMEE_HOME="$HOME/.config/aimee"
 mkdir -p "$AIMEE_HOME/modules.d/server" "$HOME/workflows" "$HOME/repo"
 # The engine needs the workflow definitions it would ship with; a submit names
 # one by workflow name and fails without it.
-WORKFLOWS=${AIMEE_WORKFLOWS_DIR:-/opt/workflows}
 [ -d "$WORKFLOWS" ] && cp "$WORKFLOWS"/*.yaml "$HOME/workflows/" 2>/dev/null || true
 HTTP_SOCK="$AIMEE_HOME/aimee-http.sock"
 BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
-WFE_SOCK="$AIMEE_HOME/aimee-wfe.sock"
 DB="$AIMEE_HOME/aimee.db"
 export AIMEE_SOCK="$AIMEE_HOME/aimee.sock"
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
-# The grant's executable= is what the daemon pins the peer against, so it must
-# name the module this rig actually starts. In a container the two are the same
-# path and a plain copy works; against a build tree they are not, and a grant
-# naming an uninstalled path makes the daemon reject the whole policy and exit.
-sed "s|^executable=.*|executable=$MODULE|" "$GRANT" \
-    >"$AIMEE_HOME/modules.d/server/aimee.grant"
-sed "s|^executable=.*|executable=${WFE:-$AIMEE_WFE_BIN}|" "$WFE_GRANT" \
-    >"$AIMEE_HOME/modules.d/server/wfe.grant"
-# The engine carries two identities: wfe (the store kinds it CALLS) and
-# workflows (the control kinds it ANSWERS). A serving grant requests nothing, so
-# one cannot do both, and without the second the engine's control stage is
-# refused at attach -- "workflows attach: bus: attach denied" -- while the rest
-# of the topology comes up looking fine.
-WORKFLOWS_GRANT=${AIMEE_WORKFLOWS_GRANT:-$(dirname "$WFE_GRANT")/workflows.grant}
-if [ -r "$WORKFLOWS_GRANT" ]; then
-   sed "s|^executable=.*|executable=${WFE:-${AIMEE_WFE_BIN:-}}|" "$WORKFLOWS_GRANT" \
-       >"$AIMEE_HOME/modules.d/server/workflows.grant"
-fi
+workflow_fixture_install_policy || exit 1
 
 # A git repo for the proposal to belong to: submit resolves the repo path and
 # validates the proposal source against it.
@@ -94,21 +74,16 @@ state() {
    curl -s --unix-socket "$HTTP_SOCK" http://localhost/v1/server/health |
       sed -n 's/.*"state":"\([a-z]*\)".*/\1/p'
 }
-# Every call carries the same identity. The engine scopes a run to the principal
-# that submitted it, and resolves that owner by walking parent links THROUGH the
-# module -- so calling as one user and reading as another is not a test of the
-# store, it is a test of the access check refusing. Sending the header exercises
-# the ownership lookup as well as the operation.
-WEBUSER=${WEBUSER:-lifecycle-tester}
+# The C boundary authenticates the actual local peer and stamps the workflow
+# principal over the module bus. No caller-controlled identity header is used.
 wfe() {
    # $1 method, $2 path, $3 body
    if [ -n "$3" ]; then
-      curl -s --max-time 20 --unix-socket "$WFE_SOCK" -X "$1" \
-         -H "X-Aimee-Webuser: $WEBUSER" \
+      curl -s --max-time 20 --unix-socket "$HTTP_SOCK" -X "$1" \
          -H 'Content-Type: application/json' -d "$3" "http://localhost$2"
    else
-      curl -s --max-time 20 --unix-socket "$WFE_SOCK" -X "$1" \
-         -H "X-Aimee-Webuser: $WEBUSER" "http://localhost$2"
+      curl -s --max-time 20 --unix-socket "$HTTP_SOCK" -X "$1" \
+         "http://localhost$2"
    fi
 }
 # The work item, and one field of it, through the engine. These replace direct
@@ -137,25 +112,14 @@ wi_event_count() {
 # comes from the DSN so a non-default one is still found. The invariant this
 # serves is unchanged: the module is the only holder, and aimee-wfe is never
 # among them.
-STORE_PORT=$(printf '%s' "${AIMEE_STORE_URL:-}" | sed -n 's|.*:\([0-9][0-9]*\)/.*|\1|p')
-[ -n "$STORE_PORT" ] || STORE_PORT=5432
-# Only this rig's processes. The port is shared, so a global scan counts any
-# other module running on the machine and reports two holders for a topology
-# that has one. What is being asserted is about THIS daemon, module and engine.
-holders() {
-   for _p in ${MPID:-} ${SPID:-} ${WPID:-}; do
-      [ -n "$_p" ] || continue
-      if ss -tnp 2>/dev/null | grep ":$STORE_PORT " | grep -q "pid=$_p,"; then
-         printf '%s(%s) ' "$(tr -d '\0' <"/proc/$_p/comm" 2>/dev/null)" "$_p"
-      fi
-   done
-}
+holders() { workflow_fixture_sql_holders; }
 
 echo "=============================================================="
 echo " the shipped topology: daemon, module, engine"
 echo "=============================================================="
 "$SERVER" --foreground >"$HOME/server.log" 2>&1 &
 SPID=$!
+workflow_fixture_start_config || exit 1
 i=0
 while [ $i -lt 300 ]; do
    [ -S "$HTTP_SOCK" ] && break
@@ -163,6 +127,7 @@ while [ $i -lt 300 ]; do
    i=$((i + 1))
 done
 require_store_url
+workflow_fixture_start_postgres || exit 1
 AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
 MPID=$!
 i=0
@@ -177,24 +142,30 @@ done
 }
 
 AIMEE_MODULE_BUS_SOCKET="$BUS_SOCK" "$WFE" \
-   --home "$AIMEE_HOME" --socket "$WFE_SOCK" --workflow-dir "$HOME/workflows" \
+   --home "$AIMEE_HOME" --workflow-dir "$HOME/workflows" \
    >"$HOME/wfe.log" 2>&1 &
 WPID=$!
 i=0
 while [ $i -lt 200 ]; do
-   [ -S "$WFE_SOCK" ] && break
+   workflow_fixture_stage_ready build && break
    kill -0 "$WPID" 2>/dev/null || break
    sleep 0.1
    i=$((i + 1))
 done
-if [ -S "$WFE_SOCK" ]; then
-   say_pass "the workflow engine bound its socket"
+if workflow_fixture_stage_ready build; then
+   say_pass "the workflow engine serves definitions through the C boundary"
 else
-   say_fail "the engine did not start; its output was:"
+   say_fail "the engine did not serve definitions; its output was:"
    tail -15 "$HOME/wfe.log" 2>/dev/null | sed 's/^/      /'
-   kill "$MPID" "$SPID" 2>/dev/null
+   cleanup
    exit 1
 fi
+
+workflow_fixture_register_workspace "$HOME/repo" || {
+   say_fail "the actual fixture workspace could not be registered"
+   exit 1
+}
+say_pass "the actual fixture workspace is registered through the C owner"
 
 # The invariant, asserted here and after every mutation below.
 check_owner() {
@@ -206,8 +177,8 @@ check_owner() {
       return
       ;;
    esac
-   if [ "$count" = "1" ]; then
-      say_pass "$1: the module is still the only holder"
+   if [ "$count" = "1" ] && printf '%s' "$who" | grep -q "($WFF_POSTGRES_PID)"; then
+      say_pass "$1: the PostgreSQL owner is still the only holder"
    else
       say_fail "$1: $count processes hold the store ($who)"
    fi
@@ -432,5 +403,5 @@ echo "=============================================================="
 echo " $PASS passed, $FAIL failed"
 echo " home: $HOME"
 echo "=============================================================="
-kill "$WPID" "$MPID" "$SPID" 2>/dev/null
+cleanup
 [ "$FAIL" -eq 0 ]

@@ -77,41 +77,33 @@ func (m *Manager) commitCredentials(ctx context.Context, changes []credentialCha
 	return rollback, nil
 }
 
-// Resolve the selected connection's OAuth credential, never an unrelated API
-// key or another account. These are the same Vault slots used by serving.
+// Resolve the same selected, refresh-aware credential/account snapshot as serving.
+// This private resource response is never a provider roster or model payload.
+type codexCredentialSnapshot struct {
+	Token         string `json:"token"`
+	Account       string `json:"account_id"`
+	Source        string `json:"source_digest"`
+	ClientVersion string `json:"client_version"`
+}
+
+func (m *Manager) resolveCodexSnapshot(ctx context.Context, p object) (codexCredentialSnapshot, error) {
+	if m.resources == nil {
+		return codexCredentialSnapshot{}, errors.New("credential service unavailable")
+	}
+	document, err := m.resources.Credential(ctx, "get", str(p, "name"), "codex_oauth_credentials", "")
+	if err != nil {
+		return codexCredentialSnapshot{}, err
+	}
+	var pair codexCredentialSnapshot
+	if json.Unmarshal([]byte(document), &pair) != nil || pair.Token == "" || len(pair.Source) != 64 || strings.ContainsAny(pair.Token+pair.Account, "\r\n") {
+		return codexCredentialSnapshot{}, errors.New("Codex OAuth credential unavailable; re-authenticate this provider")
+	}
+	return pair, nil
+}
+
+// Preserve the serving/probe helper's credential-only contract. Catalog callers
+// additionally require the declared compatibility version from the same pair.
 func (m *Manager) resolveCodex(ctx context.Context, p object) (string, string, error) {
-	name := str(p, "name")
-	token, err := m.resources.Credential(ctx, "get", name, "codex_oauth_token", "")
-	if err != nil {
-		return "", "", err
-	}
-	account, err := m.resources.Credential(ctx, "get", name, "codex_account_id", "")
-	if err != nil {
-		return "", "", err
-	}
-	if token == "" {
-		document, err := m.resources.Credential(ctx, "get", name, "oauth", "")
-		if err != nil {
-			return "", "", err
-		}
-		var doc object
-		if json.Unmarshal([]byte(document), &doc) == nil {
-			token = str(doc, "access_token")
-			if account == "" {
-				account = str(doc, "account_id")
-			}
-			if tokens, ok := doc["tokens"].(map[string]any); ok {
-				if token == "" {
-					token = str(tokens, "access_token")
-				}
-				if account == "" {
-					account = str(tokens, "account_id")
-				}
-			}
-		}
-	}
-	if token == "" {
-		return "", "", errors.New("Codex OAuth credential unavailable; re-authenticate this provider")
-	}
-	return token, account, nil
+	pair, err := m.resolveCodexSnapshot(ctx, p)
+	return pair.Token, pair.Account, err
 }

@@ -64,12 +64,13 @@ const fs = require('fs');
   await context.close();
  }
 
- // The shipped wizard must present and persist every memory backend on first start.
- for (const engine of ['native', 'cognee', 'hillock']) {
+ // Only supported engines may be selected; retired saved selections require an explicit replacement.
+ for (const engine of ['native', 'cognee', 'hillock', 'unknown']) {
   const context = await browser.newContext();
   await context.addInitScript(()=>localStorage.setItem('aimee_setup_dismissed','1'));
   const page = await context.newPage(); page.setDefaultTimeout(15000);
   const config = {provider:'test',embedder_model:'bekko-a25m'}, writes = [], errors = [];
+  if (engine !== 'native') Object.assign(config, {memory_backend_engine:engine,memory_backend_endpoint:'http://old-service',memory_backend_auth:'bearer',memory_backend_token:true});
   page.on('pageerror', e=>errors.push(e.message));
   await page.route('http://gui-check.test/**', async route=>{
    const path = new URL(route.request().url()).pathname;
@@ -84,8 +85,7 @@ const fs = require('fs');
    if (path === '/api/vault/credentials') data={credentials:[{agent:'git',cred:'author_name'},{agent:'git',cred:'author_email'}]};
    if (path === '/api/config/set') {
     const body=route.request().postDataJSON(); writes.push(body);
-    if (body.key === 'memory_backend_token') {config.memory_backend_token=true; data={value:true};}
-    else if (body.key === 'memory.backend') {for(const [key,value] of Object.entries(body.value))config['memory_backend_'+key]=value;data={value:body.value,reload:'restart',applied_live:false};}
+    if (body.key === 'memory.backend' && body.value.engine === 'native') {for(const [key,value] of Object.entries(body.value))config['memory_backend_'+key]=value;data={value:body.value,reload:'restart',applied_live:false};}
     else throw Error('Unexpected wizard write: '+body.key);
    }
    return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
@@ -94,17 +94,21 @@ const fs = require('fs');
   await page.getByRole('button',{name:'Got it',exact:true}).click();
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('aimee:open-setup-wizard')));
   const dialog=page.getByRole('dialog',{name:'Setup wizard'});
-  await dialog.getByLabel('Memory backend').selectOption(engine);
+  const selection=dialog.getByLabel('Memory backend');
+  const save=dialog.getByRole('button',{name:'Save memory backend',exact:true});
   if (engine !== 'native') {
-   await dialog.getByLabel('Memory service origin').fill('http://'+engine+':8097');
-   if(engine==='cognee')await dialog.getByLabel('Memory service authentication').selectOption('api-key');
-   await dialog.getByLabel('Memory service credential').fill('fixture-browser-token');
+   if (await selection.inputValue() !== engine || !(await save.isDisabled()) || writes.length) throw Error('Retired selection silently changed or allowed saving');
+   await dialog.getByRole('alert').filter({hasText:'Export and migrate'}).waitFor();
+   if (await dialog.getByLabel('Memory service credential').count()) throw Error('Retired credential setup still offered');
+   await selection.selectOption('native');
   }
-  await dialog.getByRole('button',{name:'Save memory backend',exact:true}).click();
+  const options=await selection.locator('option').allTextContents();
+  if (options.some(option=>option !== 'Aimee native memory' && !option.endsWith('(retired)'))) throw Error('Unsupported engine offered');
+  await save.click();
   await dialog.getByText('Workspaces & projects',{exact:true}).waitFor();
-  if(config.memory_backend_engine!==engine || writes.length!==(engine==='native'?1:2) || errors.length)throw Error(JSON.stringify({engine,writes,errors}));
-  if(engine!=='native' && (writes[0].key!=='memory_backend_token' || writes[1].key!=='memory.backend'))throw Error('Credential was not sealed first');
-  console.log(JSON.stringify({screen:'first-start memory',engine,credentialSealed:engine!=='native',atomicSelection:true,errors}));
+  if(config.memory_backend_engine!=='native' || writes.length!==1 || errors.length)throw Error(JSON.stringify({engine,writes,errors}));
+  if(JSON.stringify(writes[0])!==JSON.stringify({key:'memory.backend',value:{engine:'native',endpoint:'',auth:'bearer'}}))throw Error('Unexpected backend write');
+  console.log(JSON.stringify({screen:'first-start memory',previousEngine:engine,retiredSelectionRequiresExplicitReplacement:engine!=='native',engine:'native',atomicSelection:true,errors}));
   await context.close();
  }
  // A reinstall at the same origin must override a prior Finish flag.

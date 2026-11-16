@@ -1,3 +1,4 @@
+#include "cJSON.h"
 /* test_oauth_pkce.c: unit tests for the PKCE primitives and OAuth token flow. */
 #include <assert.h>
 #include <stdio.h>
@@ -286,6 +287,43 @@ int main(void)
       assert(resp.expires_at > (long)time(NULL)); /* should be in the future */
    }
 
+   /* Every token field accepts its full payload capacity, never truncates. */
+   {
+      oauth_token_response_t parsed;
+      const char *fields[] = {"access_token", "refresh_token", "token_type"};
+      const size_t capacities[] = {sizeof parsed.access_token, sizeof parsed.refresh_token,
+                                   sizeof parsed.token_type};
+      for (size_t field = 0; field < 3; field++)
+      {
+         char *value = malloc(capacities[field] + 1);
+         assert(value);
+         memset(value, 'x', capacities[field]);
+         value[capacities[field]] = 0;
+         for (int oversized = 0; oversized < 2; oversized++)
+         {
+            value[capacities[field] - 1] = oversized ? 'x' : 0;
+            cJSON *object = cJSON_CreateObject();
+            assert(object && cJSON_AddStringToObject(object, "access_token", "valid"));
+            cJSON_DeleteItemFromObjectCaseSensitive(object, fields[field]);
+            assert(cJSON_AddStringToObject(object, fields[field], value));
+            char *wire = cJSON_PrintUnformatted(object);
+            assert(wire);
+            assert((oauth_token_parse_response(wire, &parsed) != 0) == oversized);
+            if (!oversized)
+            {
+               const char *actual = field == 0   ? parsed.access_token
+                                    : field == 1 ? parsed.refresh_token
+                                                 : parsed.token_type;
+               assert(strlen(actual) == capacities[field] - 1 && !strcmp(actual, value));
+            }
+            free(wire);
+            cJSON_Delete(object);
+         }
+         free(value);
+      }
+      assert(oauth_token_parse_response("{\"access_token\":\"valid\"} trailing", &parsed));
+   }
+
    /* --- oauth_token_parse_response: missing access_token → error --- */
    {
       const char *json = "{\"token_type\": \"Bearer\"}";
@@ -331,6 +369,16 @@ int main(void)
       rc = oauth_token_load(client, loaded, sizeof(loaded));
       assert(rc == 0);
       assert(strcmp(loaded, "access-abc") == 0);
+
+      /* A fresh login without expiry cannot inherit the old token's expiry. */
+      to_store.expires_at = 1;
+      assert(oauth_token_store(client, &to_store) == 0);
+      assert(oauth_token_load(client, loaded, sizeof loaded) != 0);
+      to_store.expires_at = 0;
+      snprintf(to_store.access_token, sizeof to_store.access_token, "new-login-no-expiry");
+      assert(oauth_token_store(client, &to_store) == 0);
+      assert(oauth_token_load(client, loaded, sizeof loaded) == 0);
+      assert(!strcmp(loaded, "new-login-no-expiry"));
 
       /* Clean up */
       oauth_token_remove(client);

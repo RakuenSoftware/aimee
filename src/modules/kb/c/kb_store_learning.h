@@ -78,14 +78,6 @@ extern "C"
       char applied_refs[LEARNING_REF_JSON_MAX];
    } learning_application_event_t;
 
-   /* Deterministically materialize/refresh one recurring-failure observation
-    * and attach every matching source event through max_event_id. The derived
-    * row becomes active only at the closed policy's 3-event/2-session floor. */
-   int kb_store_learning_observation_refresh_recurrence(const char *observation_id,
-                                                        const char *role, const char *failure_mode,
-                                                        const char *title, const char *summary,
-                                                        int64_t max_event_id);
-
    /* Read-only observation surfaces. evidence ids are stable source_event_id
     * locators, ordered oldest-first. */
    int kb_store_learning_observation_get(const char *observation_id, learning_observation_t *out);
@@ -94,7 +86,6 @@ extern "C"
                                           learning_observation_t *out, int max);
    int kb_store_learning_observation_evidence_ids(const char *observation_id, int64_t *out,
                                                   int max);
-   int kb_store_learning_observation_set_status(const char *observation_id, const char *status);
    /* Closed-type, normalized observation refresh. The transaction upserts the
     * derived row, idempotently attaches exact event locators, and recomputes its
     * lifecycle from the effective supporting/contradicting evidence. */
@@ -181,22 +172,6 @@ extern "C"
     * -1 on miss / SQL / connection error. */
    int kb_store_learning_proposal_get(int id, learning_proposal_t *out);
 
-   /* List learning_proposals rows filtered by |state| and |sink|. Empty
-    * / NULL filters skip the corresponding WHERE clause. Rows are
-    * returned in id-DESC order, capped at |max| (caller's buffer
-    * size); |limit| further caps the SQL fetch (clamped to max).
-    * Returns count (>=0) on success, -1 on SQL / connection error. */
-   int kb_store_learning_proposal_list(const char *state, const char *sink, int limit,
-                                       learning_proposal_t *out, int max);
-
-   /* Settled-window proposal counts: committed and (committed + archived)
-    * within |window_days|, using COALESCE(committed_at, updated_at,
-    * created_at) for the timestamp. window_days must be >0. Sets
-    * *committed and *terminal on success and returns 0; returns -1 on
-    * bad args / SQL / connection error. Either pointer may be NULL. */
-   int kb_store_learning_proposals_settled_counts(int window_days, int64_t *committed,
-                                                  int64_t *terminal);
-
 #define KB_STORE_LEARNING_SOURCE_LEN      16
 #define KB_STORE_LEARNING_SIGNAL_TYPE_LEN 32
 
@@ -260,10 +235,6 @@ extern "C"
     * not police the vocabulary, the policy layer does. Returns 0 on success,
     * -1 on bad args / SQL / connection error. */
    int kb_store_learning_fate_record(int proposal_id, const char *fate, const char *reason);
-
-   /* The recorded fate of one proposal. Writes at most KB_STORE_LEARNING_FATE_LEN
-    * bytes. Returns 1 when a row exists, 0 when none does, -1 on error. */
-   int kb_store_learning_fate_get(int proposal_id, char *fate_out, size_t fate_out_len);
 
    /* Committed-proposal counts by originating signal_type over |window_days|,
     * split by whether a fate has been recorded and whether it was a regret.

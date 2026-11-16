@@ -192,54 +192,6 @@ static void test_job_interval_is_respected(void)
    printf("  job_interval_is_respected: ok\n");
 }
 
-/* ingress-compression §4: with kb.mining.failure_learning_enabled on, the
- * recurrence job emits a *pending learning proposal* (sink=artifact) instead of
- * writing the workflow_pattern artifact directly — the artifact appears only after
- * review/Gate-Promote commits the proposal. A repeat cluster corroborates the same
- * pending proposal rather than producing a second one. */
-static void test_recurrence_routes_to_learning_when_enabled(void)
-{
-   assert(config_set_kb_mining_failure_learning_enabled(1) == 0);
-
-   open_db();
-   for (int i = 1; i <= 5; i++)
-   {
-      char session[32];
-      snprintf(session, sizeof(session), "sess-%d", (i % 3) + 1);
-      seed_event(i, session, "delegate_exit", "code", "stall/no-writes", "");
-   }
-
-   assert(kb_mining_run_once() >= 1);
-   /* Routed through learning: NO direct artifact, but a pending proposal exists. */
-   assert(kb_store_artifact_count("workflow_pattern", "proposed") == 0);
-   int pid =
-       kb_store_learning_proposal_find_pending("artifact", "delegate_exit:code:stall/no-writes", 0);
-   assert(pid > 0);
-   learning_proposal_t proposal;
-   assert(kb_store_learning_proposal_get(pid, &proposal) == 0);
-   assert(strstr(proposal.evidence_refs, "learning_observation") != NULL);
-   assert(strstr(proposal.evidence_refs, "interaction_event") != NULL);
-
-   /* A second qualifying window on the same cluster corroborates and refreshes
-    * the exact evidence manifest on the same proposal. */
-   seed_event(6, "sess-1", "delegate_exit", "code", "stall/no-writes", "");
-   seed_event(7, "sess-4", "delegate_exit", "code", "stall/no-writes", "");
-   seed_event(8, "sess-5", "delegate_exit", "code", "stall/no-writes", "");
-   exec_sql("UPDATE mining_jobs SET last_run_at='' WHERE id='recurrence'");
-   assert(kb_mining_run_once() >= 0);
-   assert(kb_store_artifact_count("workflow_pattern", "proposed") == 0);
-   int pid2 =
-       kb_store_learning_proposal_find_pending("artifact", "delegate_exit:code:stall/no-writes", 0);
-   assert(pid2 == pid); /* same pending proposal, corroborated */
-   assert(kb_store_learning_proposal_get(pid, &proposal) == 0);
-   assert(proposal.corroboration_count == 2);
-   assert(strstr(proposal.evidence_refs, "\"stable_id\":8") != NULL);
-
-   close_db();
-   assert(config_set_kb_mining_failure_learning_enabled(0) == 0);
-   printf("  recurrence_routes_to_learning_when_enabled: ok\n");
-}
-
 static void test_recovery_observation_and_scope_partition(void)
 {
    open_db();
@@ -312,7 +264,6 @@ int main(void)
    test_pattern_cluster_proposes_interaction_pattern();
    test_disabled_job_is_skipped();
    test_job_interval_is_respected();
-   test_recurrence_routes_to_learning_when_enabled();
    test_recovery_observation_and_scope_partition();
    test_application_attribution_contract();
    printf("kb_mining: all tests passed\n");

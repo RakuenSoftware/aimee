@@ -180,7 +180,7 @@ SERVER_DASHBOARD_FALLBACK char *api_dashboard_maintenance(void)
 {
    cJSON *args = cJSON_CreateObject(), *response = NULL;
    cJSON_AddStringToObject(args, "operation", "maintenance-dashboard");
-   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   int rc = aimee_module_commands_dispatch_internal_caller("memory.runtime", args, &response);
    cJSON_Delete(args);
    if (rc <= 0 || !cJSON_IsObject(response))
    {
@@ -213,14 +213,4 @@ SERVER_DASHBOARD_FALLBACK char *api_dashboard_onboard(void)
 SERVER_DASHBOARD_FALLBACK char *api_doctor(void)
 {
    return strdup("{\"error\":\"doctor report is not available from the server-hosted webchat\"}");
-}
-
-char *api_payload_rewrite_status(void)
-{
-   cJSON *obj = tool_payload_rewrite_status(NULL);
-   if (!obj)
-      return strdup("{}");
-   char *json = cJSON_PrintUnformatted(obj);
-   cJSON_Delete(obj);
-   return json ? json : strdup("{}");
 }

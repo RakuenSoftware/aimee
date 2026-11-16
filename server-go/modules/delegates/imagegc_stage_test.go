@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func imageGCRequest(images []SandboxImage, now int64, keepMin int, maxAge int64) []byte {
@@ -32,9 +32,9 @@ func imageGCRequest(images []SandboxImage, now int64, keepMin int, maxAge int64)
 func callImageGC(t *testing.T, images []SandboxImage, now int64, keepMin int,
 	maxAge int64) []SandboxImageVerdict {
 	t.Helper()
-	response, status := Handle(bus.ModuleInvocation{StageID: StageImageGC},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageImageGC},
 		imageGCRequest(images, now, keepMin, maxAge))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	if len(response) < 8 || binary.LittleEndian.Uint32(response[0:4]) != imageGCResponseMagic {
@@ -128,17 +128,17 @@ func TestImageGCStageRejectsMalformedRequests(t *testing.T) {
 	cases["tag length overruns"] = overrun
 
 	for name, request := range cases {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageImageGC}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageImageGC}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: status = %v, want InvalidRequest", name, status)
 		}
 	}
 }
 
 func TestImageGCStageHonoursCancellation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageImageGC, DeadlineNS: 1}
+	invocation := ring.ModuleInvocation{StageID: StageImageGC, DeadlineNS: 1}
 	request := imageGCRequest([]SandboxImage{{Tag: "a", CreatedAt: "2026-07-15 12:34:56 +0000 UTC"}},
 		1784118896, 1, 86400)
-	if _, status := Handle(invocation, request); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(invocation, request); status != ring.ModuleStatusCancelled {
 		t.Errorf("status = %v, want Cancelled", status)
 	}
 }

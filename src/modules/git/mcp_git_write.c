@@ -424,7 +424,7 @@ cJSON *handle_git_push(cJSON *args)
       if (has_upstream && upstream)
       {
          char *slash = strchr(upstream, '/');
-         const char *upstream_branch = slash ? slash + 1 : upstream;
+         char *upstream_branch = slash ? slash + 1 : upstream;
          char *up_nl = strchr(upstream_branch, '\n');
          if (up_nl)
             *up_nl = '\0';

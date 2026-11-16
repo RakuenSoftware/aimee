@@ -67,13 +67,6 @@ extern "C"
    int kb_store_org_rate_policy_show(const char *dim, const char *scope_key,
                                      kb_store_org_rate_policy_t *out, int max);
 
-   /* The atomic keyed fixed-window admission (org_rate_check) — the P2b enforcement
-    * primitive (NOT wired to egress in P4b). Takes the RESOLVED IDENTITY: team (required),
-    * and optionally project (has_project), model, cred_slot (NULL/empty = absent). On a
-    * DB-level outcome returns 0 and fills *out; on a definer error returns -1. Tenant-scoped. */
-   int kb_store_org_rate_check(int64_t team, int has_project, int64_t project, const char *model,
-                               const char *cred_slot, kb_store_org_rate_result_t *out);
-
 #ifdef __cplusplus
 }
 #endif

@@ -179,26 +179,6 @@ func TestChatSessionRestoresTranscriptAndProviderID(t *testing.T) {
 	}
 }
 
-func TestSeedChatMessagesDoesNotOverwriteServerHistory(t *testing.T) {
-	s := newSessionTestServer(t)
-	_ = s.touchChatSession("alice", "sess-1", "", "server turn")
-	if err := s.seedChatMessages("alice", "sess-1", []chatMessage{
-		{Role: "user", Text: "legacy user"},
-		{Role: "assistant", Text: "legacy answer"},
-	}); err != nil {
-		t.Fatalf("initial seed: %v", err)
-	}
-	if err := s.seedChatMessages("alice", "sess-1", []chatMessage{
-		{Role: "user", Text: "stale overwrite"},
-	}); err != nil {
-		t.Fatalf("repeat seed: %v", err)
-	}
-	cs, _ := s.getChatSession("alice", "sess-1")
-	if cs == nil || len(cs.Messages) != 2 || cs.Messages[0].Text != "legacy user" {
-		t.Fatalf("server transcript overwritten: %+v", cs)
-	}
-}
-
 func TestHandleChatSessionsListReturnsEnvironmentSessions(t *testing.T) {
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "sess-1", "/a", "hello there")
@@ -262,12 +242,11 @@ func TestHandleChatSessionUpsertAndGet(t *testing.T) {
 	}
 }
 
-func TestHandleChatSessionUpsertSeedsCrossBrowserStateWithoutTrustingProviderID(t *testing.T) {
+func TestHandleChatSessionUpsertPersistsMetadataWithoutTrustingProviderID(t *testing.T) {
 	s := newSessionTestServer(t)
 	rr := httptest.NewRecorder()
 	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session", strings.NewReader(
-		`{"id":"stable-id","title":"My chat","provider_session_id":"provider-id",`+
-			`"messages":[{"role":"user","text":"question"},{"role":"assistant","text":"answer"}]}`)), "alice")
+		`{"id":"stable-id","title":"My chat","provider_session_id":"provider-id"}`)), "alice")
 	s.handleChatSession(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
@@ -276,7 +255,7 @@ func TestHandleChatSessionUpsertSeedsCrossBrowserStateWithoutTrustingProviderID(
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.ID != "stable-id" || got.ProviderSessionID != "" || len(got.Messages) != 2 {
+	if got.ID != "stable-id" || got.ProviderSessionID != "" || len(got.Messages) != 0 {
 		t.Fatalf("restorable session = %+v", got)
 	}
 }
@@ -285,11 +264,11 @@ func TestHandleChatSessionUpsertTransfersServerTrustedLegacyAlias(t *testing.T) 
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "legacy-provider-id", "", "old chat")
 	_ = s.setChatSessionRuntime("alice", "legacy-provider-id", "legacy-provider-id")
+	_ = s.appendChatMessage("alice", "legacy-provider-id", "user", "old chat")
 
 	rr := httptest.NewRecorder()
 	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session", strings.NewReader(
-		`{"id":"web-stable-id","legacy_provider_alias_id":"legacy-provider-id",`+
-			`"messages":[{"role":"user","text":"old chat"}]}`)), "alice")
+		`{"id":"web-stable-id","legacy_provider_alias_id":"legacy-provider-id"}`)), "alice")
 	s.handleChatSession(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
@@ -428,4 +407,70 @@ func TestCurrentUserDefaultsEmpty(t *testing.T) {
 	if u := currentUser(req); u != "zoe" {
 		t.Fatalf("currentUser = %q, want zoe", u)
 	}
+}
+
+func TestChatSessionUpsertRefusesFlatHistoryWithoutChangingStoredArchive(t *testing.T) {
+	s := newSessionTestServer(t)
+	_ = s.touchChatSession("alice", "archive", "", "original")
+	_ = s.appendChatMessage("alice", "archive", "assistant", "retained legacy archive")
+	rr := httptest.NewRecorder()
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session", strings.NewReader(`{"id":"archive","title":"replacement","messages":[{"role":"assistant","text":"browser supplied live history"}]}`)), "alice")
+	s.handleChatSession(rr, req)
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d, want 422", rr.Code)
+	}
+	got, err := s.getChatSession("alice", "archive")
+	if err != nil || got == nil || got.Title != "original" || len(got.Messages) != 1 || got.Messages[0].Text != "retained legacy archive" {
+		t.Fatalf("archive changed: %+v, %v", got, err)
+	}
+}
+
+// Legacy rows are seeded only by fixtures; production has no parallel transcript
+// or provider-resume writer after the canonical session cutover.
+func (s *server) setChatSessionRuntime(username, id, providerSessionID string) error {
+	if s == nil || s.db == nil || username == "" || id == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO chat_session_runtime (session_id, username, provider_session_id)
+		SELECT ?, ?, ?
+		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			provider_session_id = CASE
+				WHEN excluded.provider_session_id != '' THEN excluded.provider_session_id
+				ELSE chat_session_runtime.provider_session_id END`,
+		id, username, providerSessionID, id)
+	return err
+}
+
+func (s *server) chatSessionProviderID(username, id string) (string, error) {
+	if s == nil || s.db == nil || username == "" || id == "" {
+		return "", nil
+	}
+	var providerSessionID string
+	err := s.db.QueryRow(`SELECT provider_session_id FROM chat_session_runtime
+		WHERE session_id = ?`, id).Scan(&providerSessionID)
+	switch err {
+	case nil:
+		return providerSessionID, nil
+	case sql.ErrNoRows:
+		return "", nil
+	default:
+		return "", err
+	}
+}
+
+func (s *server) appendChatMessage(username, id, role, text string) error {
+	if s == nil || s.db == nil || username == "" || id == "" || text == "" {
+		return nil
+	}
+	if role != "user" && role != "assistant" && role != "narration" {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO chat_session_messages (session_id, username, role, text)
+		SELECT ?, ?, ?, ?
+		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ?)`,
+		id, username, role, text, id)
+	return err
 }

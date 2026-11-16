@@ -3,6 +3,7 @@ package panel
 import (
 	"context"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 )
 
@@ -39,7 +40,6 @@ type Analysis struct {
 type seatOutcome struct {
 	seat        Seat
 	result      panelResponse
-	raw         string
 	cost        float64
 	costUnknown bool
 	err         error
@@ -64,26 +64,38 @@ func RunAnalysis(ctx context.Context, delegates Delegates, run Run, seats []Seat
 		// Repeated persona/agent specifications must not collide and reuse one
 		// remote result, so each capacity seat carries a distinct durable slot.
 		// An empty Selector is deliberate: generic delegation resolves eligibility.
+		input, err := reviewInput(run, seat.Persona, prompt)
+		if err != nil {
+			return Analysis{Unreachable: "canonical review input: " + err.Error()}
+		}
 		requests[i] = SeatRequest{Role: delegateRole, Persona: seat.Persona, Selector: seat.Selector,
-			Prompt: prompt, Tools: true, MaxTurnsCap: delegateMaxTurnsCap,
+			Input: input, Tools: true, MaxTurnsCap: delegateMaxTurnsCap,
 			DurableSlot:   seatDurableSlot(run, panelRound, seat.Ordinal),
 			ArtifactStage: artifactStage, ArtifactHash: artifactHash}
 	}
 	delegated := delegates.Group(ctx, run, requests)
 	outcomes := make([]seatOutcome, len(seats))
 	repairIndexes := make([]int, 0, len(seats))
+	repairInputs := make(map[int]*canonical.Request)
 	for i, call := range delegated {
-		parsed, err := parsePanelResponse(call.Response, call.Err)
+		text, admissionErr := call.semanticText()
+		parsed, err := parsePanelResponse(text, admissionErr)
 		seat := seats[i]
 		seat.Participant = call.Participant
-		outcomes[i] = seatOutcome{seat: seat, result: parsed, raw: call.Response, cost: call.CostUSD,
+		outcomes[i] = seatOutcome{seat: seat, result: parsed, cost: call.CostUSD,
 			costUnknown: call.CostUnknown, err: err, category: call.FailureCategory,
 			detail: call.FailureDetail, replayLost: call.ReplayLost}
 		// A verdict that contradicts its own findings carries no more reviewable
 		// signal than unparseable text, so it earns the same one repair attempt.
 		// Without this it was charged against the artifact having never been retried.
-		if call.Err == nil && strings.TrimSpace(call.Participant) != "" && (err != nil || panelVerdictError(parsed) != nil) {
-			repairIndexes = append(repairIndexes, i)
+		if admissionErr == nil && strings.TrimSpace(call.Participant) != "" && (err != nil || panelVerdictError(parsed) != nil) {
+			input, repairErr := canonical.RepairRequest(requests[i].Input, call.Output, panelResponseRepairPrompt(run.ID, artifactHash, artifactStage))
+			if repairErr != nil {
+				outcomes[i].err = repairErr
+			} else {
+				repairInputs[i] = input
+				repairIndexes = append(repairIndexes, i)
+			}
 		}
 	}
 	if len(repairIndexes) > 0 && run.CostLimitUSD > 0 {
@@ -104,7 +116,7 @@ func RunAnalysis(ctx context.Context, delegates Delegates, run Run, seats []Seat
 				Role:        delegateRole,
 				Persona:     seat.Persona,
 				Participant: seat.Participant,
-				Prompt:      panelResponseRepairPrompt(run.ID, artifactHash, artifactStage, outcomes[outcomeIndex].raw),
+				Input:       repairInputs[outcomeIndex],
 				// Preserve the review delegate's tool-capable transport: a CLI-backed
 				// agent has no HTTP request URL, and tools:false would send its
 				// continuation down the simple path instead.
@@ -117,7 +129,8 @@ func RunAnalysis(ctx context.Context, delegates Delegates, run Run, seats []Seat
 		}
 		for i, call := range delegates.Group(ctx, run, repairs) {
 			outcomeIndex := repairIndexes[i]
-			parsed, err := parsePanelResponse(call.Response, call.Err)
+			text, admissionErr := call.semanticText()
+			parsed, err := parsePanelResponse(text, admissionErr)
 			outcomes[outcomeIndex].cost += call.CostUSD
 			outcomes[outcomeIndex].costUnknown = outcomes[outcomeIndex].costUnknown || call.CostUnknown
 			outcomes[outcomeIndex].result = parsed

@@ -229,7 +229,7 @@ int persona_is_builtin(const char *name)
 
 int persona_exists(const char *project_root, const char *name)
 {
-   if (!name || !name[0])
+   if (!persona_name_valid(name))
       return 0;
    if (persona_is_builtin(name))
       return 1;
@@ -354,17 +354,24 @@ static void set_roles_from_csv(persona_t *out, const char *csv)
 
 int persona_path(const char *project_root, const char *name, char *buf, size_t bufsz)
 {
-   if (!name || !buf || bufsz == 0)
+   if (!buf || bufsz == 0)
       return -1;
+   if (!persona_name_valid(name))
+   {
+      buf[0] = '\0';
+      return -1;
+   }
    struct stat st;
+   int length;
    if (project_root && project_root[0])
    {
-      snprintf(buf, bufsz, "%s/.aimee/personas/%s.md", project_root, name);
-      if (stat(buf, &st) == 0 && S_ISREG(st.st_mode))
+      length = snprintf(buf, bufsz, "%s/.aimee/personas/%s.md", project_root, name);
+      if (length >= 0 && (size_t)length < bufsz && stat(buf, &st) == 0 && S_ISREG(st.st_mode) &&
+          platform_path_is_beneath(project_root, buf))
          return 0;
    }
-   snprintf(buf, bufsz, "%s/personas/%s.md", config_default_dir(), name);
-   if (stat(buf, &st) == 0 && S_ISREG(st.st_mode))
+   length = snprintf(buf, bufsz, "%s/personas/%s.md", config_default_dir(), name);
+   if (length >= 0 && (size_t)length < bufsz && stat(buf, &st) == 0 && S_ISREG(st.st_mode))
       return 0;
    buf[0] = '\0';
    return -1;

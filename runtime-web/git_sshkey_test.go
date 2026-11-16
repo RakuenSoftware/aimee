@@ -31,6 +31,7 @@ func TestGitSSHKeyProxy(t *testing.T) {
 		strings.NewReader(`{"ssh_key":`+jsonString(key)+`}`)), "alice")
 	rr := httptest.NewRecorder()
 	s.handleGitSSHKey(rr, req)
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("POST sshkey: code=%d body=%q", rr.Code, rr.Body.String())
@@ -50,7 +51,9 @@ func TestGitSSHKeyProxy(t *testing.T) {
 	gotMethod, gotBody = "", "x"
 	req = withUser(httptest.NewRequest(http.MethodDelete, "/api/git/sshkey", nil), "alice")
 	rr = httptest.NewRecorder()
+	beforeFakeV1(t)
 	s.handleGitSSHKey(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK || gotMethod != http.MethodDelete {
 		t.Fatalf("DELETE sshkey: code=%d forwardedMethod=%q", rr.Code, gotMethod)
 	}

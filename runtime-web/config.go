@@ -8,14 +8,15 @@ import (
 )
 
 type config struct {
-	port       int
-	certFile   string
-	keyFile    string
-	socketPath string
-	wfeEngine  string
-	wfeSocket  string
-	dbPath     string
-	spaPath    string
+	requireOriginalInput bool
+	port                 int
+	certFile             string
+	keyFile              string
+	socketPath           string
+	wfeEngine            string
+	wfeSocket            string
+	dbPath               string
+	spaPath              string
 	// PAM service backing dashboard logins (/etc/pam.d/<name>). Overridable so a
 	// deployment can point at its own stack rather than the shipped default.
 	pamService string
@@ -46,8 +47,6 @@ func newConfig(port int, certFile, keyFile, socketPath, dbPath, spaPath string) 
 		certFile:   certFile,
 		keyFile:    keyFile,
 		socketPath: socketPath,
-		wfeEngine:  strings.TrimSpace(os.Getenv("AIMEE_WFE_ENGINE")),
-		wfeSocket:  strings.TrimSpace(os.Getenv("AIMEE_WFE_HTTP_SOCKET")),
 		dbPath:     dbPath,
 		spaPath:    spaPath,
 		pamService: pamServiceFromEnv(),

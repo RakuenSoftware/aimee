@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const EventExperience uint32 = 6146
@@ -103,7 +103,7 @@ func eventTerminal(s string) bool { return s == "verified_success" || s == "veri
 // ValidateProcedureEvent receives context outside the public JSON arguments.
 // Exposure must have come from the host's principal-owned receipt reader. A
 // model signal can be retained but cannot establish application or correctness.
-func ValidateProcedureEvent(event ProcedureEvent, exposure ProcedureExposure, caller bus.CommandContext) error {
+func ValidateProcedureEvent(event ProcedureEvent, exposure ProcedureExposure, caller ring.CommandContext) error {
 	bad := errors.New("unverified or inconsistent procedure application")
 	if !caller.Authenticated || caller.Principal == "" || event.Actor != caller.Principal || event.SchemaVersion != 1 || !validProcedure(event.Procedure) || event.ID == "" || event.Trial == "" || event.Task == "" || event.Attempt == "" || event.Environment == "" || event.Model == "" || event.TaskClass == "" {
 		return bad
@@ -366,13 +366,13 @@ func uniqueProcedureRefs(values []string) []string {
 
 // Only the authenticated host may present receipt-reader evidence to this
 // process stage. Public arguments cannot set the caller context on the wire.
-func handleExperience(invocation bus.ModuleInvocation, raw []byte) ([]byte, bus.ModuleStatus) {
+func handleExperience(invocation ring.ModuleInvocation, raw []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.PrincipalRef != 0 || len(raw) > 2<<20 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
-	verb, args, caller, err := bus.DecodeCommandWithContext(raw)
+	verb, args, caller, err := ring.DecodeCommandWithContext(raw)
 	if err != nil || caller == nil || !caller.Authenticated {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	var req struct {
 		Event    ProcedureEvent    `json:"event"`
@@ -382,30 +382,30 @@ func handleExperience(invocation bus.ModuleInvocation, raw []byte) ([]byte, bus.
 	d := json.NewDecoder(bytes.NewReader(args))
 	d.DisallowUnknownFields()
 	if d.Decode(&req) != nil || d.Decode(new(any)) != io.EOF {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	var result any
 	switch verb {
 	case "admit":
 		if ValidateProcedureEvent(req.Event, req.Exposure, *caller) != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		result = req.Event
 	case "project":
 		result, err = ProjectProcedureExperience(req.Events)
 		if err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	body, err := json.Marshal(result)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	framed, err := bus.EncodeCommandResult(body)
+	framed, err := ring.EncodeCommandResult(body)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return framed, bus.ModuleStatusOK
+	return framed, ring.ModuleStatusOK
 }

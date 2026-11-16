@@ -1,0 +1,194 @@
+{
+  "recorded_at": "2026-11-14T14:29:22.157238+00:00",
+  "release_ready": false,
+  "requested_defects_fixed": true,
+  "application_runtime_commit": "87710a802f12effe3549773c64ff35e3bb86d086",
+  "qualification_harness_commit": "4d94516bac147da3c59d01d70f13bd39799a6ed3",
+  "application_image_id": "sha256:e56a2305f48bd17735f2245bed5b4ca907a8ba6ae8148329bfe7cec4cacaddbc",
+  "postgres_image_id": "sha256:6b6e0ae40c481a080b51fdbeaaecf8196f41131238c069d464d5eadd588cdecd",
+  "memory_source_commit": "9be71b7679e13fe3adfd03f7fca3b3433ca7909f",
+  "memory_bundle_sha256": "9621cba8658f45c4bc33769552c5c1390d6b11ed3c04929618c9acf92b99e85f",
+  "source_verification": {
+    "tracked_files": 8773,
+    "mismatches": [],
+    "note": "Runtime matches 87710a802; the regression driver matches 4d94516ba. Image was built from the recorded working-tree snapshot before those commits."
+  },
+  "environment": {
+    "proxmox_host": "192.168.1.253",
+    "ct_id": 9474,
+    "hostname": "aimee-index-ready-fix",
+    "guest_ip": "192.168.0.169",
+    "unprivileged": true,
+    "cores": 24,
+    "memory_mib": 32768,
+    "root_disk_gib": 150,
+    "postgres_storage": "plain",
+    "build_args": {
+      "WITH_RUNTIME_WEB": "0",
+      "WITH_VSCODE": "0",
+      "AIMEE_VERSION": "1.1.0-index-ready-fix"
+    }
+  },
+  "fixes": {
+    "standalone-code-index-unavailable": "Host-only runtime operation 67 and migration 58 own retained repository snapshots independently of the retired memory data operation. Existing extractors and source-observer guard remain active. Native provider owns embeddings with verified identity and explicit extraction policy.",
+    "readiness-misreports-sql-dependency": "Probe actual SQL success; bus transport success no longer attests SQL readiness. Keep the bounded one-second probe cache and off-request-path readiness snapshot.",
+    "fixed-stage-embedding-contract": "Native Stage 3 supports existing verified metadata and complete batch contracts; Go SDK metadata framing and positive dimension handling now match the provider."
+  },
+  "results": {
+    "T2-final": {
+      "identity.json": {
+        "passed": 6,
+        "failed": 0
+      },
+      "local-memory.json": {
+        "passed": 9,
+        "failed": 0
+      },
+      "native-async.json": {
+        "passed": 60,
+        "failed": 1
+      },
+      "provider-boundary.json": {
+        "passed": 353,
+        "failed": 0
+      },
+      "shared-memory.json": {
+        "passed": 17,
+        "failed": 0
+      },
+      "topology.json": {
+        "passed": 40,
+        "failed": 1
+      }
+    },
+    "T2-repeat": {
+      "identity.json": {
+        "passed": 6,
+        "failed": 0
+      },
+      "local-memory.json": {
+        "passed": 9,
+        "failed": 0
+      },
+      "native-async.json": {
+        "passed": 95,
+        "failed": 0
+      },
+      "provider-boundary.json": {
+        "passed": 353,
+        "failed": 0
+      },
+      "shared-memory.json": {
+        "passed": 17,
+        "failed": 0
+      },
+      "topology.json": {
+        "passed": 41,
+        "failed": 0
+      }
+    },
+    "T3-final": {
+      "local-memory.json": {
+        "passed": 9,
+        "failed": 0
+      },
+      "native-async.json": {
+        "passed": 87,
+        "failed": 0
+      },
+      "provider-boundary.json": {
+        "passed": 353,
+        "failed": 0
+      },
+      "standalone-index/standalone-index.json": {
+        "passed": 34,
+        "failed": 0
+      },
+      "topology.json": {
+        "passed": 6,
+        "failed": 0
+      }
+    },
+    "standalone-final-r3": {
+      "standalone-index.json": {
+        "passed": 34,
+        "failed": 0
+      }
+    },
+    "server-e4b-final": {
+      "kb-typed-facts.json": {
+        "passed": 19,
+        "failed": 0
+      }
+    },
+    "kb-e4b-final": {
+      "kb-typed-facts.json": {
+        "passed": 19,
+        "failed": 0
+      }
+    }
+  },
+  "other_validation": {
+    "lint": "all 76 passed",
+    "go_unit_tests": "./modules/aimee/... and ./memory passed",
+    "real_postgres_code_index_tests": {
+      "passed": 2,
+      "failed": 0
+    },
+    "sql_readiness_unit_test": "SQL failure despite bus success, bounded cache, recovery and absent module passed",
+    "private_embedding_wire_tests": {
+      "passed": 4,
+      "failed": 0
+    },
+    "private_stage_wire_tests": {
+      "passed": 4,
+      "failed": 0
+    },
+    "native_release_build": "all seven binaries rebuilt using Bookworm; bundle archive and 79 public fingerprints verified"
+  },
+  "observed_recovery": {
+    "independent_sql_readiness_failure_seconds": 2.19,
+    "T3_sql_readiness_failure_seconds": 2.18,
+    "independent_sql_readiness_recovery_seconds": 12.72,
+    "T3_sql_readiness_recovery_seconds": 14.76,
+    "same_commit_embedding_rebuild": "passed in both independent and T3 runs"
+  },
+  "intermittent_concern": {
+    "first_T2": "source_release_refused after four provider requests prevented the planned fifth-request outage intervention; no provider fixture errors",
+    "fresh_full_T2_repeat": "passed, including all 95 Native asynchronous assertions",
+    "root_cause_established": false,
+    "not_hidden_by_repeat": true
+  },
+  "harness_repairs": [
+    "Read SQL history with psql and the database container own runtime credential; do not assume Python exists in the PostgreSQL image.",
+    "Require the superseded definition to disappear from engine.c; an unchanged caller declaration remains valid.",
+    "Generate valid multiline caller source and inspect the actual nested span response."
+  ],
+  "remaining_release_blockers": [
+    "PII/Vault routing and missing-master behavior remain unfixed; see pii-vault-2026-11-14.json.",
+    "Prior completed CI has integration-tests and live-auth-rigs failures. Final pushed revision requires its own checks.",
+    "The first T2 Native source-release refusal remains an intermittent qualification concern."
+  ],
+  "coverage_limits": [
+    "Linux amd64 application APIs on ordinary PostgreSQL storage; runtime-web and VS Code excluded from this image.",
+    "Both supported synthesis roles were rerun with real E4B. E2B, LUKS, pairing and upgrade evidence from earlier candidates was not rerun for this patch.",
+    "No merge, image publication or release promotion. No physical application-record deletion was introduced or exercised."
+  ],
+  "evidence": {
+    "archive": "index-readiness-evidence.tar.gz",
+    "sha256": "5a6dceb5714584941f21ac1f22edbaf7c76a7fc188cad9986cc2db57b6a9c511",
+    "files": 44,
+    "hashes_verified": true,
+    "secret_scan": "passed",
+    "local_directory": "/home/virant/dev/aimee-index-readiness-fix-20261114",
+    "receipt_capabilities_exported": false,
+    "note": "Only verdicts, counts, public source hashes and build metadata exported. Scanner false positives on path-to-hash mappings were resolved by separating path and sha256 fields; no scanner allowlist was added."
+  },
+  "cleanup": {
+    "completed": true,
+    "ct_config_absent": true,
+    "root_disk_absent": true,
+    "unrelated_ct9473_running": true,
+    "other_workloads_modified": false
+  }
+}

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Provider kinds, mirroring ws_provider_kind_t. Only DETACHED is named in the
@@ -123,13 +123,13 @@ func workspaceForPath(cwd, mirrorBase string, workspaces []string) string {
 }
 
 // handleCredResolve serves git-credential-resolve (stage 5).
-func handleCredResolve(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleCredResolve(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var decoded CredResolveRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	response := CredResolveResponse{RunsOnServer: runsOnServer(decoded.ProviderKind)}
 	if response.RunsOnServer {
@@ -137,8 +137,8 @@ func handleCredResolve(invocation bus.ModuleInvocation, request []byte) ([]byte,
 			decoded.Workspaces)
 	}
 	encoded, err := json.Marshal(response)
-	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-		return nil, bus.ModuleStatusInternal
+	if err != nil || uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }

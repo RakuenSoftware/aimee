@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Whether a delegate's structured handoff can be believed.
@@ -210,20 +210,20 @@ func putFixed(dst []byte, s string) {
 	copy(dst, s)
 }
 
-func handleHandoff(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleHandoff(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < handoffHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != handoffRequestMagic ||
 		request[4] != wireVersion || request[5] > 1 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	textLen := int(binary.LittleEndian.Uint32(request[8:12]))
 	ownedLen := int(binary.LittleEndian.Uint32(request[12:16]))
 	if textLen > handoffTextMax || ownedLen > handoffTextMax ||
 		len(request) != handoffHeaderLen+textLen+ownedLen {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	text := string(request[handoffHeaderLen : handoffHeaderLen+textLen])
@@ -245,5 +245,5 @@ func handleHandoff(invocation bus.ModuleInvocation, request []byte) ([]byte, bus
 	putFixed(response[36:36+handoffStatusLen], verdict.Status)
 	putFixed(response[36+handoffStatusLen:36+2*handoffStatusLen], verdict.RawStatus)
 	putFixed(response[36+2*handoffStatusLen:], verdict.Error)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

@@ -27,8 +27,6 @@ class Contract:
     consumers: tuple[str, ...]
     document: str
     document_markers: tuple[str, ...]
-    test_cmake_source: str | None = None
-    legacy_test_cmake_source: str | None = None
 
 
 CONTRACTS = (
@@ -40,7 +38,7 @@ CONTRACTS = (
         canonical_header="src/modules/module-runtime/include/aimee/module-runtime/pre_llm_hook.h",
         canonical_include="aimee/module-runtime/pre_llm_hook.h",
         make_source="modules/module-runtime/pre_llm_hook.c",
-        cmake_source="${AIMEE_SRC_DIR}/modules/module-runtime/pre_llm_hook.c",
+        cmake_source=None,
         legacy_cmake_source="${AIMEE_SRC_DIR}/plugin_c_hook.c",
         test_object="$(OBJDIR)/modules/module-runtime/pre_llm_hook.o",
         legacy_test_object="$(OBJDIR)/plugin_c_hook.o",
@@ -51,25 +49,6 @@ CONTRACTS = (
         ),
         document="docs/modules/module-runtime.md",
         document_markers=("system prompt", "plugin_chook_apply_pre_llm"),
-    ),
-    Contract(
-        module="gateway-pipeline",
-        legacy_source="src/gateway_pipeline.c",
-        legacy_header="src/headers/gateway_pipeline.h",
-        canonical_source="src/modules/gateway/gateway_pipeline.c",
-        canonical_header="src/modules/gateway/include/aimee/gateway/gateway_pipeline.h",
-        canonical_include="aimee/gateway/gateway_pipeline.h",
-        make_source="modules/gateway/gateway_pipeline.c",
-        cmake_source=None,
-        legacy_cmake_source=None,
-        test_object="$(OBJDIR)/modules/gateway/gateway_pipeline.o",
-        legacy_test_object="$(OBJDIR)/gateway_pipeline.o",
-        consumers=(
-            "src/modules/gateway/gateway_pipeline.c",
-            "src/tests/test_gateway_pipeline.c",
-        ),
-        document="docs/modules/gateway.md",
-        document_markers=("gw_pipeline_run_request", "canonical include namespace"),
     ),
     Contract(
         module="gateway-policy",
@@ -88,7 +67,7 @@ CONTRACTS = (
             "src/tests/test_gateway_policy.c",
         ),
         document="docs/modules/gateway.md",
-        document_markers=("gateway_policy_apply_request", "canonical include namespace"),
+        document_markers=("gateway_policy_apply_ir", "canonical include namespace"),
     ),
     Contract(
         module="gateway-delegate",
@@ -117,7 +96,7 @@ CONTRACTS = (
         canonical_header="src/modules/ir/include/aimee/ir/aimee_ir.h",
         canonical_include="aimee/ir/aimee_ir.h",
         make_source="modules/ir/aimee_ir.c",
-        cmake_source=None,
+        cmake_source="${AIMEE_SRC_DIR}/modules/ir/aimee_ir.c",
         legacy_cmake_source=None,
         test_object="$(OBJDIR)/modules/ir/aimee_ir.o",
         legacy_test_object="$(OBJDIR)/server/aimee_ir.o",
@@ -127,8 +106,6 @@ CONTRACTS = (
         ),
         document="docs/modules/ir.md",
         document_markers=("provider-neutral message model", "canonical include namespace"),
-        test_cmake_source="../modules/ir/aimee_ir.c",
-        legacy_test_cmake_source="../server/aimee_ir.c",
     ),
     Contract(
         module="ir-metrics",
@@ -148,8 +125,6 @@ CONTRACTS = (
         ),
         document="docs/modules/ir.md",
         document_markers=("IR-local metrics", "canonical include namespace"),
-        test_cmake_source="../modules/ir/aimee_ir_metrics.c",
-        legacy_test_cmake_source="../server/aimee_ir_metrics.c",
     ),
     Contract(
         module="translation-frontend-anthropic",
@@ -169,8 +144,6 @@ CONTRACTS = (
         ),
         document="docs/modules/translation.md",
         document_markers=("parse-to-canonical", "canonical ingress adapters"),
-        test_cmake_source="../modules/translation/aimee_frontend_anthropic.c",
-        legacy_test_cmake_source="../server/aimee_frontend_anthropic.c",
     ),
     Contract(
         module="translation-frontend-openai",
@@ -190,8 +163,6 @@ CONTRACTS = (
         ),
         document="docs/modules/translation.md",
         document_markers=("parse-to-canonical", "canonical ingress adapters"),
-        test_cmake_source="../modules/translation/aimee_frontend_openai.c",
-        legacy_test_cmake_source="../server/aimee_frontend_openai.c",
     ),
     Contract(
         module="translation-frontend-responses",
@@ -211,8 +182,6 @@ CONTRACTS = (
         ),
         document="docs/modules/translation.md",
         document_markers=("parse-to-canonical", "canonical ingress adapters"),
-        test_cmake_source="../modules/translation/aimee_frontend_responses.c",
-        legacy_test_cmake_source="../server/aimee_frontend_responses.c",
     ),
     Contract(
         module="translation-backend-anthropic",
@@ -232,8 +201,6 @@ CONTRACTS = (
         ),
         document="docs/modules/translation.md",
         document_markers=("canonical egress", "wire-to-canonical"),
-        test_cmake_source="../modules/translation/aimee_backend_anthropic.c",
-        legacy_test_cmake_source="../server/aimee_backend_anthropic.c",
     ),
     Contract(
         module="translation-backend-openai",
@@ -253,8 +220,6 @@ CONTRACTS = (
         ),
         document="docs/modules/translation.md",
         document_markers=("canonical egress", "wire-to-canonical"),
-        test_cmake_source="../modules/translation/aimee_backend_openai.c",
-        legacy_test_cmake_source="../server/aimee_backend_openai.c",
     ),
     Contract(
         module="translation-backend-responses",
@@ -274,8 +239,6 @@ CONTRACTS = (
         ),
         document="docs/modules/translation.md",
         document_markers=("canonical egress", "wire-to-canonical"),
-        test_cmake_source="../modules/translation/aimee_backend_responses.c",
-        legacy_test_cmake_source="../server/aimee_backend_responses.c",
     ),
     Contract(
         module="translation-backend-bedrock",
@@ -295,8 +258,6 @@ CONTRACTS = (
         ),
         document="docs/modules/translation.md",
         document_markers=("canonical egress", "wire-to-canonical"),
-        test_cmake_source=None,
-        legacy_test_cmake_source=None,
     ),
     Contract(
         module="translation-streaming",
@@ -317,8 +278,6 @@ CONTRACTS = (
         ),
         document="docs/modules/translation.md",
         document_markers=("Canonical streaming conversion", "bounded state"),
-        test_cmake_source="../modules/translation/aimee_ir_stream.c",
-        legacy_test_cmake_source="../server/aimee_ir_stream.c",
     ),
     Contract(
         module="delegates-ir-rescue",
@@ -341,8 +300,6 @@ CONTRACTS = (
         ),
         document="docs/modules/delegates.md",
         document_markers=("IR-side prose tool-call rescue", "aimee_ir_rescue_tool_calls"),
-        test_cmake_source=None,
-        legacy_test_cmake_source=None,
     ),
 )
 
@@ -406,7 +363,6 @@ def validate_contract(
     contract: Contract,
     makefile: str,
     cmake: str,
-    test_cmake: str,
     rules: str,
 ) -> None:
     for relative in (contract.legacy_source, contract.legacy_header):
@@ -431,12 +387,6 @@ def validate_contract(
     if contract.legacy_cmake_source is not None:
         require(contract.legacy_cmake_source not in cmake, "core-source-unique",
                 f"{contract.module}: CMake legacy source")
-    if contract.test_cmake_source is not None:
-        require(contract.test_cmake_source in test_cmake, "focused-test-source",
-                f"{contract.module}: test CMake canonical source")
-    if contract.legacy_test_cmake_source is not None:
-        require(contract.legacy_test_cmake_source not in test_cmake, "focused-test-source",
-                f"{contract.module}: test CMake legacy source")
 
     # One canonical object can appear in several independently linked test targets.
     require(rules.count(contract.test_object) >= 1, "focused-test-object",
@@ -471,10 +421,9 @@ def validate(root: Path) -> None:
     require((root / ".git").exists() or (root / ".git").is_file(), "config-root", str(root))
     makefile = read(root, "src/Makefile")
     cmake = read(root, "CMakeLists.txt")
-    test_cmake = read(root, "src/tests/CMakeLists.txt")
     rules = read(root, "src/tests/Rules.mk")
     for contract in CONTRACTS:
-        validate_contract(root, contract, makefile, cmake, test_cmake, rules)
+        validate_contract(root, contract, makefile, cmake, rules)
 
     for module, legacy_root, build_files in LEGACY_MODULE_ROOTS:
         validate_legacy_module_root(root, module, legacy_root, build_files)

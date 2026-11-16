@@ -19,7 +19,7 @@ checks below; the external article is not the authority for this checkout.
 
 The local [Server composition](../../server-go/modules/server/role.go),
 [KB composition](../../server-go/modules/kb/role.go), and
-[placement validator](../../server-go/modules/memory/scope.go) establish two roles sharing one
+[placement validator](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/scope.go) establish two roles sharing one
 implementation. [Default Compose](../../compose.yaml) deploys Server, PostgreSQL, and embedding,
 with no KB. [KB Compose](../../compose.kb.yaml) selects a separate role. Server's
 [store selector](../../src/server/server_memory.c) defaults ordinary memory operations to personal
@@ -46,7 +46,7 @@ The [governance SQL gate](../../scripts/memory-governance-pg-test.sql) tests the
 under `aimee_kb_runtime`, whose narrower grants come from
 [schema_grants.sql](../../src/modules/kb/c/schema_grants.sql).
 
-The [Go runtime-role replay](../../server-go/modules/memory/runtime_role_test.go) uses
+The [Go runtime-role replay](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/runtime_role_test.go) uses
 `aimee_store_runtime`, but its existence does not prove the separate no-erasure assertion for that
 role. A grant permits an operation subject to RLS and other enforcement; this finding does not
 claim unrestricted access to all rejection rows.
@@ -65,8 +65,8 @@ the upgrade twice and through the Go provider, not only `SET ROLE` in an owner c
 
 **Priority: high. Source-confirmed comparison mismatch; bypass not executed.**
 
-[factIdentity](../../server-go/modules/memory/fact_identity.go) normalizes Unicode, case, whitespace,
-and relation names. [factTombstoned](../../server-go/modules/memory/fact_mutation.go) checks both
+[factIdentity](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/fact_identity.go) normalizes Unicode, case, whitespace,
+and relation names. [factTombstoned](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/fact_mutation.go) checks both
 raw triples and recomputed canonical identities, paging through active fact refusals. The
 `fact_rejection_tombstone_guard` database trigger in
 [the schema](../../src/modules/kb/c/schema.sql) compares raw `source`, `relation`, and `target`.
@@ -85,7 +85,7 @@ control. Verify restore attribution, concurrent assert/reject, migration replay,
 
 **Priority: medium. Current write screening has a narrower contract.**
 
-[screenMemoryWrite](../../server-go/modules/memory/content_gate.go) rejects sensitive keys and
+[screenMemoryWrite](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/content_gate.go) rejects sensitive keys and
 redacts or rejects credential-bearing content. It is not a general instruction-injection classifier.
 [Server recall](../../src/server/server_memory.c),
 [KB recall transport](../../src/modules/kb_client/kb_client_memory.c), and
@@ -107,7 +107,7 @@ evidence into higher-authority instructions.
 
 **Priority: documentation now; automated drift checks next.**
 
-[currentMemorySQL](../../server-go/modules/memory/eligibility.go) applies active lifecycle,
+[currentMemorySQL](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/eligibility.go) applies active lifecycle,
 suppression, and half-open valid-time checks directly. The two native lifecycle accessors have no
 production caller beyond their definitions in this checkout. The historical
 [flag rollout report](../validation/flag-rollout-readiness.md) named `memory_core_helpers.inc`,
@@ -126,17 +126,17 @@ unused settings.
 
 **Priority: medium. Backend review exists; no correction-review UI caller found.**
 
-[KB correction proposals](../../server-go/modules/memory/correction_proposals.go) and
-[personal proposals](../../server-go/modules/memory/personal_proposals.go) retain a model's draft
+[KB correction proposals](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/correction_proposals.go) and
+[personal proposals](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/personal_proposals.go) retain a model's draft
 without replacing protected content. The
-[review command](../../server-go/modules/memory/public_correction_proposals.go) requires verified
+[review command](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/public_correction_proposals.go) requires verified
 user authority, exact expected version, proposal ID, and payload digest. The
 [Server adapter](../../src/server/server_memory.c) routes both placements; these review operations
 retain a KB default and require explicit `store=user` for personal review.
 
 Searches for `review_correction` and `correction-review` under `frontend` and `control-web` find no
 caller. This is a missing integration in the inspected UI, not a missing backend review primitive.
-Separately, [typed-fact review](../../server-go/modules/memory/fact_review.go) already implements
+Separately, [typed-fact review](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/fact_review.go) already implements
 operator approve, reject, and undo through the
 [KB console adapter](../../src/kb/http/kb_http_console.c). Those fact actions do not complete the
 memory correction-proposal journey.
@@ -147,8 +147,8 @@ Reuse the backend; do not build a second proposal queue.
 
 Acceptance: exercise the UI through the authenticated API. A model cannot approve its own proposal
 or borrow user authority; stale revisions conflict; repeated rejected drafts cannot reopen terminal
-decisions. The existing [KB tests](../../server-go/modules/memory/correction_proposals_test.go) and
-[personal tests](../../server-go/modules/memory/personal_proposals_test.go) provide owner-level cases
+decisions. The existing [KB tests](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/correction_proposals_test.go) and
+[personal tests](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/personal_proposals_test.go) provide owner-level cases
 to carry across the UI boundary.
 
 ### 6. Make decision reminders an explicit product choice
@@ -175,7 +175,7 @@ and acknowledged or superseded decisions stop resurfacing. Verify the actual ass
 The `evidence_object_mutation` trigger in [the schema](../../src/modules/kb/c/schema.sql) writes
 a memory mutation intent in the row transaction. The
 [WORM worker](../WORM_WORKER.md) later appends committed intents to the separate SQLite chain.
-[Go action publication](../../server-go/modules/memory/mutation_audit.go) is an additional
+[Go action publication](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/mutation_audit.go) is an additional
 observation path. Successful ring publication, PostgreSQL commit, and completed WORM delivery are
 different milestones.
 
@@ -192,7 +192,7 @@ require visible pending delivery without claiming the database transaction rolle
 
 The latest tree has retired DB2 and native libpq ownership. Both roles use the Go PostgreSQL
 provider; the KB schema is under `src/modules/kb/c/`. The local
-[eligibility policy](../../server-go/modules/memory/eligibility.go) is `current-validity-v18`, including
+[eligibility policy](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/eligibility.go) is `current-validity-v18`, including
 utility-horizon and derived-input checks. The horizon mode remains disabled by default; implemented
 policy is not evidence of deployment enablement.
 
@@ -276,7 +276,7 @@ above are present in this checkout. This follow-up does not certify a deployed s
 ### Repetition must not clear the model's review queue
 
 One residual issue was confirmed in
-[fact maintenance](../../server-go/modules/memory/fact_maintenance.go): promotion selected
+[fact maintenance](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/fact_maintenance.go): promotion selected
 Class B candidates at any authority rank up to 20 when enough supporting evidence existed.
 Distinct evidence IDs do not establish independent authority. A model repeating the same
 claim across sources could satisfy the threshold and become recallable. The host dispatch
@@ -290,7 +290,7 @@ functional-conflict checks, transactional changes, and audit seal remain in use.
 System assertions normally enter persistent state directly; the promotion path remains
 available for retained system candidates without conferring authority on repeated text.
 
-The [runtime ingestion replay](../../server-go/modules/memory/fact_ingestion_parity_test.go)
+The [runtime ingestion replay](https://github.com/RakuenSoftware/aimee/blob/6cd136947f205db9610eeab02b9f8255bbfc2a7e/server-go/modules/memory/fact_ingestion_parity_test.go)
 now checks five distinct model evidence sources through the real host maintenance dispatch,
 including a forged request actor rank. That claim must retain candidate state, confidence,
 and model authority. A system candidate provides the positive control and must become

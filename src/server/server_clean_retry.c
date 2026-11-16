@@ -2,6 +2,7 @@
  * normal Go memory assembly/source revalidation remains mandatory on each turn. */
 #include "server.h"
 #include "primary_session_adapter.h"
+#include <aimee/ir/session_event.h>
 #include "request_context.h"
 #include "db1_client/session_state.h"
 #include "agent_exec.h"
@@ -73,7 +74,18 @@ int server_clean_retry_begin(const primary_session_request_t *req, cJSON **messa
    }
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "request_id", ctx->request_id);
-   cJSON_AddStringToObject(body, "input", req->user_prompt);
+   cJSON *input = aimee_ir_message_json(
+       req->request && req->request->n_messages == 1 ? &req->request->messages[0] : NULL);
+   char *input_json = input ? cJSON_PrintUnformatted(input) : NULL;
+   cJSON_Delete(input);
+   if (!input_json || !cJSON_AddStringToObject(body, "input", input_json))
+   {
+      free(input_json);
+      cJSON_Delete(body);
+      snprintf(error, error_len, "retry canonical input unavailable");
+      return -1;
+   }
+   free(input_json);
    cJSON_AddStringToObject(body, "previous_attempt", retry_text(options, "previous_attempt"));
    cJSON_AddBoolToObject(
        body, "replace_constraints",

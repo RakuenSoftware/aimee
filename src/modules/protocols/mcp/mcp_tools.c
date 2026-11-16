@@ -8,7 +8,14 @@
 #include "log.h"
 #include "agent_code_capabilities.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+/* Optional host deployment capability filter; arguments/_meta cannot select it. */
+extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
+/* Optional host-owned presentation override: 0 unchanged, 1 owned replacement,
+ * -1 unavailable. The original schema is borrowed and must not be mutated. */
+extern int aimee_module_tool_input_schema(const char *, const cJSON *, cJSON **)
+    __attribute__((weak));
 static int tools_array_has_name(cJSON *tools, const char *name)
 {
    cJSON *tool = NULL;
@@ -19,6 +26,68 @@ static int tools_array_has_name(cJSON *tools, const char *name)
          return 1;
    }
    return 0;
+}
+
+cJSON *mcp_tool_advert_from_list(const cJSON *list, const char *tool)
+{
+   if (!cJSON_IsArray(list) || !tool || !tool[0])
+      return NULL;
+   const cJSON *item, *git = NULL;
+   cJSON_ArrayForEach(item, list)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "name"));
+      if (name && !strcmp(name, tool))
+         return cJSON_Duplicate(item, 1);
+      if (name && !strcmp(name, "git"))
+         git = item;
+   }
+   if (strncmp(tool, "git_", 4) || !tool[4] || !git)
+      return NULL;
+   const cJSON *schema = cJSON_GetObjectItemCaseSensitive(git, "inputSchema");
+   const cJSON *properties = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+   const cJSON *command = cJSON_GetObjectItemCaseSensitive(properties, "command");
+   const cJSON *values = cJSON_GetObjectItemCaseSensitive(command, "enum");
+   const cJSON *required = cJSON_GetObjectItemCaseSensitive(schema, "required");
+   const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(schema, "type"));
+   const char *command_type =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(command, "type"));
+   if (!cJSON_IsString(cJSON_GetObjectItemCaseSensitive(git, "description")) ||
+       !cJSON_IsObject(schema) || !cJSON_IsObject(properties) || !type || strcmp(type, "object") ||
+       !command_type || strcmp(command_type, "string") || !cJSON_IsArray(values) ||
+       (required && !cJSON_IsArray(required)))
+      return NULL;
+   int declared = 0;
+   const cJSON *value;
+   cJSON_ArrayForEach(value, values) if (cJSON_IsString(value) &&
+                                         !strcmp(value->valuestring, tool + 4)) declared = 1;
+   if (!declared)
+      return NULL;
+   cJSON_ArrayForEach(value, required) if (!cJSON_IsString(value)) return NULL;
+   cJSON *advert = cJSON_Duplicate(git, 1);
+   if (!advert)
+      return NULL;
+   cJSON *projected_schema = cJSON_GetObjectItemCaseSensitive(advert, "inputSchema");
+   cJSON *projected_properties = cJSON_GetObjectItemCaseSensitive(projected_schema, "properties");
+   cJSON_DeleteItemFromObjectCaseSensitive(projected_properties, "command");
+   cJSON *projected_required = cJSON_GetObjectItemCaseSensitive(projected_schema, "required");
+   for (int i = cJSON_GetArraySize(projected_required) - 1; i >= 0; --i)
+   {
+      const cJSON *entry = cJSON_GetArrayItem(projected_required, i);
+      if (!strcmp(entry->valuestring, "command"))
+         cJSON_DeleteItemFromArray(projected_required, i);
+   }
+   char description[256];
+   int length = snprintf(description, sizeof description,
+                         "Run Git command '%s'. The command is fixed by this tool name.", tool + 4);
+   if (length < 0 || (size_t)length >= sizeof description ||
+       !cJSON_ReplaceItemInObjectCaseSensitive(advert, "name", cJSON_CreateString(tool)) ||
+       !cJSON_ReplaceItemInObjectCaseSensitive(advert, "description",
+                                               cJSON_CreateString(description)))
+   {
+      cJSON_Delete(advert);
+      return NULL;
+   }
+   return advert;
 }
 
 static void mcp_add_memory_store_property(cJSON *properties)
@@ -1022,28 +1091,6 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                        "The project defaults from the MCP request cwd. Returns affected files, "
                        "severity, and warnings.",
                        s));
-   }
-
-   /* delegate_reply */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *did = cJSON_AddObjectToObject(p, "delegation_id");
-      cJSON_AddStringToObject(did, "type", "string");
-      cJSON_AddStringToObject(did, "description", "ID of the delegation to reply to");
-      cJSON *ct = cJSON_AddObjectToObject(p, "content");
-      cJSON_AddStringToObject(ct, "type", "string");
-      cJSON_AddStringToObject(ct, "description", "Reply content for the delegate");
-      cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("delegation_id"));
-      cJSON_AddItemToArray(req, cJSON_CreateString("content"));
-      cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools, mcp_tool_new("delegate_reply",
-                                               "Reply to a delegate that has requested input. "
-                                               "The delegate will receive this as the response "
-                                               "to its request_input call.",
-                                               s));
    }
 
    /* record_attempt */
@@ -2084,11 +2131,52 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
 
    add_session_context_tools(tools);
 
+   /* Filter before family collapse so unsupported operations cannot survive in
+    * a multiplexed enum or remain advertised by flat native discovery. */
+   for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
+   {
+      cJSON *tool = cJSON_GetArrayItem(tools, i);
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(tool, "name"));
+      if (name && aimee_module_tool_source_mode && aimee_module_tool_source_mode(name) < 0)
+      {
+         cJSON_DeleteItemFromArray(tools, i);
+         continue;
+      }
+   }
+
    /* Collapse coherent families into single multiplexed tools (P4). Runs after
     * every builtin member exists, before plugin/remote tools (which are left as
     * separate, namespaced entries). */
    if (collapse)
       mcp_collapse_families(tools);
+
+   /* Apply to the final public representation, including collapsed families.
+    * The same flat schema feeds native execution/provider advertisements. */
+   if (aimee_module_tool_input_schema)
+      for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
+      {
+         cJSON *tool = cJSON_GetArrayItem(tools, i);
+         const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(tool, "name"));
+         if (!name)
+            continue;
+         cJSON *replacement = NULL;
+         int changed = aimee_module_tool_input_schema(
+             name, cJSON_GetObjectItemCaseSensitive(tool, "inputSchema"), &replacement);
+         char *bytes = changed == 1 && cJSON_IsObject(replacement)
+                           ? cJSON_PrintUnformatted(replacement)
+                           : NULL;
+         int valid =
+             changed == 0 ? replacement == NULL : changed == 1 && bytes && strlen(bytes) <= 262144;
+         free(bytes);
+         if (!valid)
+         {
+            cJSON_Delete(replacement);
+            cJSON_DeleteItemFromArray(tools, i);
+            continue;
+         }
+         if (changed == 1)
+            cJSON_ReplaceItemInObjectCaseSensitive(tool, "inputSchema", replacement);
+      }
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
    if (cJSON_IsArray(remote_tools))

@@ -42,38 +42,8 @@ const char *aimee_ir_metric_name(aimee_ir_metric_t m)
 {
    switch (m)
    {
-   case AIMEE_IR_M_PARSE_FAIL:
-      return "ir_parse_failures";
-   case AIMEE_IR_M_RENDER_FAIL:
-      return "ir_render_failures";
-   case AIMEE_IR_M_BACKEND_BUILD_FAIL:
-      return "ir_backend_build_failures";
-   case AIMEE_IR_M_BACKEND_PARSE_FAIL:
-      return "ir_backend_parse_failures";
-   case AIMEE_IR_M_REBUILD_MATCH:
-      return "ir_rebuild_match_bytes";
-   case AIMEE_IR_M_REBUILD_MISMATCH:
-      return "ir_rebuild_mismatch_bytes";
-   case AIMEE_IR_M_STAGE_MUTATION:
-      return "ir_stage_mutations";
-   case AIMEE_IR_M_CACHE_CONTROL_LOST:
-      return "ir_cache_control_lost";
-   case AIMEE_IR_M_PASSTHROUGH:
-      return "ir_passthrough";
-   case AIMEE_IR_M_IR_PATH:
-      return "ir_path";
-   case AIMEE_IR_M_LEGACY_FALLBACK:
-      return "ir_legacy_fallback";
-   case AIMEE_IR_M_BODY_MISMATCH:
-      return "ir_body_mismatch";
-   case AIMEE_IR_M_BODY_MATCH:
-      return "ir_body_match";
    case AIMEE_IR_M_RESCUE_RECOVERIES:
       return "ir_rescue_recoveries";
-   case AIMEE_IR_M_RESP_MISMATCH:
-      return "ir_resp_mismatch";
-   case AIMEE_IR_M_RESP_MATCH:
-      return "ir_resp_match";
    case AIMEE_IR_M_REASONING_OBSERVED:
       return "ir_reasoning_observed";
    case AIMEE_IR_M_REASONING_INCOMPLETE:

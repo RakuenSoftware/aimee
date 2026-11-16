@@ -2,6 +2,7 @@
 #define DEC_AGENT_TASKS_H 1
 
 #include "agent_types.h"
+#include "wire_fence.h"
 
 typedef struct
 {
@@ -14,7 +15,7 @@ typedef struct
    int dep_count;
    int status; /* 0=pending, 1=running, 2=done, 3=failed, 4=rolled_back */
    char output[4096];
-   int wave; /* execution wave index assigned by plan_assign_waves() */
+   int wave; /* retained execution wave index */
 } plan_step_t;
 
 typedef struct
@@ -27,34 +28,34 @@ typedef struct
    int step_count;
 } plan_t;
 
-typedef struct
-{
-   int total_steps;
-   int strong_passed;
-   int weak_passed;
-   int failed;
-} plan_verify_summary_t;
-
-/* Assign wave indices to all steps in a plan via topological sort.
- * Steps with no dependencies get wave 0; a step's wave is 1 + the maximum
- * wave of all its dependencies.  Modifies plan->steps[i].wave in place.
- * Returns 0 on success, -1 if a dependency cycle is detected. */
-int plan_assign_waves(plan_t *plan);
-int agent_plan_execute(plan_t *plan, const agent_t *agent, int timeout_ms);
-int agent_plan_rollback_step(plan_t *plan, int step_idx, int timeout_ms);
-int agent_plan_verify(plan_t *plan, plan_verify_summary_t *summary);
-int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network,
-                            const char *system_prompt, const char *user_prompt, int max_tokens,
-                            double temperature, agent_result_t *out);
-
 /* Durable jobs.
  *
  * agent_set_durable_job publishes the active job id to the agent runtime.
- * The runtime calls db1_agent_job_update / db1_agent_job_heartbeat
- * directly, so callers no longer hand in a DB connection. */
+ * Its retained progress owner serializes transport counts and heartbeat writes. */
 void agent_set_durable_job(int job_id);
 int agent_get_durable_job_id(void);
-int agent_job_resume(agent_config_t *cfg, int job_id, agent_result_t *out);
+
+/* One actual job owns progress across dispatch retries and joined callbacks.
+ * begin requires the persisted counter and a held owner before provider work.
+ * The legacy setter preserves its prior binding if a new owner cannot be held;
+ * shipping positive job starts use checked begin. */
+typedef struct agent_job_progress agent_job_progress_t;
+int agent_durable_job_begin(int job_id);
+agent_job_progress_t *agent_job_progress_capture(void); /* retained, may be NULL */
+void agent_job_progress_release(agent_job_progress_t *progress);
+/* bind retains the supplied owner and transfers the old TLS reference out.
+ * restore consumes that reference after releasing the temporary binding. */
+typedef struct
+{
+   agent_job_progress_t *previous;
+   wire_fence_transport_observer_t observer, previous_transport;
+   int transport_bound;
+} agent_job_progress_binding_t;
+agent_job_progress_binding_t agent_job_progress_bind(agent_job_progress_t *progress);
+void agent_job_progress_restore(agent_job_progress_binding_t previous);
+void agent_job_progress_heartbeat(const char *current_tool);
+void agent_job_progress_observe_transport(int attempts);
+int agent_job_progress_transport_attempts(void);
 
 /* Result cache lives in src/db1/caches.h (db1_agent_cache_*). */
 

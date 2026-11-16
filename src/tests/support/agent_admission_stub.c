@@ -20,3 +20,10 @@ void policy_action_attempt(const char *attempt)
 {
    (void)attempt;
 }
+
+/* The fixture has no action owner; inherited action admission must refuse. */
+int policy_action_inherit(const char *session)
+{
+   (void)session;
+   return -1;
+}

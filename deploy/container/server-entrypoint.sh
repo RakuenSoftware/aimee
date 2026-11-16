@@ -37,6 +37,31 @@ module_pid=""
 # inherited first-boot secrets either.
 ulimit -c 0 2>/dev/null || true
 
+# Activate the provisioned memory installation for this role. The memory-init
+# service wrote it to the read-only /opt/aims-memory volume; its launcher checks
+# the installation and then runs the resource binary it was prepared with, so it
+# takes the place of the image's own resource executable for every later call.
+# Without a provisioned volume the image's executable runs unchanged and memory
+# stays unavailable (`missing_module: memory`).
+_memory_role="${AIMEE_INSTANCE_ROLE:-server}"
+case "$_memory_role" in
+    server|kb)
+        _memory_launch="/opt/aims-memory/$_memory_role/bin/launch-resource"
+        if [ "$(id -u)" -eq 0 ] && [ -f "$_memory_launch" ] && [ ! -L "$_memory_launch" ]; then
+            install -m 0755 -o root -g root "$_memory_launch" "/usr/local/bin/aimee-$_memory_role"
+            # The installation's module manifest, grants and bridge configuration
+            # replace the image's public ones for every process started below.
+            export AIMEE_MODULE_BUS_SOCKET="$AIMEE_HOME/$_memory_role-module-bus.sock"
+            export AIMEE_MODULE_MANIFEST="/opt/aims-memory/$_memory_role/etc/modules"
+            # Composed at each start from the installation's grants and the
+            # operator's plugin grants in $AIMEE_HOME/modules.d/<role>.
+            export AIMEE_MODULE_POLICY_DIR="/opt/aims-memory/$_memory_role/run/grants"
+            export AIMEE_MODULE_RUNTIME_BIN="/usr/local/libexec/aimee-modules/aimee-module-$_memory_role"
+            export AIMS_MEMORY_BRIDGE_CONFIG="/opt/aims-memory/$_memory_role/etc/bridge.json"
+        fi
+        ;;
+esac
+
 # Consume deployment credentials before invoking any unrelated child process.
 # Kubernetes/Docker environment injection is accepted only as first-boot
 # transport: the short-lived server seals it into Vault, then this PID removes
@@ -179,7 +204,6 @@ case "$AIMEE_WFE_ENGINE" in
     go) ;;
     *) printf '[server-entrypoint] fatal: WFE is Go-only; AIMEE_WFE_ENGINE must be go\n' >&2; exit 2 ;;
 esac
-export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
 export AIMEE_MODULE_BUS_SOCKET="${AIMEE_MODULE_BUS_SOCKET:-$AIMEE_HOME/server-module-bus.sock}"
 export AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-server
 # THE STORE MODULE OPENS NO DATABASE, so this exports no path for it.
@@ -610,7 +634,7 @@ if [ -z "${AIMEE_SANDBOX_HOST_MOUNTS:-}" ] && [ -S "${_dsock:-/var/run/docker.so
 fi
 
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
-rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
+rm -f "$AIMEE_HOME/aimee-http.sock"
 runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
 # The shipped manifest is decided when the image is built and cannot know what
@@ -683,14 +707,14 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
     # HTTP API. This particular Unix resource-plane socket is passed to the Go
     # WFE only for credentialed forge operations; delegate execution uses the
     # Go delegates process over the module bus.
-    log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
+    log "starting Go WFE control plane (bus=$AIMEE_MODULE_BUS_SOCKET)"
     # The WFE is the workflows bus principal: it serves the advance decision and
     # the control stage the C resource plane calls. The module supervisor does
     # not spawn a workflows process (the contract marks it hosted_by=wfe), because
     # the bus denies a live duplicate of a principal. Pass the bus socket
     # explicitly rather than relying on runuser's environment handling.
-    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; export AIMEE_MODULE_BUS_SOCKET="$5"; exec aimee-wfe --home "$1" --socket "$2" --workflow-dir "$3" --forge-service-socket "$4"' sh \
-        "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/workflows" \
+    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; export AIMEE_MODULE_BUS_SOCKET="$4"; exec aimee-wfe --home "$1" --workflow-dir "$2" --forge-service-socket "$3"' sh \
+        "$AIMEE_HOME" "$AIMEE_HOME/workflows" \
         "$AIMEE_HOME/aimee-http.sock" "$AIMEE_MODULE_BUS_SOCKET" &
     wfe_pid=$!
 

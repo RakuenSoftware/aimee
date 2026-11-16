@@ -102,7 +102,7 @@ static void test_endpoints(void)
    assert(strcmp(dev, "https://gitlab.example.com/oauth/authorize_device") == 0);
    assert(strcmp(cred, "gitlab.example.com") == 0);
 
-   /* Gitea requires a host and uses the /login/oauth/* paths. */
+   /* Gitea requires a host and uses the /login/oauth/ paths. */
    assert(oauth_dev_endpoints(OAUTH_DEV_GITEA, "gitea.example.com", dev, sizeof(dev), tok,
                               sizeof(tok), cred, sizeof(cred)) == 0);
    assert(strcmp(dev, "https://gitea.example.com/login/oauth/authorize_device") == 0);

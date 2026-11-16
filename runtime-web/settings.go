@@ -23,8 +23,6 @@ type settingField struct {
 var settingsAllow = []settingField{
 	{Key: "autonomous", Label: "Autonomous mode", Type: "bool",
 		Help: "Agent acts without per-action confirmation."},
-	{Key: "cross_verify", Label: "Cross-verify", Type: "bool",
-		Help: "Double-check work before reporting done."},
 	{Key: "reasoning_cap_enabled", Label: "Cap reasoning by complexity", Type: "bool",
 		Help: "Lower reasoning effort on simple turns."},
 	{Key: "max_iterations", Label: "Max iterations", Type: "int",

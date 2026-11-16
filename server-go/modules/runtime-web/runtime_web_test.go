@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/runtime-web/policy"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func classifyWire(kind string) []byte {
@@ -53,8 +53,8 @@ func TestRPCFaultStatusParity(t *testing.T) {
 			if got := policy.HTTPStatusForRPCFault(test.kind); uint32(got) != test.want {
 				t.Fatalf("shared policy status = %d, want %d", got, test.want)
 			}
-			response, status := Handle(bus.ModuleInvocation{StageID: StageClassify}, classifyWire(test.kind))
-			if status != bus.ModuleStatusOK {
+			response, status := Handle(ring.ModuleInvocation{StageID: StageClassify}, classifyWire(test.kind))
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("handler status = %d", status)
 			}
 			if got := responseStatus(t, response); got != test.want {
@@ -86,25 +86,25 @@ func TestRPCFaultRejectsMalformedWire(t *testing.T) {
 	padding[requestKindOff+len("not_found")] = 1
 	tests = append(tests, padding)
 	for index, request := range tests {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageClassify}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageClassify}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("malformed request %d status = %d", index, status)
 		}
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageClassify + 1}, valid()); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageClassify + 1}, valid()); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong-stage status = %d", status)
 	}
 }
 
 func TestRPCFaultWireBoundAndCancellation(t *testing.T) {
 	maxKind := strings.Repeat("x", kindMax)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageClassify}, classifyWire(maxKind)); status != bus.ModuleStatusOK {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageClassify}, classifyWire(maxKind)); status != ring.ModuleStatusOK {
 		t.Fatalf("maximum canonical wire status = %d", status)
 	}
-	invocation := bus.ModuleInvocation{StageID: StageClassify, DeadlineNS: 1}
-	if _, status := Handle(invocation, classifyWire("unavailable")); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageClassify, DeadlineNS: 1}
+	if _, status := Handle(invocation, classifyWire("unavailable")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
-	if _, status := Handle(invocation, nil); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(invocation, nil); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed expired-request status = %d", status)
 	}
 }

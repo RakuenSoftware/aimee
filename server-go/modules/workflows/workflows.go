@@ -3,8 +3,9 @@ package workflows
 
 import (
 	"encoding/binary"
+	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -58,30 +59,12 @@ type advanceRequest struct {
 	haveNonce     bool
 }
 
-func zeroPadding(value []byte) bool {
-	for _, item := range value {
-		if item != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func nonzeroText(value []byte) bool {
-	for _, item := range value {
-		if item == 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func decodeSlot(request []byte, offset, slotSize, length int) (string, bool) {
 	if length >= slotSize {
 		return "", false
 	}
 	slot := request[offset : offset+slotSize]
-	if !nonzeroText(slot[:length]) || !zeroPadding(slot[length:]) {
+	if !modulewire.NonzeroText(slot[:length]) || !modulewire.ZeroPadding(slot[length:]) {
 		return "", false
 	}
 	return string(slot[:length]), true
@@ -150,17 +133,17 @@ func decide(request advanceRequest) AdvanceOutcome {
 }
 
 // Handle classifies an already-parsed advance request without performing the transition.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	decoded, valid := decodeRequest(request)
 	if invocation.StageID != StageAdvance || !valid {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], wireVersion)
 	binary.LittleEndian.PutUint32(response[8:12], uint32(decide(decoded)))
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

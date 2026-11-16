@@ -3,7 +3,7 @@
 #include "kb_service_backend.h"
 
 #include "aimee.h"
-#include "../support/kb_store_runtime_config.h"
+#include "config.h"
 #include "curiosity.h"
 #include "notes.h"
 #include "kb_store_internal.h"
@@ -29,7 +29,7 @@ extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, 
 /* The job kinds this drain handles — the single source of truth for BOTH the
  * claim's IN-list and the dispatch in kb_store_kb_service_async_queue_drain. They
  * must agree, and the failure mode when they drift is silent and destructive:
- * kb_async_jobs is shared with the curator stages (extract_doc, memory_facts),
+ * kb_async_jobs is shared with the curator stages (extract_doc and the code stages),
  * which own their own claim lifecycle, and the dispatch marks every kind it
  * does not recognize 'failed'. An unfiltered claim therefore takes the
  * lowest-id pending row of ANY kind, so a single call to the drain endpoint
@@ -705,29 +705,6 @@ int kb_store_kb_service_clear_current_project(const char *project)
    return rc == AIMEE_PG_DONE ? deleted : -1;
 }
 
-int kb_store_kb_service_memory_record_exists(int64_t record_id)
-{
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt =
-       aimee_pg_prepare(conn,
-                        "SELECT EXISTS(SELECT 1 FROM memories WHERE id = ?1)"
-                        "    OR EXISTS(SELECT 1 FROM memory_units WHERE id = ?1)",
-                        err, sizeof(err));
-   if (!stmt)
-      return -1;
-
-   aimee_pg_bind_int64(stmt, "?1", record_id);
-   int exists = -1;
-   if (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
-      exists = aimee_pg_column_int(stmt, 0);
-   aimee_pg_finalize(stmt);
-   return exists;
-}
-
 int kb_store_kb_service_kb_document_exists(int64_t document_id)
 {
    void *conn = kb_store_conn();
@@ -855,9 +832,9 @@ cJSON *kb_store_kb_service_curiosity_sweep_json(void)
    return resp;
 }
 
-cJSON *kb_store_kb_service_curiosity_rescore_json(void)
+cJSON *kb_store_kb_service_curiosity_rescore_json(const void *memory)
 {
-   int rescored = kb_store_curiosity_rescore_all();
+   int rescored = kb_store_curiosity_rescore_all((const kb_store_curiosity_memory_t *)memory);
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
@@ -939,20 +916,43 @@ static void route_curiosity_build_question(const curiosity_item_t *it, char *out
 {
    const char *target = it->target_topic[0] ? it->target_topic : it->target_entity;
    const char *evidence = it->evidence[0] ? it->evidence : "";
+   const char *prefix;
+   int include_evidence = 0;
    if (strcmp(it->gap_type, CURIOSITY_GAP_CONTRADICTION) == 0)
-      snprintf(out, cap, "Resolve contradiction about %s%s%s", target, evidence[0] ? ": " : "",
-               evidence);
+   {
+      prefix = "Resolve contradiction about ";
+      include_evidence = 1;
+   }
    else if (strcmp(it->gap_type, CURIOSITY_GAP_MISSING_FACT) == 0)
-      snprintf(out, cap, "Find a fact to answer: %s", target);
+      prefix = "Find a fact to answer: ";
    else if (strcmp(it->gap_type, CURIOSITY_GAP_STALE_FACT) == 0)
-      snprintf(out, cap, "Re-verify a stale fact about %s", target);
+      prefix = "Re-verify a stale fact about ";
    else if (strcmp(it->gap_type, CURIOSITY_GAP_WEAK_COVERAGE) == 0)
-      snprintf(out, cap, "Expand coverage of %s", target);
+      prefix = "Expand coverage of ";
    else if (strcmp(it->gap_type, CURIOSITY_GAP_UNVERIFIED_ASSUMPTION) == 0)
-      snprintf(out, cap, "Verify assumption about %s%s%s", target, evidence[0] ? ": " : "",
-               evidence);
+   {
+      prefix = "Verify assumption about ";
+      include_evidence = 1;
+   }
    else
-      snprintf(out, cap, "Investigate %s", target);
+      prefix = "Investigate ";
+   if (!cap)
+      return;
+   /* Keep the established byte-limited question, including its truncation
+    * order. The full evidence is forwarded separately to the memory owner. */
+   const char *parts[] = {prefix, target, include_evidence && evidence[0] ? ": " : "",
+                          include_evidence ? evidence : ""};
+   size_t used = 0;
+   for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); ++i)
+   {
+      size_t length = strlen(parts[i]);
+      size_t available = cap - 1 - used;
+      if (length > available)
+         length = available;
+      memcpy(out + used, parts[i], length);
+      used += length;
+   }
+   out[used] = '\0';
 }
 
 cJSON *kb_store_kb_service_curiosity_route_top_json(int limit, const char *source_session)

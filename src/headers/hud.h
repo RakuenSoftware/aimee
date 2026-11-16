@@ -38,5 +38,4 @@ typedef struct
 } hud_status_t;
 
 int hud_gather(hud_status_t *out);
-void hud_print(const hud_status_t *s);
 char *hud_json(const hud_status_t *s);

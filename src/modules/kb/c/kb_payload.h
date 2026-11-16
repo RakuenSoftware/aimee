@@ -75,12 +75,6 @@ extern "C"
    int kb_store_kb_documents_hll_sources_for_hash(const char *project, const char *file_hash,
                                                   sketch_hll_t *out);
 
-   /* Lexical (FTS) retrieval over kb_documents.kb_fts_tsv — the term-matching
-    * leg for kb_search_fused, distinct from the dense pgvector leg. Fills ids +
-    * ts_rank scores (best first, up to max), scoped by project when non-empty.
-    * Returns the count, 0 for no matches / empty query, -1 on SQL / conn error. */
-   int kb_store_kb_documents_fts_search(const char *project, const char *query, int64_t *ids,
-                                        double *scores, int max);
    int kb_store_kb_documents_fts_search_scoped(const char *project, const char *exclude_project,
                                                const char *query, int64_t *ids, double *scores,
                                                int max);
@@ -127,18 +121,6 @@ extern "C"
     * accompanying pgvector point deletes — those run on the materialized
     * id list returned by kb_store_kb_documents_list_chunk_ids_for_file. */
    void kb_store_kb_documents_delete_for_file(const char *project, const char *file_path);
-   int kb_store_kb_documents_delete_older_than(int days);
-
-   /* Idempotent KB_STORE half and immutable-evidence completion of the cross-store
-    * subject-erasure saga. sessions_json is a JSON array of DB1 session ids. */
-   int kb_store_subject_erasure_begin(const char *request_id, const char *subject,
-                                      const char *sessions_json, int64_t *memory_count,
-                                      int64_t *document_count, int *already_done);
-   int kb_store_subject_erasure_ack(const char *request_id, const char *actor,
-                                    const char *transport, int64_t db1_count, int *event_created,
-                                    int *coverage_complete, int64_t *pending_owners);
-   int kb_store_subject_erasure_complete(const char *request_id, const char *actor,
-                                         int64_t db1_count, int *event_created);
 
    /* INSERT a fresh kb_documents row with DELETE-then-INSERT semantics
     * (callers invoke kb_store_kb_documents_delete_for_file for the file
@@ -249,12 +231,6 @@ extern "C"
    /* Count rows in kb_async_jobs for a given kind (e.g. "embed_pdf"). Test/observability
     * helper. Returns the count (>=0) or -1 on error. */
    int kb_store_kb_async_count_kind(const char *kind);
-
-   /* Count only the PENDING rows for a kind. Separate from the total above because a
-    * backlog is the interesting quantity: total conflates work still waiting with work
-    * long finished, and cannot distinguish a queue that is draining from one nothing
-    * will ever claim. Returns the count (>=0) or -1 on error. */
-   int kb_store_kb_async_count_kind_pending(const char *kind);
 
    /* structured-pdf Phase B: a recognised table cell. Stored ONLY in kb_table_cells (never
     * in the shared typed_facts table — see schema.sql). */

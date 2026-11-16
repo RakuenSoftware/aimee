@@ -27,6 +27,24 @@ char platform_path_sep(void)
    return '/';
 }
 
+int platform_path_is_beneath(const char *root, const char *path)
+{
+   if (!root || !root[0] || !path || !path[0])
+      return 0;
+   char *parent = realpath(root, NULL), *child = realpath(path, NULL);
+   struct stat status;
+   int within = 0;
+   if (parent && child && !stat(parent, &status) && S_ISDIR(status.st_mode))
+   {
+      size_t length = strlen(parent);
+      within = !strncmp(parent, child, length) &&
+               (parent[length - 1] == '/' || child[length] == '/' || !child[length]);
+   }
+   free(parent);
+   free(child);
+   return within;
+}
+
 int platform_mkdir_p(const char *path, int mode)
 {
    char tmp[4096];

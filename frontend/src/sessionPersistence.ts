@@ -11,6 +11,7 @@ export interface SessionRecord {
   claudeSid: string;
   aimeeSid: string;
   attachId: string;
+  workflowChannel?: string;
   messages: SessionMessage[];
 }
 
@@ -40,7 +41,7 @@ export function sessionsForLocalCache(sessions: SessionRecord[]): SessionRecord[
   }));
 }
 
-function validMessages(value: unknown): SessionMessage[] {
+export function validMessages(value: unknown): SessionMessage[] {
   if (!Array.isArray(value)) return [];
   return value.filter((message): message is SessionMessage => {
     if (!message || typeof message !== 'object') return false;
@@ -118,6 +119,7 @@ export function mergePersistedSessions(
       // Attachments are live browser surfaces and must never cross devices.
       attachId: '',
       messages: preferMessages(cached?.messages || [], remote.messages),
+      workflowChannel: cached?.workflowChannel,
     });
     localByAimeeID.delete(remote.id);
   }

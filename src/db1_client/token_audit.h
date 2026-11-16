@@ -91,10 +91,6 @@ extern "C"
     * never double-counted. */
    int db1_token_audit_insert(const db1_token_audit_row_t *row);
 
-   /* Create the (source, principal, idempotency_key, attempt) idempotency index on
-    * the live DB. Idempotent; created lazily on first insert. */
-   void db1_token_audit_ensure_idem_index(void);
-
    /* Sum estimated_cost_usd across rows tagged with this delegation_id.
     * Returns 0.0 for unknown delegation or DB-not-initialized. Used by
     * the cost-fold integration to attribute a child delegate's spend
@@ -129,10 +125,6 @@ extern "C"
       int64_t worker_cache_read_tokens;
       double worker_cost_usd;
    } db1_token_audit_session_split_t;
-
-   /* Aggregate the split for one session_id. Returns 0 on success (including a
-    * session with no rows -> all-zero out), -1 on error / DB-not-initialized. */
-   int db1_token_audit_session_split(const char *session_id, db1_token_audit_session_split_t *out);
 
    typedef struct
    {

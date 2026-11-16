@@ -3,26 +3,6 @@
 
 #include <stdio.h>
 
-int64_t kb_store_memory_count(void)
-{
-   return 0;
-}
-
-int kb_store_memory_count_l2(void)
-{
-   return 0;
-}
-
-int kb_store_memory_count_l3(void)
-{
-   return 0;
-}
-
-int kb_store_memory_count_orphaned_l0(void)
-{
-   return 0;
-}
-
 /* Unconfigured module transport for legacy KB_STORE-only fixtures. Consumer-specific
  * tests supply a strong transport mock and assert the Go response contract. */
 __attribute__((weak)) int aimee_module_commands_dispatch_internal(const char *method,
@@ -44,4 +24,19 @@ __attribute__((weak)) int aimee_module_commands_dispatch_internal_timeout(const 
 {
    (void)timeout_ms;
    return aimee_module_commands_dispatch_internal(method, args, result);
+}
+
+/* Legacy-only consumer fixtures have no installed verifier context factory. */
+__attribute__((weak)) int aimee_module_commands_dispatch_internal_caller(const char *method,
+                                                                         const cJSON *args,
+                                                                         cJSON **result)
+{
+   return aimee_module_commands_dispatch_internal(method, args, result);
+}
+__attribute__((weak)) int aimee_module_commands_dispatch_internal_caller_timeout(const char *method,
+                                                                                 const cJSON *args,
+                                                                                 int timeout_ms,
+                                                                                 cJSON **result)
+{
+   return aimee_module_commands_dispatch_internal_timeout(method, args, timeout_ms, result);
 }

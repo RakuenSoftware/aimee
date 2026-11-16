@@ -2,6 +2,7 @@
  * policy-verdict action audit. See kb_http_governance.h. All routes are
  * console-admin-ACL'd upstream. */
 #include "kb_http_governance.h"
+#include "kb_http_common.h"
 #include "kb/kb_module_stage_adapters.h"
 
 #include "cJSON.h"
@@ -22,142 +23,6 @@
 #define DECISION_LIST_MAX 50
 #define AUDIT_LIST_MAX    100
 
-int kb_http_subject_erasure_route(const char *method, const char *path, const char *body,
-                                  int owner_scope, char *out_buf, int out_cap)
-{
-   if (strcmp(path, "/v1/privacy/erase-subject/begin") != 0 &&
-       strcmp(path, "/v1/privacy/erase-subject/complete") != 0)
-      return -1;
-   if (strcmp(method, "POST") != 0)
-   {
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
-      return 405;
-   }
-   if (!owner_scope)
-   {
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"owner authorization required\"}");
-      return 403;
-   }
-   const kb_principal_t *actor = kb_reqctx_actor();
-   char actor_key[600] = "";
-   if (!actor || kb_identity_key(actor, actor_key, sizeof(actor_key)) != 0)
-   {
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated owner identity required\"}");
-      return 403;
-   }
-   cJSON *req = body ? cJSON_Parse(body) : NULL;
-   const cJSON *jr = req ? cJSON_GetObjectItemCaseSensitive(req, "request_id") : NULL;
-   if (!cJSON_IsString(jr) || !jr->valuestring[0])
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"request_id required\"}");
-      return 400;
-   }
-   if (strcmp(path, "/v1/privacy/erase-subject/begin") == 0)
-   {
-      const cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "subject");
-      const cJSON *jids = cJSON_GetObjectItemCaseSensitive(req, "session_ids");
-      if (!cJSON_IsString(js) || !js->valuestring[0] || !cJSON_IsArray(jids))
-      {
-         cJSON_Delete(req);
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"subject and session_ids array required\"}");
-         return 400;
-      }
-      char *sessions = cJSON_PrintUnformatted(jids);
-      int64_t memories = 0, documents = 0;
-      int already = 0;
-      int rc = sessions ? kb_store_subject_erasure_begin(jr->valuestring, js->valuestring, sessions,
-                                                         &memories, &documents, &already)
-                        : -1;
-      free(sessions);
-      if (rc != 0)
-      {
-         cJSON_Delete(req);
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"KB_STORE erasure failed\"}");
-         return 500;
-      }
-      if (kb_module_memory_erase_subject(jr->valuestring, js->valuestring, jids) != 0)
-      {
-         cJSON_Delete(req);
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"backend erasure failed; retry request_id\"}");
-         return 503;
-      }
-      cJSON *resp = cJSON_CreateObject();
-      cJSON_AddStringToObject(resp, "status", "knowledge_done");
-      cJSON_AddStringToObject(resp, "request_id", jr->valuestring);
-      cJSON_AddNumberToObject(resp, "memory_count", (double)memories);
-      cJSON_AddNumberToObject(resp, "document_count", (double)documents);
-      cJSON_AddBoolToObject(resp, "already_done", already);
-      char *json = cJSON_PrintUnformatted(resp);
-      snprintf(out_buf, (size_t)out_cap, "%s", json ? json : "{}");
-      free(json);
-      cJSON_Delete(resp);
-      cJSON_Delete(req);
-      return 200;
-   }
-   const cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "db1_count");
-   if (!cJSON_IsNumber(jc) || !isfinite(jc->valuedouble) || jc->valuedouble < 0 ||
-       jc->valuedouble > 9007199254740991.0 || trunc(jc->valuedouble) != jc->valuedouble)
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"non-negative integer db1_count required\"}");
-      return 400;
-   }
-   const cJSON *policy = cJSON_GetObjectItemCaseSensitive(req, "receipt_policy");
-   if (!cJSON_IsString(policy) || strcmp(policy->valuestring, "memory-erasure-v2") != 0)
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":\"versioned private erasure receipt replay required\"}");
-      return 409;
-   }
-   kb_blob_recon_stats_t recon;
-   if (kb_blob_reconcile_run(config_kb_pdf_blob_orphan_alarm_mb(), 0, &recon) != 0)
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"orphan blob reconciliation failed\"}");
-      return 500;
-   }
-   char transport[600] = "";
-   const kb_request_context_t *resolved = kb_reqctx_resolved();
-   if (resolved && resolved->has_transport &&
-       kb_identity_key(&resolved->transport, transport, sizeof(transport)) != 0)
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":\"authenticated owner transport unavailable\"}");
-      return 403;
-   }
-   if (kb_module_memory_reset_derived() != 0)
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":\"derived memory cleanup failed; retry erasure request\"}");
-      return 503;
-   }
-   int event_created = 0, coverage_complete = 0;
-   int64_t pending_owners = 0;
-   int rc =
-       kb_store_subject_erasure_ack(jr->valuestring, actor_key, transport, (int64_t)jc->valuedouble,
-                                    &event_created, &coverage_complete, &pending_owners);
-   cJSON_Delete(req);
-   if (rc != 0)
-   {
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"erasure completion failed\"}");
-      return 500;
-   }
-   snprintf(
-       out_buf, (size_t)out_cap,
-       "{\"status\":\"%s\",\"event_created\":%s,\"coverage_complete\":%s,\"pending_owners\":%lld,"
-       "\"coverage_scope\":\"managed_application_stores\",\"policy_revision\":\"memory-erasure-"
-       "v2\",\"orphan_blobs_unlinked\":%lld}",
-       coverage_complete ? "completed" : "pending_owners", event_created ? "true" : "false",
-       coverage_complete ? "true" : "false", (long long)pending_owners, recon.orphans_unlinked);
-   return 200;
-}
-
 static const char *jstr(const cJSON *o, const char *k)
 {
    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k);
@@ -167,51 +32,6 @@ static int64_t jint(const cJSON *o, const char *k)
 {
    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k);
    return cJSON_IsNumber(v) ? (int64_t)v->valuedouble : 0;
-}
-
-/* Read one query param (no percent-decoding needed for our ids/timestamps). */
-static int qparam(const char *qs, const char *key, char *out, size_t cap)
-{
-   if (cap == 0)
-      return 0;
-   out[0] = '\0';
-   if (!qs)
-      return 0;
-   size_t klen = strlen(key);
-   const char *p = qs;
-   while (p && *p)
-   {
-      if (strncmp(p, key, klen) == 0 && p[klen] == '=')
-      {
-         const char *v = p + klen + 1;
-         const char *amp = strchr(v, '&');
-         size_t n = amp ? (size_t)(amp - v) : strlen(v);
-         if (n >= cap)
-            n = cap - 1;
-         memcpy(out, v, n);
-         out[n] = '\0';
-         return 1;
-      }
-      p = strchr(p, '&');
-      if (p)
-         p++;
-   }
-   return 0;
-}
-
-static int emit(cJSON *root, char *out_buf, int out_cap, int status)
-{
-   char *s = cJSON_PrintUnformatted(root);
-   cJSON_Delete(root);
-   if (!s || strlen(s) >= (size_t)out_cap)
-   {
-      free(s);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"response too large\"}");
-      return 500;
-   }
-   snprintf(out_buf, (size_t)out_cap, "%s", s);
-   free(s);
-   return status;
 }
 
 static cJSON *decision_to_json(const kb_store_decision_log_row_t *d)
@@ -236,9 +56,9 @@ static cJSON *decision_to_json(const kb_store_decision_log_row_t *d)
 static int list_decisions(const char *qs, char *out_buf, int out_cap)
 {
    char subject[256], status[32], limit_s[16];
-   qparam(qs, "subject", subject, sizeof(subject));
-   qparam(qs, "status", status, sizeof(status));
-   qparam(qs, "limit", limit_s, sizeof(limit_s));
+   kb_http_query_param(qs, "subject", subject, sizeof(subject));
+   kb_http_query_param(qs, "status", status, sizeof(status));
+   kb_http_query_param(qs, "limit", limit_s, sizeof(limit_s));
    int limit = limit_s[0] ? atoi(limit_s) : 50;
    kb_store_decision_log_row_t rows[DECISION_LIST_MAX];
    int n = kb_store_decision_log_list_scoped(subject[0] ? subject : NULL, status[0] ? status : NULL,
@@ -253,7 +73,7 @@ static int list_decisions(const char *qs, char *out_buf, int out_cap)
    for (int i = 0; i < n; i++)
       cJSON_AddItemToArray(arr, decision_to_json(&rows[i]));
    cJSON_AddNumberToObject(root, "count", n);
-   return emit(root, out_buf, out_cap, 200);
+   return kb_http_emit(root, out_buf, out_cap, 200);
 }
 
 /* GET /v1/decisions/{id} — the decision plus its supersede chain (older first). */
@@ -277,7 +97,7 @@ static int get_decision(int64_t id, char *out_buf, int out_cap)
       cJSON_AddItemToArray(chain, decision_to_json(&p));
       prev = p.supersedes_id;
    }
-   return emit(root, out_buf, out_cap, 200);
+   return kb_http_emit(root, out_buf, out_cap, 200);
 }
 
 /* POST /v1/decisions — create (or supersede via supersedes_id). One active
@@ -354,7 +174,7 @@ static int create_decision(const char *body, char *out_buf, int out_cap)
    safe_subj[si] = '\0';
    audit_log("console_decision_create", "id=%lld subject=%s supersedes=%lld", (long long)out.id,
              safe_subj, (long long)supersedes_id);
-   return emit(decision_to_json(&out), out_buf, out_cap, 201);
+   return kb_http_emit(decision_to_json(&out), out_buf, out_cap, 201);
 }
 
 /* POST /v1/decisions/{id}/{outcome|status|revisit} — single-field updates. */
@@ -396,7 +216,7 @@ static int update_decision(int64_t id, const char *action, const char *body, cha
    audit_log("console_decision_update", "id=%lld field=%s", (long long)id, action);
    kb_store_decision_log_row_t d;
    if (kb_store_decision_log_get(id, &d) == 0)
-      return emit(decision_to_json(&d), out_buf, out_cap, 200);
+      return kb_http_emit(decision_to_json(&d), out_buf, out_cap, 200);
    snprintf(out_buf, (size_t)out_cap, "{\"ok\":true}");
    return 200;
 }
@@ -421,10 +241,10 @@ static int supersede_decision(int64_t id, const char *body, char *out_buf, int o
 static int list_audit(const char *qs, char *out_buf, int out_cap)
 {
    char since[32], until[32], scope[32], limit_s[16];
-   qparam(qs, "since", since, sizeof(since));
-   qparam(qs, "until", until, sizeof(until));
-   qparam(qs, "scope_kind", scope, sizeof(scope));
-   qparam(qs, "limit", limit_s, sizeof(limit_s));
+   kb_http_query_param(qs, "since", since, sizeof(since));
+   kb_http_query_param(qs, "until", until, sizeof(until));
+   kb_http_query_param(qs, "scope_kind", scope, sizeof(scope));
+   kb_http_query_param(qs, "limit", limit_s, sizeof(limit_s));
    if (!since[0])
    {
       snprintf(out_buf, (size_t)out_cap,
@@ -457,7 +277,7 @@ static int list_audit(const char *qs, char *out_buf, int out_cap)
       cJSON_AddItemToArray(arr, o);
    }
    cJSON_AddNumberToObject(root, "count", n);
-   return emit(root, out_buf, out_cap, 200);
+   return kb_http_emit(root, out_buf, out_cap, 200);
 }
 
 int kb_http_governance_route(const char *method, const char *path, const char *query_string,

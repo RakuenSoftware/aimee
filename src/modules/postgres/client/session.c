@@ -2,8 +2,8 @@
 #include <aimee/postgres/client.h>
 #include <aimee/postgres/module_api.h>
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_protocol.h>
 #include <limits.h>
 #include <errno.h>
 #include <stdio.h>
@@ -260,25 +260,25 @@ static unsigned char *call(aimee_postgres_session_t *session, uint32_t operation
       return NULL;
    }
    uint32_t length = 0;
-   aimee_module_call_result_t rc;
+   ouro_module_call_result_t rc;
    if (session && session->child > 0)
       rc = aimee_postgres_local_exchange(session, request.bytes, (uint32_t)request.used, reply,
                                          (uint32_t)reply_cap, &length) == 0
-               ? AIMEE_MODULE_CALL_OK
-               : AIMEE_MODULE_CALL_TRANSPORT;
+               ? OURO_MODULE_CALL_OK
+               : OURO_MODULE_CALL_TRANSPORT;
 #ifdef AIMEE_POSTGRES_LOCAL_ONLY
    else
-      rc = AIMEE_MODULE_CALL_TRANSPORT;
+      rc = OURO_MODULE_CALL_TRANSPORT;
 #else
    else if ((session && session->channel == -2) || !obs_bus_module_call)
-      rc = AIMEE_MODULE_CALL_TRANSPORT;
+      rc = OURO_MODULE_CALL_TRANSPORT;
    else
       rc = obs_bus_module_call(AIMEE_POSTGRES_EVENT_SESSION, AIMEE_POSTGRES_STAGE_SESSION, 0,
                                deadline_ns(session), request.bytes, (uint32_t)request.used, reply,
                                (uint32_t)reply_cap, &length, NULL, NULL);
 #endif
    free(request.bytes);
-   if (rc != AIMEE_MODULE_CALL_OK || length > reply_cap)
+   if (rc != OURO_MODULE_CALL_OK || length > reply_cap)
    {
       free(reply);
       if (session)

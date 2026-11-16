@@ -153,7 +153,7 @@ func TestStateRecallSurvivesAcrossRuns(t *testing.T) {
 
 	// Run 1: the coordinate is deep in the prefix and gets folded away.
 	run1 := makeMessages(20)
-	run1.At(1).Set("content", NewString("the retry backoff lives in "+coord+" and needs care"))
+	run1.At(1).Get("blocks").At(0).Set("text", NewString("the retry backoff lives in "+coord+" and needs care"))
 	cfg := &ReduceConfig{DelegateSeam: true, HistoryFold: true, RecallEnabled: true,
 		Fold: FoldConfig{Closet: ClosetConfig{Enabled: true}}}
 	st1 := &ReduceState{Turn: 3, Recall: NewRecallIndex()}
@@ -181,7 +181,7 @@ func TestStateRecallSurvivesAcrossRuns(t *testing.T) {
 	// which is retained verbatim and therefore never evicted — so nothing HERE
 	// could have put the key in the table.
 	run2 := makeMessages(20)
-	run2.At(run2.Len()-1).Set("content", NewString(
+	run2.At(run2.Len()-1).Get("blocks").At(0).Set("text", NewString(
 		"remind me what we concluded about "+coord+" before"))
 	out := Reduce(run2, "sys", SeamDelegate, cfg, &st2)
 	if out.RecallSurfaced < 1 || !strings.Contains(out.RecallHint, coord) {
@@ -193,7 +193,7 @@ func TestStateRecallSurvivesAcrossRuns(t *testing.T) {
 	// mentioned path.
 	fresh := &ReduceState{Turn: 9, Recall: NewRecallIndex()}
 	run2b := makeMessages(20)
-	run2b.At(run2b.Len()-1).Set("content", NewString(
+	run2b.At(run2b.Len()-1).Get("blocks").At(0).Set("text", NewString(
 		"remind me what we concluded about "+coord+" before"))
 	if off := Reduce(run2b, "sys", SeamDelegate, cfg, fresh); off.RecallHint != "" {
 		t.Errorf("no restored state must mean no hint, got %q", off.RecallHint)

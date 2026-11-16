@@ -182,7 +182,7 @@ def _validate_principal_refs(data: dict[str, object], path: Path) -> None:
     Event kinds are carved from a ref as 4096 + ref*256 + stage, so a ref is not
     just an id: it reserves a whole 256-kind block. Handing a module a ref inside
     the plugin band would put its kinds where a provisioned plugin instance may
-    already be serving, and bus_host_serve_kind() binds one kind to exactly one
+    already be serving, and ouro_host_serve_kind() binds one kind to exactly one
     slot -- the loser is denied at attach with nothing in its own log to say why.
     That is not hypothetical: the plugin range formerly sat at 11264, which is
     postgres's block (4096 + 28*256), and a live aimee-kb reproduced the denial.

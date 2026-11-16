@@ -2,6 +2,7 @@ package delegates
 
 import (
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 )
 
@@ -114,7 +115,7 @@ type LaunchStep struct {
 type LaunchTask struct {
 	OwnedFiles []string
 	Role       string
-	Prompt     string
+	Message    canonical.Message
 }
 
 type LaunchRepair struct {
@@ -170,10 +171,11 @@ func PlanLaunch(plan LaunchPlan, maxConcurrent int) LaunchDecision {
 		}
 
 		d.Steps = append(d.Steps, launchStep(p))
+		prompt := LaunchPrompt(p, files)
 		d.Tasks = append(d.Tasks, LaunchTask{
 			OwnedFiles: files,
 			Role:       roleOrDefault(p.Role),
-			Prompt:     LaunchPrompt(p, files),
+			Message:    canonical.Message{Role: "user", Blocks: []canonical.Block{{Type: "text", Text: &prompt}}},
 		})
 
 		if len(d.Steps) > MaxPlanSteps {

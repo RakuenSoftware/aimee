@@ -17,11 +17,12 @@
  * unresolved markers.
  * Files larger than FILE_REF_MAX_SIZE are truncated with a [TRUNCATED] marker.
  * Caller must free() the returned string. Returns NULL only on allocation failure. */
-char *resolve_file_references(const char *prompt, const char *project_root);
+/* Read referenced files as evidence without copying or rewriting the task. */
+char *resolve_file_reference_context(const char *prompt, const char *project_root);
 
 /* Delegate token budget: limit system prompt size before dispatching.
  * Default budget is 20K tokens (~80K chars). Progressive truncation priority:
- *   1. injected file content ("--- @path ---" blocks from resolve_file_references)
+ *   1. injected file content ("--- @path ---" blocks from resolve_file_reference_context)
  *   2. context/background sections ("# Relevant Context", "# Pre-loaded" blocks)
  *   3. injected skill content (after "### ACTIVE SKILL:" marker)
  *   4. generic tail truncation
@@ -43,17 +44,6 @@ char *delegate_prompt_limit(const char *prompt, int token_budget);
  * Returns the configured value, or DELEGATE_TOKEN_BUDGET_DEFAULT if not set. */
 int delegate_token_budget_load(const char *project_root, const char *role);
 
-/* Input budget a specific model can accept (context window minus its output
- * ceiling), honouring an agent's explicit context_window override. 0 = unknown. */
-int delegate_token_budget_for_agent(const char *model, int agent_context_window);
-
-/* Smallest such budget across every agent still eligible after routing: the
- * agent is picked downstream, so the prompt has to fit the smallest of them. */
-int delegate_token_budget_for_agents(const agent_config_t *cfg);
-
-int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out);
-int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_voters,
-               agent_result_t *out);
 /* Check whether a tool call would violate any active hard directive in KB_STORE.
  * Returns -1 with reason_out filled on a likely violation, 0 otherwise. Reads
  * go through kb_store_rules_list. */

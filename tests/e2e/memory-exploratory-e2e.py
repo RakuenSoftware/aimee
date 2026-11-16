@@ -87,8 +87,13 @@ def main():
             code, _ = gate.call('/v1/health', method='GET')
             gate.check('application stays live during memory owner outage', code == 200)
         finally:
+            # Resume, terminate and wait for the old process to exit: a resumed
+            # owner may answer before SIGTERM finishes, which proves nothing
+            # about its supervised replacement.
             gate.docker('exec', args.server, 'python3', '-c',
-                'import os,signal,sys; p=int(sys.argv[1]); os.kill(p,signal.SIGCONT); os.kill(p,signal.SIGTERM)', str(pid))
+                'import os,signal,sys,time; p=int(sys.argv[1]); os.kill(p,signal.SIGCONT); os.kill(p,signal.SIGTERM)\n'
+                'end=time.monotonic()+60\nwhile os.path.exists("/proc/%d" % p) and time.monotonic()<end: time.sleep(0.1)\n'
+                'sys.exit(os.path.exists("/proc/%d" % p))', str(pid))
         started = time.monotonic()
         gate.wait('get', dict(id=mid), predicate=lambda row: row.get('memory', {}).get('content') == content)
         timings['owner_recovery_seconds'] = time.monotonic() - started

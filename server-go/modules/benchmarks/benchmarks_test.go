@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func scoreRequest(retrieved, relevant []int64, k uint32) []byte {
@@ -88,9 +88,9 @@ func TestIRScoringParity(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response, status := Handle(bus.ModuleInvocation{StageID: StageRun},
+			response, status := Handle(ring.ModuleInvocation{StageID: StageRun},
 				scoreRequest(test.retrieved, test.relevant, test.k))
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("status = %d", status)
 			}
 			mrr, ndcg, recall := decodeScores(t, response)
@@ -115,9 +115,9 @@ func TestLatencySummaryParity(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response, status := Handle(bus.ModuleInvocation{StageID: StageLatency},
+			response, status := Handle(ring.ModuleInvocation{StageID: StageLatency},
 				latencyRequest(test.input))
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("status = %d", status)
 			}
 			count, values := decodeLatency(t, response)
@@ -146,12 +146,12 @@ func TestBenchmarksRejectsMalformedWire(t *testing.T) {
 	padding[requestRetrievedOff+8] = 1
 	tests = append(tests, padding)
 	for index, request := range tests {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageRun}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageRun}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("malformed request %d status = %d", index, status)
 		}
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageLatency + 1},
-		scoreRequest(nil, nil, 1)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageLatency + 1},
+		scoreRequest(nil, nil, 1)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong-stage status = %d", status)
 	}
 }
@@ -175,25 +175,25 @@ func TestBenchmarksRejectsMalformedLatencyWire(t *testing.T) {
 	padding[latencyValuesOff+8] = 1
 	tests = append(tests, padding)
 	for index, request := range tests {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageLatency}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageLatency}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("malformed latency request %d status = %d", index, status)
 		}
 	}
 }
 
 func TestBenchmarksHonorsCancellationAfterValidation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageRun, DeadlineNS: 1}
-	if _, status := Handle(invocation, scoreRequest([]int64{1}, []int64{1}, 1)); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageRun, DeadlineNS: 1}
+	if _, status := Handle(invocation, scoreRequest([]int64{1}, []int64{1}, 1)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
-	if _, status := Handle(invocation, nil); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(invocation, nil); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed expired-request status = %d", status)
 	}
 	invocation.StageID = StageLatency
-	if _, status := Handle(invocation, latencyRequest([]float64{1})); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(invocation, latencyRequest([]float64{1})); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired latency invocation status = %d", status)
 	}
-	if _, status := Handle(invocation, latencyRequest(nil)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(invocation, latencyRequest(nil)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed expired latency request status = %d", status)
 	}
 }

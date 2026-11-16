@@ -8,13 +8,32 @@
 #include <stdint.h>
 #include <string.h>
 #include "slop_detect.h"
+#include <aimee/tools/agent_tools.h>
 
 struct cJSON;
+int agent_tools_classification(const char *name);
+/* Takes ownership of admitted_arguments when non-NULL. */
 
+char *agent_tools_dispatch_ir_owned(const char *name, int timeout_ms, int *is_error,
+                                    struct cJSON *admitted_arguments);
+
+/* Parse native exec outcome at its tool-owner entry boundary. Borrowed static
+ * verdict/reason are returned only for a classified failure. */
+/* Private per-dispatch classified outcome; owned alongside the effect slot so
+ * a synchronous nested producer cannot overwrite the outer completion. */
+typedef struct
+{
+   const char *verdict, *reason, *mode;
+   int explicit_verdict;
+} agent_tools_dispatch_outcome_t;
+extern _Thread_local agent_tools_dispatch_outcome_t agent_tools_dispatch_outcome;
+void td_outcome_reset(void);
+void td_outcome_set(const char *verdict, const char *reason);
+int agent_tools_effect_exec_failure(const char *result, const char **verdict, const char **reason);
 void agent_tools_effect_reset(void);
 int agent_tools_effect_admit(const char *name, struct cJSON **args, const char *cwd,
                              const char *sid, int classification);
-char *agent_tools_effect_receipt(const char *verdict, char *result);
+char *agent_tools_effect_receipt(const char *verdict, char *result, int *is_error);
 int agent_tools_effect_classification(const char *name, int (*classifier)(const char *, int *));
 int agent_tools_effect_mcp_failure_is_timeout(const char *error);
 void agent_tools_effect_propose(const char *name, struct cJSON *args, int classification);

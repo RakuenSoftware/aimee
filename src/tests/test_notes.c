@@ -1,3 +1,4 @@
+#include "support/typed_catalog_fixture.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -211,7 +212,7 @@ static void test_null_params(void)
 
 /* Verify that the delegate-facing tool definitions advertise the note tools.
  * This is the contract that proposal AC requires: "Note tools are available
- * in delegate sessions" — i.e. exposed via build_tools_array(). */
+ * in delegate sessions" — i.e. exposed via fixture_chat_tools(). */
 static int tools_array_has(cJSON *tools, const char *want_name)
 {
    int n = cJSON_GetArraySize(tools);
@@ -228,19 +229,19 @@ static int tools_array_has(cJSON *tools, const char *want_name)
 
 static void test_delegate_tools_advertised(void)
 {
-   cJSON *tools = build_tools_array();
+   cJSON *tools = fixture_chat_tools();
    assert(tools_array_has(tools, "create_note"));
    assert(tools_array_has(tools, "list_notes"));
    assert(tools_array_has(tools, "search_notes"));
    cJSON_Delete(tools);
 
-   cJSON *resp_tools = build_tools_array_responses();
+   cJSON *resp_tools = fixture_responses_tools();
    assert(tools_array_has(resp_tools, "create_note"));
    assert(tools_array_has(resp_tools, "list_notes"));
    assert(tools_array_has(resp_tools, "search_notes"));
    cJSON_Delete(resp_tools);
 
-   cJSON *anthro_tools = build_tools_array_anthropic();
+   cJSON *anthro_tools = fixture_anthropic_tools();
    assert(tools_array_has(anthro_tools, "create_note"));
    assert(tools_array_has(anthro_tools, "list_notes"));
    assert(tools_array_has(anthro_tools, "search_notes"));

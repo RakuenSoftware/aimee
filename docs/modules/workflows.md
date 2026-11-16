@@ -18,8 +18,7 @@ engine.
 The separately supervised `workflows` process serves one bounded Go stage at principal 20/event
 9217: it classifies an already-parsed `advance_request` as `ok`, `replay`, `stale`, `unbound`,
 `terminal`, or `badargs`. The caller still owns state reads, authorization, audit, persistence, and
-the transition itself. Its C `module_adapter.c` is a wire-parity fixture, not an executable workflow
-engine.
+the transition itself.
 
 The local CLI still uses the C parser for `workflow blocks`, `validate`, `show`, `list`, and `new`.
 Those commands are compatibility helpers. Browser Save and Validate, server admission, and the Go

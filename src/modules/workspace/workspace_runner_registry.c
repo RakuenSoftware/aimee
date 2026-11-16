@@ -103,18 +103,6 @@ static ws_runner_queue_t *handle_intern(const char *id)
    return h;
 }
 
-static void handle_release(const char *id)
-{
-   pthread_mutex_lock(&g_handles_mu);
-   ws_runner_queue_t *h = handle_find(id);
-   if (h)
-   {
-      g_handle_used[h - g_handles] = 0;
-      h->id[0] = '\0';
-   }
-   pthread_mutex_unlock(&g_handles_mu);
-}
-
 ws_runner_queue_t *ws_runner_registry_get_or_create(const char *id)
 {
    /* Announce the tree, but hand back the handle either way. This answers "what
@@ -140,35 +128,16 @@ int ws_runner_registry_register_configured(const char *workspace)
    return 0;
 }
 
-ws_runner_queue_t *ws_runner_registry_lookup(const char *id)
+int ws_runner_registry_announce(const char *id)
 {
-   char serving[AIMEE_WS_RUNNER_ID_MAX + 1] = "";
-   if (!id || runner_ask(AIMEE_WS_RUNNER_OP_RESOLVE, id, serving, sizeof(serving)) != 0)
-      return NULL;
-   /* Resolve answers with the CLOSEST serving tree, which for an exact lookup
-    * must be the tree itself; a parent answering does not mean this id is
-    * registered. */
-   if (strcmp(serving, id) != 0)
-      return NULL;
-   return handle_intern(serving);
+   return runner_ask(AIMEE_WS_RUNNER_OP_REGISTER, id, NULL, 0) < 0 ? -1 : 0;
 }
 
-ws_runner_queue_t *ws_runner_registry_lookup_for_path(const char *path)
+int ws_runner_registry_close_channel(const char *channel)
 {
-   char serving[AIMEE_WS_RUNNER_ID_MAX + 1] = "";
-   if (!path || runner_ask(AIMEE_WS_RUNNER_OP_RESOLVE, path, serving, sizeof(serving)) != 0)
-      return NULL;
-   if (!serving[0])
-      return NULL; /* nobody is serving it: an answer, not a failure */
-   return handle_intern(serving);
-}
-
-void ws_runner_registry_remove(const char *id)
-{
-   if (!id || !id[0])
-      return;
-   (void)runner_ask(AIMEE_WS_RUNNER_OP_UNREGISTER, id, NULL, 0);
-   handle_release(id);
+   if (!aimee_ws_runner_channel_valid(channel))
+      return -1;
+   return runner_ask(AIMEE_WS_RUNNER_OP_UNREGISTER, channel, NULL, 0) < 0 ? -1 : 0;
 }
 
 /* One handoff op, carrying `payload` and returning the module's chunk. The
@@ -208,7 +177,7 @@ int ws_runner_io(unsigned op, const char *id, const char *payload, size_t payloa
        * failure. The module answers it as CAPABILITY_ABSENT precisely so this
        * layer can pass it on; collapsing it into -1 here is what let the poll
        * loop treat a permanent condition as a transient one. */
-      return (rc == (int)AIMEE_MODULE_CALL_CAPABILITY_ABSENT) ? WS_RUNNER_IO_UNSERVED : -1;
+      return (rc == (int)OURO_MODULE_CALL_CAPABILITY_ABSENT) ? WS_RUNNER_IO_UNSERVED : -1;
    }
 
    const uint8_t *body = NULL;

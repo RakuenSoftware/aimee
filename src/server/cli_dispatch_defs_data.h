@@ -189,6 +189,7 @@
     {"cron", "disable", "cron.disable", NULL, NULL, 0},
     {"cron", "remove", "cron.remove", NULL, NULL, 0},
     {"model", "list", "model.list", NULL, "agents", 0},
+    {"model", "generate", "model.generate", NULL, NULL, 300000},
     {"audit", "verify", "audit.verify", NULL, NULL, 0},
     {"audit", "checkpoint", "audit.checkpoint", NULL, NULL, 0},
     {"audit", "seal", "audit.seal", NULL, NULL, 0},

@@ -212,7 +212,7 @@ void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
                                int prompt_tokens, int completion_tokens, int cache_write_tokens,
                                int cache_read_tokens, const char *source, const char *kind)
 {
-   agent_result_t ar;
+   agent_result_t ar = {0};
    memset(&ar, 0, sizeof(ar));
    snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", agent_name ? agent_name : "");
    snprintf(ar.model, sizeof(ar.model), "%s", agent_model ? agent_model : "");
@@ -232,7 +232,7 @@ void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
 void agent_record_token_audit_kind(const agent_result_t *result, const char *role,
                                    const char *source, const char *usage_kind)
 {
-   if (!result)
+   if (!result || result->cache_hit)
       return;
 
    /* Per-request idempotency + attribution (#3): the request context carries the
@@ -321,7 +321,9 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
        .requested_model = result->requested_model,
        .stop_reason = result->stop_reason,
        .agent_log_id = g_agent_log_id,
-       .usage_kind = usage_kind ? usage_kind : "realized",
+       .usage_kind = agent_result_usage_is_unobserved(result)
+                         ? "unobserved"
+                         : (usage_kind ? usage_kind : "realized"),
        .request_id = rctx ? rctx->request_id : "",
        .idempotency_key = rctx ? rctx->idempotency_key : "",
        .attempt = 0,
@@ -345,6 +347,8 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
 
 void agent_log_call(const agent_result_t *result, const char *role)
 {
+   if (!result || result->cache_hit)
+      return;
    db1_agent_log_insert_row_t row = {
        .agent_name = result->agent_name,
        .role = role ? role : "",

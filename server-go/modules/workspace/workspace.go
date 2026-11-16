@@ -4,8 +4,9 @@ package workspace
 import (
 	"encoding/binary"
 	"sync"
+	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -99,33 +100,100 @@ func runnerUnregister(id string) {
 	}
 }
 
+// A runner channel is one client's private rendezvous: "runner:" and 32
+// lowercase hex digits the client chose. The aimee CLI opens one for each
+// command it runs inside a detached tree and sends its name with that command,
+// so the ops the command causes are run by that client and no other. A tree's
+// own id stays shared by `aimee workspace serve`; a CLI that polled it could
+// otherwise be handed another session's op and run it with its own
+// environment and credentials.
+const (
+	runnerChannelPrefix = "runner:"
+	runnerChannelLen    = len(runnerChannelPrefix) + 32
+	// Channels are per command, so many are open at once across sessions.
+	runnerChannelMax = 1024
+	// A channel nobody polled for this long belongs to a client that is gone.
+	runnerChannelIdle = 2 * time.Minute
+)
+
+var channels = map[string]*rendezvous{}
+
+func isRunnerChannel(id string) bool {
+	if len(id) != runnerChannelLen || id[:len(runnerChannelPrefix)] != runnerChannelPrefix {
+		return false
+	}
+	for _, c := range []byte(id[len(runnerChannelPrefix):]) {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// channelFor returns a channel's rendezvous, opening it on first use: the
+// client's own first poll opens it, so the command it then sends finds it
+// served. Channels idle past runnerChannelIdle are closed on the way.
+func channelFor(id string) *rendezvous {
+	runnersMu.Lock()
+	defer runnersMu.Unlock()
+	if point := channels[id]; point != nil {
+		return point
+	}
+	for other, point := range channels {
+		if point.idleFor() > runnerChannelIdle {
+			delete(channels, other)
+			point.close()
+		}
+	}
+	if len(channels) >= runnerChannelMax {
+		return nil
+	}
+	point := newRendezvous()
+	point.markServing()
+	channels[id] = point
+	return point
+}
+
+func channelClose(id string) {
+	runnersMu.Lock()
+	point := channels[id]
+	delete(channels, id)
+	runnersMu.Unlock()
+	if point != nil {
+		point.close()
+	}
+}
+
 func runnerFor(id string) *rendezvous {
+	if isRunnerChannel(id) {
+		return channelFor(id)
+	}
 	runnersMu.Lock()
 	defer runnersMu.Unlock()
 	return runners[id]
 }
 
-func handleRunner(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleRunner(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != runnerRequestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != runnerRequestMagic ||
 		request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	op := request[5]
 	length := int(binary.LittleEndian.Uint16(request[6:8]))
 	if length == 0 || length > runnerPathMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if op != RunnerOpRegister && op != RunnerOpUnregister && op != RunnerOpResolve {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	// A registered id is the rendezvous key the transport looks up, so it has to
 	// fit that key; a path being asked about does not.
 	if (op == RunnerOpRegister || op == RunnerOpUnregister) && length > runnerIDMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	value := string(request[8 : 8+length])
@@ -134,18 +202,26 @@ func handleRunner(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.
 
 	switch op {
 	case RunnerOpRegister:
-		if !runnerRegister(value) {
-			return nil, bus.ModuleStatusInvalidRequest
+		if isRunnerChannel(value) {
+			if channelFor(value) == nil {
+				return nil, ring.ModuleStatusInvalidRequest
+			}
+		} else if !runnerRegister(value) {
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	case RunnerOpUnregister:
-		runnerUnregister(value)
+		if isRunnerChannel(value) {
+			channelClose(value)
+		} else {
+			runnerUnregister(value)
+		}
 	case RunnerOpResolve:
 		if id := serverFor(value); id != "" {
 			binary.LittleEndian.PutUint32(response[4:8], uint32(len(id)))
 			copy(response[8:], id)
 		}
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 func asciiAlphanumeric(value byte) bool {
@@ -190,7 +266,7 @@ func refValid(ref []byte) bool {
 
 // Handle validates a bounded project or owner/project reference, or answers
 // which client is serving a tree.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.StageID == StageRunner {
 		return handleRunner(invocation, request)
 	}
@@ -200,19 +276,19 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	if invocation.StageID != StageAccess || len(request) != requestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[4] != wireVersion ||
 		request[5] != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	length := int(binary.LittleEndian.Uint16(request[6:8]))
 	if length == 0 || length > refMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	if refValid(request[8 : 8+length]) {
 		binary.LittleEndian.PutUint32(response[4:8], 1)
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

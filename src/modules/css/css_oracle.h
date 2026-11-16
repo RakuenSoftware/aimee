@@ -49,13 +49,6 @@ extern "C"
       const char *limitation; /* static banner; not owned by the caller */
    } css_oracle_result_t;
 
-   /* Compare two declaration sets after cascade resolution. Returns NULL only on
-    * allocation failure. Free with css_oracle_result_free. */
-   css_oracle_result_t *css_oracle_compare(const css_declaration_t *before, int nbefore,
-                                           const css_declaration_t *after, int nafter);
-
-   void css_oracle_result_free(css_oracle_result_t *r);
-
 #ifdef __cplusplus
 }
 #endif

@@ -643,11 +643,6 @@ int kb_mgmt_status_listener_start(const kb_mgmt_status_listener_config_t *cfg)
    return 0;
 }
 
-uint16_t kb_mgmt_status_listener_bound_port(void)
-{
-   return g_listener.initialized ? g_listener.bound_port : 0;
-}
-
 void kb_mgmt_status_listener_stop(void)
 {
    listener_state_t *s = &g_listener;

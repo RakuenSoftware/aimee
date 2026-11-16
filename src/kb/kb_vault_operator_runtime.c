@@ -1010,11 +1010,6 @@ void kb_vault_operator_runtime_fill_deps(kb_vault_operator_runtime_t *runtime,
    };
 }
 
-int kb_vault_operator_runtime_read_status(kb_vault_operator_status_t *status, void *opaque)
-{
-   return runtime_read_status(status, opaque);
-}
-
 int kb_vault_operator_runtime_activation_validate(kb_vault_operator_runtime_t *runtime,
                                                   const kb_vault_operator_status_t *latched)
 {

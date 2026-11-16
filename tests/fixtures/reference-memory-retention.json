@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "purpose": "retention-compatible-external-reference",
+  "path": "server-go/modules/memory/process.go",
+  "source_sha256": "04d4fc23e3ac2a658dc46fbcd23598bad87df749ed41404ce5ff34ebd513f417",
+  "replacements": [
+    [
+      "\t// Private memory also opens the store directly. It must not race the Aimee\n\t// owner's migration/replay and serve a content snapshot before surviving\n\t// erasure intents have been applied. Both owners use the storage contract;\n\t// neither imports the other's migration or admission implementation.\n\tif placement == PlacementServer {\n\t\treplayCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)\n\t\terr = waitPrivateErasureReplay(replayCtx, resources)\n\t\tcancel()\n\t\tif err != nil {\n\t\t\tcloseConnection()\n\t\t\treturn nil, fmt.Errorf(\"memory: private erasure replay: %w\", err)\n\t\t}\n\t}\n",
+      "\t// The reference waits for the current owner's retained schema. It must not\n\t// invoke the destructive replay function removed by the retention migration.\n\tif placement == PlacementServer {\n\t\treadyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)\n\t\terr = waitPrivateStoreSchema(readyCtx, resources)\n\t\tcancel()\n\t\tif err != nil {\n\t\t\tcloseConnection()\n\t\t\treturn nil, fmt.Errorf(\"memory: private schema readiness: %w\", err)\n\t\t}\n\t}\n"
+    ],
+    [
+      "waitPrivateErasureReplay",
+      "waitPrivateStoreSchema"
+    ],
+    [
+      "SELECT user_memory_replay_erasure_intents()",
+      "SELECT count(*) FROM user_memories"
+    ],
+    [
+      "var removed int64",
+      "var retained int64"
+    ],
+    [
+      "Scan(&removed)",
+      "Scan(&retained)"
+    ]
+  ]
+}

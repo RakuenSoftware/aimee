@@ -29,7 +29,7 @@ interface Trace {
 }
 
 interface MemoryStat {
-  tier: string;
+  tier: string | null;
   functional_name?: string;
   kind: string;
   count: number;
@@ -173,7 +173,8 @@ interface DashData {
 interface RawMemoryStats {
   code_index?: CodeStats;
   graph_fusion_enabled?: boolean;
-  tier_kinds?: MemoryStat[];
+  tier_kinds?: MemoryStat[] | null;
+  kinds?: { kind: string; count: number }[] | null;
   tiers?: unknown;
   scopes?: unknown;
 }
@@ -248,10 +249,14 @@ const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
  * a captured live payload — the panels themselves stay dumb over clean data. */
 export function toDashData(raw: RawDashboard | null | undefined): DashData {
   const r = raw ?? {};
-  // `memory_stats` is an object with rows under `tier_kinds` (per tier+kind),
-  // but a legacy/plain array is tolerated too.
+  // A supplied legacy tier array (including empty) takes precedence. Native
+  // kind totals have no tier attribution; retain that absence explicitly.
   const memRaw = r.memory_stats;
-  const memory = Array.isArray(memRaw) ? memRaw : arr<MemoryStat>(memRaw?.tier_kinds);
+  const memory: MemoryStat[] = Array.isArray(memRaw) ? memRaw
+    : Array.isArray(memRaw?.tier_kinds) ? memRaw.tier_kinds
+    : arr<{ kind: string; count: number }>(memRaw?.kinds).map(row => ({
+      kind: row.kind, count: row.count, tier: null,
+    }));
   // Only a real onboard report (with a `steps` array) is renderable; the
   // server's `{error: …}` stub falls back to null.
   const onboard = r.onboard;
@@ -352,7 +357,7 @@ const MEMORY_COLUMNS: Column<MemoryStat>[] = [
     key: 'tier', label: 'Tier',
     render: r => (
       <>
-        {e(r.tier)}
+        {r.tier === null ? 'Unavailable' : e(r.tier)}
         {r.functional_name ? (
           <span style={{ color: 'var(--sg-text-pale)', marginLeft: '6px' }}>{e(r.functional_name)}</span>
         ) : null}
@@ -374,7 +379,7 @@ function CodeIndexPanel({ data }: { data: DashData }) {
   </Panel>;
 }
 
-function MemoryPanel({ data }: { data: MemoryStat[] }) {
+export function MemoryPanel({ data }: { data: MemoryStat[] }) {
   return (
     <Panel title="Memory">
       {data.length === 0 ? (

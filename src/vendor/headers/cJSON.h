@@ -118,7 +118,7 @@ extern "C"
       /* The type of the item, as above. */
       int type;
 
-      /* The item's string, if type==cJSON_String  and type == cJSON_Raw */
+      /* The item's string, if type==cJSON_String or type==cJSON_Raw. */
       char *valuestring;
       /* writing to valueint is DEPRECATED, use cJSON_SetNumberValue instead */
       int valueint;
@@ -128,6 +128,9 @@ extern "C"
       /* The item's name string, if this item is the child of, or is in the list of subitems of an
        * object. */
       char *string;
+      /* Local transport-fidelity extension: exact parsed decimal token.
+       * Owned unless IsReference. Numeric setters invalidate it. */
+      char *number_lexeme;
    } cJSON;
 
    typedef struct cJSON_Hooks
@@ -318,7 +321,7 @@ extern "C"
 
 /* When assigning an integer value, it needs to be propagated to valuedouble too. */
 #define cJSON_SetIntValue(object, number)                                                          \
-   ((object) ? (object)->valueint = (object)->valuedouble = (number) : (number))
+   ((object) ? cJSON_SetNumberHelper(object, (double)(number)) : (number))
    /* helper for the cJSON_SetNumberValue macro */
    CJSON_PUBLIC(double) cJSON_SetNumberHelper(cJSON *object, double number);
 #define cJSON_SetNumberValue(object, number)                                                       \

@@ -102,6 +102,7 @@ stunnel_pid=$!
 
 # Either process dying takes the container with it, so the healthcheck and any
 # depends_on gate see a stopped container rather than a half-up one.
+trap ':' CHLD
 while :; do
     if ! kill -0 "$srv_pid" 2>/dev/null; then
         log "embedder-server exited; stopping"
@@ -115,5 +116,11 @@ while :; do
         wait "$stunnel_pid" 2>/dev/null || true
         exit 1
     fi
-    sleep 5
+    # A trapped SIGCHLD ends this wait as soon as either process exits; the
+    # timer only bounds an exit that lands between the checks and the wait.
+    sleep 60 &
+    _timer=$!
+    wait "$_timer" 2>/dev/null || true
+    kill "$_timer" 2>/dev/null || true
+    wait "$_timer" 2>/dev/null || true
 done

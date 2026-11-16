@@ -10,19 +10,6 @@ import (
 	"time"
 )
 
-// CurrentActionCompositionPolicy shares the existing operator policy loader.
-// Callers cannot supply a more permissive policy inside action JSON.
-func CurrentActionCompositionPolicy() (ActionCompositionPolicy, error) {
-	policy, err := defaultPolicyLoader()
-	if err != nil {
-		return ActionCompositionPolicy{}, err
-	}
-	if policy == nil {
-		return ActionCompositionPolicy{}, nil
-	}
-	return policy.Actions, nil
-}
-
 // ActionPolicyGeneration binds admission to the same policy document used by
 // ordinary tool authorization, including its composition limits.
 func ActionPolicyGeneration() (string, error) {

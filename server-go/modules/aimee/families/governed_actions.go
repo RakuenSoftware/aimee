@@ -3,6 +3,7 @@ package families
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 // host supplies tool-owner classifications and guarded source observations;
 // none of these fields are public tool arguments or client assertions.
 type governedActionRequest struct {
+	TurnSession   string                          `json:"turn_session_id,omitempty"`
+	Turn          string                          `json:"turn_id,omitempty"`
 	Retry         executionpolicy.RetryRequest    `json:"retry"`
 	ActionID      string                          `json:"action_id,omitempty"`
 	Arguments     json.RawMessage                 `json:"arguments,omitempty"`
@@ -27,7 +30,7 @@ type governedActionRequest struct {
 
 func governedActionApply(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	principal, sid, body := f[0], f[1], f[2]
-	if principal == "" || sid == "" || len(principal) > 128 || len(sid) > 128 || len(body) > 65536 {
+	if principal == "" || sid == "" || len(principal) >= 160 || len(sid) > 128 || len(body) > 65536 {
 		return store.StatusInvalid, nil, nil
 	}
 	var req governedActionRequest
@@ -36,6 +39,12 @@ func governedActionApply(ctx context.Context, q store.Queryer, f []string) (uint
 	}
 	// Lock directory identities in stable order, then lineage, then journal.
 	// A fork may bind only an unused child. Existing children never change roots.
+	admission := req.Operation == "issue" || req.Operation == "admit" || req.Operation == "dispatch"
+	if admission && req.Turn == "" {
+		if err := sessionOperatorCancelLock(ctx, q, principal); err != nil {
+			return 0, nil, err
+		}
+	}
 	ids := []string{sid}
 	if req.Operation == "fork" {
 		if req.ParentSession == "" || req.ParentSession == sid || len(req.ParentSession) > 128 {
@@ -46,6 +55,13 @@ func governedActionApply(ctx context.Context, q store.Queryer, f []string) (uint
 			ids[0], ids[1] = ids[1], ids[0]
 		}
 	}
+	if admission && req.TurnSession != "" && req.TurnSession != sid {
+		if len(req.TurnSession) >= 128 {
+			return store.StatusInvalid, nil, nil
+		}
+		ids = append(ids, req.TurnSession)
+	}
+	sort.Strings(ids)
 	for _, id := range ids {
 		var owner string
 		err := q.QueryRow(ctx, `SELECT principal FROM server_sessions WHERE id=$1 FOR UPDATE`, id).Scan(&owner)
@@ -57,6 +73,25 @@ func governedActionApply(ctx context.Context, q store.Queryer, f []string) (uint
 		}
 		if owner != principal {
 			return store.StatusInvalid, nil, nil
+		}
+	}
+	if admission {
+		if len(req.Turn) >= 128 || (req.Turn == "") != (req.TurnSession == "") || (req.Operation != "issue" && (req.Intent.Turn != req.Turn || req.Intent.TurnSession != req.TurnSession)) {
+			return store.StatusInvalid, nil, nil
+		}
+		allowed, err := sessionActionTurnAdmitted(ctx, q, req.TurnSession, principal, req.Turn)
+		if err != nil {
+			return 0, nil, err
+		}
+		if !allowed {
+			if req.Turn == "" {
+				return store.StatusOK, []string{`{"allowed":false,"dispatch_allowed":false,"reason":"canonical_turn_binding_required","remediation":"Use a fresh host-bound canonical turn."}`}, nil
+			}
+			return store.StatusInvalid, nil, nil
+		}
+		if req.Operation == "issue" {
+			req.Intent.Turn = req.Turn
+			req.Intent.TurnSession = req.TurnSession
 		}
 	}
 	source := sid

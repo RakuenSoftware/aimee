@@ -17,11 +17,6 @@ const char *config_kb_curator_provider_model(void)
    return cfg.kb_curator_provider_model;
 }
 
-const char *config_kb_curator_provider_api_key(void)
-{
-   return cfg.kb_curator_provider_api_key;
-}
-
 const char *config_synthesis_endpoint(void)
 {
    return cfg.synthesis_endpoint;

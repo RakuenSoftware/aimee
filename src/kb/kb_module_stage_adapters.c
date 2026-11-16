@@ -25,7 +25,7 @@
 
 #include <aimee/audit/obs_bus.h>
 #include <aimee/control-web/module_api.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 #include <aimee/kb/host_contracts.h>
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/learning/learning.h>
@@ -188,7 +188,7 @@ static int call_module_with_budget(uint32_t event_kind, uint32_t stage_id, const
       trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
    return obs_bus_module_call(event_kind, stage_id, trace, now + budget_ns, request, request_len,
                               response, response_capacity, response_len, NULL,
-                              NULL) == AIMEE_MODULE_CALL_OK
+                              NULL) == OURO_MODULE_CALL_OK
               ? 0
               : -1;
 }
@@ -251,7 +251,7 @@ cJSON *kb_module_memory_data(const cJSON *request_json)
       return NULL;
    char *request = cJSON_PrintUnformatted(request_json);
    size_t request_len = request ? strlen(request) : 0;
-   uint8_t *response = calloc(AIMEE_MODULE_MESSAGE_MAX_BODY + 1u, 1u);
+   uint8_t *response = calloc(OURO_MODULE_MESSAGE_MAX_BODY + 1u, 1u);
    uint32_t response_len = 0;
    cJSON *root = NULL;
    const cJSON *operation = cJSON_GetObjectItemCaseSensitive(request_json, "operation");
@@ -263,10 +263,10 @@ cJSON *kb_module_memory_data(const cJSON *request_json)
    if (backend && backend[0] && strcmp(backend, "native") != 0 &&
        strcmp(backend, "aimee-native") != 0)
       budget = 120ULL * 1000000000ULL;
-   if (request && request_len > 0 && request_len <= AIMEE_MODULE_MESSAGE_MAX_BODY &&
+   if (request && request_len > 0 && request_len <= OURO_MODULE_MESSAGE_MAX_BODY &&
        request_len <= UINT32_MAX && response &&
        call_module_with_budget(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, request,
-                               (uint32_t)request_len, response, AIMEE_MODULE_MESSAGE_MAX_BODY,
+                               (uint32_t)request_len, response, OURO_MODULE_MESSAGE_MAX_BODY,
                                &response_len, budget) == 0)
       root = cJSON_ParseWithLength((const char *)response, response_len);
    free(request);
@@ -291,7 +291,7 @@ static int json_optional_flag(const cJSON *root, const char *name, int *value)
 static int embed_over_module(const char *text, const char *command, int input_type, float *out,
                              int max_dim)
 {
-   if ((size_t)max_dim > (AIMEE_MODULE_MESSAGE_MAX_BODY - 512u) / 32u)
+   if ((size_t)max_dim > (OURO_MODULE_MESSAGE_MAX_BODY - 512u) / 32u)
       return 0;
    cJSON *request_json = cJSON_CreateObject();
    if (!request_json || !cJSON_AddStringToObject(request_json, "base_url", command) ||
@@ -310,7 +310,7 @@ static int embed_over_module(const char *text, const char *command, int input_ty
    uint8_t *response = calloc(response_cap + 1u, 1u);
    uint32_t response_len = 0;
    int dim = 0;
-   if (!request || request_len == 0 || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY ||
+   if (!request || request_len == 0 || request_len > OURO_MODULE_MESSAGE_MAX_BODY ||
        request_len > UINT32_MAX || !response || response_cap > UINT32_MAX ||
        call_module_with_budget(AIMEE_MEMORY_EVENT_EMBED, AIMEE_MEMORY_STAGE_EMBED, request,
                                (uint32_t)request_len, response, (uint32_t)response_cap,
@@ -373,25 +373,6 @@ static int embed_text(const char *text, const char *command, int input_type, flo
               : 0;
 }
 
-int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables_ok)
-{
-   uint8_t request[AIMEE_POSTGRES_REQUEST_LEN];
-   uint8_t response[AIMEE_POSTGRES_RESPONSE_LEN] = {0};
-   uint32_t response_len = 0;
-   if (schema_ok)
-      *schema_ok = 0;
-   if (have_pg_trgm)
-      *have_pg_trgm = 0;
-   if (kb_tables_ok)
-      *kb_tables_ok = 0;
-   if (aimee_postgres_health_request_encode(request, sizeof(request)) != 0 ||
-       call_module(AIMEE_POSTGRES_EVENT_HEALTH, AIMEE_POSTGRES_STAGE_HEALTH, request,
-                   sizeof(request), response, sizeof(response), &response_len) != 0)
-      return -1;
-   return aimee_postgres_health_response_decode(response, response_len, schema_ok, have_pg_trgm,
-                                                kb_tables_ok);
-}
-
 /* Signal classification, for the router that runs HERE. The signal-capture
  * route is served by the KB -- that is where the learning tables live -- but
  * the classifier was registered only by the daemon, so every signal reaching
@@ -425,44 +406,4 @@ void kb_module_stage_adapters_configure(void)
    learning_router_register_signal_classifier(learning_classify);
 }
 
-int kb_module_memory_reset_derived(void)
-{
-   const char *backend = config_memory_backend_current();
-   if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
-       strcmp(backend, "aimee-native") == 0)
-      return 0;
-   cJSON *request = cJSON_CreateObject();
-   if (!request)
-      return -1;
-   cJSON_AddStringToObject(request, "operation", "reset-derived");
-   cJSON *reply = kb_module_memory_data(request);
-   cJSON_Delete(request);
-   int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "deleted"));
-   cJSON_Delete(reply);
-   return ok ? 0 : -1;
-}
-
 /* Called only by the existing authenticated erasure coordinator. */
-int kb_module_memory_erase_subject(const char *request_id, const char *subject,
-                                   const cJSON *sessions)
-{
-   const char *backend = config_memory_backend_current();
-   if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
-       strcmp(backend, "aimee-native") == 0)
-      return 0;
-   if (!subject || !subject[0])
-      return -1;
-   cJSON *request = cJSON_CreateObject();
-   if (!request)
-      return -1;
-   cJSON_AddStringToObject(request, "operation", "erase-backend");
-   cJSON_AddStringToObject(request, "backend_subject", subject);
-   cJSON_AddStringToObject(request, "backend_erasure_id", request_id);
-   if (sessions)
-      cJSON_AddItemToObject(request, "backend_sessions", cJSON_Duplicate(sessions, 1));
-   cJSON *reply = kb_module_memory_data(request);
-   cJSON_Delete(request);
-   int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "deleted"));
-   cJSON_Delete(reply);
-   return ok ? 0 : -1;
-}

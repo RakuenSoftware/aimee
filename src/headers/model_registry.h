@@ -4,21 +4,10 @@
 
 #include <stddef.h>
 
-/*
- * Model registry provides:
- *  1. Alias resolution: "opus" → provider="anthropic", model="claude-opus-4-6"
- *  2. Provider autodetection: "gpt-4o" → provider="openai"
- *  3. Capability metadata lookup: context window, tool support
- */
+/* Model metadata views over the provider registry owner. */
 
 #define MODEL_PROVIDER_MAX 32
 #define MODEL_ID_MAX       128
-
-typedef struct
-{
-   char provider[MODEL_PROVIDER_MAX]; /* e.g. "anthropic", "openai", "gemini" */
-   char model_id[MODEL_ID_MAX];       /* canonical model identifier */
-} model_info_t;
 
 enum
 {
@@ -105,39 +94,6 @@ typedef struct
 } model_capability_t;
 
 /*
- * Resolve a model alias or partial name to provider + canonical model ID.
- * Returns 1 if resolved, 0 if not found (out is unchanged).
- *
- * Examples:
- *   "opus"    → { "anthropic", "claude-opus-4-6" }
- *   "sonnet"  → { "anthropic", "claude-sonnet-4-6" }
- *   "haiku"   → { "anthropic", "claude-haiku-4-5-20251001" }
- *   "gpt4o"   → { "openai",    "gpt-4o" }
- *   "gpt4"    → { "openai",    "gpt-4-turbo" }
- *   "gemini"  → { "gemini",    "gemini-1.5-pro" }
- */
-int model_alias_resolve(const char *alias, model_info_t *out);
-
-/*
- * Autodetect provider from a full model ID string.
- * Returns provider name (static string) or NULL if unknown.
- *
- * Examples:
- *   "claude-opus-4-6"          → "anthropic"
- *   "gpt-4o"                   → "openai"
- *   "gemini-1.5-pro"           → "gemini"
- *   "mistral-7b-instruct"      → "openai"  (treat as openai-compatible)
- */
-const char *model_detect_provider(const char *model_id);
-
-/*
- * List all known aliases. Writes at most max entries.
- * Returns the total number of aliases available.
- * Useful for tab completion / help text.
- */
-int model_alias_list(model_info_t *out, int max);
-
-/*
  * Look up the context window size (in tokens) for a model ID.
  * Performs case-insensitive prefix matching against known models.
  * Returns context window size, or 0 if the model is unknown.
@@ -174,7 +130,6 @@ int model_capability_get(const char *provider, const char *model_id, model_capab
 int model_capability_resolve_ref(const char *ref, char *provider, size_t provider_cap,
                                  char *model_id, size_t model_id_cap, model_capability_t *out);
 
-unsigned model_capability_flag_from_name(const char *name);
 void model_capability_format_flags(unsigned flags, char *buf, size_t buf_len);
 
 /*
@@ -184,11 +139,5 @@ void model_capability_format_flags(unsigned flags, char *buf, size_t buf_len);
  */
 int model_capability_list(model_capability_t *out, int max, unsigned required_flags,
                           int open_weights_only);
-
-void model_capability_flags_string(unsigned flags, char *out, size_t out_len);
-
-/* Reload model metadata from cache/snapshot sources. Returns the number of
- * loaded entries (or 0 on fallback/no external entries). */
-int model_capability_refresh(char *msg, size_t msg_len);
 
 #endif /* DEC_MODEL_REGISTRY_H */

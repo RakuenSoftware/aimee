@@ -26,15 +26,15 @@
 #include "headers/module_json_call.h"
 
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 #include <aimee/roundtable/module_api.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-/* Matches AIMEE_MODULE_MESSAGE_MAX_BODY and Go's MaxArtifactBytes. A review of a
+/* Matches OURO_MODULE_MESSAGE_MAX_BODY and Go's MaxArtifactBytes. A review of a
  * 16 MiB artifact is the largest thing this carries. */
-#define ROUNDTABLE_REVIEW_MAX_BODY AIMEE_MODULE_MESSAGE_MAX_BODY
+#define ROUNDTABLE_REVIEW_MAX_BODY OURO_MODULE_MESSAGE_MAX_BODY
 
 /* Build the review body. Identical JSON to what the HTTP route carried: the
  * transport changed, the contract did not. */
@@ -50,25 +50,46 @@ static char *build_review_body(const cJSON *request, const char *resolved_panel)
    const cJSON *requested_run_id = cJSON_GetObjectItemCaseSensitive(request, "run_id");
    const cJSON *transport_run_id = cJSON_GetObjectItemCaseSensitive(request, "__run_id");
    const cJSON *original = cJSON_GetObjectItemCaseSensitive(request, "original_request");
+   const cJSON *canonical = cJSON_GetObjectItemCaseSensitive(request, "request");
    const cJSON *stage = cJSON_GetObjectItemCaseSensitive(request, "artifact_stage");
-   const cJSON *requested_workdir = cJSON_GetObjectItemCaseSensitive(request, "workdir");
 
    const char *artifact_text = cJSON_IsString(artifact)
                                    ? artifact->valuestring
                                    : (cJSON_IsString(prompt) ? prompt->valuestring : NULL);
-   if (!artifact_text)
+   if (!artifact_text && !cJSON_IsObject(canonical))
    {
       cJSON_Delete(payload);
       return NULL;
    }
-   cJSON_AddStringToObject(payload, "artifact", artifact_text);
+   if (artifact_text)
+      cJSON_AddStringToObject(payload, "artifact", artifact_text);
+   if (canonical)
+   {
+      cJSON *copy = cJSON_Duplicate(canonical, 1);
+      if (!copy || !cJSON_AddItemToObject(payload, "request", copy))
+      {
+         cJSON_Delete(copy);
+         cJSON_Delete(payload);
+         return NULL;
+      }
+   }
    cJSON_AddStringToObject(payload, "artifact_stage",
                            cJSON_IsString(stage) ? stage->valuestring : "frozen_diff");
    if (cJSON_IsString(original))
       cJSON_AddStringToObject(payload, "original_request", original->valuestring);
-   else if (cJSON_IsString(brief))
+   if (canonical && brief)
+   {
+      cJSON *copy = cJSON_Duplicate(brief, 1);
+      if (!copy || !cJSON_AddItemToObject(payload, "brief", copy))
+      {
+         cJSON_Delete(copy);
+         cJSON_Delete(payload);
+         return NULL;
+      }
+   }
+   else if (!original && cJSON_IsString(brief))
       cJSON_AddStringToObject(payload, "original_request", brief->valuestring);
-   else if (cJSON_IsObject(brief))
+   else if (!original && cJSON_IsObject(brief))
    {
       char *text = cJSON_PrintUnformatted(brief);
       if (text)
@@ -87,6 +108,7 @@ static char *build_review_body(const cJSON *request, const char *resolved_panel)
       cJSON_AddStringToObject(payload, "run_id", requested_run_id->valuestring);
    else if (cJSON_IsString(transport_run_id))
       cJSON_AddStringToObject(payload, "run_id", transport_run_id->valuestring);
+   const cJSON *requested_workdir = cJSON_GetObjectItemCaseSensitive(request, "workdir");
    const char *cwd =
        cJSON_IsString(requested_workdir) ? requested_workdir->valuestring : run_cmd_get_cwd();
    if (cwd && cwd[0])
@@ -135,20 +157,20 @@ int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *requ
    char *wire = build_review_body(request, resolved);
    if (!wire)
       return server_send_error(conn, "roundtable artifact is required", NULL);
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_OK;
+   ouro_module_call_result_t result = OURO_MODULE_CALL_OK;
    cJSON *parsed = aimee_module_json_call_raw(AIMEE_ROUNDTABLE_EVENT_REVIEW,
                                               AIMEE_ROUNDTABLE_STAGE_REVIEW, wire, strlen(wire),
                                               ROUNDTABLE_REVIEW_MAX_BODY, timeout_ms, &result);
    free(wire);
 
-   if (result != AIMEE_MODULE_CALL_OK)
+   if (result != OURO_MODULE_CALL_OK)
    {
       /* Name the outcome. Every failure used to render as "Go roundtable service
        * is unreachable", so a review that ran its full deadline looked exactly
        * like a service that was never started. */
       char reason[160];
       snprintf(reason, sizeof(reason), "roundtable review failed: %s",
-               aimee_module_call_result_name(result));
+               ouro_module_call_result_name(result));
       return server_send_error(conn, reason, NULL);
    }
    if (!parsed)

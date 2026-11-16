@@ -89,4 +89,17 @@ int git_cred_forge_configured(void);
 /* Free an envp from git_cred_inject_build_env (zeroes the GH_TOKEN entry first). */
 void git_cred_inject_free_env(char **envp);
 
+/* True if `envp` (from git_cred_inject_build_env*) carries SSH_AUTH_SOCK: the
+ * principal has a vaulted SSH key and its in-memory agent is wired up. */
+int git_cred_env_has_ssh_agent(char *const *envp);
+
+/* The URL a server-side git network op should use for `url` under `envp`'s
+ * credential: an SSH URL (ssh://, git@host:path) is kept only when a vaulted
+ * SSH key is loaded (git_cred_env_has_ssh_agent); otherwise it is rewritten to
+ * its HTTPS form (util_url_normalize), where the per-host token authenticates
+ * through the askpass shim. The server holds no SSH key of its own, so an SSH
+ * URL without one fails with "Permission denied (publickey)". Returns a
+ * malloc'd string (caller frees), or NULL when `url` is NULL/empty. */
+char *git_cred_transport_url(const char *url, char *const *envp);
+
 #endif /* GIT_CRED_INJECT_H */

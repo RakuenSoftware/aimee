@@ -8,6 +8,9 @@
 /* MAX_PATH_LEN. Previously reached only transitively via config.h; this header must not
  * depend on a caller including the config module first. */
 #include "client_constants.h"
+#include <aimee/ir/aimee_ir.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* Forward declaration for cJSON (used by plan API). */
 struct cJSON;
@@ -45,7 +48,7 @@ struct cJSON;
 #define AGENT_DEFAULT_MAX_TOKENS   0
 #define MAX_EXEC_ROLES             8
 #define MAX_EXEC_PROMPT_LEN        4096
-#define AGENT_BACKEND_TMUX_CLI     "tmux-cli"
+#define AGENT_BACKEND_TMUX_CLI     "tmux-cli" /* Legacy input alias; executes headless. */
 #define AGENT_BACKEND_PROVIDER_CLI "provider-cli"
 #define AGENT_BACKEND_CLI_STDIO    "cli-stdio" /* legacy config alias */
 #define CLI_CMD_MAX                256
@@ -423,7 +426,7 @@ typedef struct
    int credential_count;
    agent_middleware_cfg_t middleware; /* per-agent middleware pipeline config */
    /* CLI backend config (optional) */
-   char backend[32];          /* "tmux-cli", "provider-cli", or "" for HTTP */
+   char backend[32];          /* "provider-cli" or "" for HTTP; old tmux input normalizes. */
    char cli_cmd[CLI_CMD_MAX]; /* CLI command, e.g. "claude" or "gemini" */
    int cli_idle_timeout_ms;   /* explicit response timeout ms; 0/-1 = no timeout */
    int session_reuse;         /* 1 = reuse CLI session across tasks */
@@ -449,6 +452,14 @@ typedef struct
    int primary_only;
 } agent_t;
 
+/* Transient producer-selected routing namespace, never configuration or authority.
+ * CONTAINER eligibility still requires the actual container owner before execution. */
+typedef enum
+{
+   AGENT_ROUTE_EXECUTION_HOST = 0,
+   AGENT_ROUTE_EXECUTION_CONTAINER = 1
+} agent_route_execution_t;
+
 typedef struct
 {
    char revision[65]; /* opaque Go roster revision for compare-and-swap saves */
@@ -465,6 +476,9 @@ typedef struct
    /* Transient per-request routing contract: an explicit agent/provider pin
     * must surface that agent's result and may never substitute a peer. */
    int route_pinned;
+   /* Runtime-only; only a delegate producer planning mandatory container binding
+    * sets this. Never serialized, persisted, or accepted from a request body. */
+   agent_route_execution_t route_execution;
    /* Initial dispatch cost estimate and qualified learning preference. Runtime only. */
    int route_input_tokens;
    int route_output_tokens;
@@ -482,10 +496,8 @@ typedef struct
 typedef struct
 {
    const char *role;
-   const char *system_prompt;
-   const char *user_prompt;
-   int max_tokens;
-   double temperature;
+   /* Owned by the producer until the synchronous fan-out has joined all workers. */
+   aimee_request_t request;
    /* Optional per-task participant selector. When set, this task runs on the
     * named configured agent (resolved like aux_router does), bypassing
     * role-based routing — so a fan-out (e.g. the MoA ensemble) reaches N
@@ -527,7 +539,13 @@ typedef struct
     * "stop", "length"), when the parser captured it. Empty otherwise. */
    char stop_reason[32];
    char clean_retry_attempt[65];
-   char *response;
+   /* Owner-checked canonical history source for this actual execution. Empty
+    * for non-session internal work; never a borrowed connection or parent log. */
+   char canonical_session_id[128];
+   /* The complete owned model observation. Text is projected only at its consumer. */
+   aimee_response_t canonical_response;
+   int cache_hit;        /* No new provider work, health success or outcome evidence. */
+   int usage_unobserved; /* Any actual provider attempt lacked complete usage. */
    int prompt_tokens;
    int completion_tokens;
    int cache_write_tokens; /* Anthropic: cache_creation_input_tokens */
@@ -543,6 +561,67 @@ typedef struct
    int abstained;
    char abstain_reason[512];
 } agent_result_t;
+
+/* A direct factory output may still own the canonical observation. */
+static inline int agent_result_usage_is_unobserved(const agent_result_t *result)
+{
+   return result && (result->usage_unobserved || result->canonical_response.usage_unobserved);
+}
+
+/* Metadata stays available for accounting after content is released. */
+static inline void agent_result_clear_response(agent_result_t *result)
+{
+   if (!result)
+      return;
+   result->usage_unobserved |= result->canonical_response.usage_unobserved;
+   aimee_response_free(&result->canonical_response);
+}
+
+/* Move the complete observation without manufacturing a second representation. */
+static inline int agent_result_adopt_response(agent_result_t *result, aimee_response_t *owned)
+{
+   if (!result || !owned || owned == &result->canonical_response)
+      return -1;
+   agent_result_clear_response(result);
+   result->usage_unobserved |= owned->usage_unobserved;
+   result->canonical_response = *owned;
+   *owned = (aimee_response_t){0};
+   return 0;
+}
+
+/* Transfer the complete admitted output, retaining each result's metrics. */
+static inline void agent_result_move_response(agent_result_t *destination, agent_result_t *source)
+{
+   if (!destination || !source || destination == source)
+      return;
+   agent_result_clear_response(destination);
+   destination->usage_unobserved |=
+       source->usage_unobserved | source->canonical_response.usage_unobserved;
+   destination->canonical_response = source->canonical_response;
+   memcpy(destination->agent_name, source->agent_name, sizeof destination->agent_name);
+   memcpy(destination->model, source->model, sizeof destination->model);
+   memcpy(destination->served_model, source->served_model, sizeof destination->served_model);
+   memcpy(destination->requested_model, source->requested_model,
+          sizeof destination->requested_model);
+   memcpy(destination->canonical_session_id, source->canonical_session_id,
+          sizeof destination->canonical_session_id);
+   memcpy(destination->stop_reason, source->stop_reason, sizeof destination->stop_reason);
+   destination->cache_hit = source->cache_hit;
+   source->canonical_response = (aimee_response_t){0};
+}
+
+/* Consume a complete successful observation at an explicit business-text boundary. */
+static inline char *agent_result_take_text(agent_result_t *result)
+{
+   if (!result)
+      return NULL;
+   char *text =
+       !result->success || aimee_ir_response_complete_text_valid(&result->canonical_response)
+           ? NULL
+           : aimee_ir_response_text_alloc(&result->canonical_response);
+   agent_result_clear_response(result);
+   return text;
+}
 
 /* Structured outcome classification for agent executions */
 typedef enum

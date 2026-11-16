@@ -47,7 +47,7 @@ func (d unavailableDelegates) One(ctx context.Context, run Run, request SeatRequ
 
 func capacityTestRun(id string) Run {
 	content := "a complete implementation plan that is long enough for panel review"
-	return Run{ID: id, OriginalRequest: "implement the requested capacity behavior",
+	return Run{ID: id, Request: fixtureTask("implement the requested capacity behavior"),
 		Reviewed: Artifact{Stage: "plan", Content: content, Hash: Hash([]byte(content))}}
 }
 

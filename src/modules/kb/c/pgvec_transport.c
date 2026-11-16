@@ -4,7 +4,7 @@
 #include "db_postgres.h"
 #include "lifecycle.h" /* kb_store_embedding_dim */
 #include "cJSON.h"
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -47,24 +47,6 @@ static void record_latency(int64_t us)
    latency_count++;
    if (us > latency_max_us)
       latency_max_us = us;
-   pthread_mutex_unlock(&latency_mu);
-}
-
-void pgvec_search_latency_snapshot(int64_t *total_us, int64_t *count, int64_t *max_us, int reset)
-{
-   pthread_mutex_lock(&latency_mu);
-   if (total_us)
-      *total_us = latency_total_us;
-   if (count)
-      *count = latency_count;
-   if (max_us)
-      *max_us = latency_max_us;
-   if (reset)
-   {
-      latency_total_us = 0;
-      latency_count = 0;
-      latency_max_us = 0;
-   }
    pthread_mutex_unlock(&latency_mu);
 }
 
@@ -249,205 +231,15 @@ int pgvec_vectorscale_available(void)
    return found;
 }
 
-/* pgvectorscale's StreamingDiskANN is the DEFAULT, and HNSW is the fallback for
- * a database that does not have the extension.
- *
- * This function used to say the opposite: an unset setting meant HNSW, and
- * "auto" reached DiskANN only above kb_store_vector_corpus_diskann_threshold, whose
- * shipped default is a million rows. schema.sql has always disagreed with it --
- * it creates `USING diskann` whenever the extension is present and only falls
- * back to HNSW when CREATE EXTENSION vectorscale fails. So the tree carried two
- * index policies that contradicted each other, and the contradiction went
- * unnoticed because this one has no production caller: only tests reach it.
- *
- * corpus_rows and diskann_threshold remain in the signature and are deliberately
- * unused. A corpus size threshold is the wrong shape for this decision: DiskANN
- * is not a large-corpus optimisation to grow into, it is the access method this
- * system indexes with, and it also lifts pgvector's 2000-dimension cap on HNSW
- * -- so a small corpus with wide vectors is exactly the case a threshold would
- * have sent to the index that cannot hold it. */
-const char *pgvec_corpus_index_type(const char *configured, int64_t corpus_rows,
-                                    int vectorscale_available, int64_t diskann_threshold)
-{
-   (void)corpus_rows;
-   (void)diskann_threshold;
-   /* An explicit "hnsw" is honoured: an operator who asks for it has a reason,
-    * and overriding that would make the setting a lie. */
-   if (configured && strcmp(configured, "hnsw") == 0)
-      return "hnsw";
-   /* Everything else -- unset, "auto", "diskann" -- wants DiskANN, and gets it
-    * whenever the extension is there. Without the extension there is only one
-    * answer available, and pgvec_ensure_corpus_index warns when it takes it. */
-   return vectorscale_available ? "diskann" : "hnsw";
-}
-
-int pgvec_ensure_corpus_index(const char *table, const char *index_type, int recreate)
-{
-   if (!table || !table[0])
-      return -1;
-   void *pg = kb_store_conn();
-   if (!pg)
-      return -1;
-
-   /* Resolve through the policy rather than trusting the argument, so a caller
-    * that passes nothing gets the DEFAULT (DiskANN) instead of silently
-    * creating an HNSW index. Passing NULL used to mean HNSW here, which is the
-    * same inversion pgvec_corpus_index_type carried. */
-   const char *use_type = pgvec_corpus_index_type(index_type, 0, pgvec_vectorscale_available(), 0);
-   if (index_type && strcmp(index_type, "diskann") == 0 && strcmp(use_type, "hnsw") == 0)
-      LOG_WARN("pgvec", "pgvectorscale unavailable; corpus table %s falls back to HNSW", table);
-
-   char errbuf[256];
-   if (recreate)
-   {
-      char sql[512];
-      snprintf(sql, sizeof(sql), "DROP INDEX IF EXISTS idx_%s_hnsw", table);
-      aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf));
-      snprintf(sql, sizeof(sql), "DROP INDEX IF EXISTS idx_%s_diskann", table);
-      aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf));
-   }
-
-   char sql[512];
-   if (strcmp(use_type, "diskann") == 0)
-      snprintf(sql, sizeof(sql),
-               "CREATE INDEX IF NOT EXISTS idx_%s_diskann "
-               "ON %s USING diskann (embedding vector_cosine_ops)",
-               table, table);
-   else
-      snprintf(sql, sizeof(sql),
-               "CREATE INDEX IF NOT EXISTS idx_%s_hnsw "
-               "ON %s USING hnsw (embedding vector_cosine_ops)",
-               table, table);
-
-   if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
-   {
-      LOG_WARN("pgvec", "create %s index on corpus table %s failed: %s", use_type, table, errbuf);
-      return -1;
-   }
-   LOG_INFO("pgvec", "corpus index type=%s table=%s", use_type, table);
-   return 0;
-}
-
 /* -------------------------------------------------------------------------
  * Memory upsert
- * ---------------------------------------------------------------------- */
-
-int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char *payload_json)
-{
-   if (!vec || dim <= 0)
-      return 0;
-   /* Dimension guard: the embedding column is vector(N) where N is the active
-    * configured dim (kb_store_embedding_dim). A vector of a different dim (e.g. the
-    * 384-dim builtin fallback against a 1024/2560 column) is rejected by
-    * Postgres with "expected N dimensions, not M" — but that error was being
-    * counted as a successful embed, silently leaving memory_embeddings empty.
-    * Fail loudly here instead of shipping a mismatched vector. */
-   int expect = kb_store_embedding_dim();
-   if (expect > 0 && dim != expect)
-   {
-      /* Record it as well as logging it: a per-row WARN in the kb log is invisible
-       * to anyone reading health, and this condition silently drops every vector. */
-      atomic_fetch_add_explicit(&g_dim_refused, 1, memory_order_relaxed);
-      atomic_store_explicit(&g_dim_last_offered, dim, memory_order_relaxed);
-      aimee_log(
-          LOG_WARN, "pgvec",
-          "memory embedding dim mismatch: got %d, expected %d (point_id=%lld); refusing upsert",
-          dim, expect, (long long)point_id);
-      return -1;
-   }
-   void *pg = kb_store_conn();
-   if (!pg)
-      return -1;
-
-   char record_type[64] = "";
-   char primary_scope[64] = "";
-   char workspace[128] = "";
-   char project[256] = "";
-   char kind[64] = "";
-
-   if (payload_json && payload_json[0])
-   {
-      cJSON *obj = cJSON_Parse(payload_json);
-      if (obj)
-      {
-         json_str(obj, "record_type", record_type, sizeof(record_type));
-         json_str(obj, "primary_scope", primary_scope, sizeof(primary_scope));
-         json_str(obj, "workspace", workspace, sizeof(workspace));
-         json_str(obj, "project", project, sizeof(project));
-         json_str(obj, "kind", kind, sizeof(kind));
-         /* unit points use memory_kind for the kind filter */
-         if (!kind[0])
-            json_str(obj, "memory_kind", kind, sizeof(kind));
-         cJSON_Delete(obj);
-      }
-   }
-
-   char *vec_text = build_vec_text(vec, dim);
-   if (!vec_text)
-      return -1;
-
-   static const char *sql = "INSERT INTO memory_embeddings "
-                            "  (point_id, embedding, record_type, primary_scope, workspace, "
-                            "project, kind, payload_json) "
-                            "VALUES "
-                            "  (:point_id, :embedding::vector, :record_type, :primary_scope, "
-                            ":workspace, :project, :kind, :payload) "
-                            "ON CONFLICT (point_id) DO UPDATE SET "
-                            "  embedding = EXCLUDED.embedding, "
-                            "  record_type = EXCLUDED.record_type, "
-                            "  primary_scope = EXCLUDED.primary_scope, "
-                            "  workspace = EXCLUDED.workspace, "
-                            "  project = EXCLUDED.project, "
-                            "  kind = EXCLUDED.kind, "
-                            "  payload_json = EXCLUDED.payload_json";
-
-   char errbuf[256];
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
-   if (!stmt)
-   {
-      free(vec_text);
-      return -1;
-   }
-   aimee_pg_bind_int64(stmt, "point_id", point_id);
-   aimee_pg_bind_text(stmt, "embedding", vec_text);
-   aimee_pg_bind_text(stmt, "record_type", record_type);
-   aimee_pg_bind_text(stmt, "primary_scope", primary_scope);
-   aimee_pg_bind_text(stmt, "workspace", workspace);
-   aimee_pg_bind_text(stmt, "project", project);
-   aimee_pg_bind_text(stmt, "kind", kind);
-   aimee_pg_bind_text(stmt, "payload", payload_json ? payload_json : "");
-
-   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
-   aimee_pg_finalize(stmt);
-   free(vec_text);
-   return (rc == AIMEE_PG_DONE) ? 0 : -1;
-}
-
-int pgvec_memory_delete(int64_t point_id)
-{
-   void *pg = kb_store_conn();
-   if (!pg)
-      return -1;
-   static const char *sql = "DELETE FROM memory_embeddings WHERE point_id = :point_id";
-   char errbuf[256];
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
-   if (!stmt)
-      return -1;
-   aimee_pg_bind_int64(stmt, "point_id", point_id);
-   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
-   aimee_pg_finalize(stmt);
-   return (rc == AIMEE_PG_DONE) ? 0 : -1;
-}
-
-/* -------------------------------------------------------------------------
- * KB upsert
  * ---------------------------------------------------------------------- */
 
 int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *payload_json)
 {
    if (!vec || dim <= 0)
       return 0;
-   /* Same dim guard as pgvec_memory_upsert: never ship a vector whose dim does
+   /* Dim guard: never ship a vector whose dim does
     * not match the configured vector(N) column. */
    int expect = kb_store_embedding_dim();
    if (expect > 0 && dim != expect)
@@ -787,22 +579,6 @@ int pgvec_kbpdf_upsert(int64_t point_id, const float *vec, int dim, const char *
    aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
    aimee_pg_finalize(stmt);
    free(vec_text);
-   return (rc == AIMEE_PG_DONE) ? 0 : -1;
-}
-
-int pgvec_kbpdf_delete(int64_t point_id)
-{
-   void *pg = kb_store_conn();
-   if (!pg)
-      return -1;
-   static const char *sql = "DELETE FROM kb_pdf_embeddings WHERE point_id = :point_id";
-   char errbuf[256];
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
-   if (!stmt)
-      return -1;
-   aimee_pg_bind_int64(stmt, "point_id", point_id);
-   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
-   aimee_pg_finalize(stmt);
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
@@ -1640,22 +1416,6 @@ int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *p
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int pgvec_code_delete(int64_t point_id)
-{
-   void *pg = kb_store_conn();
-   if (!pg)
-      return -1;
-   static const char *sql = "DELETE FROM code_embeddings WHERE point_id = :pid";
-   char errbuf[256];
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
-   if (!stmt)
-      return -1;
-   aimee_pg_bind_int64(stmt, "pid", point_id);
-   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
-   aimee_pg_finalize(stmt);
-   return (rc == AIMEE_PG_DONE) ? 0 : -1;
-}
-
 int pgvec_code_delete_project(const char *project)
 {
    if (!project || !*project)
@@ -1673,62 +1433,6 @@ int pgvec_code_delete_project(const char *project)
    int changes = aimee_pg_stmt_changes(stmt);
    aimee_pg_finalize(stmt);
    return (rc == AIMEE_PG_DONE) ? changes : -1;
-}
-
-int pgvec_code_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
-                      double *scores, int max)
-{
-   if (!vec || dim <= 0 || !ids || !scores || max <= 0)
-      return -1;
-   void *pg = kb_store_conn();
-   if (!pg)
-      return -1;
-
-   char *vec_text = build_vec_text(vec, dim);
-   if (!vec_text)
-      return -1;
-
-   const char *sql;
-   if (project && *project)
-      sql = "SELECT ce.point_id, 1.0 - (ce.embedding <=> :qvec::vector) AS score"
-            " FROM code_embeddings ce JOIN projects p ON p.name = ce.project"
-            " WHERE ce.project = :project AND p.lifecycle_state = 'current'"
-            "   AND ce.generation = p.current_generation"
-            " ORDER BY ce.embedding <=> :qvec::vector LIMIT :lim";
-   else
-      sql = "SELECT ce.point_id, 1.0 - (ce.embedding <=> :qvec::vector) AS score"
-            " FROM code_embeddings ce JOIN projects p ON p.name = ce.project"
-            " WHERE p.lifecycle_state = 'current' AND ce.generation = p.current_generation"
-            " ORDER BY ce.embedding <=> :qvec::vector LIMIT :lim";
-
-   char errbuf[256];
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
-   if (!stmt)
-   {
-      free(vec_text);
-      return 0;
-   }
-   aimee_pg_bind_text(stmt, "qvec", vec_text);
-   if (project && *project)
-      aimee_pg_bind_text(stmt, "project", project);
-   aimee_pg_bind_int(stmt, "lim", limit > 0 ? limit : max);
-
-   int64_t t0 = monotonic_us();
-   int n = 0;
-   aimee_pg_step_t rc;
-   while ((rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf))) == AIMEE_PG_ROW)
-   {
-      if (n >= max)
-         break;
-      ids[n] = aimee_pg_column_int64(stmt, 0);
-      scores[n] = aimee_pg_column_double(stmt, 1);
-      n++;
-   }
-   aimee_pg_finalize(stmt);
-   free(vec_text);
-   int64_t elapsed = monotonic_us() - t0;
-   record_latency(elapsed);
-   return (rc == AIMEE_PG_ERR) ? -1 : n;
 }
 
 /* Like pgvec_code_search, but returns each hit's file_path instead of its

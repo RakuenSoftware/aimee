@@ -252,34 +252,6 @@ static int typed_result_get_handler(const char *url, const char *extra_headers, 
    return 401;
 }
 
-static int queue_get_handler(const char *url, const char *extra_headers, char **response_buf,
-                             int timeout_ms)
-{
-   (void)timeout_ms;
-   assert(url);
-   assert(strcmp(url, "http://127.0.0.1:4010/v1/pipeline/status") == 0);
-   assert(extra_headers);
-   assert(strcmp(extra_headers, "Authorization: Bearer queue-token") == 0);
-   g_get_seen++;
-   if (response_buf)
-      *response_buf = strdup("{\"state\":\"running\",\"queue_depth\":4}");
-   return 200;
-}
-
-static int job_get_handler(const char *url, const char *extra_headers, char **response_buf,
-                           int timeout_ms)
-{
-   (void)timeout_ms;
-   assert(url);
-   assert(strcmp(url, "http://127.0.0.1:4010/v1/jobs/42") == 0);
-   assert(extra_headers);
-   assert(strcmp(extra_headers, "Authorization: Bearer queue-token") == 0);
-   g_get_seen++;
-   if (response_buf)
-      *response_buf = strdup("{\"id\":42,\"status\":\"done\",\"project\":\"proj-alpha\"}");
-   return 200;
-}
-
 static int ingest_status_get_handler(const char *url, const char *extra_headers,
                                      char **response_buf, int timeout_ms)
 {
@@ -989,134 +961,6 @@ static void test_status_uses_v1_api_when_configured(void)
    mock_agent_http_reset();
 }
 
-/* Which credential aimee-server PRESENTS to aimee-kb.
- *
- * AIMEE_KB_CLIENT_BEARER_TOKEN is the server's own outbound credential and wins,
- * so it can be a scoped `service` token that holds only the data plane. It falls
- * back to AIMEE_KB_API_BEARER_TOKEN — aimee-kb's inbound token — because that is
- * what existing deployments set; without the fallback an upgrade would silently
- * stop reaching the kb. The fallback means presenting the OWNER credential, which
- * the client warns about; this pins the SELECTION, which is what decides
- * authority. */
-static char g_seen_auth[512];
-static int auth_capture_handler(const char *url, const char *auth_header, const char *body,
-                                char **response_buf, int timeout_ms, const char *extra_headers)
-{
-   (void)url;
-   (void)body;
-   (void)timeout_ms;
-   (void)extra_headers;
-   snprintf(g_seen_auth, sizeof(g_seen_auth), "%s", auth_header ? auth_header : "");
-   if (response_buf)
-      *response_buf = strdup("{\"status\":\"ok\"}");
-   return 0;
-}
-
-static void test_client_bearer_selection(void)
-{
-   mock_agent_http_reset();
-   mock_agent_http_set_post_handler(auth_capture_handler);
-   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-
-   /* Only the inbound token set: fall back to it, so an upgrade keeps working. */
-   runtime_secret_remove("AIMEE_KB_CLIENT_BEARER_TOKEN");
-   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "owner-secret") == 0);
-   g_seen_auth[0] = '\0';
-   free(kb_client_reconcile_json(1));
-   assert(strstr(g_seen_auth, "owner-secret") != NULL);
-
-   /* The server's own credential wins when set, so a scoped service token is
-    * what actually reaches the wire. */
-   assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", "scope:service:aimee-server:svc") ==
-          0);
-   g_seen_auth[0] = '\0';
-   free(kb_client_reconcile_json(1));
-   assert(strstr(g_seen_auth, "scope:service:aimee-server:svc") != NULL);
-   assert(strstr(g_seen_auth, "owner-secret") == NULL);
-
-   /* Neither set: no Authorization header at all (the kb may run auth-off). */
-   runtime_secret_remove("AIMEE_KB_CLIENT_BEARER_TOKEN");
-   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
-   g_seen_auth[0] = '\0';
-   free(kb_client_reconcile_json(1));
-   assert(g_seen_auth[0] == '\0');
-
-   unsetenv("AIMEE_KB_API_URL");
-   mock_agent_http_reset();
-}
-
-static void test_maintenance_uses_v1_api_when_configured(void)
-{
-   g_post_seen = 0;
-   mock_agent_http_reset();
-   mock_agent_http_set_post_handler(maintenance_post_handler);
-   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
-
-   /* kb_client_repair_json / kb_client_clear_json are gone: their only callers
-    * were `aimee kb repair` / `aimee kb clear`, which the live dispatcher never
-    * exposed, so both were unreachable and the linker discarded them. Maintenance
-    * on aimee-kb is an administrative action there, not a client capability
-    * here. Cases 1 and 2 went with them. */
-   g_route_case = 3;
-   char *reconcile = kb_client_reconcile_json(1);
-   assert(reconcile);
-   assert(strstr(reconcile, "\"dry_run\":true") != NULL);
-   free(reconcile);
-
-   g_route_case = 4;
-   assert(kb_client_canonical_index_scan("aimee", "/repo", 1) == 0);
-
-   g_route_case = 5;
-   char *drain = kb_client_queue_drain_json("embed", 9);
-   assert(drain);
-   assert(strstr(drain, "\"processed\":2") != NULL);
-   free(drain);
-
-   assert(g_post_seen == 3); /* was 5; repair + clear were removed */
-   unsetenv("AIMEE_KB_API_URL");
-   mock_agent_http_reset();
-   g_route_case = 0;
-}
-
-static void test_queue_status_uses_v1_api_when_configured(void)
-{
-   g_get_seen = 0;
-   mock_agent_http_reset();
-   mock_agent_http_set_get_handler(queue_get_handler);
-   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "queue-token") == 0);
-
-   char *status = kb_client_queue_status_json();
-   assert(status);
-   assert(strstr(status, "\"queue_depth\":4") != NULL);
-   free(status);
-
-   assert(g_get_seen == 1);
-   unsetenv("AIMEE_KB_API_URL");
-   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
-   mock_agent_http_reset();
-}
-
-static void test_job_status_uses_v1_api_when_configured(void)
-{
-   g_get_seen = 0;
-   mock_agent_http_reset();
-   mock_agent_http_set_get_handler(job_get_handler);
-   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "queue-token") == 0);
-
-   char *status = kb_client_job_status_json(42);
-   assert(status);
-   assert(strstr(status, "\"status\":\"done\"") != NULL);
-   free(status);
-
-   assert(g_get_seen == 1);
-   unsetenv("AIMEE_KB_API_URL");
-   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
-   mock_agent_http_reset();
-}
-
 static void test_build_update_ingest_use_v1_api_when_configured(void)
 {
    g_post_seen = 0;
@@ -1564,10 +1408,7 @@ int main(void)
    test_search_v1_reports_http_status();
    test_outage_is_typed_bounded_and_recovers();
    test_exact_result_statuses();
-   test_maintenance_uses_v1_api_when_configured();
    test_build_update_ingest_use_v1_api_when_configured();
-   test_queue_status_uses_v1_api_when_configured();
-   test_job_status_uses_v1_api_when_configured();
    test_ingest_status_uses_v1_api_when_configured();
    test_workers_uses_v1_api_when_configured();
    test_intelligence_readiness_uses_v1_api_when_configured();
@@ -1577,7 +1418,6 @@ int main(void)
    test_mtls_non_2xx_is_not_returned_as_valid_json();
    test_mtls_raw_post_preserves_content_type_and_status();
    test_index_scan_uses_v1_api_when_configured();
-   test_client_bearer_selection();
    printf("test_kb_client_search: ok\n");
    return 0;
 }

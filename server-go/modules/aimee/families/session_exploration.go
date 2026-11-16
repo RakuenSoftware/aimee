@@ -12,7 +12,7 @@ import (
 // comes from the existing session directory, not from the contract being issued.
 func sessionExplorationApply(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	principal, sid, body := f[0], f[1], f[2]
-	if principal == "" || sid == "" || len(principal) > 128 || len(sid) > 128 || len(body) > 65536 {
+	if principal == "" || sid == "" || len(principal) >= 160 || len(sid) > 128 || len(body) > 65536 {
 		return store.StatusInvalid, nil, nil
 	}
 	var owner string

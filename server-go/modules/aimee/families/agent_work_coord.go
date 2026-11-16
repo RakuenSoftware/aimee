@@ -3,6 +3,7 @@ package families
 import (
 	"context"
 	"encoding/json"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
@@ -37,7 +38,7 @@ const (
 	                     VALUES ($1, $2) RETURNING id`
 
 	coordTaskAddSQL = `INSERT INTO coord_job_tasks
-	                       (job_id, step_id, files, role, prompt, cwd, persona)
+	                       (job_id, step_id, files, role, message_ir, cwd, persona)
 	                   VALUES ($1, NULLIF($2::bigint, 0), $3::jsonb, $4, $5, $6, $7)
 	                   RETURNING id`
 
@@ -200,7 +201,8 @@ const (
 	                          WHERE status IN ('pending', 'running')
 	                          ORDER BY id LIMIT $1`
 
-	coordTaskGetDispatchSQL = `SELECT role, prompt, files::text, cwd, persona
+	coordTaskGetDispatchSQL = `SELECT role, message_ir IS NOT NULL, COALESCE(message_ir, ''),
+                                    prompt, files::text, cwd, persona
 	                             FROM coord_job_tasks WHERE id = $1`
 )
 
@@ -277,6 +279,33 @@ func coordJobCreate(ctx context.Context, q store.Queryer, f []string) (uint32, [
 	return store.StatusOK, []string{store.I64toa(id)}, nil
 }
 
+// New queue writes are canonical IR. Legacy prompt rows are imported only at
+// this storage read boundary; valid canonical bytes and opaque fields stay exact.
+const coordMessageMaxBytes = 1 << 20
+
+func coordTaskMessage(raw string, legacy bool) (string, bool) {
+	if raw == "" || len(raw) > coordMessageMaxBytes {
+		return "", false
+	}
+	if legacy {
+		// The storage column determines the format. JSON-looking legacy text
+		// is still literal user text, never an inferred canonical message.
+		encoded, err := json.Marshal(canonical.Message{Role: "user",
+			Blocks: []canonical.Block{{Type: "text", Text: &raw}}})
+		return string(encoded), err == nil && len(encoded) <= coordMessageMaxBytes && canonical.ValidMessage(encoded)
+	}
+	if !canonical.ValidMessage(json.RawMessage(raw)) {
+		return "", false
+	}
+	var header struct {
+		Role string `json:"role"`
+	}
+	if json.Unmarshal([]byte(raw), &header) != nil || header.Role != "user" {
+		return "", false
+	}
+	return raw, true
+}
+
 func coordTaskAdd(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	jobID, ok := store.Atoi64(f[0])
 	if !ok || jobID <= 0 {
@@ -298,9 +327,17 @@ func coordTaskAdd(ctx context.Context, q store.Queryer, f []string) (uint32, []s
 	if persona == "" {
 		persona = "engineer"
 	}
+	message, valid := coordTaskMessage(f[4], false)
+	if !valid && !(f[4] == "" && stepID > 0) {
+		return store.StatusInvalid, nil, nil
+	}
+	var messageValue any
+	if valid {
+		messageValue = message
+	}
 	var id int64
 	if err := q.QueryRow(ctx, coordTaskAddSQL,
-		jobID, stepID, files, role, f[4], f[5], persona).Scan(&id); err != nil {
+		jobID, stepID, files, role, messageValue, f[5], persona).Scan(&id); err != nil {
 		return store.StatusFailed, nil, err
 	}
 	return store.StatusOK, []string{store.I64toa(id)}, nil
@@ -493,14 +530,22 @@ func coordTaskGetDispatch(ctx context.Context, q store.Queryer, f []string) (uin
 	if !ok || id <= 0 {
 		return store.StatusInvalid, nil, nil
 	}
-	var role, prompt, files, cwd, persona string
+	var role, rawMessage, prompt, files, cwd, persona string
+	var hasIR bool
 	err := q.QueryRow(ctx, coordTaskGetDispatchSQL, id).Scan(
-		&role, &prompt, &files, &cwd, &persona)
+		&role, &hasIR, &rawMessage, &prompt, &files, &cwd, &persona)
 	if store.IsNoRows(err) {
 		return store.StatusMissing, nil, nil
 	}
 	if err != nil {
 		return store.StatusFailed, nil, err
 	}
-	return store.StatusOK, []string{role, prompt, files, cwd, persona}, nil
+	if !hasIR {
+		rawMessage = prompt
+	}
+	message, valid := coordTaskMessage(rawMessage, !hasIR)
+	if !valid {
+		return store.StatusInvalid, nil, nil
+	}
+	return store.StatusOK, []string{role, message, files, cwd, persona}, nil
 }

@@ -15,6 +15,17 @@ aimee index scan .
 On a thin client, `workspace add` registers a detached workspace and uploads source content. The
 server does not read the client path.
 
+## Git from a remote thin client
+
+On POSIX thin clients, an explicit `aimee git` command in an unregistered local
+repository registers that repository as a detached workspace and starts a runner for the command.
+It waits for the authenticated runner acknowledgment before dispatching Git.
+This registration does not scan or upload source content; use `index scan` for
+that. Existing shared, mirror and detached workspace registrations keep their
+provider. Registration or runner failures stop the command instead of falling
+back to another checkout. Index queries alone do not register an executable
+workspace.
+
 ## Manifest
 
 `aimee.workspace.yaml` names repositories and workspace metadata. Per-repository build, test, lint,

@@ -30,7 +30,18 @@ func logReviewDecision(run Run, analysis Analysis) {
 		}
 		alignments[status]++
 	}
+	requestBytes := 0
+	if run.Request != nil {
+		requestBytes = 0
+		for _, message := range run.Request.Messages {
+			for _, block := range message.Blocks {
+				if block.Text != nil {
+					requestBytes += len(*block.Text)
+				}
+			}
+		}
+	}
 	log.Printf("roundtable review run=%s seats=%d request_chars=%d requirements=%d unaddressed=%d alignment=%v approvals=%d findings=%d",
-		run.ID, len(analysis.Reports), len(strings.TrimSpace(run.OriginalRequest)),
+		run.ID, len(analysis.Reports), requestBytes,
 		requirements, unaddressed, alignments, analysis.Approvals, len(analysis.Feedback.Findings))
 }

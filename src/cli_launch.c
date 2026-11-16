@@ -1,8 +1,7 @@
-/* cli_launch.c: parse __LAUNCH__ metadata from server output */
+/* Launch an external client inside its Aimee-owned session worktree. */
 #include "cli_client.h"
 #include "cli_proxy.h"
 #include "aimee_client.h"
-#include "cJSON.h"
 #include "client_session_worktree.h"
 #include "platform_process.h"
 #include "platform_path.h"
@@ -30,54 +29,6 @@ static int launch_execvp(const char *file, char *const argv[])
 #define launch_chdir  chdir
 #define launch_execvp execvp
 #endif
-
-int parse_launch_meta(const char *output, launch_meta_t *meta)
-{
-   memset(meta, 0, sizeof(*meta));
-   snprintf(meta->provider, sizeof(meta->provider), "claude");
-
-   const char *launch_marker = strstr(output, "__LAUNCH__");
-   if (!launch_marker)
-      return 0;
-
-   meta->context_len = (size_t)(launch_marker - output);
-
-   const char *json_start = launch_marker + strlen("__LAUNCH__");
-   const char *line_end = strchr(json_start, '\n');
-   size_t json_len = line_end ? (size_t)(line_end - json_start) : strlen(json_start);
-   char *json_buf = malloc(json_len + 1);
-   if (!json_buf)
-      return 0;
-
-   memcpy(json_buf, json_start, json_len);
-   json_buf[json_len] = '\0';
-
-   cJSON *jmeta = cJSON_Parse(json_buf);
-   free(json_buf);
-   if (!jmeta)
-      return 0;
-
-   cJSON *jprovider = cJSON_GetObjectItemCaseSensitive(jmeta, "provider");
-   cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(jmeta, "model");
-   cJSON *jbuiltin = cJSON_GetObjectItemCaseSensitive(jmeta, "builtin");
-   cJSON *jauto = cJSON_GetObjectItemCaseSensitive(jmeta, "autonomous");
-   cJSON *jwt_cwd = cJSON_GetObjectItemCaseSensitive(jmeta, "worktree_cwd");
-   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(jmeta, "session_id");
-
-   if (cJSON_IsString(jprovider))
-      snprintf(meta->provider, sizeof(meta->provider), "%s", jprovider->valuestring);
-   if (cJSON_IsString(jmodel))
-      snprintf(meta->model, sizeof(meta->model), "%s", jmodel->valuestring);
-   meta->builtin = cJSON_IsTrue(jbuiltin);
-   meta->autonomous = cJSON_IsTrue(jauto);
-   if (cJSON_IsString(jwt_cwd))
-      snprintf(meta->worktree_cwd, sizeof(meta->worktree_cwd), "%s", jwt_cwd->valuestring);
-   if (cJSON_IsString(jsid))
-      snprintf(meta->session_id, sizeof(meta->session_id), "%s", jsid->valuestring);
-
-   cJSON_Delete(jmeta);
-   return 1;
-}
 
 static int launch_session_id(char out[33])
 {

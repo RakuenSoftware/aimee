@@ -51,12 +51,6 @@ extern "C"
    void kb_store_lease_end(void);
    void kb_store_lease_release_idle(void);
 
-   /* Open a new dedicated KB_STORE connection for the calling thread and set
-    * it as the thread's active connection (returned by kb_store_conn()).
-    * Returns the new connection on success, NULL on failure (errbuf
-    * filled). Only callable after kb_store_init has succeeded. */
-   void *kb_store_thread_conn_open(char *errbuf, size_t errlen);
-
    /* Close and clear the calling thread's dedicated KB_STORE connection.
     * No-op if no thread connection is open. */
    void kb_store_thread_conn_close(void);
@@ -85,16 +79,6 @@ extern "C"
    void kb_store_init_lock(void);
    void kb_store_init_unlock(void);
 
-   /* Mark the registered handle as ephemeral. Cleared to 0 automatically
-    * by kb_store_register_shared_sqlite. */
-   void kb_store_set_ephemeral(int ephemeral);
-
-   /* Ephemeral flag for the memory/embed path.  Eval harnesses and
-    * benchmarks set this to 1 when using a throwaway scratch database;
-    * the memory sync helpers check it to skip pgvector upserts that
-    * would leak beyond the test's isolation. */
-   int kb_store_is_ephemeral(void);
-
    /* --- Generic scalar/exec convenience helpers (kb_store/kb_store_init.c) -------
     * Wrap the prepare/bind/step/finalize dance for the two patterns that
     * recur across the kb_store sources: a single-row scalar read, and a
@@ -109,19 +93,6 @@ extern "C"
 
    /* SELECT one integer with a single text bind to ?1. */
    int kb_store_scalar_int_text(const char *sql, const char *a1, int dflt);
-
-   /* SELECT one double with a single int64 bind to ?1. */
-   double kb_store_scalar_double_id(const char *sql, int64_t id, double dflt);
-
-   /* Exec (INSERT/UPDATE/DELETE), single int64 bind ?1, result ignored. */
-   void kb_store_exec_id(const char *sql, int64_t id);
-
-   /* Exec, single text bind ?1, result ignored. */
-   void kb_store_exec_text(const char *sql, const char *a1);
-
-   /* Exec, text ?1 + int64 ?2 (the "SET col = text WHERE id = ?" shape),
-    * result ignored. */
-   void kb_store_exec_text_id(const char *sql, const char *a1, int64_t id);
 
    /* Exec on a caller-supplied connection (for use inside a caller-managed
     * transaction, where kb_store_conn() must not be re-acquired), single int64 bind

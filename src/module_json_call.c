@@ -28,17 +28,17 @@ uint64_t aimee_module_call_deadline_ns(int timeout_ms)
 
 cJSON *aimee_module_json_call_raw(uint32_t event_kind, uint32_t stage_id, const char *body,
                                   size_t body_len, size_t max_body, int timeout_ms,
-                                  aimee_module_call_result_t *result)
+                                  ouro_module_call_result_t *result)
 {
    if (result)
-      *result = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+      *result = OURO_MODULE_CALL_INVALID_ARGUMENT;
    if (!body || max_body == 0 || max_body > UINT32_MAX)
       return NULL;
 
    if (body_len > max_body)
    {
       if (result)
-         *result = AIMEE_MODULE_CALL_INVALID_REQUEST;
+         *result = OURO_MODULE_CALL_INVALID_REQUEST;
       return NULL;
    }
 
@@ -46,7 +46,7 @@ cJSON *aimee_module_json_call_raw(uint32_t event_kind, uint32_t stage_id, const 
    if (!obs_bus_module_available(event_kind))
    {
       if (result)
-         *result = AIMEE_MODULE_CALL_CAPABILITY_ABSENT;
+         *result = OURO_MODULE_CALL_CAPABILITY_ABSENT;
       return NULL;
    }
 
@@ -54,17 +54,17 @@ cJSON *aimee_module_json_call_raw(uint32_t event_kind, uint32_t stage_id, const 
    if (!response)
    {
       if (result)
-         *result = AIMEE_MODULE_CALL_INTERNAL;
+         *result = OURO_MODULE_CALL_INTERNAL;
       return NULL;
    }
 
    uint32_t response_len = 0;
-   aimee_module_call_result_t rc = obs_bus_module_call(
+   ouro_module_call_result_t rc = obs_bus_module_call(
        event_kind, stage_id, 0, aimee_module_call_deadline_ns(timeout_ms), body, (uint32_t)body_len,
        response, (uint32_t)max_body, &response_len, NULL, NULL);
    if (result)
       *result = rc;
-   if (rc != AIMEE_MODULE_CALL_OK)
+   if (rc != OURO_MODULE_CALL_OK)
    {
       free(response);
       return NULL;
@@ -78,10 +78,10 @@ cJSON *aimee_module_json_call_raw(uint32_t event_kind, uint32_t stage_id, const 
 }
 
 cJSON *aimee_module_json_call(uint32_t event_kind, uint32_t stage_id, cJSON *request,
-                              size_t max_body, int timeout_ms, aimee_module_call_result_t *result)
+                              size_t max_body, int timeout_ms, ouro_module_call_result_t *result)
 {
    if (result)
-      *result = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+      *result = OURO_MODULE_CALL_INVALID_ARGUMENT;
    if (!request)
       return NULL;
 
@@ -91,7 +91,7 @@ cJSON *aimee_module_json_call(uint32_t event_kind, uint32_t stage_id, cJSON *req
    {
       cJSON_Delete(request);
       if (result)
-         *result = AIMEE_MODULE_CALL_CAPABILITY_ABSENT;
+         *result = OURO_MODULE_CALL_CAPABILITY_ABSENT;
       return NULL;
    }
 
@@ -100,7 +100,7 @@ cJSON *aimee_module_json_call(uint32_t event_kind, uint32_t stage_id, cJSON *req
    if (!wire)
    {
       if (result)
-         *result = AIMEE_MODULE_CALL_INTERNAL;
+         *result = OURO_MODULE_CALL_INTERNAL;
       return NULL;
    }
 

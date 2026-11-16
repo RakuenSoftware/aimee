@@ -8,10 +8,13 @@ function SessionProbe() {
   const { sessions, active, addSession, patchSession, closeSession } = useSessions();
   return <>
     <div data-testid="sessions">{sessions.map(session => session.name).join(',')}</div>
+    <div data-testid="workflow">{active?.workflowChannel}</div>
+    <button onClick={() => active && patchSession(active.id, { workflowChannel: 'new-workflow' })}>Workflow</button>
     <div data-testid="active">{active?.name}|{active?.projectRoot}|{active?.messages.map(message => message.text).join(',')}</div>
     <button onClick={() => addSession('New chat')}>Add</button>
     <button onClick={() => active && patchSession(active.id, { projectRoot: '/work/new-project', projectName: 'new-project' })}>Project</button>
     <button onClick={() => active && closeSession(active.id)}>Close</button>
+    <button onClick={() => active && patchSession(active.id, { messages: [{ role: 'assistant', text: 'Injected flat history' }] } as never)}>Flat write</button>
   </>;
 }
 
@@ -178,4 +181,76 @@ describe('SessionProvider refresh races', () => {
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
     expect(screen.getByTestId('sessions').textContent).toBe('Alice chat');
   });
+});
+
+describe('metadata writes cannot upload flat transcript authority', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+  it('preserves the local legacy archive but omits it from ordinary session saves', async () => {
+    localStorage.clear(); trustedCache();
+    const requests: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/auth/me') return json({ username: 'alice' });
+      if (init?.method === 'POST') { requests.push(JSON.parse(String(init.body))); return json({}); }
+      return json([remote]);
+    }));
+    render(<SessionProvider><SessionProbe /></SessionProvider>);
+    await screen.findByText('Alice chat');
+    fireEvent.click(screen.getByRole('button', { name: 'Project' }));
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    for (const request of requests) expect(request).not.toHaveProperty('messages');
+    expect(screen.getByTestId('active').textContent).toContain('private message');
+    const writes = requests.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Flat write' }));
+    expect(screen.getByTestId('active').textContent).not.toContain('Injected flat history');
+    expect(requests).toHaveLength(writes);
+  });
+});
+
+
+it('imports a browser-only legacy archive into the single session cache and preserves workflow selection', async () => {
+  localStorage.clear();
+  const legacy = JSON.stringify([{ sessionId: 'legacy-ui', title: 'Legacy chat', aimeeSid: 'web-legacy',
+    workflowChannel: 'saved-workflow', messages: [{ role: 'assistant', text: 'Archived answer' }],
+    threads: [{ id: 7, label: 'Old branch' }], activeThreadId: 7 }]);
+  localStorage.setItem('aimee_chat_tabs', legacy);
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const writes: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === '/api/auth/me') return json({ username: 'alice' });
+    if (init?.method === 'POST') { writes.push(JSON.parse(String(init.body))); return json({}); }
+    return json(writes.length ? [{ ...writes.at(-1), messages: [] }] : []);
+  }));
+  try {
+    let view = render(<SessionProvider><SessionProbe /></SessionProvider>);
+    expect((await screen.findByTestId('active')).textContent).toContain('Archived answer');
+    expect(screen.getByTestId('workflow').textContent).toBe('saved-workflow');
+    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('aimee_sessions')!)[0].workflowChannel).toBe('new-workflow'));
+    await waitFor(() => expect(writes).toHaveLength(2));
+    view.unmount();
+    view = render(<SessionProvider><SessionProbe /></SessionProvider>);
+    expect((await screen.findByTestId('workflow')).textContent).toBe('new-workflow');
+    expect(screen.getByTestId('active').textContent).toContain('Archived answer');
+    expect(localStorage.getItem('aimee_chat_tabs')).toBe(legacy);
+    expect(writes.every(body => !Object.hasOwn(body, 'messages'))).toBe(true);
+    view.unmount();
+  } finally { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
+});
+
+
+it('does not revive a cleared conversation from the retained legacy tab archive', async () => {
+  localStorage.clear();
+  cacheSession('Cleared chat');
+  const sessions = JSON.parse(localStorage.getItem('aimee_sessions')!);
+  sessions[0].aimeeSid = 'web-cleared'; sessions[0].messages = [];
+  localStorage.setItem('aimee_sessions', JSON.stringify(sessions));
+  localStorage.setItem('aimee_sessions_owner', 'alice');
+  localStorage.setItem('aimee_chat_tabs', JSON.stringify([{ sessionId: 'ui-secret', aimeeSid: 'web-secret',
+    messages: [{ role: 'assistant', text: 'Old cleared answer' }] }]));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url === '/api/auth/me'
+    ? json({ username: 'alice' }) : json([{ id: 'web-cleared', title: 'Cleared chat', messages: [] }])));
+  try {
+    render(<SessionProvider><SessionProbe /></SessionProvider>);
+    expect((await screen.findByTestId('active')).textContent).not.toContain('Old cleared answer');
+  } finally { cleanup(); vi.unstubAllGlobals(); }
 });

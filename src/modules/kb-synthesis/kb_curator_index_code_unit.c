@@ -1,5 +1,6 @@
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 /* kb_curator_index_code_unit.c: deep-curator code_unit vector indexer.
  *
  * Claims one proposed `code_unit` artifact, embeds its intent (summary),
@@ -126,8 +127,7 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    cJSON_AddNumberToObject(embed_0_args, "max_dim", CURATOR_CODE_UNIT_DIM);
    (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
    cJSON_Delete(embed_0_args);
-   int d1 = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), intent_vec,
-                           CURATOR_CODE_UNIT_DIM);
+   int d1 = embed_reply_vector(embed_0_reply, intent_vec, CURATOR_CODE_UNIT_DIM);
    cJSON_Delete(embed_0_reply);
    cJSON *embed_1_args = cJSON_CreateObject(), *embed_1_reply = NULL;
    cJSON_AddStringToObject(embed_1_args, "base_url", embed_cmd);
@@ -136,8 +136,7 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    cJSON_AddNumberToObject(embed_1_args, "max_dim", CURATOR_CODE_UNIT_DIM);
    (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_1_args, &embed_1_reply);
    cJSON_Delete(embed_1_args);
-   int d2 = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), sig_vec,
-                           CURATOR_CODE_UNIT_DIM);
+   int d2 = embed_reply_vector(embed_1_reply, sig_vec, CURATOR_CODE_UNIT_DIM);
    cJSON_Delete(embed_1_reply);
    cJSON *embed_2_args = cJSON_CreateObject(), *embed_2_reply = NULL;
    cJSON_AddStringToObject(embed_2_args, "base_url", embed_cmd);
@@ -146,8 +145,7 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    cJSON_AddNumberToObject(embed_2_args, "max_dim", CURATOR_CODE_UNIT_DIM);
    (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_2_args, &embed_2_reply);
    cJSON_Delete(embed_2_args);
-   int d3 = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_2_reply, "vector"), body_vec,
-                           CURATOR_CODE_UNIT_DIM);
+   int d3 = embed_reply_vector(embed_2_reply, body_vec, CURATOR_CODE_UNIT_DIM);
    cJSON_Delete(embed_2_reply);
 
    /* Job-row re-check + vector upsert + artifact commit in ONE transaction,

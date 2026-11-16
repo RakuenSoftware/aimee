@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel, Badge, Spinner, InlineStatus, EmptyState, Button } from "@rakuensoftware/smoothgui";
 import type { BadgeVariant } from "@rakuensoftware/smoothgui";
 import { renderMd } from "./chat/markdown";
+import type { Message } from "../ir/session";
 
 /* ---- API types (mirror the enriched /api/workflow/items* envelopes) ---- */
 
@@ -1367,12 +1368,13 @@ function Composer({
       return;
     }
     // Title + notes are the SUBJECT; the server system prompt frames them as data.
-    const prompt = `Title: ${title || "(untitled)"}\n\nNotes / requirements:\n${body || "(none)"}`;
+    const message: Message = { role: "user", blocks: [{ type: "text", text:
+      `Title: ${title || "(untitled)"}\n\nNotes / requirements:\n${body || "(none)"}` }] };
     setDrafting(true);
     try {
       const { status: st, data } = await postJSON<{ text?: string; error?: string }>(
         "/api/proposal/draft",
-        { prompt },
+        { message },
       );
       if (st >= 200 && st < 300 && data.text) setPreview(data.text);
       else setDraftErr(data.error || `draft failed (HTTP ${st})`);

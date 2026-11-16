@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	ep "github.com/JBailes/aimee/server-go/modules/execution-policy"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
 	"path/filepath"
@@ -36,7 +36,7 @@ func TestCleanRetryLiveSharedRoot(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer pool.Close()
-	for _, name := range []string{"schema_sessions.sql", "schema_governed_actions.sql", "schema_clean_retry.sql"} {
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_governed_actions.sql", "schema_clean_retry.sql"} {
 		body, e := schemaFS.ReadFile(name)
 		if e != nil {
 			t.Fatal(e)
@@ -58,8 +58,8 @@ func TestCleanRetryLiveSharedRoot(t *testing.T) {
 		t.Helper()
 		body, _ := json.Marshal(r)
 		frame, _ := wire.EncodeFields(10, []string{principal, sid, string(body)})
-		raw, status := handler(bus.ModuleInvocation{StageID: StageGuardrailState}, frame)
-		if status != bus.ModuleStatusOK {
+		raw, status := handler(ring.ModuleInvocation{StageID: StageGuardrailState}, frame)
+		if status != ring.ModuleStatusOK {
 			t.Errorf("status %v", status)
 			return ep.RetryDecision{}, store.StatusInvalid
 		}

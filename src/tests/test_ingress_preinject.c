@@ -13,6 +13,7 @@
 #include <limits.h>
 #include <unistd.h>
 #include <stdatomic.h>
+#include <time.h>
 #include <sqlite3.h>
 #include "aimee_sha256.h"
 #include "vault_service.h"
@@ -20,7 +21,106 @@
 #include <aimee/audit/audit_worm.h>
 #include "support/module_runtime_fixture.h"
 
+/* Controlled owner fixture: the production admission remains 500 ms. */
+static int g_receipt_order, g_receipt_source_changed, g_receipt_change_during_owner;
+static int g_receipt_order_plans;
+static struct timespec g_receipt_admitted;
+int __real_audit_worm_dispatch_owner(char owner[33]);
+int __wrap_audit_worm_dispatch_owner(char owner[33])
+{
+   if (g_receipt_order)
+   {
+      /* A serialized audit owner may wait longer than a fresh admission. */
+      usleep(600000);
+      if (g_receipt_change_during_owner)
+         g_receipt_source_changed = 1;
+   }
+   return __real_audit_worm_dispatch_owner(owner);
+}
+
+/* Sequencing fixture retains the 500 ms local window and exact owner DTO. */
+static int g_local_last_mode, g_local_last_owner_done, g_local_last_grade_done;
+static int g_local_last_changed, g_local_last_local_calls, g_local_last_results;
+static struct timespec g_local_last_started;
+static _Atomic int g_local_last_cancel_entered;
+
+/* Generic transport fixture: the installed owner controls retry eligibility. */
+static int g_refresh_mode, g_refresh_plans, g_refresh_local, g_refresh_owner, g_refresh_results;
+static int g_refresh_local_closed, g_refresh_owner_closed, g_refresh_final_closed;
+static _Atomic int g_refresh_cancel_entered;
+static struct timespec g_refresh_owner_started;
+static int g_refresh_fork_phase, g_refresh_fork_active;
+static const char *refresh_directive =
+    "{\"status\":\"retry\",\"kind\":\"owner_lease_expired\",\"retry_directive\":{"
+    "\"schema_version\":1,\"action\":\"revalidate_same_source_plan\"}}";
+#ifndef AIMEE_TEST_RETRY_HOOK_ABSENT
+int aimee_module_ingress_retry_requested(const cJSON *reply)
+{
+   const cJSON *s = cJSON_GetObjectItemCaseSensitive(reply, "status");
+   const cJSON *k = cJSON_GetObjectItemCaseSensitive(reply, "kind");
+   const cJSON *d = cJSON_GetObjectItemCaseSensitive(reply, "retry_directive");
+   const cJSON *v = cJSON_GetObjectItemCaseSensitive(d, "schema_version");
+   const cJSON *a = cJSON_GetObjectItemCaseSensitive(d, "action");
+   return cJSON_IsObject(reply) && cJSON_GetArraySize(reply) == 3 && cJSON_IsString(s) &&
+          !strcmp(s->valuestring, "retry") && cJSON_IsString(k) &&
+          !strcmp(k->valuestring, "owner_lease_expired") && cJSON_IsObject(d) &&
+          cJSON_GetArraySize(d) == 2 && cJSON_IsNumber(v) && v->valuedouble == 1 &&
+          cJSON_IsString(a) && !strcmp(a->valuestring, "revalidate_same_source_plan");
+}
+#endif
+static void refresh_cancel_wait(void)
+{
+   atomic_store(&g_refresh_cancel_entered, 1);
+   for (;;)
+      usleep(10000);
+}
+
 static int g_runtime_failure;
+static int g_grade_plan_case, g_grade_plan_assembly_calls;
+static int g_grade_history_mode, g_grade_history_checks, g_grade_history_reads;
+static int g_scope_resolve_failure;
+char *db1_execution_test_grade_recall(const char *principal, const char *project,
+                                      const char *sources_json)
+{
+   if (g_local_last_mode)
+   {
+      assert(sources_json);
+      if (g_local_last_mode == 7)
+      {
+         atomic_store(&g_local_last_cancel_entered, 1);
+         for (;;)
+            usleep(10000);
+      }
+      usleep(100000);
+      g_local_last_grade_done = 1;
+      return strdup(sources_json);
+   }
+   if (!g_grade_history_mode)
+      return NULL;
+   assert(!strcmp(principal, "grade-actor") && !strcmp(project, "active-project"));
+   if (sources_json)
+   {
+      g_grade_history_checks++;
+      cJSON *reply = cJSON_Parse(sources_json);
+      assert(reply && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "check_id")));
+      if (g_grade_history_mode == 2)
+         cJSON_ReplaceItemInObjectCaseSensitive(reply, "items", cJSON_CreateArray());
+      char *raw = cJSON_PrintUnformatted(reply);
+      cJSON_Delete(reply);
+      return raw;
+   }
+   g_grade_history_reads++;
+   if (g_grade_history_mode == 3)
+      return strdup(
+          "{\"schema_version\":1,\"principal\":\"grade-actor\",\"scope_kind\":\"project\",\"scope_"
+          "id\":\"active-project\",\"coverage\":\"recent_bounded\",\"items\":[]}");
+   return strdup(
+       "{\"schema_version\":1,\"principal\":\"grade-actor\",\"scope_kind\":\"project\",\"scope_"
+       "id\":\"active-project\",\"coverage\":\"recent_bounded\",\"items\":[{\"schema_version\":1,"
+       "\"source\":{\"actor\":\"grade-actor\",\"event_id\":\"terminal\"},\"qualification\":"
+       "\"configured_tests_only\",\"verification\":\"tests_bound_revision\",\"verdict\":\"passed\","
+       "\"proof\":{\"scope_kind\":\"project\",\"scope_id\":\"active-project\"}}]}");
+}
 static int g_private_source_fixture;
 static int g_private_source_calls;
 static int g_scope_active;
@@ -70,9 +170,236 @@ static const char *guard_completion_reply(int call, int failures)
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
                                                     int timeout_ms, cJSON **result)
 {
-   assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 500);
+   /* Owner calls are bounded by the remaining receipt deadline, never above 500ms. */
+   assert(strcmp(method, "memory.runtime") == 0 && timeout_ms > 0 && timeout_ms <= 500);
    const char *operation =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
+   if (g_refresh_fork_active && operation)
+   {
+      if (!strcmp(operation, "source-release-fork-plan"))
+         *result = cJSON_Parse(
+             "{\"status\":\"ok\",\"fork_ticket\":\"fedcba9876543210fedcba9876543210\",\"new_"
+             "request_id\":\"fork-child\",\"request\":{\"fixture\":\"fork-owner\"},\"local_"
+             "request\":{\"operation\":\"personal-source-revalidate\"}}");
+      else if (!strcmp(operation, "personal-source-revalidate"))
+      {
+         if (g_refresh_fork_phase == 2)
+         {
+            *result = cJSON_Parse("{\"partial\":true}");
+            refresh_cancel_wait();
+         }
+         *result = cJSON_Parse("{\"status\":\"ok\"}");
+      }
+      else if (!strcmp(operation, "source-release-fork-result"))
+      {
+         if (g_refresh_fork_phase == 3)
+         {
+            *result = cJSON_Parse("{\"partial\":true}");
+            refresh_cancel_wait();
+         }
+         *result = cJSON_Parse(refresh_directive); /* fork never refreshes */
+      }
+      else
+         assert(!"unexpected fork fixture operation");
+      return 1;
+   }
+   if (g_refresh_mode && operation)
+   {
+      const char *mode = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "mode"));
+      if (!strcmp(operation, "source-release-plan"))
+      {
+         ++g_refresh_plans;
+         *result =
+             cJSON_Parse("{\"status\":\"ok\",\"request\":{\"fixture\":\"refresh-owner\",\"check_"
+                         "id\":\"same-opaque-check\"},\"local_request\":{\"operation\":\"personal-"
+                         "source-revalidate\",\"check_id\":\"same-opaque-check\"},\"local_release_"
+                         "request\":{\"operation\":\"personal-source-revalidate\",\"mode\":"
+                         "\"release\"},\"release_request\":{\"fixture\":\"refresh-release\"},"
+                         "\"completion_request\":{\"operation\":\"source-release-completion\"}}");
+         if (g_refresh_mode == 12)
+            cJSON_ReplaceItemInObjectCaseSensitive(*result, "request",
+                                                   cJSON_CreateString("invalid"));
+      }
+      else if (!strcmp(operation, "personal-source-revalidate"))
+      {
+         if (mode && !strcmp(mode, "release"))
+         {
+            ++g_refresh_local_closed;
+            *result = cJSON_Parse("{\"status\":\"ok\",\"send_guard\":\"released\"}");
+         }
+         else
+         {
+            assert(!request_context_get()->context_refused);
+            assert(
+                !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "check_id")),
+                        "same-opaque-check"));
+            ++g_refresh_local;
+            /* The first owner lease expires during legitimate local work. A
+             * fresh owner round is required; no production window changes. */
+            if (g_refresh_local == 1 || g_refresh_mode == 2)
+               usleep(20000);
+            if ((g_refresh_mode == 7 && g_refresh_local == 2) ||
+                (g_refresh_mode == 10 && g_refresh_local == 1))
+               refresh_cancel_wait();
+            *result = cJSON_Parse("{\"status\":\"ok\",\"check_id\":\"same-opaque-check\"}");
+         }
+      }
+      else if (!strcmp(operation, "source-release-completion"))
+      {
+         ++g_refresh_final_closed;
+         *result = cJSON_Parse("{\"status\":\"ok\",\"send_guard\":\"released\"}");
+      }
+      else if (!strcmp(operation, "source-release-result"))
+      {
+         ++g_refresh_results;
+         assert(g_refresh_local == g_refresh_results && g_refresh_owner == g_refresh_results);
+         assert(!request_context_get()->context_refused);
+         if ((g_refresh_mode == 8 && g_refresh_results == 2) ||
+             (g_refresh_mode == 11 && g_refresh_results == 1))
+         {
+            *result = cJSON_Parse("{\"partial\":true}");
+            refresh_cancel_wait();
+         }
+         struct timespec now;
+         assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+         long long age = (now.tv_sec - g_refresh_owner_started.tv_sec) * 1000000000LL +
+                         now.tv_nsec - g_refresh_owner_started.tv_nsec;
+         int expired = age >= 10000000LL;
+         if (g_refresh_mode == 3 || (g_refresh_mode == 4 && g_refresh_results == 2))
+            *result = cJSON_Parse("{\"status\":\"error\",\"kind\":\"source_release_refused\"}");
+         else if (g_refresh_mode == 5)
+            *result = cJSON_Parse(
+                "{\"status\":\"retry\",\"kind\":\"owner_lease_expired\",\"retry_directive\":{"
+                "\"schema_version\":1,\"action\":\"revalidate_same_source_plan\",\"extra\":true}}");
+         else if (expired)
+            *result = cJSON_Parse(refresh_directive);
+         else
+            *result = cJSON_Parse("{\"status\":\"ok\",\"admitted\":true}");
+      }
+      else
+         assert(!"unexpected refresh operation");
+      assert(*result);
+      return 1;
+   }
+   if (g_local_last_mode && operation)
+   {
+      if (!strcmp(operation, "source-release-plan"))
+         *result =
+             cJSON_Parse("{\"status\":\"ok\",\"request\":{\"fixture\":\"owner\"},\"local_request\":"
+                         "{\"operation\":"
+                         "\"personal-source-revalidate\",\"check_id\":\"local-check\"},\"execution_"
+                         "grade_request\":{\"principal\":\"grade-actor\",\"scope_id\":\"active-"
+                         "project\",\"check_id\":\"grade-check\"}}");
+      else if (!strcmp(operation, "personal-source-revalidate"))
+      {
+         ++g_local_last_local_calls;
+         if (g_local_last_mode == 6)
+         {
+            atomic_store(&g_local_last_cancel_entered, 1);
+            for (;;)
+               usleep(10000);
+         }
+         /* A source mutation during remote work is observed, never refreshed away. */
+         assert(clock_gettime(CLOCK_MONOTONIC, &g_local_last_started) == 0);
+         *result =
+             cJSON_Parse(g_local_last_changed ? "{\"status\":\"error\",\"kind\":\"stale_context\"}"
+                                              : "{\"status\":\"ok\",\"check_id\":\"local-check\"}");
+      }
+      else if (!strcmp(operation, "source-release-result"))
+      {
+         ++g_local_last_results;
+         struct timespec now;
+         assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+         long long elapsed = (now.tv_sec - g_local_last_started.tv_sec) * 1000000000LL +
+                             now.tv_nsec - g_local_last_started.tv_nsec;
+         const cJSON *local = cJSON_GetObjectItemCaseSensitive(request, "local_response");
+         const cJSON *owner = cJSON_GetObjectItemCaseSensitive(request, "owner_response");
+         const cJSON *grade = cJSON_GetObjectItemCaseSensitive(request, "execution_grade_response");
+         int admitted =
+             elapsed < 500000000LL && !g_local_last_changed && g_local_last_owner_done &&
+             g_local_last_grade_done &&
+             !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(local, "status")),
+                     "ok") &&
+             !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(owner, "check_id")),
+                     "owner-check") &&
+             cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(owner, "eligible")) &&
+             cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(owner, "lease_current")) &&
+             !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(grade, "check_id")),
+                     "grade-check");
+         if (g_local_last_mode == 1)
+            fprintf(stderr, "local-last unchanged controls: local_age_ms=%lld admitted=%d\n",
+                    elapsed / 1000000LL, admitted);
+         *result = cJSON_Parse(admitted ? "{\"status\":\"ok\",\"admitted\":true}"
+                                        : "{\"status\":\"error\",\"kind\":\"stale_context\"}");
+      }
+      else
+         assert(!"unexpected local-last operation");
+      assert(*result);
+      return 1;
+   }
+   if (g_receipt_order && operation)
+   {
+      if (!strcmp(operation, "source-release-plan"))
+         *result = cJSON_Parse("{\"status\":\"ok\",\"local_request\":{\"operation\":\"personal-"
+                               "source-revalidate\"}}");
+      else if (!strcmp(operation, "personal-source-revalidate"))
+         *result = cJSON_Parse("{\"status\":\"ok\"}");
+      else if (!strcmp(operation, "source-release-result"))
+      {
+         assert(clock_gettime(CLOCK_MONOTONIC, &g_receipt_admitted) == 0);
+         *result = cJSON_Parse(g_receipt_source_changed
+                                   ? "{\"status\":\"error\",\"kind\":\"stale_context\"}"
+                                   : "{\"status\":\"ok\",\"admitted\":true}");
+      }
+      else if (!strcmp(operation, "provider-receipt-plan"))
+      {
+         ++g_receipt_order_plans;
+         struct timespec now;
+         assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+         long long elapsed = (now.tv_sec - g_receipt_admitted.tv_sec) * 1000000000LL + now.tv_nsec -
+                             g_receipt_admitted.tv_nsec;
+         /* Expired admission is refused, never extended by this test owner. */
+         if (elapsed >= 500000000LL)
+         {
+            *result = NULL;
+            return -1;
+         }
+         *result =
+             cJSON_Parse("{\"status\":\"ok\",\"attempt_id\":\"0123456789abcdef0123456789abcdef\","
+                         "\"at\":\"2026-11-08T00:00:00Z\",\"requires_durable_acceptance\":true,"
+                         "\"prepared_detail\":\"{}\",\"admitted_detail\":\"{}\"}");
+      }
+      else
+         assert(!"unexpected receipt-order fixture command");
+      assert(*result);
+      return 1;
+   }
+   if (g_grade_plan_case && operation && !strcmp(operation, "ingress-begin"))
+   {
+      *result = cJSON_Parse("{\"status\":\"ok\",\"active\":true,\"mode\":\"on\",\"legacy_preview\":"
+                            "false,\"facts\":false,\"temporal\":false,\"task\":false,\"assembly\":{"
+                            "\"operation\":\"ingress-assemble\"}}");
+      assert(*result);
+      if (g_grade_plan_case == 2 || g_grade_plan_case == 3)
+         cJSON_AddBoolToObject(*result, "execution_grades", g_grade_plan_case == 2);
+      else if (g_grade_plan_case == 4)
+         cJSON_AddStringToObject(*result, "execution_grades", "false");
+      else if (g_grade_plan_case == 5)
+         cJSON_AddNullToObject(*result, "execution_grades");
+      return 1;
+   }
+   if (g_grade_plan_case && operation && !strcmp(operation, "ingress-assemble"))
+   {
+      g_grade_plan_assembly_calls++;
+      if (g_grade_plan_case == 3)
+         assert(!cJSON_GetObjectItemCaseSensitive(request, "execution_test_grades"));
+      else
+         assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(request, "execution_test_grades")));
+      *result = cJSON_Parse("{\"status\":\"ok\",\"envelope\":\"Selected native "
+                            "context.\",\"source_release_ticket\":\"fixture-grade-plan-ticket\"}");
+      assert(*result);
+      return 1;
+   }
    if (g_guard_cleanup_mode && operation && !strcmp(operation, "personal-source-revalidate"))
    {
       const cJSON *r = cJSON_GetObjectItemCaseSensitive(request, "revalidation");
@@ -127,6 +454,32 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
       return g_runtime_failure == 1 ? -1 : 1;
    }
    return module_runtime_fixture_call(request, result);
+}
+
+/* Controlled transport context shape, not an authentication proof. Exercise
+ * owning non-null request contexts on normal and actual pthread cancellation. */
+cJSON *aimee_module_host_command_context(void)
+{
+   const request_context_t *current = request_context_get();
+   cJSON *context = cJSON_CreateObject();
+   assert(context);
+   cJSON_AddBoolToObject(context, "authenticated", current != NULL);
+   cJSON_AddBoolToObject(context, "user_authority", current != NULL);
+   cJSON_AddStringToObject(context, "principal", current ? current->principal : "");
+   cJSON_AddStringToObject(context, "transport_identity", current ? current->principal : "");
+   return context;
+}
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method,
+                                                            const cJSON *request,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result)
+{
+   assert(cJSON_IsObject(context) && cJSON_GetArraySize(context) == 4);
+   assert(cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(context, "authenticated")));
+   assert(cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(context, "principal")));
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(context, "transport_identity")));
+   return aimee_module_commands_dispatch_internal_timeout(method, request, timeout_ms, result);
 }
 
 static cJSON *fixture_runtime(const char *operation)
@@ -191,6 +544,55 @@ void kb_client_memory_scope_context_apply(cJSON *request)
 static char *diagnostic_reply(const cJSON *request);
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
+   if (g_refresh_fork_active && !strcmp(method, "memory.revalidate_sources"))
+   {
+      cJSON_Delete(request);
+      if (g_refresh_fork_phase == 1)
+         refresh_cancel_wait();
+      return strdup("{\"status\":\"ok\"}");
+   }
+   if (g_refresh_mode && !strcmp(method, "memory.revalidate_sources"))
+   {
+      const char *fixture =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "fixture"));
+      assert(fixture);
+      if (!strcmp(fixture, "refresh-release"))
+      {
+         ++g_refresh_owner_closed;
+         cJSON_Delete(request);
+         return strdup("{\"status\":\"ok\",\"send_guard\":\"released\",\"owner_completion_json\":"
+                       "\"opaque-signed-proof\"}");
+      }
+      assert(!strcmp(fixture, "refresh-owner"));
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "check_id")),
+                     "same-opaque-check"));
+      cJSON_Delete(request);
+      ++g_refresh_owner;
+      assert(clock_gettime(CLOCK_MONOTONIC, &g_refresh_owner_started) == 0);
+      if ((g_refresh_mode == 6 && g_refresh_owner == 2) ||
+          (g_refresh_mode == 9 && g_refresh_owner == 1))
+         refresh_cancel_wait();
+      return strdup("{\"status\":\"ok\",\"check_id\":\"same-opaque-check\"}");
+   }
+   if (g_local_last_mode && !strcmp(method, "memory.revalidate_sources"))
+   {
+      cJSON_Delete(request);
+      if (g_local_last_mode == 5)
+      {
+         atomic_store(&g_local_last_cancel_entered, 1);
+         for (;;)
+            usleep(10000);
+      }
+      usleep(600000);
+      g_local_last_owner_done = 1;
+      if (g_local_last_mode == 2)
+         g_local_last_changed = 1;
+      if (g_local_last_mode == 3)
+         return strdup("{\"check_id\":\"owner-check\",\"eligible\":true,\"lease_current\":false}");
+      if (g_local_last_mode == 4)
+         return strdup("{\"check_id\":\"wrong-check\",\"eligible\":true,\"lease_current\":true}");
+      return strdup("{\"check_id\":\"owner-check\",\"eligible\":true,\"lease_current\":true}");
+   }
    if (g_guard_cleanup_mode && !strcmp(method, "memory.revalidate_sources"))
    {
       cJSON_Delete(request);
@@ -279,6 +681,12 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    return strdup("{\"status\":\"ok\",\"facts\":\"- global preference: never substitute for project "
                  "evidence\\n\"}");
 }
+/* Deadline-bounded owner calls use the same fixtures; the caller owns the bound. */
+char *kb_v1_action_request_with_timeout(const char *action, cJSON *req, int timeout_ms)
+{
+   assert(timeout_ms > 0);
+   return kb_v1_action_request(action, req);
+}
 static const char *g_expected_task_requirements;
 char *kb_client_memory_assemble_typed_context_requirements_json(
     const char *query, const cJSON *context_limits, const char *evidence_requirements_json)
@@ -326,6 +734,8 @@ char *kb_client_memory_assemble_typed_context_requirements_json(
 int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,
                                            size_t project_len)
 {
+   if (g_scope_resolve_failure)
+      return -1;
    snprintf(workspace, workspace_len, "active-workspace");
    snprintf(project, project_len, "active-project");
    return 0;
@@ -488,17 +898,7 @@ const char *config_default_dir(void)
 {
    return "/tmp/aimee-test";
 }
-int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
-                                            const char *query_fingerprint, const int64_t *ids,
-                                            int n_ids)
-{
-   (void)turn_id;
-   (void)role;
-   (void)query_fingerprint;
-   (void)ids;
-   (void)n_ids;
-   return 0;
-}
+
 int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
                                                const char *query_fingerprint, const int64_t *ids,
                                                int n_ids, char *event_id_out, size_t event_id_len)
@@ -694,35 +1094,6 @@ static void test_unavailable_task_context_retries_after_recovery(void)
    g_context_mode = "observe";
    g_context_result = KB_CLIENT_RESULT_OK;
    printf("unavailable_task_context_retries_after_recovery OK\n");
-}
-
-static void test_query_from_messages(void)
-{
-   /* String content; last user message wins over an earlier one. */
-   cJSON *m = cJSON_Parse("[{\"role\":\"user\",\"content\":\"first\"},"
-                          "{\"role\":\"assistant\",\"content\":\"mid\"},"
-                          "{\"role\":\"user\",\"content\":\"second ask\"}]");
-   char *q = ingress_preinject_query_from_messages(m);
-   assert(q && strcmp(q, "second ask") == 0);
-   free(q);
-   cJSON_Delete(m);
-
-   /* Array-of-parts content. */
-   cJSON *m2 =
-       cJSON_Parse("[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"hello \"},"
-                   "{\"type\":\"input_text\",\"text\":\"world\"}]}]");
-   char *q2 = ingress_preinject_query_from_messages(m2);
-   assert(q2 && strcmp(q2, "hello world") == 0);
-   free(q2);
-   cJSON_Delete(m2);
-
-   /* No user message -> NULL. */
-   cJSON *m3 = cJSON_Parse("[{\"role\":\"assistant\",\"content\":\"hi\"}]");
-   assert(ingress_preinject_query_from_messages(m3) == NULL);
-   cJSON_Delete(m3);
-
-   assert(ingress_preinject_query_from_messages(NULL) == NULL);
-   printf("query_from_messages OK\n");
 }
 
 static void test_apply(void)
@@ -1285,6 +1656,150 @@ static void test_required_assembly_refusal_reaches_dispatch(void)
    request_context_clear();
    puts("required assembly failure reaches provider fence and clears on new request");
 }
+static void test_configured_test_history_at_provider_fence(void)
+{
+   request_context_t context = {0};
+   strcpy(context.request_id, "grade-history-request");
+   strcpy(context.principal, "grade-caller");
+   strcpy(context.vault_principal, "grade-actor");
+   context.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&context);
+   int saved_budget = g_assembly_budget;
+   g_assembly_budget = 4096;
+   g_grade_history_mode = 1;
+   char *envelope = ingress_preinject_build("deployment matrix", 0);
+   assert(envelope && strstr(envelope, "configured-test-history"));
+   assert(strlen(request_context_get()->memory_source_release) == 32);
+   free(envelope);
+   context = *request_context_get();
+   assert(ingress_preinject_revalidate_sources() == 0 && g_grade_history_checks > 0);
+   request_context_set(&context);
+   g_grade_history_mode = 2; /* source erased after context was retained */
+   assert(ingress_preinject_revalidate_sources() == -1);
+   assert(request_context_get()->context_refused);
+   g_grade_history_mode = 0;
+   g_assembly_budget = saved_budget;
+   request_context_clear();
+   puts("configured-test source history is scoped and rechecked at provider fence");
+}
+
+/* Native callbacks keep distinct transport IDs. Provenance must be revalidated
+ * and forked by its owner, rather than copying or clearing the parent ticket. */
+static void test_native_source_request_handoff(void)
+{
+   request_context_t parent = {0};
+   strcpy(parent.request_id, "native-parent-request");
+   strcpy(parent.principal, "grade-caller");
+   strcpy(parent.caller_subject, "native-subject");
+   strcpy(parent.vault_principal, "grade-actor");
+   parent.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&parent);
+   int saved_budget = g_assembly_budget;
+   g_assembly_budget = 4096;
+   g_grade_history_mode = 1;
+   char *envelope = ingress_preinject_build("deployment matrix", 0);
+   assert(envelope && request_context_get()->memory_source_release[0]);
+   free(envelope);
+   parent = *request_context_get();
+   request_context_t child = parent;
+   strcpy(child.request_id, "native-callback-request");
+   request_context_set(&child);
+   assert(ingress_preinject_revalidate_sources() == -1);
+   request_context_set(&child);
+   int checks = g_grade_history_checks;
+   assert(ingress_preinject_fork_sources(&parent) == 0);
+   assert(g_grade_history_checks > checks);
+   assert(!request_context_get()->context_refused);
+   assert(strcmp(request_context_get()->memory_source_release, parent.memory_source_release));
+   assert(!strcmp(request_context_get()->request_id, child.request_id));
+   assert(ingress_preinject_revalidate_sources() == 0);
+   ingress_preinject_finish_sources();
+   request_context_set(&parent);
+   assert(ingress_preinject_revalidate_sources() == 0);
+   strcpy(child.request_id, "native-revoked-callback");
+   request_context_set(&child);
+   g_grade_history_mode = 2;
+   assert(ingress_preinject_fork_sources(&parent) == -1);
+   assert(request_context_get()->context_refused);
+   assert(!strcmp(request_context_get()->memory_source_release, parent.memory_source_release));
+   g_grade_history_mode = 1;
+   strcpy(child.request_id, "native-foreign-callback");
+   strcpy(child.principal, "other-caller");
+   request_context_set(&child);
+   checks = g_grade_history_checks;
+   assert(ingress_preinject_fork_sources(&parent) == -1);
+   assert(g_grade_history_checks == checks && request_context_get()->context_refused);
+   request_context_set(&parent);
+   assert(ingress_preinject_fork_sources(&parent) == -1);
+   request_context_set(&parent);
+   ingress_preinject_finish_sources();
+   memset(&parent, 0, sizeof parent);
+   request_context_set(&parent);
+   assert(ingress_preinject_fork_sources(&parent) == 0);
+   g_grade_history_mode = 0;
+   g_assembly_budget = saved_budget;
+   request_context_clear();
+   puts("native callback source handoff revalidates fresh identity and preserves parent ownership");
+}
+
+/* Ordinary browser/primary tasks do not set evidence_requirements. Grade
+ * history must still use the real Go assembler and provider freshness fence,
+ * without accidentally enabling optional KB preview/typed/fact retrieval. */
+static void test_default_primary_grade_only_context(void)
+{
+   ingress_preinject_set_session_id("primary-without-requirements");
+   request_context_t context = {0};
+   strcpy(context.request_id, "default-primary-grade-request");
+   strcpy(context.principal, "grade-caller");
+   strcpy(context.vault_principal, "grade-actor");
+   context.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&context);
+   int code = g_code_count, typed = g_typed_count, facts = g_fact_count;
+   int previews = g_preview_count, task = g_context_calls;
+   g_grade_history_mode = 1;
+   int checks = g_grade_history_checks;
+   char *instructions =
+       ingress_preinject_task_instructions("CURRENT_PRIMARY_SYSTEM", "deployment matrix");
+   assert(instructions && strstr(instructions, "CURRENT_PRIMARY_SYSTEM") &&
+          strstr(instructions, "configured-test-history"));
+   assert(strlen(request_context_get()->memory_source_release) == 32);
+   assert(ingress_preinject_revalidate_sources() == 0 && g_grade_history_checks > checks);
+   g_grade_history_mode = 2;
+   assert(ingress_preinject_revalidate_sources() == -1);
+   assert(request_context_get()->context_refused);
+   free(instructions);
+   ingress_preinject_finish_sources();
+
+   /* Empty and unavailable history preserve the ordinary instructions path. */
+   for (int mode = 0; mode <= 3; mode += 3)
+   {
+      request_context_set(&context);
+      g_grade_history_mode = mode;
+      assert(!ingress_preinject_task_instructions("UNCHANGED_SYSTEM", "no available history"));
+      assert(!request_context_get()->context_refused &&
+             !request_context_get()->memory_source_release[0]);
+   }
+   g_grade_history_mode = 1;
+   int reads = g_grade_history_reads;
+   context.vault_transport = ATTEST_NONE;
+   request_context_set(&context);
+   assert(!ingress_preinject_task_instructions("UNCHANGED_SYSTEM", "unattested actor"));
+   assert(g_grade_history_reads == reads);
+   context.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&context);
+   g_scope_resolve_failure = 1;
+   assert(!ingress_preinject_task_instructions("UNCHANGED_SYSTEM", "unresolved project"));
+   assert(g_grade_history_reads == reads);
+   g_scope_resolve_failure = 0;
+   assert(g_code_count == code && g_typed_count == typed && g_fact_count == facts &&
+          g_preview_count == previews && g_context_calls == task && !g_scope_active);
+   g_grade_history_mode = 0;
+   request_context_clear();
+   ingress_preinject_set_session_id("");
+   puts("default primary grade-only context: no requirements, no KB, exact source freshness and "
+        "empty noop passed");
+}
+
 static void test_source_revalidation_at_provider_fence(void)
 {
    request_context_t context = {0};
@@ -1397,6 +1912,204 @@ static void test_preview_sources_at_provider_fence(void)
    request_context_clear();
    g_source_check_mode = g_preview_projection = g_evidence_enabled = 0;
    puts("preview summary versions survive C transport and fence every provider route");
+}
+
+static void *local_last_cancel_worker(void *opaque)
+{
+   request_context_set(opaque);
+   (void)ingress_preinject_revalidate_sources();
+   return NULL;
+}
+
+static void *refresh_cancel_worker(void *opaque)
+{
+   request_context_set(opaque);
+   void *state = NULL;
+   (void)ingress_preinject_acquire_send_guard(&state);
+   ingress_preinject_release_send_guard(state);
+   return NULL;
+}
+static void *refresh_fork_cancel_worker(void *opaque)
+{
+   request_context_t *parent = opaque, child = *parent;
+   strcpy(child.request_id, "fork-child");
+   request_context_set(&child);
+   assert(ingress_preinject_fork_sources(parent) == -1);
+   assert(request_context_get()->context_refused);
+   request_context_clear();
+   return NULL;
+}
+static void test_refresh_preserves_fork_ownership(void)
+{
+   request_context_t parent = {0};
+   strcpy(parent.request_id, "fork-parent");
+   strcpy(parent.principal, "fork-user");
+   strcpy(parent.memory_source_release, "0123456789abcdef0123456789abcdef");
+   g_refresh_fork_active = 1;
+   for (int phase = 0; phase <= 3; ++phase)
+   {
+      g_refresh_fork_phase = phase;
+      if (!phase)
+      {
+         refresh_fork_cancel_worker(&parent);
+         assert(!request_context_get());
+      }
+      else
+      {
+         atomic_store(&g_refresh_cancel_entered, 0);
+         pthread_t worker;
+         assert(pthread_create(&worker, NULL, refresh_fork_cancel_worker, &parent) == 0);
+         for (int n = 0; n < 1000 && !atomic_load(&g_refresh_cancel_entered); ++n)
+            usleep(1000);
+         assert(atomic_load(&g_refresh_cancel_entered));
+         assert(pthread_cancel(worker) == 0);
+         void *joined = NULL;
+         assert(pthread_join(worker, &joined) == 0 && joined == PTHREAD_CANCELED);
+      }
+   }
+   g_refresh_fork_active = 0;
+   puts("fork remains non-retrying and its three cancellation ownership paths remain clean");
+}
+
+static void test_owner_directed_same_plan_refresh(void)
+{
+   request_context_t context = {0};
+   strcpy(context.request_id, "refresh-request");
+   strcpy(context.principal, "refresh-user");
+   strcpy(context.memory_source_release, "0123456789abcdef0123456789abcdef");
+#ifdef AIMEE_TEST_RETRY_HOOK_ABSENT
+   const int mode_limit = 1;
+#else
+   const int mode_limit = 11;
+#endif
+   for (int mode = 1; mode <= mode_limit; ++mode)
+   {
+      g_refresh_mode = mode;
+      g_refresh_plans = g_refresh_local = g_refresh_owner = g_refresh_results = 0;
+      g_refresh_local_closed = g_refresh_owner_closed = g_refresh_final_closed = 0;
+      if (mode >= 6)
+      {
+         atomic_store(&g_refresh_cancel_entered, 0);
+         pthread_t thread;
+         assert(pthread_create(&thread, NULL, refresh_cancel_worker, &context) == 0);
+         for (int n = 0; n < 1000 && !atomic_load(&g_refresh_cancel_entered); ++n)
+            usleep(1000);
+         assert(atomic_load(&g_refresh_cancel_entered));
+         assert(pthread_cancel(thread) == 0);
+         void *joined = NULL;
+         assert(pthread_join(thread, &joined) == 0 && joined == PTHREAD_CANCELED);
+      }
+      else
+      {
+         request_context_set(&context);
+         void *state = NULL;
+         int rc = ingress_preinject_acquire_send_guard(&state);
+#ifdef AIMEE_TEST_RETRY_HOOK_ABSENT
+         assert(rc == -1 && g_refresh_results == 1);
+#else
+         assert(rc == (mode == 1 ? 0 : -1));
+         assert(g_refresh_results == (mode == 1 || mode == 4 ? 2 : mode == 2 ? 3 : 1));
+#endif
+         assert(state);
+         ingress_preinject_release_send_guard(state);
+         request_context_clear();
+      }
+      assert(g_refresh_plans == 1); /* no new token, ticket or plan on refresh */
+      assert(g_refresh_local_closed == 1 && g_refresh_owner_closed == 1 &&
+             g_refresh_final_closed == 1);
+   }
+#ifndef AIMEE_TEST_RETRY_HOOK_ABSENT
+   g_refresh_mode = 12;
+   g_refresh_plans = g_refresh_local = g_refresh_owner = g_refresh_results = 0;
+   g_refresh_local_closed = g_refresh_owner_closed = g_refresh_final_closed = 0;
+   request_context_set(&context);
+   void *partial = NULL;
+   assert(ingress_preinject_acquire_send_guard(&partial) == -1 && partial);
+   ingress_preinject_release_send_guard(partial);
+   assert(g_refresh_plans == 1 && !g_refresh_results && !g_refresh_local && !g_refresh_owner);
+   assert(g_refresh_local_closed == 1 && g_refresh_owner_closed == 1 &&
+          g_refresh_final_closed == 1);
+   request_context_clear();
+#endif
+   g_refresh_mode = 0;
+   puts("owner-directed refresh: same opaque plan, bounded3rounds, final refusal and6cancel "
+        "cleanup");
+}
+
+static void test_local_verification_follows_blocking_source_owners(void)
+{
+   request_context_t context = {0};
+   strcpy(context.request_id, "local-last-request");
+   strcpy(context.principal, "local-last-user");
+   strcpy(context.memory_source_release, "0123456789abcdef0123456789abcdef");
+   strcpy(context.vault_principal, "grade-actor");
+   context.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   for (int mode = 1; mode <= 4; ++mode)
+   {
+      request_context_set(&context);
+      g_local_last_mode = mode;
+      g_local_last_owner_done = g_local_last_grade_done = g_local_last_changed = 0;
+      g_local_last_local_calls = g_local_last_results = 0;
+      int result = ingress_preinject_revalidate_sources();
+      assert(result == (mode == 1 ? 0 : -1));
+      assert(g_local_last_local_calls == 1 && g_local_last_results == 1);
+      if (mode != 1)
+         assert_context_dispatch_refused("stale_context");
+      request_context_clear();
+   }
+   for (int mode = 5; mode <= 7; ++mode)
+   {
+      g_local_last_mode = mode;
+      atomic_store(&g_local_last_cancel_entered, 0);
+      pthread_t worker;
+      assert(pthread_create(&worker, NULL, local_last_cancel_worker, &context) == 0);
+      for (int i = 0; i < 1000 && !atomic_load(&g_local_last_cancel_entered); ++i)
+         usleep(1000);
+      assert(atomic_load(&g_local_last_cancel_entered));
+      assert(pthread_cancel(worker) == 0);
+      void *joined = NULL;
+      assert(pthread_join(worker, &joined) == 0 && joined == PTHREAD_CANCELED);
+      assert(!request_context_get());
+   }
+   g_local_last_mode = 0;
+   puts("local verification follows delayed owner/grade; changed sources and invalid owner "
+        "evidence refuse");
+}
+
+static void test_receipt_admission_follows_blocking_owner(void)
+{
+   char directory[1024], path[1200];
+   snprintf(directory, sizeof directory, "%s/aimee-receipt-order-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(directory));
+   snprintf(path, sizeof path, "%s/receipt.db", directory);
+   assert(audit_worm_init_at(path) == 0);
+   request_context_t context = {0};
+   strcpy(context.request_id, "receipt-order-request");
+   strcpy(context.principal, "receipt-order-user");
+   strcpy(context.memory_source_release, "0123456789abcdef0123456789abcdef");
+   context.memory_receipt_required = 1;
+   request_context_set(&context);
+   g_receipt_order = 1;
+   g_receipt_order_plans = 0;
+   char attempt[33];
+   assert(ingress_preinject_prepare_attempt("{}", 2, "openai_chat", "test", "model", attempt) == 0);
+   assert(attempt[0] && g_receipt_order_plans == 1 && audit_worm_count() == 2);
+   request_context_set(&context);
+   g_receipt_change_during_owner = 1;
+   assert(ingress_preinject_prepare_attempt("{}", 2, "openai_chat", "test", "model", attempt) != 0);
+   assert(!attempt[0] && g_receipt_order_plans == 1 && audit_worm_count() == 2);
+   assert_context_dispatch_refused("stale_context");
+   g_receipt_order = g_receipt_change_during_owner = g_receipt_source_changed = 0;
+   request_context_clear();
+   audit_worm_close();
+   const char *suffixes[] = {"", "-wal", "-shm", ".dispatch-owner"};
+   for (size_t i = 0; i < sizeof suffixes / sizeof suffixes[0]; ++i)
+   {
+      snprintf(path, sizeof path, "%s/receipt.db%s", directory, suffixes[i]);
+      unlink(path);
+   }
+   assert(rmdir(directory) == 0);
+   puts("receipt admission follows delayed audit owner; intervening source change still refuses");
 }
 
 static void test_unversioned_provider_body_receipt(void)
@@ -1736,14 +2449,83 @@ static void test_ingress_host_session_binding(void)
    assert(!ingress_preinject_session_id()[0]);
 }
 
-int main(void)
+/* Controlled request-context scheduling test, not an authentication/SDK proof. */
+static void test_execution_grade_plan_scheduling(void)
 {
+   request_context_t context = {0};
+   strcpy(context.request_id, "grade-plan-request");
+   strcpy(context.principal, "grade-caller");
+   strcpy(context.vault_principal, "grade-actor");
+   context.vault_transport = ATTEST_UDS_PEERCRED;
+   ingress_preinject_set_session_id("grade-plan-session");
+   g_grade_history_mode = 1;
+   const int cases[] = {3, 1, 2, 4, 5};
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      g_grade_plan_case = cases[i];
+      request_context_set(&context);
+      assert(request_context_get() && request_context_get()->vault_principal[0]);
+      int before = g_grade_history_reads;
+      g_grade_plan_assembly_calls = 0;
+      char *out = ingress_preinject_build("Rin Juniper", 0);
+      if (g_grade_plan_case >= 4)
+      {
+         assert(!out && request_context_get()->context_refused);
+         assert(g_grade_history_reads == before && g_grade_plan_assembly_calls == 0);
+      }
+      else
+      {
+         assert(out && !strcmp(out, "Selected native context."));
+         assert(g_grade_history_reads == before + (g_grade_plan_case == 3 ? 0 : 1));
+         assert(g_grade_plan_assembly_calls == 1 && !request_context_get()->context_refused);
+      }
+      free(out);
+      request_context_clear();
+   }
+   g_grade_plan_case = 0;
+   g_grade_history_mode = 0;
+   ingress_preinject_set_session_id("");
+   puts("execution-grade plan: controlled context false0/true1/absent1/invalid0 passed");
+}
+
+int main(int argc, char **argv)
+{
+   if (argc == 2 && !strcmp(argv[1], "--owner-refresh-only"))
+   {
+      test_owner_directed_same_plan_refresh();
+      return 0;
+   }
+#ifdef AIMEE_RECEIPT_ORDER_ONLY
+   test_owner_directed_same_plan_refresh();
+   test_refresh_preserves_fork_ownership();
+   test_local_verification_follows_blocking_source_owners();
+   test_receipt_admission_follows_blocking_owner();
+   return 0;
+#endif
+   if (argc == 2 && !strcmp(argv[1], "--local-last-only"))
+   {
+      test_local_verification_follows_blocking_source_owners();
+      return 0;
+   }
+   if (argc == 2 && !strcmp(argv[1], "--receipt-order-only"))
+   {
+      test_receipt_admission_follows_blocking_owner();
+      return 0;
+   }
+   test_owner_directed_same_plan_refresh();
+   test_refresh_preserves_fork_ownership();
+   test_local_verification_follows_blocking_source_owners();
+   test_receipt_admission_follows_blocking_owner();
    test_ingress_host_session_binding();
    test_send_guard_completion_retries();
    test_native_private_source_transport();
    test_replayable_provider_receipt();
    test_durable_provider_attempt();
    test_unversioned_provider_body_receipt();
+   test_configured_test_history_at_provider_fence();
+   test_native_source_request_handoff();
+   test_default_primary_grade_only_context();
+   test_execution_grade_plan_scheduling();
    test_source_revalidation_at_provider_fence();
    test_preview_sources_at_provider_fence();
    test_required_assembly_refusal_reaches_dispatch();
@@ -1759,7 +2541,6 @@ int main(void)
    test_task_context_mode_and_first_turn_gate();
    test_unavailable_task_context_retries_after_recovery();
    test_recall_unavailable_is_counted_apart_from_empty();
-   test_query_from_messages();
    test_apply();
    test_append();
    test_budgeted_build_uses_memory_previews();

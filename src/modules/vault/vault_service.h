@@ -25,12 +25,14 @@ typedef enum
    VAULT_ERR_BADARG,     /* missing/oversize argument */
    VAULT_ERR_CRYPTO,     /* KDF/decrypt/entropy failure — fail closed */
    VAULT_ERR_IO,         /* vault file read/write failure */
-   VAULT_ERR_UNSUPPORTED_OP, /* op not supported by the active store backend (e.g. the
-                                server-autonomous dual-wrap ops on the kb pg backend) */
-   VAULT_ERR_SEALED,         /* the custody provider is SEALED — the server KEK is
-                                unavailable until an out-of-band unseal (P7 §3). Only an
-                                external-anchor custody returns this; the file provider
-                                (server profile) never seals, so never yields it. */
+   VAULT_ERR_UNSUPPORTED_OP,      /* op not supported by the active store backend (e.g. the
+                                     server-autonomous dual-wrap ops on the kb pg backend) */
+   VAULT_ERR_SEALED,              /* the custody provider is SEALED — the server KEK is
+                                     unavailable until an out-of-band unseal (P7 §3). Only an
+                                     external-anchor custody returns this; the file provider
+                                     (server profile) never seals, so never yields it. */
+   VAULT_ERR_GENERATION_MISMATCH, /* expected immutable generation no longer exists */
+   VAULT_ERR_RETIRED,             /* immutable slot permanently retired, no value */
 } vault_status_t;
 
 /* A short human-readable label for a status (for error responses/logging). */
@@ -104,6 +106,10 @@ vault_status_t vault_service_set(const char *principal, const char *agent, const
  * server master KEK. No unlock required — usable from a TCP client. Returns
  * VAULT_OK, or VAULT_ERR_CRYPTO/IO on a fail-closed error. */
 vault_status_t vault_service_set_server(const char *agent, const char *cred, const char *secret);
+/* Atomic server-credential update; all fields commit together or none do. NULL
+ * values remove fields. Unsupported storage refuses without sequential fallback. */
+vault_status_t vault_service_write_server_batch(const char *agent,
+                                                const vault_store_write_t *writes, size_t count);
 
 /* Read (agent, cred) from the server principal's vault under the server master KEK
  * — no client, no unlock. VAULT_OK (plaintext written), VAULT_NO_ENTRY (no file or
@@ -124,6 +130,11 @@ vault_status_t vault_service_set_server(const char *agent, const char *cred, con
  * you actually intend to USE the credential -- that one audits, correctly. */
 int vault_service_has_server_principal(const char *agent, const char *cred);
 
+/* Resolve all requested fields from one immutable server-credential snapshot.
+ * Missing fields have present=0; any failure clears every output. A backend
+ * without snapshot support returns VAULT_ERR_UNSUPPORTED_OP, never torn pairs. */
+vault_status_t vault_service_read_server_snapshot(const char *agent, vault_store_read_t *reads,
+                                                  size_t count);
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t out_len);
 
@@ -136,6 +147,40 @@ vault_status_t vault_service_get_server_principal(const char *agent, const char 
  * created if absent. VAULT_OK, or VAULT_ERR_BADARG/CRYPTO/IO (fail closed). */
 vault_status_t vault_service_set_server_wrap(const char *principal, const char *agent,
                                              const char *cred, const char *secret);
+
+/* Trusted host facade: derive principal from actual verified transport, never
+ * request JSON. Creates/reconciles only; returns NO plaintext or value hash.
+ * Optional provider support is mandatory. Existing mutable setters are unchanged.
+ * Slot names should be opaque IDs if their labels would disclose private data. */
+vault_create_once_result_t
+vault_service_create_server_wrap_once(const char *principal, const char *agent, const char *cred,
+                                      const char *secret, char *generation,
+                                      size_t generation_capacity);
+/* Trusted bounded-use callback only: no CLI/model route and no read capability
+ * implied by a locator. Caller must authenticate/authorize principal and purpose.
+ * A missing/deleted incarnation is a hard generation refusal, not the legacy
+ * VAULT_NO_ENTRY/environment-fallback result.
+ * Exact generation and authenticated marker are checked before invoking use;
+ * the temporary plaintext is cleansed afterward. Snapshot use is not a durable
+ * external guard spanning later effects. Callback must not retain secret bytes.
+ * It is invoked at most once: its failure may follow consumption or effects;
+ * an error is NOT proof of non-use and must never cause automatic replay. */
+typedef int (*vault_secret_use_fn)(const char *secret, size_t length, void *context);
+vault_status_t vault_service_use_server_wrap_generation(const char *principal, const char *agent,
+                                                        const char *cred,
+                                                        const char *expected_generation,
+                                                        vault_secret_use_fn use, void *context);
+/* Same trusted principal/purpose boundary, with a provider entry-retirement/
+ * write fence held THROUGH the callback. No snapshot fallback. No raw output,
+ * native authorization or seal-epoch authorization is implied. The callback
+ * must be bounded synchronous work and MUST NOT call Vault/key/native APIs or
+ * retain secret bytes. A non-OK return after callback entry is an unknown effect,
+ * not permission to retry. Existing snapshot API above remains unchanged. */
+vault_status_t vault_service_use_server_wrap_generation_fenced(const char *principal,
+                                                               const char *agent, const char *cred,
+                                                               const char *expected_generation,
+                                                               vault_secret_use_fn use,
+                                                               void *context);
 
 /* Autonomous per-principal read via the server wrap of a dual-wrapped credential
  * (vault_service_set stores both a user-KEK and a server-KEK wrap). Resolves
@@ -189,4 +234,14 @@ vault_status_t vault_service_lock(const char *principal);
 vault_status_t vault_service_inject_api_key(const char *principal, const char *agent, char *api_key,
                                             size_t api_key_len, long now_epoch);
 
+/* Trusted attested-principal adapter only. Missing never attests erasure. */
+vault_status_t vault_service_retire_server_wrap_generation(const char *principal, const char *agent,
+                                                           const char *cred,
+                                                           const char *expected_generation);
+/* Trusted attested-principal adapter only; authorize permanent SLOT closure.
+ * Absence is closed durably rather than reported as erasure of a known value.
+ * Never infers caller permission or exposes plaintext. No CLI/model route. */
+vault_status_t vault_service_close_server_wrap_slot_once(const char *principal, const char *agent,
+                                                         const char *cred, char *closed_generation,
+                                                         size_t generation_capacity);
 #endif /* DEC_VAULT_SERVICE_H */

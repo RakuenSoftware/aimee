@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -61,14 +60,6 @@ func ParseDefinition(content []byte) (Definition, error) {
 }
 
 func canonicalYAML(def Definition) ([]byte, error) { return yaml.Marshal(def) }
-
-func LoadDefinition(path string) (Definition, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return Definition{}, fmt.Errorf("read workflow definition: %w", err)
-	}
-	return ParseDefinition(content)
-}
 
 func (d Definition) Validate() error {
 	if d.Name == "" {

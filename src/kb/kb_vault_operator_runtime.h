@@ -91,9 +91,6 @@ void kb_vault_operator_runtime_destroy(kb_vault_operator_runtime_t *);
 void kb_vault_operator_runtime_fill_deps(kb_vault_operator_runtime_t *,
                                          kb_vault_operator_mutation_deps_t *);
 
-/* Transport-compatible status projection over this composite opaque. */
-int kb_vault_operator_runtime_read_status(kb_vault_operator_status_t *, void *);
-
 /* Main-thread acquire validation after the latch wakes. Re-reads the exact
  * opened event where one was committed by this process, then requires a fresh
  * byte-identical operational status and live singleton/provider state. */

@@ -17,14 +17,6 @@ void delegate_checkout_add_result_ex(cJSON *resp, const char *launch_worktree_pa
                                      const char *launch_head, const char *parent_worktree_path,
                                      const char *parent_worktree_head,
                                      const char *parent_worktree_fingerprint);
-void write_result_json(const char *path, const agent_result_t *result);
-void write_result_json_with_checkout(const char *path, const agent_result_t *result,
-                                     const char *launch_worktree_path, const char *launch_head);
-void write_result_json_with_checkout_ex(const char *path, const agent_result_t *result,
-                                        const char *launch_worktree_path, const char *launch_head,
-                                        const char *parent_worktree_path,
-                                        const char *parent_worktree_head,
-                                        const char *parent_worktree_fingerprint);
 void delegate_worktree_restore(const char *orig_cwd, const char *git_root, const char *work_name,
                                int keep);
 
@@ -51,10 +43,6 @@ typedef int (*delegate_chain_provider_fn)(unsigned op, int has_depth, int has_pa
                                           int max_depth, int *flag, int32_t *current_depth);
 void delegate_register_chain_provider(delegate_chain_provider_fn provider);
 
-int delegate_check_chain_depth(int max_depth, char *errbuf, size_t errbuf_sz);
-int delegate_chain_env_should_clear(const char *depth_env, const char *parent_env,
-                                    int parent_active_known, int parent_active);
-
 typedef struct
 {
    const char *task_prompt;
@@ -80,23 +68,22 @@ typedef struct
    char error[DELEGATE_HANDOFF_ERROR_LEN];
 } delegate_handoff_validation_t;
 
-/* Resolve the delegate task prompt and user prompt.
- *
- * - With only cli_prompt: both task_prompt and user_prompt are cli_prompt.
- * - With only file_prompt: task_prompt becomes a generic "see user prompt" descriptor,
- *   while user_prompt is the file contents.
- * - With both: task_prompt stays as cli_prompt and user_prompt becomes a combined
- *   prompt that includes the file contents, owned by the plan.
- */
-int delegate_resolve_prompt_inputs(const char *cli_prompt, const char *file_prompt,
-                                   delegate_prompt_plan_t *out);
-
 /* Build the final-output contract appended to prompts that require structured
  * delegate handoffs.  |packet_id| may be NULL for direct one-off delegations. */
 char *delegate_handoff_append_contract(const char *prompt, const char *packet_id);
 
 /* Build a one-shot repair prompt for a malformed handoff. */
 char *delegate_handoff_repair_prompt(const char *previous_response, const char *validation_error);
+
+/* Append separately classified host/model context to the canonical task. */
+int delegate_request_add_context(aimee_request_t *request, const char *text,
+                                 aimee_context_origin_t origin,
+                                 aimee_context_authority_t authority);
+
+int delegate_request_add_response(aimee_request_t *request, const aimee_response_t *response);
+int delegate_request_map_root(aimee_request_t *request, const char *operator_root,
+                              const char *delegate_root);
+size_t delegate_request_text_bytes(const aimee_request_t *request);
 
 /* Validate delegate_result_v1 JSON text.  When |owned_files_json| is a non-empty
  * JSON array, changed files outside that list are reported as supervisor-review
@@ -113,27 +100,6 @@ int delegate_handoff_validate_text(const char *text, const char *owned_files_jso
                                    int require_verification, delegate_handoff_validation_t *out);
 
 void delegate_handoff_add_validation_json(cJSON *obj, const delegate_handoff_validation_t *v);
-
-/* Platform-specific background dispatch.
- * POSIX: forks; parent prints task info and returns; child runs agent and _exit()s.
- * Windows: prints task info, runs agent synchronously, frees effective_prompt/file_prompt,
- *          and returns.
- * The caller should return immediately after this call. */
-void platform_delegate_run_background(
-    const char *tasks_dir, const char *task_id, const char *result_path, int json_output,
-    agent_config_t *cfg, const char *role, const char *sys_prompt, const char *final_prompt,
-    int max_tokens, int force_tools, const char *original_cwd, const char *delegate_git_root,
-    const char *delegate_work_name, int keep_worktree, const char *launch_worktree_path,
-    const char *launch_head, const char *parent_worktree_path, const char *parent_worktree_head,
-    const char *parent_worktree_fingerprint, char *effective_prompt, char *file_prompt);
-
-/* Platform-specific background task dispatch for cmd_dispatch.
- * POSIX: forks; parent returns 0; child runs agent and _exit()s.
- *        Returns -1 on fork failure (caller should skip this task).
- * Windows: runs agent synchronously and returns 0. */
-int platform_trace_run_task(agent_config_t *cfg, const char *role, const char *sys,
-                            const char *prompt, int task_timeout, int use_tools,
-                            const char *result_path, int task_idx);
 
 /* ---- Named-file drift detection (delegate_prompt.c) ---- */
 
@@ -220,8 +186,6 @@ int delegate_worktree_has_changes(const char *wt_path);
  * paths. Provider routing picks the cheapest enabled agent for the requested
  * provider and role, preferring the configured default agent on equal tier. */
 agent_t *delegate_route_by_provider(agent_config_t *cfg, const char *role, const char *provider);
-/* Highest cost_tier among enabled, role-capable agents (or -1 if none). */
-int delegate_max_cost_tier(agent_config_t *cfg, const char *role);
 /* Synthesize an ephemeral ACP delegate agent from an inline `--acp <command>`
  * (+ optional `--acp-args <args>`), append it to cfg, and return its generated
  * name via name_out. The agent uses the provider-cli backend with the "acp"
@@ -243,12 +207,6 @@ void delegate_routing_register_capability_provider(delegate_capability_provider_
 
 void delegate_infer_capability_requirements(const char *prompt, int tools_enabled,
                                             unsigned *required_caps_out, int *min_context_out);
-/* Disable every agent whose declared max_scope ceiling cannot serve a packet of
- * this scope. AGENT_SCOPE_UNSET is a no-op here (the routing filter resolves it
- * to whole_task). On "nothing can serve it" the error LISTS the fleet and each
- * agent's ceiling, so the operator is not left guessing which seat to change. */
-int delegate_filter_route_scope(agent_config_t *cfg, agent_scope_t scope, char *errbuf,
-                                size_t errbuf_sz);
 
 int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
                                        unsigned required_caps, int min_context, int drop_deprecated,
@@ -285,28 +243,11 @@ typedef enum
 char *delegate_bound_root_notice(const char *shell_root, const char *file_root,
                                  delegate_root_kind_t kind);
 
-/* Rewrite every occurrence of `cwd` in `prompt` to `worktree_path` so a delegate
- * running in an isolated sibling worktree sees paths under its own checkout.
- * Returns a newly malloc'd string (caller frees) and sets *occurrences_out to
- * the count, or NULL when nothing was rewritten (no match / empty inputs / alloc
- * failure) — in which case the caller keeps the original prompt. */
-char *delegate_rewrite_prompt_cwd(const char *prompt, const char *cwd, const char *worktree_path,
-                                  int *occurrences_out);
-
-/* Concatenate `block` onto `base` (treating NULL `base` as empty), returning a
- * newly malloc'd buffer the caller owns, or NULL on NULL block / alloc failure.
- * The "append a section to the system prompt" idiom used across the delegate
- * prompt assembly. */
-char *delegate_prompt_append_block(const char *base, const char *block);
-
-/* Assemble a delegate's system prompt: the request-supplied `in` (may be NULL),
- * else a per-role template, else a static fallback; with the persona's
- * identity/principles composed on and the role's token budget applied. Returns
- * the active prompt and sets *owned_out to the malloc'd buffer the caller must
- * free (NULL when the static fallback literal is in use). */
-const char *delegate_assemble_system_prompt(const char *in, const char *role, const char *prompt,
-                                            const char *cwd, const char *persona,
-                                            const char *worktree_path, char **owned_out);
+/* Produce role/persona configuration as an owned canonical policy block.
+ * Source task/history never enter template substitution. Existing system blocks
+ * remain owned by the caller's canonical Request. Output unchanged on error. */
+int delegate_assemble_policy_ir(int has_source_policy, const char *role, const char *cwd,
+                                const char *persona, const char *worktree_path, aimee_block_t *out);
 
 /* For read-only inspection roles (review/validate/diagnose/test), prepend the
  * PARENT worktree's uncommitted-diff bundle (with a labelled preamble) to the

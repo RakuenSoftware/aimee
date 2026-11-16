@@ -1,5 +1,6 @@
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 /* learning_bundle.c: cross-source evidence neighbourhood builder.
  *
  * Embed the query, scan stored evidence vectors, rank by cosine similarity,
@@ -100,8 +101,7 @@ int learning_bundle_build(const char *query, const char *embed_cmd, int k, learn
    cJSON_AddNumberToObject(embed_0_args, "max_dim", BUNDLE_EMBED_DIM);
    (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
    cJSON_Delete(embed_0_args);
-   int qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), qvec,
-                             BUNDLE_EMBED_DIM);
+   int qdim = embed_reply_vector(embed_0_reply, qvec, BUNDLE_EMBED_DIM);
    cJSON_Delete(embed_0_reply);
    if (qdim <= 0)
       return -1;

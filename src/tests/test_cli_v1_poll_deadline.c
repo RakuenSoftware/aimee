@@ -46,6 +46,7 @@
 
 static atomic_int g_stop;
 static atomic_int g_polls;
+static atomic_int g_reply_incomplete;
 
 typedef struct
 {
@@ -84,10 +85,13 @@ static void *stub_server(void *arg)
       }
       req[r] = '\0';
 
-      if (first)
+      if (first || atomic_load(&g_reply_incomplete))
       {
+         const char *body =
+             first ? "{\"id\":\"oprun_1_1\"}" : "{\"id\":\"oprun_1_1\",\"status\":\"incomplete\"}";
+         if (!first)
+            atomic_fetch_add(&g_polls, 1);
          first = 0;
-         const char *body = "{\"id\":\"oprun_1_1\"}";
          char resp[256];
          int n = snprintf(resp, sizeof(resp),
                           "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -168,14 +172,28 @@ int main(void)
 
    atomic_store(&g_stop, 1);
    pthread_join(th, NULL);
-   close(stub.listen_fd);
-   unsetenv("AIMEE_API_ENDPOINT");
 
    printf("  budget=%dms elapsed=%lldms polls=%d\n", BUDGET_MS, elapsed, atomic_load(&g_polls));
    assert(atomic_load(&g_polls) >= 1); /* the run handle was accepted and polled */
    assert(elapsed < CEILING_MS);       /* the budget bounds the wall clock */
 
    printf("  a stalled server does not outlive the caller's timeout: ok\n");
+   atomic_store(&g_stop, 0);
+   atomic_store(&g_polls, 0);
+   atomic_store(&g_reply_incomplete, 1);
+   assert(pthread_create(&th, NULL, stub_server, &stub) == 0);
+   req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "method", "dev.sweep");
+   resp = cli_v1_dispatch(req, BUDGET_MS);
+   assert(resp && atomic_load(&g_polls) == 1);
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+   atomic_store(&g_stop, 1);
+   pthread_join(th, NULL);
+   close(stub.listen_fd);
+   unsetenv("AIMEE_API_ENDPOINT");
+   printf("  an incomplete run terminates polling after one snapshot: ok\n");
+
    printf("All cli_v1_poll_deadline tests passed.\n");
    return 0;
 }

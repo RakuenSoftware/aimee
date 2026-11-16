@@ -55,14 +55,6 @@ extern "C"
       char scope_id[KB_STORE_CALIBRATION_SCOPE_LEN];
    } kb_store_calibration_surface_t;
 
-   /* Parse a calibration_profile JSON payload into the promotion threshold
-    * implied by its Beta buckets and conformal reject floor. static_threshold
-    * is the posterior lower-bound target used when choosing the earliest
-    * confidence bucket. Returns 0 on success, -1 for invalid/missing JSON. */
-   int kb_store_calibration_threshold_from_profile_json(const char *payload_json,
-                                                        double static_threshold,
-                                                        double *threshold_out);
-
    /* Write a calibration_profile artifact for (target_surface, kind,
     * scope_kind, scope_id).  payload_json is the full JSON profile blob.
     * Returns the new artifact id in id_out (>= 37 bytes) on success.

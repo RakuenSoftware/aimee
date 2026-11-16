@@ -40,12 +40,6 @@ typedef struct
  * Return 0 to continue draining, non-zero to abort the stream early. */
 typedef int (*ws_runner_partial_fn)(void *cb_ctx, struct cJSON *partial);
 
-void ws_runner_queue_init(ws_runner_queue_t *q);
-void ws_runner_queue_destroy(ws_runner_queue_t *q);
-
-/* Wake all waiters and fail any pending/future op. Idempotent. */
-void ws_runner_queue_close(ws_runner_queue_t *q);
-
 /* Detached transport (ctx = ws_runner_queue_t*): enqueue `request`, block until
  * the runner responds (or the queue closes). Consumes `request` per the
  * ws_detached_transport_fn contract. Returns 0 and sets *response (caller owns)
@@ -61,14 +55,5 @@ int ws_runner_queue_transport(void *ctx, struct cJSON *request, struct cJSON **r
 int ws_runner_queue_transport_stream(void *ctx, struct cJSON *request,
                                      ws_runner_partial_fn on_partial, void *cb_ctx,
                                      struct cJSON **final);
-
-/* Runner side: take the next pending request, blocking up to timeout_ms
- * (<= 0 = no wait). Returns the request (caller owns and must cJSON_Delete it
- * after responding) or NULL on timeout / close. */
-struct cJSON *ws_runner_queue_poll(ws_runner_queue_t *q, int timeout_ms);
-
-/* Runner side: hand `response` back to the waiting transport (queue takes
- * ownership). Returns 0, or -1 if the queue is closed (response freed). */
-int ws_runner_queue_respond(ws_runner_queue_t *q, struct cJSON *response);
 
 #endif /* WORKSPACE_RUNNER_QUEUE_H */

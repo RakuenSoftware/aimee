@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func newModule(t *testing.T, ids ...string) *Module {
@@ -62,8 +62,8 @@ func call(t *testing.T, m *Module, stage, op uint32, cells []string) (peerwire.S
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	body, st := m.Handle(bus.ModuleInvocation{StageID: stage}, frame)
-	if st != bus.ModuleStatusOK {
+	body, st := m.Handle(ring.ModuleInvocation{StageID: stage}, frame)
+	if st != ring.ModuleStatusOK {
 		t.Fatalf("transport status = %v; want OK (a domain refusal is still a served call)", st)
 	}
 	status, out, err := peerwire.DecodeResponse(body)
@@ -314,24 +314,24 @@ func TestMalformedInputIsInvalidRequest(t *testing.T) {
 		"garbage":   []byte("not a frame"),
 		"truncated": {1, 0, 0, 0},
 	} {
-		if _, st := m.Handle(bus.ModuleInvocation{StageID: peerwire.StageDelivery}, req); st != bus.ModuleStatusInvalidRequest {
+		if _, st := m.Handle(ring.ModuleInvocation{StageID: peerwire.StageDelivery}, req); st != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: status = %v; want InvalidRequest", name, st)
 		}
 	}
 
 	// Wrong cell count for the operation.
 	frame, _ := peerwire.EncodeRequest(peerwire.OpSend, []string{"A"})
-	if _, st := m.Handle(bus.ModuleInvocation{StageID: peerwire.StageDelivery}, frame); st != bus.ModuleStatusInvalidRequest {
+	if _, st := m.Handle(ring.ModuleInvocation{StageID: peerwire.StageDelivery}, frame); st != ring.ModuleStatusInvalidRequest {
 		t.Errorf("short cells: status = %v; want InvalidRequest", st)
 	}
 	// Unknown stage.
 	frame, _ = peerwire.EncodeRequest(peerwire.OpSend, []string{"A", "B", "x", "", "0", "0"})
-	if _, st := m.Handle(bus.ModuleInvocation{StageID: 99}, frame); st != bus.ModuleStatusInvalidRequest {
+	if _, st := m.Handle(ring.ModuleInvocation{StageID: 99}, frame); st != ring.ModuleStatusInvalidRequest {
 		t.Errorf("unknown stage: status = %v; want InvalidRequest", st)
 	}
 	// Unknown op within a known stage.
 	frame, _ = peerwire.EncodeRequest(99, []string{"A"})
-	if _, st := m.Handle(bus.ModuleInvocation{StageID: peerwire.StageInbox}, frame); st != bus.ModuleStatusInvalidRequest {
+	if _, st := m.Handle(ring.ModuleInvocation{StageID: peerwire.StageInbox}, frame); st != ring.ModuleStatusInvalidRequest {
 		t.Errorf("unknown op: status = %v; want InvalidRequest", st)
 	}
 }
@@ -373,7 +373,7 @@ func TestThreeOutcomeLevelsStayDistinct(t *testing.T) {
 	}
 
 	// "could not understand" -- transport level, never a domain status.
-	if _, st := m.Handle(bus.ModuleInvocation{StageID: peerwire.StageInbox}, []byte("garbage")); st == bus.ModuleStatusOK {
+	if _, st := m.Handle(ring.ModuleInvocation{StageID: peerwire.StageInbox}, []byte("garbage")); st == ring.ModuleStatusOK {
 		t.Error("an undecodable frame answered OK; it must fail at the transport level")
 	}
 }
@@ -418,11 +418,11 @@ func TestUnknownSessionIsNotAnEmptyInbox(t *testing.T) {
 }
 
 // fakeCapability advertises whatever stages it is given.
-type fakeCapability struct{ stages []bus.ModuleStage }
+type fakeCapability struct{ stages []ring.ModuleStage }
 
-func (f fakeCapability) Stages() []bus.ModuleStage { return f.stages }
-func (f fakeCapability) Handle(bus.ModuleInvocation, []byte) ([]byte, bus.ModuleStatus) {
-	return nil, bus.ModuleStatusOK
+func (f fakeCapability) Stages() []ring.ModuleStage { return f.stages }
+func (f fakeCapability) Handle(ring.ModuleInvocation, []byte) ([]byte, ring.ModuleStatus) {
+	return nil, ring.ModuleStatusOK
 }
 
 // Two capabilities claiming one stage must fail at CONSTRUCTION. Left to
@@ -430,7 +430,7 @@ func (f fakeCapability) Handle(bus.ModuleInvocation, []byte) ([]byte, bus.Module
 // arrive and are served by the wrong owner, which returns plausible nonsense.
 // That is worse than CAPABILITY_ABSENT, which at least fails visibly.
 func TestStageConflictRefusedAtConstruction(t *testing.T) {
-	clash := fakeCapability{stages: []bus.ModuleStage{
+	clash := fakeCapability{stages: []ring.ModuleStage{
 		{EventKind: peerwire.EventKind(PrincipalRef, peerwire.StageInbox), StageID: peerwire.StageInbox},
 	}}
 	_, err := New(mustPeer(t, newRegistry(t)), clash)
@@ -444,7 +444,7 @@ func TestStageConflictRefusedAtConstruction(t *testing.T) {
 // with the formula is how a module advertises something the contract does not
 // declare.
 func TestStageWithOffFormulaKindRefused(t *testing.T) {
-	bad := fakeCapability{stages: []bus.ModuleStage{
+	bad := fakeCapability{stages: []ring.ModuleStage{
 		{EventKind: 9999, StageID: 7},
 	}}
 	if _, err := New(bad); err == nil {
@@ -455,7 +455,7 @@ func TestStageWithOffFormulaKindRefused(t *testing.T) {
 // The module is a host for capabilities, not peer messaging in a wrapper. A
 // second capability is a New() argument.
 func TestModuleHostsMultipleCapabilities(t *testing.T) {
-	second := fakeCapability{stages: []bus.ModuleStage{
+	second := fakeCapability{stages: []ring.ModuleStage{
 		{EventKind: peerwire.EventKind(PrincipalRef, 9), StageID: 9},
 	}}
 	m, err := New(mustPeer(t, newRegistry(t, "A", "B")), second)
@@ -470,7 +470,7 @@ func TestModuleHostsMultipleCapabilities(t *testing.T) {
 		t.Fatalf("stages = %d; want %d (peer's own, plus one other)", got, wantStages)
 	}
 	// Each stage reaches its own owner.
-	if _, st := m.Handle(bus.ModuleInvocation{StageID: 9}, nil); st != bus.ModuleStatusOK {
+	if _, st := m.Handle(ring.ModuleInvocation{StageID: 9}, nil); st != ring.ModuleStatusOK {
 		t.Errorf("second capability stage = %v; want OK", st)
 	}
 	// And peer messaging still works alongside it.

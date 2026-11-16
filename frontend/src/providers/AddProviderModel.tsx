@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Button, InlineStatus } from "@rakuensoftware/smoothgui";
 import { providerRequest, type ProviderConnection } from "./api";
 
@@ -6,12 +6,18 @@ export default function AddProviderModel({ onDone }: { onDone: (msg: string, ok:
   const [providers, setProviders] = useState<ProviderConnection[]>([]);
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
+  const [customName, setCustomName] = useState<string | null>(null);
+  const nameErrorId = useId();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [found, setFound] = useState<{ id: string; context_window?: number }[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
+  const modelName = (customName ?? (model.trim() ? `${name}:${model.trim()}` : "")).trim();
+  const nameError = model.trim() && (!modelName ? "Enter a model name." :
+    new TextEncoder().encode(modelName).length >= 64 ? "This name is too long. Choose a shorter model name." :
+    /[\0\r\n]/.test(modelName) ? "Choose a model name without control characters." : "");
   useEffect(() => {
     providerRequest<{ providers: ProviderConnection[] }>("/api/providers")
       .then(d => { setProviders(d.providers); setName(d.providers[0]?.name || ""); })
@@ -30,11 +36,11 @@ export default function AddProviderModel({ onDone }: { onDone: (msg: string, ok:
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
     const provider = providers.find(p => p.name === name);
-    if (!provider || !model.trim()) return;
+    if (!provider || !model.trim() || !modelName || nameError) return;
     setBusy(true); setError("");
     try {
       await providerRequest("/api/models/add", { args: [
-        `${provider.name}:${model.trim()}`, provider.endpoint, model.trim(), "--registration", provider.name,
+        modelName, provider.endpoint, model.trim(), "--registration", provider.name,
       ] });
       onDone(`Added ${model.trim()}`, true);
     } catch (err) { setError(err instanceof Error ? err.message : "Could not add model"); }
@@ -53,8 +59,10 @@ export default function AddProviderModel({ onDone }: { onDone: (msg: string, ok:
         {m.context_window ? `${m.context_window.toLocaleString()} context` : "context not published"}
       </div>)}</div>}
       <label style={{ display: "grid", gap: 4 }}>Model ID <input style={{ padding: "6px 8px", width: "100%", boxSizing: "border-box" }} required value={model} onChange={e => setModel(e.target.value)} disabled={busy} /></label>
+      <label style={{ display: "grid", gap: 4 }}>Name in Aimee <input style={{ padding: "6px 8px", width: "100%", boxSizing: "border-box" }} required value={customName ?? (model.trim() ? `${name}:${model.trim()}` : "")} onChange={e => setCustomName(e.target.value)} disabled={busy} aria-invalid={!!nameError} aria-describedby={nameError ? nameErrorId : undefined} /></label>
+      {nameError && <p id={nameErrorId} role="alert">{nameError}</p>}
       <p>Uses this provider’s saved connection and credentials. Set limits, prices, and routing preferences after adding the model.</p>
-      <Button style={{ justifySelf: "start" }} type="submit" disabled={busy}>{busy ? "Adding…" : "Add model"}</Button>
+      <Button style={{ justifySelf: "start" }} type="submit" disabled={busy || !model.trim() || !modelName || !!nameError}>{busy ? "Adding…" : "Add model"}</Button>
     </>}
     {error && <InlineStatus status={{ kind: "err", msg: error }} />}
   </form>;

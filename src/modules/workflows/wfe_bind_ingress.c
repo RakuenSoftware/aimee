@@ -48,16 +48,6 @@ void wfe_bind_health_note_bind(void)
    atomic_store(&g_health_warned, 0);
 }
 
-/* test hooks */
-void wfe_bind_health_reset(void)
-{
-   atomic_store(&g_routes_since_bind, 0);
-   atomic_store(&g_health_warned, 0);
-}
-int wfe_bind_health_warned(void)
-{
-   return atomic_load(&g_health_warned);
-}
 #include "db1_client/wfe_store.h" /* db1_lifecycle_event_add */
 
 static void audit_bind(const char *wi, const char *workflow, const char *stage, int resumed)

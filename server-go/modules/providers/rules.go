@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -34,18 +34,18 @@ const (
 // Rules preserves the provider rule wire format while moving its sole
 // implementation out of the retired C adapter. The event allocation belongs to
 // providers; the old unregistered allocation overlapped economizer.
-func Rules(inv bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func Rules(inv ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 	length := 8 + recordLen
 	if inv.StageID == StageResolve {
 		length += recordLen
 	} else if inv.StageID != StageValidate {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if len(body) != length || binary.LittleEndian.Uint32(body) != requestMagic || binary.LittleEndian.Uint32(body[4:]) != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if inv.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	declared := body[8 : 8+recordLen]
 	out := make([]byte, recordLen)
@@ -136,7 +136,7 @@ func Rules(inv bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
 		binary.LittleEndian.PutUint32(reply[12:], 1)
 		copy(reply[16:], out)
 	}
-	return reply, bus.ModuleStatusOK
+	return reply, ring.ModuleStatusOK
 }
 func blank(value []byte) bool {
 	for _, b := range value {

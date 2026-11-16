@@ -19,7 +19,7 @@ authorizes console-admin and fleet proxy method/path pairs, preserving exact met
 `{id}` wildcard semantics, path bounds, and the fleet trailing-slash rejection. The physical
 `control-web` provider imports that exact Go policy package, so live proxy behavior and the event-bus
 boundary cannot drift. HTTPS, authentication, sessions, CSRF, credential selection, proxy I/O, and
-assets remain in the physical provider. The C `module_adapter.c` is a wire-parity fixture. The KB
+assets remain in the physical provider. The KB
 authorizes console-admin requests only by calling the separately supervised control-web module through
 its event bus; an unavailable or invalid module response fails closed with HTTP 503, with no local
 authorization fallback.

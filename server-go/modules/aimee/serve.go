@@ -3,7 +3,7 @@ package aimee
 import (
 	"fmt"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // PrincipalRef is this module's principal in the kind formula
@@ -37,8 +37,8 @@ func kindFor(stage uint32) uint32 { return 4096 + PrincipalRef*256 + stage }
 // single handler the host asks for. A stage nobody claims is refused rather
 // than silently answered by whichever family happened to be first.
 type Mux struct {
-	byStage map[uint32]bus.ModuleHandler
-	stages  []bus.ModuleStage
+	byStage map[uint32]ring.ModuleHandler
+	stages  []ring.ModuleStage
 }
 
 // Bind is a stage served by something that is not a fields-v2 Family.
@@ -52,7 +52,7 @@ type Bind struct {
 	Name    string
 	Event   uint32
 	Stage   uint32
-	Handler bus.ModuleHandler
+	Handler ring.ModuleHandler
 }
 
 // NewMux binds each family to a database and checks it against the formula.
@@ -64,7 +64,7 @@ func NewMux(db DB, families ...Family) (*Mux, error) {
 	if db == nil {
 		return nil, fmt.Errorf("aimee: no database")
 	}
-	m := &Mux{byStage: map[uint32]bus.ModuleHandler{}}
+	m := &Mux{byStage: map[uint32]ring.ModuleHandler{}}
 	for _, f := range families {
 		if want := kindFor(f.Stage); f.Event != want {
 			return nil, fmt.Errorf(
@@ -79,7 +79,7 @@ func NewMux(db DB, families ...Family) (*Mux, error) {
 			return nil, fmt.Errorf("aimee: family %q serves no operations", f.Name)
 		}
 		m.byStage[f.Stage] = f.Handler(db)
-		m.stages = append(m.stages, bus.ModuleStage{EventKind: f.Event, StageID: f.Stage})
+		m.stages = append(m.stages, ring.ModuleStage{EventKind: f.Event, StageID: f.Stage})
 	}
 	return m, nil
 }
@@ -98,18 +98,18 @@ func (m *Mux) Add(b Bind) error {
 		return fmt.Errorf("aimee: stage %d is already claimed", b.Stage)
 	}
 	m.byStage[b.Stage] = b.Handler
-	m.stages = append(m.stages, bus.ModuleStage{EventKind: b.Event, StageID: b.Stage})
+	m.stages = append(m.stages, ring.ModuleStage{EventKind: b.Event, StageID: b.Stage})
 	return nil
 }
 
 // Stages is the list the host registers with the bus.
-func (m *Mux) Stages() []bus.ModuleStage { return m.stages }
+func (m *Mux) Stages() []ring.ModuleStage { return m.stages }
 
 // Handle routes one invocation.
-func (m *Mux) Handle(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+func (m *Mux) Handle(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 	handler, ok := m.byStage[invocation.StageID]
 	if !ok {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	return handler(invocation, frame)
 }

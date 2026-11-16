@@ -1,0 +1,17 @@
+.aimee-shell { height: 100dvh !important; }
+.aimee-shell header > div { min-width: 0; }
+.aimee-navigation { overflow-y: auto; }
+.aimee-navigation a { flex-shrink: 0; }
+@media (max-width: 760px) {
+  .aimee-body { flex-direction: column; }
+  .aimee-navigation {
+    flex-direction: row !important;
+    width: auto !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 5px 8px !important;
+    border-bottom: 1px solid var(--sg-dark-border);
+  }
+  .aimee-navigation a { white-space: nowrap; padding: 8px !important; font-size: 13px !important; }
+  .aimee-shell header { gap: 8px !important; padding: 0 10px !important; }
+}

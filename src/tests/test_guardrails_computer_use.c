@@ -67,16 +67,6 @@ static void test_sensitive_actions_require_approval(void)
                    COMPUTER_USE_DECISION_ALLOW);
 }
 
-static void test_redaction(void)
-{
-   char out[256];
-   int n = computer_use_redact_text("token=abc123 sk-testsecret ghp_secret", out, sizeof(out));
-   assert(n == 1);
-   assert(strstr(out, "[REDACTED]") != NULL);
-   assert(strstr(out, "sk-testsecret") == NULL);
-   assert(strstr(out, "ghp_secret") == NULL);
-}
-
 /* computer_use_policy_from_config reads live config rather than taking a
  * legacy_config_record, so the projection this case checks has to be written to a config
  * file the test owns — a hand-built struct no longer reaches the function. */
@@ -117,7 +107,6 @@ int main(void)
    test_disabled_blocks_exposure_escape();
    test_navigation_policy();
    test_sensitive_actions_require_approval();
-   test_redaction();
    test_config_projection();
    printf("guardrails_computer_use: ok\n");
    return 0;

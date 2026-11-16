@@ -1,9 +1,13 @@
 /* server_ready.c: the readiness snapshot sampler behind GET /v1/ready.
  *
  * The route (server_http.c) must not perform dependency I/O — a wedged
- * dependency would otherwise stall the listener — so this unit samples each
- * dependency on a background interval and publishes an immutable snapshot the
- * route can read in O(1). This is also why the sampler lives here rather than
+ * dependency would otherwise stall the listener — so a background thread
+ * samples each dependency and publishes an immutable snapshot the route can
+ * read in O(1). The thread samples on demand, never on a timer: a readiness
+ * request that finds the snapshot older than the sampling interval asks for a
+ * new one. An idle server that nobody asks is asked nothing, so it asks its
+ * dependencies nothing; one behind a healthcheck samples at most once an
+ * interval, as before. This is also why the sampler lives here rather than
  * in server_http.c: it pulls the kb_client/db1 dependency closure that
  * server_http.c and its unit test deliberately stay free of.
  *
@@ -30,7 +34,8 @@
  *
  * Tuning (env, so an operator can adjust without a rebuild; conservative
  * defaults chosen so the probe never becomes load):
- *   AIMEE_READY_INTERVAL_SECS  sampling period  (default 15, range 1..3600)
+ *   AIMEE_READY_INTERVAL_SECS  minimum snapshot age before a request triggers a
+ *                              new sample (default 15, range 1..3600)
  *   AIMEE_READY_STALE_SECS     staleness bound  (default 60, range interval..86400)
  */
 #include "server_http.h"
@@ -80,11 +85,23 @@ typedef struct
    long long retry_after_ms;
    long long last_success_query_ms;
    char last_ingest_at[64];
-   long sampled_at; /* epoch seconds; 0 = never sampled */
+   long sampled_at;           /* epoch seconds; 0 = never sampled */
+   uint64_t slot_fingerprint; /* registry identity sampled with these dependencies */
 } ready_snapshot_t;
 
 static pthread_mutex_t g_ready_mtx = PTHREAD_MUTEX_INITIALIZER;
 static ready_snapshot_t g_snap; /* guarded by g_ready_mtx */
+/* The sampler sleeps on g_sample_wake until g_sample_wanted; each published
+ * sample bumps g_sample_generation and signals g_sample_done. Guarded by
+ * g_ready_mtx. The first sample is wanted at start. */
+static pthread_cond_t g_sample_wake = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_sample_done = PTHREAD_COND_INITIALIZER;
+static int g_sample_wanted = 1;
+static unsigned long g_sample_generation;
+/* How long a request whose snapshot is too old to answer from waits for the
+ * sample it asked for. Bounded, so a wedged dependency costs a request this
+ * much and then reads as unknown, never a stalled listener. */
+#define READY_WAIT_MS 2000
 static pthread_t g_ready_thread;
 static int g_ready_thread_started;
 
@@ -204,6 +221,7 @@ void server_ready_sample_now(void)
 {
    ready_snapshot_t s;
    memset(&s, 0, sizeof(s));
+   s.slot_fingerprint = obs_bus_slot_fingerprint();
 
    s.db1 = db1_store_probe() ? DEP_OK : DEP_FAIL;
 
@@ -291,10 +309,13 @@ void server_ready_sample_now(void)
       if (s.audit_capacity_failed)
          snprintf(s.failed_boundary, sizeof(s.failed_boundary), "audit_capacity");
    }
-   s.sampled_at = (long)time(NULL);
+   /* Dependency probes must all describe one registry generation. */
+   s.sampled_at = s.slot_fingerprint == obs_bus_slot_fingerprint() ? (long)time(NULL) : 0;
 
    pthread_mutex_lock(&g_ready_mtx);
    g_snap = s;
+   g_sample_generation++;
+   pthread_cond_broadcast(&g_sample_done);
    pthread_mutex_unlock(&g_ready_mtx);
 }
 
@@ -303,10 +324,45 @@ static void *ready_sampler_main(void *arg)
    (void)arg;
    for (;;)
    {
+      pthread_mutex_lock(&g_ready_mtx);
+      while (!g_sample_wanted)
+         pthread_cond_wait(&g_sample_wake, &g_ready_mtx);
+      g_sample_wanted = 0;
+      pthread_mutex_unlock(&g_ready_mtx);
       server_ready_sample_now();
-      sleep((unsigned)ready_interval_secs());
    }
    return NULL;
+}
+
+/* g_ready_mtx held. Ask for a new sample when the snapshot is older than the
+ * interval; when it is too old to answer from at all, wait (bounded) for it. */
+static void sample_if_due_locked(uint64_t fingerprint)
+{
+   long now = (long)time(NULL);
+   long age = g_snap.sampled_at > 0 && g_snap.slot_fingerprint == fingerprint
+                  ? now - g_snap.sampled_at
+                  : -1;
+   if (age >= 0 && age < ready_interval_secs())
+      return;
+   if (!g_ready_thread_started)
+      return; /* no sampler to ask; the snapshot can only go stale */
+   g_sample_wanted = 1;
+   pthread_cond_signal(&g_sample_wake);
+   if (age >= 0 && age <= ready_stale_secs())
+      return; /* still answerable; the new sample lands behind this request */
+   unsigned long generation = g_sample_generation;
+   struct timespec until;
+   clock_gettime(CLOCK_REALTIME, &until);
+   until.tv_sec += READY_WAIT_MS / 1000;
+   until.tv_nsec += (long)(READY_WAIT_MS % 1000) * 1000000L;
+   if (until.tv_nsec >= 1000000000L)
+   {
+      until.tv_sec++;
+      until.tv_nsec -= 1000000000L;
+   }
+   while (g_sample_generation == generation &&
+          pthread_cond_timedwait(&g_sample_done, &g_ready_mtx, &until) == 0)
+      ;
 }
 
 /* The readiness decision, as a pure function of a snapshot and a clock: no
@@ -389,12 +445,18 @@ int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t 
    return ready ? 200 : 503;
 }
 
-/* Serve the snapshot. Performs no I/O: a locked copy, then a pure render. */
+/* Serve the snapshot. Performs no I/O: it may ask the sampler for a new one
+ * and wait a bounded time for it, then a locked copy and a pure render. */
 static int ready_provider(char *resp, int cap)
 {
+   uint64_t fingerprint = obs_bus_slot_fingerprint();
    pthread_mutex_lock(&g_ready_mtx);
+   sample_if_due_locked(fingerprint);
    ready_snapshot_t s = g_snap;
    pthread_mutex_unlock(&g_ready_mtx);
+   /* Also catch replacement during the bounded sampler wait or copy. */
+   if (s.slot_fingerprint != obs_bus_slot_fingerprint())
+      s.sampled_at = 0;
 
    int db1_ok = (s.db1 == DEP_UNKNOWN) ? -1 : (s.db1 == DEP_OK);
    int kb_ok = (s.kb == DEP_UNKNOWN) ? -1 : (s.kb == DEP_OK);
@@ -413,6 +475,22 @@ static int ready_provider(char *resp, int cap)
 
    return server_ready_render(db1_ok, kb_ok, &diagnostics, s.sampled_at, (long)time(NULL),
                               ready_stale_secs(), resp, cap);
+}
+
+int server_ready_summary(char *boundary, size_t n)
+{
+   char body[4096];
+   int ready = ready_provider(body, (int)sizeof body) == 200;
+   if (boundary && n)
+   {
+      pthread_mutex_lock(&g_ready_mtx);
+      const char *failed = g_snap.failed_boundary[0] ? g_snap.failed_boundary
+                           : ready                   ? ""
+                                                     : "unknown";
+      snprintf(boundary, n, "%s", failed);
+      pthread_mutex_unlock(&g_ready_mtx);
+   }
+   return ready;
 }
 
 /* Start the sampler and register the provider. The first sample is taken by the

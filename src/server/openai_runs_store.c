@@ -5,6 +5,7 @@
  * subscribers block in openai_runs_store_wait() and the run worker wakes them by
  * broadcasting on every state change. */
 #include "openai_runs_store.h"
+#include "vault_principal.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -19,6 +20,7 @@ typedef struct
 {
    int in_use;
    char id[OPENAI_RUNS_ID_MAX];
+   char owner[VAULT_PRINCIPAL_MAX];
    openai_run_status_t status;
    int cancel_requested;
    char *snapshot_json; /* GET /v1/runs/{id} body */
@@ -67,10 +69,13 @@ static int all_digits(const char *s, size_t n)
 
 openai_runs_missing_t openai_runs_store_classify_missing(const char *run_id)
 {
-   static const char prefix[] = "oprun_";
-   if (!run_id || strncmp(run_id, prefix, sizeof(prefix) - 1) != 0)
+   if (!run_id)
       return OPENAI_RUNS_MISSING_UNKNOWN;
-   const char *token = run_id + sizeof(prefix) - 1;
+   const char *token = !strncmp(run_id, "oprun_", 6) ? run_id + 6
+                       : !strncmp(run_id, "run_", 4) ? run_id + 4
+                                                     : NULL;
+   if (!token)
+      return OPENAI_RUNS_MISSING_UNKNOWN;
    const char *sep1 = strchr(token, '_');
    const char *sep2 = sep1 ? strchr(sep1 + 1, '_') : NULL;
    if (!sep1 || !sep1[1])
@@ -109,6 +114,8 @@ const char *openai_run_status_str(openai_run_status_t status)
       return "cancelled";
    case OPENAI_RUN_FAILED:
       return "failed";
+   case OPENAI_RUN_INCOMPLETE:
+      return "incomplete";
    }
    return "queued";
 }
@@ -116,7 +123,7 @@ const char *openai_run_status_str(openai_run_status_t status)
 int openai_run_status_terminal(openai_run_status_t status)
 {
    return status == OPENAI_RUN_COMPLETED || status == OPENAI_RUN_CANCELLED ||
-          status == OPENAI_RUN_FAILED;
+          status == OPENAI_RUN_FAILED || status == OPENAI_RUN_INCOMPLETE;
 }
 
 /* Caller must hold g_lock. Returns the entry index for run_id or -1. */
@@ -149,9 +156,10 @@ static void free_entry_locked(run_record_t *e)
    e->in_use = 0;
    e->cancel_requested = 0;
    e->id[0] = '\0';
+   memset(e->owner, 0, sizeof e->owner);
 }
 
-int openai_runs_store_create(const char *run_id, const char *run_json)
+static int create_record(const char *run_id, const char *run_json, const char *owner)
 {
    if (!run_id || !run_id[0] || !run_json || !run_json[0])
       return 0;
@@ -182,6 +190,7 @@ int openai_runs_store_create(const char *run_id, const char *run_json)
    run_record_t *e = &g_entries[slot];
    e->in_use = 1;
    snprintf(e->id, sizeof(e->id), "%s", run_id);
+   snprintf(e->owner, sizeof e->owner, "%s", owner);
    e->status = OPENAI_RUN_QUEUED;
    e->cancel_requested = 0;
    e->snapshot_json = strdup(run_json);
@@ -193,6 +202,26 @@ int openai_runs_store_create(const char *run_id, const char *run_json)
    pthread_cond_broadcast(&g_cond);
    pthread_mutex_unlock(&g_lock);
    return 1;
+}
+
+int openai_runs_store_create(const char *run_id, const char *run_json)
+{
+   return create_record(run_id, run_json, "");
+}
+int openai_runs_store_create_owned(const char *run_id, const char *run_json, const char *owner)
+{
+   if (!owner || !owner[0] || strlen(owner) >= sizeof g_entries[0].owner)
+      return 0;
+   return create_record(run_id, run_json, owner);
+}
+int openai_runs_store_access(const char *run_id, const char *owner)
+{
+   pthread_mutex_lock(&g_lock);
+   int i = find_locked(run_id);
+   int access =
+       i < 0 ? -1 : !g_entries[i].owner[0] || (owner && !strcmp(g_entries[i].owner, owner));
+   pthread_mutex_unlock(&g_lock);
+   return access;
 }
 
 void openai_runs_store_update_json(const char *run_id, const char *run_json)

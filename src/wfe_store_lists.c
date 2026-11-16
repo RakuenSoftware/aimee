@@ -15,11 +15,6 @@ int db1_work_item_list(db1_work_item_t **out)
    return db1_work_item_list_bounded(out, DB1_WORK_ITEM_LIST_MAX);
 }
 
-int db1_work_item_list_lru(db1_work_item_t **out)
-{
-   return db1_work_item_list_lru_bounded(out, DB1_WORK_ITEM_LIST_MAX);
-}
-
 int db1_lifecycle_event_list(const char *work_item_id, db1_lifecycle_event_t **out)
 {
    return db1_lifecycle_event_list_bounded(work_item_id, out, DB1_LIFECYCLE_EVENT_MAX);

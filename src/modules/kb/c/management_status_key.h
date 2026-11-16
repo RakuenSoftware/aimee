@@ -55,6 +55,5 @@ int kb_store_management_status_key_guard_begin(kb_store_management_status_key_ct
 int kb_store_management_status_key_guard_end(kb_store_management_status_key_ctx_t *, int commit);
 int kb_store_management_status_key_startup_begin(kb_store_management_status_key_ctx_t *,
                                                  int64_t *epoch, int *sealed);
-int kb_store_management_status_key_startup_end(kb_store_management_status_key_ctx_t *, int commit);
 
 #endif

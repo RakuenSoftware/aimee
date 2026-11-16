@@ -78,23 +78,6 @@ int plugin_chook_run_pre_llm(const char *user_msg, char *ephemeral_out, size_t o
    return included;
 }
 
-char *plugin_chook_apply_pre_llm(const char *user_msg)
-{
-   char ephemeral[4096] = {0};
-   if (plugin_chook_run_pre_llm(user_msg, ephemeral, sizeof(ephemeral)) <= 0 || !ephemeral[0])
-      return NULL;
-   size_t up_len = user_msg ? strlen(user_msg) : 0;
-   size_t ec_len = strlen(ephemeral);
-   char *aug = malloc(up_len + 1 + ec_len + 1);
-   if (!aug)
-      return NULL;
-   if (up_len)
-      memcpy(aug, user_msg, up_len);
-   aug[up_len] = '\n';
-   memcpy(aug + up_len + 1, ephemeral, ec_len + 1);
-   return aug;
-}
-
 void plugin_chook_reset(void)
 {
    memset(g_pre_llm, 0, sizeof(g_pre_llm));

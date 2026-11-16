@@ -73,32 +73,6 @@ extern "C"
    int kb_store_org_budget_show(int64_t team, int has_project, int64_t project,
                                 kb_store_org_budget_row_t *out, int max);
 
-   /* Atomic hard-cap admission (org_budget_reserve) — the P2b reserve-before-dispatch
-    * primitive. reserved_max is a NUMERIC decimal string (a conservative ceiling). On a
-    * DB-level outcome returns 0 and sets *out_outcome to KB_STORE_BUDGET_GRANTED /
-    * _REFUSED_TEAM / _REFUSED_PROJECT; on a definer error returns KB_STORE_BUDGET_ERR_CONFLICT
-    * (mismatched replay) or -1. Tenant-scoped. */
-   int kb_store_org_budget_reserve(const char *origin_cn, const char *request_id, int64_t team,
-                                   int has_project, int64_t project, int64_t pricing_version,
-                                   const char *reserved_max, int64_t lease_ttl_secs,
-                                   int *out_outcome);
-
-   /* Reconcile a reservation (org_budget_settle) — the P2b settle-after-response primitive.
-    * realized_usd is a NUMERIC decimal string; the definer charges LEAST(realized,
-    * reserved_max). Returns 0 with *out_settled = 1 if this call performed the transition
-    * (or a downward correction), 0 with *out_settled = 0 for an idempotent no-op, or -1. */
-   int kb_store_org_budget_settle(const char *origin_cn, const char *request_id,
-                                  const char *realized_usd, int *out_settled);
-
-   /* Renew an admitted lease (org_budget_heartbeat). Returns 0 with *out_ok = 1 iff a live
-    * admitted lease was renewed, else *out_ok = 0; -1 on error. */
-   int kb_store_org_budget_heartbeat(const char *origin_cn, const char *request_id,
-                                     int64_t lease_ttl_secs, int *out_ok);
-
-   /* Sweep expired leases, charging each at reserved_max (org_budget_settle_expired).
-    * Returns the number settled (>= 0), or -1 on error. */
-   int kb_store_org_budget_settle_expired(int64_t *out_settled);
-
 #ifdef __cplusplus
 }
 #endif

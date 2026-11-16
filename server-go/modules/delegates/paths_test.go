@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func pathsRequest(prompt string, max int) []byte {
@@ -20,9 +20,9 @@ func pathsRequest(prompt string, max int) []byte {
 
 func pathsCall(t *testing.T, prompt string) []string {
 	t.Helper()
-	response, status := Handle(bus.ModuleInvocation{StageID: StagePaths},
+	response, status := Handle(ring.ModuleInvocation{StageID: StagePaths},
 		pathsRequest(prompt, pathsMax))
-	if status != bus.ModuleStatusOK ||
+	if status != ring.ModuleStatusOK ||
 		binary.LittleEndian.Uint32(response[0:4]) != pathsResponseMagic {
 		t.Fatalf("response = %x, status = %d", response, status)
 	}
@@ -159,9 +159,9 @@ func TestExtractRespectsTheCap(t *testing.T) {
 		b.WriteByte(byte('a' + i))
 		b.WriteString(".c\n")
 	}
-	response, status := Handle(bus.ModuleInvocation{StageID: StagePaths},
+	response, status := Handle(ring.ModuleInvocation{StageID: StagePaths},
 		pathsRequest(b.String(), 3))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
 	}
 	if count := binary.LittleEndian.Uint32(response[4:8]); count != 3 {
@@ -171,21 +171,21 @@ func TestExtractRespectsTheCap(t *testing.T) {
 
 func TestPathsRejectsInvalidEnvelope(t *testing.T) {
 	short := pathsRequest("x", pathsMax)[:pathsHeaderLen-1]
-	if _, status := Handle(bus.ModuleInvocation{StageID: StagePaths}, short); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StagePaths}, short); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("truncated status = %d", status)
 	}
 	lying := pathsRequest("x", pathsMax)
 	binary.LittleEndian.PutUint32(lying[8:12], 64)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StagePaths}, lying); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StagePaths}, lying); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("length-mismatch status = %d", status)
 	}
 	// A cap beyond what the caller's buffer can hold must be refused, not clamped.
-	if _, status := Handle(bus.ModuleInvocation{StageID: StagePaths},
-		pathsRequest("x", pathsMax+1)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StagePaths},
+		pathsRequest("x", pathsMax+1)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("oversized-cap status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StagePaths, DeadlineNS: 1},
-		pathsRequest("x", pathsMax)); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StagePaths, DeadlineNS: 1},
+		pathsRequest("x", pathsMax)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired status = %d", status)
 	}
 }

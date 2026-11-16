@@ -105,12 +105,12 @@ int session_persona_delivery_claim(const char *session_id)
 {
    if (!session_id || !session_id[0])
       return 1;
-   db1_server_session_t row;
-   if (db1_server_session_get(session_id, &row) != 0)
+   db1_server_session_owner_t row;
+   if (db1_server_session_owner_get(session_id, &row) != 0)
    {
       const char *principal = server_http_identity_principal();
       (void)db1_server_session_create(session_id, "gateway", principal ? principal : "");
-      if (db1_server_session_get(session_id, &row) != 0)
+      if (db1_server_session_owner_get(session_id, &row) != 0)
          return -1;
    }
    return db1_server_session_persona_delivery_claim(session_id);
@@ -173,6 +173,10 @@ static void retry_after_header(char *dst, size_t n)
       dst[0] = '\0';
 }
 
+extern int host_original_submission_required(void) __attribute__((weak));
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_original_input_web_negotiation_contract_v1 = 1;
+
 void send_response(int fd, int status, const char *body, const char *request_id)
 {
    const char *reason = status == 200   ? "OK"
@@ -211,11 +215,15 @@ void send_response(int fd, int status, const char *body, const char *request_id)
    const char *encoding = compressed ? "Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n" : "";
    const char *request_encoding =
        server_http_gzip_peek() ? "Accept-Request-Encoding: gzip\r\n" : "";
+   const char *original_input =
+       host_original_submission_required && host_original_submission_required()
+           ? "X-Aimee-Original-Input: required\r\n"
+           : "X-Aimee-Original-Input: optional\r\n";
    int hlen = snprintf(head, sizeof(head),
                        "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n"
-                       "Content-Length: %zu\r\n%s%s%s%s%sConnection: %s\r\n\r\n",
+                       "Content-Length: %zu\r\n%s%s%s%s%s%sConnection: %s\r\n\r\n",
                        status, reason, wire_len, rid, reh, rah, encoding, request_encoding,
-                       server_http_keepalive_peek() ? "keep-alive" : "close");
+                       original_input, server_http_keepalive_peek() ? "keep-alive" : "close");
    write_all_fd(fd, head, hlen);
    if (wire_len > 0)
       write_all_fd(fd, wire_body, (int)wire_len);
@@ -292,4 +300,130 @@ void server_http_log_access(const char *method, const char *path, int status,
       LOG_DEBUG("server.http", "%s %s -> %d req_id=%s", method, path, status, request_id);
    else
       LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, status, request_id);
+}
+
+/* Dispatch an NDJSON {method,params} body through server_dispatch() over a
+ * socketpair loopback and capture the response into resp. The write end is
+ * non-blocking so an oversize response can never hang the server thread; if the
+ * response is truncated it fails to parse and we return an error rather than a
+ * partial body. Returns an HTTP status; resp holds the JSON response body. */
+/* Upper bound on how long the dispatch bridge waits for a reply. Generous because
+ * a deferred handler may be running a real tool, and safe because it blocks one
+ * connection's own worker thread rather than the listener. */
+#define LOOPBACK_REPLY_TIMEOUT_SECS 30
+
+int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint32_t conn_caps)
+{
+   int sp[2];
+   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sp) != 0)
+      return err_json(resp, resp_cap, 500, "dispatch route unavailable");
+   int fl = fcntl(sp[1], F_GETFL, 0);
+   if (fl >= 0)
+      fcntl(sp[1], F_SETFL, fl | O_NONBLOCK);
+   /* A handler that answers inline writes its whole reply before the read below
+    * starts. Let the socket hold a full-size reply, so one that fits resp_cap is
+    * never cut off and one that does not reaches the cap check instead of stalling
+    * the writer into a partial, unparseable reply. */
+   int sndbuf = resp_cap > 0 ? resp_cap * 2 : 0;
+   if (sndbuf > 0)
+      (void)setsockopt(sp[1], SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+
+   server_conn_t fake;
+   memset(&fake, 0, sizeof(fake));
+   fake.fd = sp[1];
+   fake.capabilities = conn_caps;
+   /* WP-C.0 hop 2 of 3: the memset above zeroes the attested identity; restore
+    * the real one captured by handle_conn so every /v1 request — which only ever
+    * reaches server_dispatch through this synthesized conn — carries the caller's
+    * vault principal through to create_compute_ctx (same thread, identity live). */
+   server_http_identity_apply(&fake);
+   pthread_mutex_init(&fake.mutex, NULL);
+   pthread_cond_init(&fake.can_close, NULL);
+
+   size_t mlen = body_len > 0 ? (size_t)body_len : strlen(body);
+   server_dispatch(server_active_ctx(), &fake, body, mlen);
+
+   pthread_mutex_destroy(&fake.mutex);
+   pthread_cond_destroy(&fake.can_close);
+
+   /* Deferred handlers reply through a dup, so bound the read instead of shutting it down. */
+   struct timeval rcv = {LOOPBACK_REPLY_TIMEOUT_SECS, 0};
+   (void)setsockopt(sp[0], SOL_SOCKET, SO_RCVTIMEO, &rcv, sizeof(rcv));
+
+   size_t total = 0;
+   for (;;)
+   {
+      ssize_t n = read(sp[0], resp + total, (size_t)resp_cap - 1 - total);
+      if (n <= 0)
+         break;
+      total += (size_t)n;
+      /* server_dispatch emits one NDJSON response. The newline is the message
+       * boundary; another in-process reference may keep the socket alive, so
+       * waiting for process-wide EOF can otherwise hang this adapter. */
+      if (memchr(resp, '\n', total) != NULL)
+         break;
+      if (total >= (size_t)resp_cap - 1)
+         break;
+   }
+   close(sp[0]);
+   close(sp[1]);
+   resp[total] = '\0';
+   while (total > 0 && (resp[total - 1] == '\n' || resp[total - 1] == '\r'))
+      resp[--total] = '\0';
+   if (total == 0)
+      return err_json(resp, resp_cap, 502, "rpc produced no response");
+   if (total >= (size_t)resp_cap - 1)
+   {
+      char msg[96];
+      snprintf(msg, sizeof(msg), "rpc response exceeds the %d-byte relay limit", resp_cap);
+      return err_json(resp, resp_cap, 502, msg);
+   }
+   int status = server_http_declared_status(resp);
+   if (!status)
+      return err_json(resp, resp_cap, 502, "rpc response too large or malformed");
+   return status;
+}
+
+static int append_sse_text(char *buf, size_t n, size_t *pos, const char *s, size_t len)
+{
+   if (buf && *pos < n)
+   {
+      size_t avail = n - *pos;
+      size_t copy = len < avail ? len : avail - 1;
+      if (copy)
+         memcpy(buf + *pos, s, copy);
+      buf[*pos + copy] = '\0';
+   }
+   *pos += len;
+   return (int)*pos;
+}
+
+int server_http_sse_event_format(const char *event, const char *data_json, char *buf, size_t n)
+{
+   size_t pos = 0;
+   const char *p;
+
+   if (buf && n)
+      buf[0] = '\0';
+   if (!data_json)
+      return 0;
+   if (event && event[0])
+   {
+      append_sse_text(buf, n, &pos, "event: ", 7);
+      append_sse_text(buf, n, &pos, event, strlen(event));
+      append_sse_text(buf, n, &pos, "\n", 1);
+   }
+   p = data_json;
+   for (;;)
+   {
+      const char *nl = strchr(p, '\n');
+      append_sse_text(buf, n, &pos, "data: ", 6);
+      append_sse_text(buf, n, &pos, p, nl ? (size_t)(nl - p) : strlen(p));
+      append_sse_text(buf, n, &pos, "\n", 1);
+      if (!nl)
+         break;
+      p = nl + 1;
+   }
+   append_sse_text(buf, n, &pos, "\n", 1);
+   return (int)pos;
 }

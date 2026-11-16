@@ -4,8 +4,8 @@
  * Tests:
  *   1. retrieval_event_write: writes a retrieval_event artifact.
  *   2. retrieval_attribution_write: writes attribution and links to event.
- *   Scoring, profiles, candidate selection and their failures are covered by
- *   server-go/modules/memory/demotion_test.go.
+ *   Scoring, profiles and candidate selection require separate qualification
+ *   by the selected external memory owner; see docs/MEMORY.md.
  *   Config defaults remain covered here.
  */
 

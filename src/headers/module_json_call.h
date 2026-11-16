@@ -35,8 +35,8 @@
  *
  * Returns the parsed reply, which the caller must cJSON_Delete, or NULL on any
  * failure. When `result` is non-NULL it always receives the outcome, so the
- * caller can name it with aimee_module_call_result_name() in whatever channel it
- * owns. A NULL return with AIMEE_MODULE_CALL_OK means the module answered but
+ * caller can name it with ouro_module_call_result_name() in whatever channel it
+ * owns. A NULL return with OURO_MODULE_CALL_OK means the module answered but
  * the body did not parse as JSON.
  *
  * `max_body` bounds both the request and the response buffer. A request that
@@ -45,7 +45,7 @@
  * `timeout_ms` <= 0 means no deadline.
  */
 cJSON *aimee_module_json_call(uint32_t event_kind, uint32_t stage_id, cJSON *request,
-                              size_t max_body, int timeout_ms, aimee_module_call_result_t *result);
+                              size_t max_body, int timeout_ms, ouro_module_call_result_t *result);
 
 /* The same round trip for a caller that already holds a serialized body.
  *
@@ -56,7 +56,7 @@ cJSON *aimee_module_json_call(uint32_t event_kind, uint32_t stage_id, cJSON *req
  */
 cJSON *aimee_module_json_call_raw(uint32_t event_kind, uint32_t stage_id, const char *body,
                                   size_t body_len, size_t max_body, int timeout_ms,
-                                  aimee_module_call_result_t *result);
+                                  ouro_module_call_result_t *result);
 
 /* Deadline arithmetic for a module call: a CLOCK_MONOTONIC nanosecond stamp
  * timeout_ms in the future, or 0 for "no deadline". Exposed because callers that

@@ -31,26 +31,6 @@ int aimee_module_commands_dispatch_internal_context_timeout(const char *method, 
    return owner_rc;
 }
 
-/* The adapter must never use these raw storage readers on success or failure. */
-int kb_store_rules_list(rule_t *out, int limit)
-{
-   (void)out;
-   (void)limit;
-   assert(!"unfiltered rule storage read");
-   return -1;
-}
-char *kb_store_rules_generate(void)
-{
-   assert(!"unfiltered rule markdown");
-   return NULL;
-}
-int kb_store_rules_export_jsonl(const char *path)
-{
-   (void)path;
-   assert(!"unfiltered rule export");
-   return -1;
-}
-
 static void exact(cJSON *reply)
 {
    assert(reply);

@@ -1,3 +1,4 @@
+#include "index_observer_internal.h"
 /* Knowledge schema and lease lifecycle. PostgreSQL owns every connection.
  * The bootstrap thread holds an exclusive migration capability; runtime
  * workers lease bounded sessions through the supervised PostgreSQL module.
@@ -9,7 +10,7 @@
 
 #include "db_postgres.h"
 #include "db_schema.h"
-#include "../support/kb_store_log.h" /* LOG_WARN */
+#include "log.h" /* LOG_WARN */
 #include "entity_edges.h"
 
 #include <pthread.h>
@@ -103,11 +104,6 @@ void kb_store_set_embedder_probe(kb_store_embedder_probe_fn fn)
    g_embedder_probe = fn;
 }
 
-int kb_store_embedder_probe_registered(void)
-{
-   return g_embedder_probe != NULL;
-}
-
 void kb_store_set_dim_probe_budget_ms(int ms)
 {
    if (ms > 0)
@@ -156,20 +152,11 @@ void kb_store_set_embedder_serving_probe(kb_store_embedder_serving_probe_fn fn)
    g_embedder_serving_probe = fn;
 }
 
-int kb_store_embedder_serving_probe_registered(void)
-{
-   return g_embedder_serving_probe != NULL;
-}
 static char g_embedding_compat[1024] = ""; /* CSV of "old_id->new_id" transitions */
 
 void kb_store_set_embedder_model_id(const char *model_id)
 {
    snprintf(g_embedder_model_id, sizeof(g_embedder_model_id), "%s", model_id ? model_id : "");
-}
-
-const char *kb_store_embedder_model_id(void)
-{
-   return g_embedder_model_id;
 }
 
 void kb_store_set_embedder_serving_id(const char *serving_id)
@@ -181,16 +168,6 @@ void kb_store_set_embedder_serving_id(const char *serving_id)
 const char *kb_store_embedder_serving_id(void)
 {
    return g_embedder_serving_id;
-}
-
-void kb_store_set_embedding_compat(const char *compat_csv)
-{
-   snprintf(g_embedding_compat, sizeof(g_embedding_compat), "%s", compat_csv ? compat_csv : "");
-}
-
-const char *kb_store_embedding_compat(void)
-{
-   return g_embedding_compat;
 }
 
 int kb_store_effective_dim(int pinned, int configured, int recorded)
@@ -303,6 +280,14 @@ static void kb_store_dim_lock_release(void *conn)
    aimee_pg_finalize(st);
 }
 
+static void kb_store_observer_close(void *connection)
+{
+   if (kb_index_observer_connection_closing(connection))
+      aimee_pg_discard(connection);
+   else
+      aimee_pg_close(connection);
+}
+
 static pthread_key_t g_thread_conn_key;
 static pthread_once_t g_thread_conn_key_once = PTHREAD_ONCE_INIT;
 /* The thread that ran kb_store_init() owns g_conn and uses it directly; every other
@@ -336,7 +321,7 @@ static void thread_conn_destructor(void *p)
       return;
    if (L->conn)
    {
-      aimee_pg_close(L->conn);
+      kb_store_observer_close(L->conn);
    }
    free(L);
 }
@@ -369,32 +354,6 @@ sqlite3 *kb_store_shared_sqlite(void)
    sqlite3 *h = g_shared_sqlite;
    pthread_mutex_unlock(&g_shared_sqlite_lock);
    return h;
-}
-
-void kb_store_set_ephemeral(int ephemeral)
-{
-   /* Ephemeral is a TEST/EVAL-only mode (the in-memory sqlite shim). A real
-    * libpq instance must never enter it: ephemeral suppresses durable vector
-    * writes (kb_store_vector_index_sync_suppressed), so flipping it on in production
-    * would silently stop memory embeddings from persisting. Refuse, fail-safe. */
-   if (ephemeral && !aimee_pg_is_shim())
-      return;
-   pthread_mutex_lock(&g_shared_sqlite_lock);
-   g_shared_ephemeral = ephemeral ? 1 : 0;
-   pthread_mutex_unlock(&g_shared_sqlite_lock);
-}
-
-int kb_store_is_ephemeral(void)
-{
-   /* Belt-and-suspenders with kb_store_set_ephemeral: a real libpq (production)
-    * instance is NEVER ephemeral, regardless of the stored flag. Ephemeral
-    * only has meaning under the sqlite shim used by tests/evals. */
-   if (!aimee_pg_is_shim())
-      return 0;
-   pthread_mutex_lock(&g_shared_sqlite_lock);
-   int v = g_shared_ephemeral;
-   pthread_mutex_unlock(&g_shared_sqlite_lock);
-   return v;
 }
 
 static int kb_store_query_flag(void *conn, const char *sql, const char *param_name,
@@ -537,13 +496,13 @@ static void *kb_store_thread_acquire(void)
       L = (kb_store_thread_lease_t *)calloc(1, sizeof(*L));
       if (!L)
       {
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          return NULL;
       }
       if (pthread_setspecific(g_thread_conn_key, L) != 0)
       {
          free(L);
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          return NULL;
       }
    }
@@ -608,7 +567,7 @@ void kb_store_lease_end(void)
           (kb_store_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
       if (L && L->conn)
       {
-         aimee_pg_close(L->conn);
+         kb_store_observer_close(L->conn);
          L->conn = NULL;
       }
       g_lease_site = NULL;
@@ -630,47 +589,10 @@ void kb_store_lease_release_idle(void)
    kb_store_thread_lease_t *L = (kb_store_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
    if (L && L->conn)
    {
-      aimee_pg_close(L->conn);
+      kb_store_observer_close(L->conn);
       L->conn = NULL;
    }
    g_lease_site = NULL;
-}
-
-void *kb_store_thread_conn_open(char *errbuf, size_t errlen)
-{
-   pthread_once(&g_thread_conn_key_once, thread_conn_key_init);
-   if (!g_initialized)
-   {
-      if (errbuf && errlen)
-         snprintf(errbuf, errlen, "kb_store not initialized");
-      return NULL;
-   }
-   void *conn = kb_store_scope_connection_open(errbuf, errlen);
-   if (!conn)
-      return NULL;
-   kb_store_thread_lease_t *L = (kb_store_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
-   if (!L)
-   {
-      L = (kb_store_thread_lease_t *)calloc(1, sizeof(*L));
-      if (!L)
-      {
-         aimee_pg_close(conn);
-         return NULL;
-      }
-      if (pthread_setspecific(g_thread_conn_key, L) != 0)
-      {
-         free(L);
-         aimee_pg_close(conn);
-         return NULL;
-      }
-   }
-   if (L->conn)
-   {
-      aimee_pg_close(L->conn);
-   }
-   L->conn = conn;
-
-   return conn;
 }
 
 void kb_store_thread_conn_close(void)
@@ -679,7 +601,7 @@ void kb_store_thread_conn_close(void)
    kb_store_thread_lease_t *L = (kb_store_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
    if (L && L->conn)
    {
-      aimee_pg_close(L->conn);
+      kb_store_observer_close(L->conn);
       L->conn = NULL;
    }
 }
@@ -726,6 +648,14 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
       return -1;
    }
 
+   KB_INDEX_MUTATION(observer_startup);
+   if (kb_index_observer_startup_begin(&observer_startup, conn) != 0)
+   {
+      kb_store_observer_close(conn);
+      pthread_mutex_unlock(&g_init_lock);
+      return -1;
+   }
+
    /* Hardened multi-tenant tier: fail closed at boot unless kb↔Postgres is
     * verify-full TLS (I1) and the connected runtime role is non-owner, non-super,
     * NOBYPASSRLS, no-CREATE (B4) — otherwise the team-scoped RLS is defeated. The
@@ -738,7 +668,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
       if (kb_store_hardening_assert_runtime_role(conn, herr, sizeof(herr)) != 0)
       {
          fprintf(stderr, "aimee-kb: hardened tier runtime-role check failed: %s\n", herr);
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          pthread_mutex_unlock(&g_init_lock);
          return -1;
       }
@@ -761,7 +691,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
    if (rd == KB_STORE_DIM_ERROR)
    {
       fprintf(stderr, "aimee: kb_store_init: reading recorded embedding dim failed\n");
-      aimee_pg_close(conn);
+      kb_store_observer_close(conn);
       pthread_mutex_unlock(&g_init_lock);
       return -1;
    }
@@ -804,7 +734,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
                      "embedder dim bootstrap: advisory lock not acquired in %dms and no dim "
                      "recorded; not derived (kb will retry)",
                      total);
-            aimee_pg_close(conn);
+            kb_store_observer_close(conn);
             pthread_mutex_unlock(&g_init_lock);
             return -1;
          }
@@ -818,7 +748,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
          if (rd2 == KB_STORE_DIM_ERROR)
          {
             kb_store_dim_lock_release(conn);
-            aimee_pg_close(conn);
+            kb_store_observer_close(conn);
             pthread_mutex_unlock(&g_init_lock);
             return -1;
          }
@@ -843,7 +773,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
                LOG_WARN("kb_store", "embedder dim probe failed/out-of-range (got %d, max %d): %s",
                         probed, EMBED_MAX_DIM, perr[0] ? perr : "(no detail)");
                kb_store_dim_lock_release(conn);
-               aimee_pg_close(conn);
+               kb_store_observer_close(conn);
                pthread_mutex_unlock(&g_init_lock);
                return -1;
             }
@@ -881,7 +811,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
          LOG_ERROR("kb_store", "%s", errbuf);
          if (dim_lock_held)
             kb_store_dim_lock_release(conn);
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          pthread_mutex_unlock(&g_init_lock);
          return -1;
       }
@@ -922,7 +852,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
               errbuf);
       if (dim_lock_held)
          kb_store_dim_lock_release(conn);
-      aimee_pg_close(conn);
+      kb_store_observer_close(conn);
       pthread_mutex_unlock(&g_init_lock);
       return -1;
    }
@@ -959,7 +889,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
                                                  sizeof(errbuf)) != 0)
    {
       fprintf(stderr, "aimee: kb_store_init: model-identity guard failed: %s\n", errbuf);
-      aimee_pg_close(conn);
+      kb_store_observer_close(conn);
       pthread_mutex_unlock(&g_init_lock);
       return -1;
    }
@@ -981,7 +911,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
           conn, "SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'", errcheck, sizeof(errcheck));
       if (!st)
       {
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          pthread_mutex_unlock(&g_init_lock);
          return -1;
       }
@@ -989,7 +919,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
       aimee_pg_finalize(st);
       if (step != AIMEE_PG_ROW)
       {
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          pthread_mutex_unlock(&g_init_lock);
          fprintf(stderr,
                  "aimee: kb_store_init: pg_trgm extension is not installed in this database. "
@@ -999,6 +929,12 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
       }
    }
 
+   if (kb_index_mutation_finish(&observer_startup) != 0)
+   {
+      kb_store_observer_close(conn);
+      pthread_mutex_unlock(&g_init_lock);
+      return -1;
+   }
    g_conn = conn;
    /* Record the owning thread: kb_store_conn() hands g_conn to this thread and a
     * private per-thread connection to every other thread. */
@@ -1036,7 +972,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
       if (!lease || pthread_setspecific(g_thread_conn_key, lease))
       {
          free(lease);
-         aimee_pg_close(g_conn);
+         kb_store_observer_close(g_conn);
          g_conn = NULL;
          pthread_mutex_unlock(&g_init_lock);
          return -1;
@@ -1139,96 +1075,13 @@ int kb_store_kb_health_probe(int *kb_tables_ok)
    return 0;
 }
 
-/* Postgres-native stat snapshot for `aimee doctor` and ops diagnostics.
- * All outputs are best-effort; missing values are reported as -1 so the
- * caller can decide whether to surface the gap. Returns 0 if the probe
- * connection is alive, -1 otherwise. Skipped under the test shim. */
-int kb_store_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
-                             int64_t *replica_lag_bytes)
-{
-   if (active_conns)
-      *active_conns = -1;
-   if (max_conns)
-      *max_conns = -1;
-   if (is_replica)
-      *is_replica = -1;
-   if (replica_lag_bytes)
-      *replica_lag_bytes = -1;
-
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-
-   if (aimee_pg_is_shim())
-      return 0;
-
-   char errbuf[256] = "";
-   aimee_pg_stmt_t *st = NULL;
-
-   if (active_conns)
-   {
-      st = aimee_pg_prepare(conn,
-                            "SELECT count(*)::int FROM pg_stat_activity "
-                            "WHERE datname = current_database()",
-                            errbuf, sizeof(errbuf));
-      if (st)
-      {
-         if (aimee_pg_step(st, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
-            *active_conns = aimee_pg_column_int(st, 0);
-         aimee_pg_finalize(st);
-      }
-   }
-
-   if (max_conns)
-   {
-      st = aimee_pg_prepare(conn, "SELECT current_setting('max_connections')::int", errbuf,
-                            sizeof(errbuf));
-      if (st)
-      {
-         if (aimee_pg_step(st, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
-            *max_conns = aimee_pg_column_int(st, 0);
-         aimee_pg_finalize(st);
-      }
-   }
-
-   if (is_replica)
-   {
-      st = aimee_pg_prepare(conn, "SELECT pg_is_in_recovery()::int", errbuf, sizeof(errbuf));
-      if (st)
-      {
-         if (aimee_pg_step(st, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
-            *is_replica = aimee_pg_column_int(st, 0);
-         aimee_pg_finalize(st);
-      }
-   }
-
-   /* Replication lag in WAL bytes, applicable only when this connection
-    * is on a standby. Returns 0 when not in recovery. */
-   if (replica_lag_bytes && is_replica && *is_replica == 1)
-   {
-      st = aimee_pg_prepare(
-          conn,
-          "SELECT COALESCE("
-          "  pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()), 0)::bigint",
-          errbuf, sizeof(errbuf));
-      if (st)
-      {
-         if (aimee_pg_step(st, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
-            *replica_lag_bytes = aimee_pg_column_int64(st, 0);
-         aimee_pg_finalize(st);
-      }
-   }
-
-   return 0;
-}
-
 void kb_store_shutdown(void)
 {
    kb_store_thread_conn_close();
    pthread_mutex_lock(&g_init_lock);
    if (g_conn)
    {
-      aimee_pg_close(g_conn);
+      kb_store_observer_close(g_conn);
       g_conn = NULL;
    }
    g_pg_url[0] = '\0';
@@ -1293,37 +1146,6 @@ int kb_store_scalar_int_text(const char *sql, const char *a1, int dflt)
    return value;
 }
 
-double kb_store_scalar_double_id(const char *sql, int64_t id, double dflt)
-{
-   void *conn = kb_store_conn();
-   if (!conn)
-      return dflt;
-   char err[KB_STOREQ_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return dflt;
-   aimee_pg_bind_int64(st, "?1", id);
-   double value = dflt;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      value = aimee_pg_column_double(st, 0);
-   aimee_pg_finalize(st);
-   return value;
-}
-
-void kb_store_exec_id(const char *sql, int64_t id)
-{
-   void *conn = kb_store_conn();
-   if (!conn)
-      return;
-   char err[KB_STOREQ_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return;
-   aimee_pg_bind_int64(st, "?1", id);
-   (void)aimee_pg_step(st, err, sizeof(err));
-   aimee_pg_finalize(st);
-}
-
 int kb_store_exec_conn_int64(void *conn, const char *sql, int64_t arg)
 {
    if (!conn)
@@ -1336,35 +1158,6 @@ int kb_store_exec_conn_int64(void *conn, const char *sql, int64_t arg)
    int rc = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE) ? 0 : -1;
    aimee_pg_finalize(st);
    return rc;
-}
-
-void kb_store_exec_text(const char *sql, const char *a1)
-{
-   void *conn = kb_store_conn();
-   if (!conn)
-      return;
-   char err[KB_STOREQ_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return;
-   aimee_pg_bind_text(st, "?1", a1);
-   (void)aimee_pg_step(st, err, sizeof(err));
-   aimee_pg_finalize(st);
-}
-
-void kb_store_exec_text_id(const char *sql, const char *a1, int64_t id)
-{
-   void *conn = kb_store_conn();
-   if (!conn)
-      return;
-   char err[KB_STOREQ_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return;
-   aimee_pg_bind_text(st, "?1", a1);
-   aimee_pg_bind_int64(st, "?2", id);
-   (void)aimee_pg_step(st, err, sizeof(err));
-   aimee_pg_finalize(st);
 }
 
 void kb_store_copy_text(char *dst, size_t cap, const char *src)

@@ -1,0 +1,94 @@
+{
+  "result": "passed",
+  "checks": [
+    {
+      "check": "Initialize owned PostgreSQL",
+      "exit_code": 0,
+      "seconds": 0.8163909480208531
+    },
+    {
+      "check": "Start owned PostgreSQL",
+      "exit_code": 0,
+      "seconds": 0.11479213600978255
+    },
+    {
+      "check": "Apply real source-owner schema",
+      "exit_code": 0,
+      "seconds": 1.8191311579430476
+    },
+    {
+      "check": "Install restricted fixture runtime role",
+      "exit_code": 0,
+      "seconds": 0.03178596997167915
+    },
+    {
+      "check": "Build actual C source owner and real libpq fixture",
+      "exit_code": 0,
+      "seconds": 2.5192826580023393
+    },
+    {
+      "check": "Actual PostgreSQL two-writer/crash/mutation qualification",
+      "exit_code": 0,
+      "seconds": 0.7155457879416645
+    }
+  ],
+  "source_before": {
+    "src/tests/test_index_observer_postgres.c": "3320e5c129ee8cb60117932237396912a64c8377aa77d27bc07b4d4e4d62eedd",
+    "src/tests/support/index_observer_pg_test_adapter.c": "ab82cebf62fc467e5135823ba1dddddb40df09786a13427790690ddd83b69ef8",
+    "src/modules/kb/c/index_observer.c": "d5c42b4390fd4a7b35f05bb3e9e0dab1921f344d4c600d3206d52d82c72060e3",
+    "src/modules/kb/c/code_index.c": "5262a9e00f9920a1b61b79ef030ade069be609f342095855185d93b666a4b7da",
+    "src/modules/kb/c/canonical_index.c": "7ad8672008d71d6861b3b75e0dee3d5e3784a02dc77de39ad659d03ea87b83cc",
+    "src/modules/kb/c/code_project_lifecycle.c": "2de4986b0f1e4e7e15ad3242e22c80e2a6c6fe048fc77ec306f68587274e7fbb",
+    "src/modules/kb/c/kb_store_init.c": "ec56e1740fb475e08d8d897e74efa65d4e733e0c4e59375755fa8295db81a800",
+    "src/modules/kb/c/db_schema.c": "9c9d913fc933ee9af60b6eee19fd2042be6f3149d884e0260505f0f4112979aa",
+    "src/modules/kb/c/cross_repo_resolver.c": "f371eadc4281531bc6f7abbc54411ea156b8c2b371dc25fe111f2ff2c434a2f3",
+    "src/modules/kb/c/entity_edges.c": "e6fffe596a0db9d54cfe95180bdace0882e1aa6bae3e39a240d0efe57e7abbf7",
+    "src/modules/kb/c/kb_runtime_state.c": "4f462a98d7661f61f3843011472bba1d9e2f22c72794fe42776545c82a74626e",
+    "src/modules/kb/c/kb_audit_worm.c": "ec1e1b15cab0b79def98509241be110ce0db0dca0ce1f451bc7e4f449873a7b0",
+    "src/modules/kb/c/css_graph.c": "e2664cc34e866a88f0f5bb800848e6835dea707a1b3942f8efb953609ae9ba6e",
+    "src/extractors.c": "3fbf8b31f26a0a80bc56a0dd0014e3b46bd15306baa8dadf65f6cac10e48643a",
+    "src/extractors_extra.c": "713329c0ef33a5721144893b98625805a95e7fc47d44d2a372f9378b0782afb3",
+    "src/extractors_new_langs.c": "41bb61dcee90cb34528db7f97da0cfe2cc60a0c59ad711aea37d1c480a1c2e7c",
+    "src/code_treesitter.c": "7c9fe837780c05e7117ec3535fca957513c9521ba1a1b565e3ad553f42a0e446",
+    "src/util.c": "d6dd07e71aa9dbb027fd509bcb4ad599ce642567d3b1cedeb6c1ed118a4e95bd",
+    "src/text.c": "de6ad5b3d7129d9dd445982f56fd8b77886e1ff7ca6fd44060782ef48670dbcf",
+    "src/index.c": "b484d7a734717a2e05d670e4b713593d624886ae35c59859ea1d69e3fff0bcab",
+    "src/log.c": "0ffe84a5cb4a58ef9d7950b5ecc0fd84a93fba950bd489412164caeb95d1b035",
+    "src/modules/kb/c/kb_store_hardening.c": "9e22024c768b11a88a719641dc329686b37df9d7b068ff24d828bd828278ffae",
+    "src/modules/kb/c/index_observer_internal.h": "f20c2918c1c95fc0b730d00d66266dc812051166f974cab6f457845571a9937e",
+    "src/modules/kb/include/aimee/kb/index_observer.h": "2b238ad2d39119db5622584c2a111a8fc8d206fdf52f21979f938b1cb97d24c0",
+    "src/modules/kb/c/schema.sql": "e1b088299913d5d4b77666ed9ac3b5e46f1c84d42c23873ade5f924ce2d897c7",
+    "scripts/validation/code-index-observer-postgres.py": "d844a0e867a39a4e51489dabc5764c790773b9147c7aa15b64a079d87069cb10"
+  },
+  "source_after": {
+    "src/tests/test_index_observer_postgres.c": "3320e5c129ee8cb60117932237396912a64c8377aa77d27bc07b4d4e4d62eedd",
+    "src/tests/support/index_observer_pg_test_adapter.c": "ab82cebf62fc467e5135823ba1dddddb40df09786a13427790690ddd83b69ef8",
+    "src/modules/kb/c/index_observer.c": "d5c42b4390fd4a7b35f05bb3e9e0dab1921f344d4c600d3206d52d82c72060e3",
+    "src/modules/kb/c/code_index.c": "5262a9e00f9920a1b61b79ef030ade069be609f342095855185d93b666a4b7da",
+    "src/modules/kb/c/canonical_index.c": "7ad8672008d71d6861b3b75e0dee3d5e3784a02dc77de39ad659d03ea87b83cc",
+    "src/modules/kb/c/code_project_lifecycle.c": "2de4986b0f1e4e7e15ad3242e22c80e2a6c6fe048fc77ec306f68587274e7fbb",
+    "src/modules/kb/c/kb_store_init.c": "ec56e1740fb475e08d8d897e74efa65d4e733e0c4e59375755fa8295db81a800",
+    "src/modules/kb/c/db_schema.c": "9c9d913fc933ee9af60b6eee19fd2042be6f3149d884e0260505f0f4112979aa",
+    "src/modules/kb/c/cross_repo_resolver.c": "f371eadc4281531bc6f7abbc54411ea156b8c2b371dc25fe111f2ff2c434a2f3",
+    "src/modules/kb/c/entity_edges.c": "e6fffe596a0db9d54cfe95180bdace0882e1aa6bae3e39a240d0efe57e7abbf7",
+    "src/modules/kb/c/kb_runtime_state.c": "4f462a98d7661f61f3843011472bba1d9e2f22c72794fe42776545c82a74626e",
+    "src/modules/kb/c/kb_audit_worm.c": "ec1e1b15cab0b79def98509241be110ce0db0dca0ce1f451bc7e4f449873a7b0",
+    "src/modules/kb/c/css_graph.c": "e2664cc34e866a88f0f5bb800848e6835dea707a1b3942f8efb953609ae9ba6e",
+    "src/extractors.c": "3fbf8b31f26a0a80bc56a0dd0014e3b46bd15306baa8dadf65f6cac10e48643a",
+    "src/extractors_extra.c": "713329c0ef33a5721144893b98625805a95e7fc47d44d2a372f9378b0782afb3",
+    "src/extractors_new_langs.c": "41bb61dcee90cb34528db7f97da0cfe2cc60a0c59ad711aea37d1c480a1c2e7c",
+    "src/code_treesitter.c": "7c9fe837780c05e7117ec3535fca957513c9521ba1a1b565e3ad553f42a0e446",
+    "src/util.c": "d6dd07e71aa9dbb027fd509bcb4ad599ce642567d3b1cedeb6c1ed118a4e95bd",
+    "src/text.c": "de6ad5b3d7129d9dd445982f56fd8b77886e1ff7ca6fd44060782ef48670dbcf",
+    "src/index.c": "b484d7a734717a2e05d670e4b713593d624886ae35c59859ea1d69e3fff0bcab",
+    "src/log.c": "0ffe84a5cb4a58ef9d7950b5ecc0fd84a93fba950bd489412164caeb95d1b035",
+    "src/modules/kb/c/kb_store_hardening.c": "9e22024c768b11a88a719641dc329686b37df9d7b068ff24d828bd828278ffae",
+    "src/modules/kb/c/index_observer_internal.h": "f20c2918c1c95fc0b730d00d66266dc812051166f974cab6f457845571a9937e",
+    "src/modules/kb/include/aimee/kb/index_observer.h": "2b238ad2d39119db5622584c2a111a8fc8d206fdf52f21979f938b1cb97d24c0",
+    "src/modules/kb/c/schema.sql": "e1b088299913d5d4b77666ed9ac3b5e46f1c84d42c23873ade5f924ce2d897c7",
+    "scripts/validation/code-index-observer-postgres.py": "d844a0e867a39a4e51489dabc5764c790773b9147c7aa15b64a079d87069cb10"
+  },
+  "source_unchanged": true,
+  "owned_postgres_stopped": true,
+  "scope": "real PostgreSQL generic observer/source owner; native bridge provider qualified separately"
+}

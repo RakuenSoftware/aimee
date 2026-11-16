@@ -1189,7 +1189,8 @@ static int is_write_intent(const char *tool_name, cJSON *root)
 
 static int pre_tool_check_impl(const char *tool_name, const char *input_json,
                                session_state_t *state, const char *guardrail_mode, const char *cwd,
-                               char *msg_buf, size_t msg_len, int client_non_git_workspace)
+                               char *msg_buf, size_t msg_len, int client_non_git_workspace,
+                               int registered_aimee_tool)
 {
    if (!tool_name || !input_json || !state)
       return 0;
@@ -1225,8 +1226,10 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
 
    int script_tool = is_script_tool(tool_name);
    tool_name = guardrails_canonical_tool_name(tool_name);
-   if (!is_subagent_tool(tool_name) && looks_like_subagent_tool_name(tool_name) &&
-       input_looks_like_subagent_request(root))
+   int owned_delegate = registered_aimee_tool &&
+                        (!strcmp(tool_name, "delegate") || !strcmp(tool_name, "delegate_status"));
+   if (!owned_delegate && !is_subagent_tool(tool_name) &&
+       looks_like_subagent_tool_name(tool_name) && input_looks_like_subagent_request(root))
       tool_name = "Subagent";
 
    /* Extract common fields */
@@ -1397,7 +1400,8 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
        * worktree. This handles "cd /path/.aimee-foo-sid/src && make" where cwd
        * is the real repo but the command operates inside the worktree. */
       int cmd_targets_worktree = command_targets_worktree;
-      int target_is_worktree = is_aimee_worktree_path(target) || git_dir_is_linked_worktree(target);
+      int target_is_worktree =
+          is_aimee_worktree_path(target) || git_dir_is_linked_worktree(target_dir);
       int cwd_is_aimee_worktree = is_aimee_worktree_path(effective_cwd);
       /* Whether the *current directory* is itself a worktree. This gates shell
        * redirection only: relative shell paths resolve against the cwd, so a
@@ -1476,7 +1480,16 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
                size_t gr_len = strlen(git_root_buf);
                char rewritten[MAX_PATH_LEN];
                if (fp && cJSON_IsString(fp))
+               {
+                  if (strncmp(target, git_root_buf, gr_len) ||
+                      (target[gr_len] && target[gr_len] != '/'))
+                  {
+                     snprintf(msg_buf, msg_len, "path is outside the resolved repository root");
+                     cJSON_Delete(root);
+                     return 2;
+                  }
                   snprintf(rewritten, sizeof(rewritten), "%s%s", wt_path, target + gr_len);
+               }
                else
                   snprintf(rewritten, sizeof(rewritten), "%s", wt_path);
                LOG_INFO("guardrails", "worktree rewrite: %s -> %s", target, rewritten);
@@ -2032,7 +2045,7 @@ static char *guardrails_workspace_exec(void *ctx, const char *cmd, int *exit_cod
 
 int pre_tool_check_inner(const char *tool_name, const char *input_json, session_state_t *state,
                          const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len,
-                         int client_non_git_workspace)
+                         int client_non_git_workspace, int registered_aimee_tool)
 {
    /* Worktree/branch/verify helpers predate workspace providers and use run_cmd.
     * Keep every probe on the same filesystem as the tool being checked, for
@@ -2046,7 +2059,7 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
       previous = run_cmd_exchange_executor(
           (run_cmd_executor_t){guardrails_workspace_exec, (void *)provider});
    int rc = pre_tool_check_impl(tool_name, input_json, state, guardrail_mode, cwd, msg_buf, msg_len,
-                                client_non_git_workspace);
+                                client_non_git_workspace, registered_aimee_tool);
    if (detached)
       run_cmd_exchange_executor(previous);
    return rc;

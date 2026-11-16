@@ -3,9 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <unistd.h>
-#endif
 
 #include "cJSON.h"
 #include "report_enrichment.h"
@@ -105,7 +103,6 @@ static void test_subject_json_helpers(void)
    PASS("subject_json_helpers");
 }
 
-#ifndef _WIN32
 static void cleanup_temp_dir(const char *dir)
 {
    if (!dir || !dir[0])
@@ -136,7 +133,6 @@ static void test_project_root_subject_reads_origin(void)
    cleanup_temp_dir(dir);
    PASS("project_root_subject_reads_origin");
 }
-#endif
 
 int main(void)
 {
@@ -146,9 +142,7 @@ int main(void)
    test_local_repo_subject();
    test_invalid_inputs();
    test_subject_json_helpers();
-#ifndef _WIN32
    test_project_root_subject_reads_origin();
-#endif
    printf("All report_enrichment tests passed.\n");
    return 0;
 }

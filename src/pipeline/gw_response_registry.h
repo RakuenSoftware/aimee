@@ -1,6 +1,5 @@
 /* gw_response_registry.h -- the RESPONSE-STAGE seam: a config-driven, explicit ordered
- * catalog of response transforms over the parsed reply, mirroring the request-side
- * gw_stage_registry (Slice 7) but for the response direction. Slice 1 of the
+ * catalog of response transforms over the canonical parsed reply. Slice 1 of the
  * response/orchestration-stages proposal. Per the roundtable ruling: the stage takes a
  * TYPED context (not a raw void*) and returns a STRUCTURED result (ok/reject/error) so the
  * caller can fail-closed at runtime (never emit a reply after a governance reject/error).
@@ -11,13 +10,13 @@
 
 #include <stddef.h>
 
-struct parsed_response;
+struct aimee_response;
 
 /* Shared context handed to every response stage. Typed (not void*) so the durable ABI is
  * not coupled to undocumented casting; grows by adding fields, never a bare pointer. */
 typedef struct
 {
-   struct parsed_response *resp; /* the parsed reply; stages mutate in place */
+   struct aimee_response *resp; /* owned canonical reply; stages mutate in place */
 } gw_response_ctx_t;
 
 /* A stage's outcome. `ok` proceeds; `reject`/`error` stop the pipeline and MUST prevent the
@@ -56,7 +55,7 @@ typedef struct
 
 /* Build the enabled, ordered stage array from `slots` into `out` (cap). Returns the count
  * (>=0), or -1 on a hard error: duplicate enabled name, enabled slot with empty name / NULL
- * fn, or output overflow. Same fail-closed contract as gw_stage_registry_build. */
+ * fn, or output overflow. Invalid catalogs refuse before any stage runs. */
 int gw_response_registry_build(const gw_response_stage_slot_t *slots, size_t n_slots,
                                gw_response_stage_t *out, size_t cap);
 

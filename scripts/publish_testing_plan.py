@@ -216,6 +216,9 @@ SERVER_CONTAINER_FILES = frozenset(
         "deploy/container/core-storage.sh",
         "deploy/container/server-entrypoint.sh",
         "deploy/container/aimee-server.yaml",
+        "deploy/container/memory-provision.py",
+        "deploy/container/memory-account-activate.py",
+        "deploy/container/application-health.sh",
     )
 )
 
@@ -263,6 +266,9 @@ def consumers(path: str) -> frozenset[str]:
     if path.startswith("runtime-web/"):
         return SERVER
     if path.startswith("config/"):
+        return SERVER
+    if path.startswith("vendor/aims-memory/") or path == "scripts/check_memory_bundle.py":
+        # The memory bundle is verified, linked and copied by the application image only.
         return SERVER
 
     if path == "api/openapi-server-v1.yaml":
@@ -313,6 +319,10 @@ def consumers(path: str) -> frozenset[str]:
     if path.startswith("deploy/container/"):
         return ALL
 
+    if path == "dependencies/ouroboros-ring.json":
+        # The ring release both daemons link is named here; its Go side changes
+        # through server-go/go.mod, classified above.
+        return SERVER | KB
     if path.startswith("scripts/"):
         # Build/export scripts and runtime helpers are copied by the C images.  A
         # future script is therefore all-C until this contract classifies it.

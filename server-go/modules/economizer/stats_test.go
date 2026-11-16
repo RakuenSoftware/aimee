@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestStatsPublishesEveryCounterEvenAtZero(t *testing.T) {
@@ -86,14 +86,14 @@ func TestStatsTokenDeltaSamples(t *testing.T) {
 	}
 }
 
-func statsSnapshot(t *testing.T, h bus.ModuleHandler, req StatsRequest) StatsSnapshot {
+func statsSnapshot(t *testing.T, h ring.ModuleHandler, req StatsRequest) StatsSnapshot {
 	t.Helper()
 	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, st := h(bus.ModuleInvocation{StageID: StageStats}, body)
-	if st != bus.ModuleStatusOK {
+	out, st := h(ring.ModuleInvocation{StageID: StageStats}, body)
+	if st != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", st)
 	}
 	var snap StatsSnapshot
@@ -116,7 +116,7 @@ func TestStatsStageCountsWhatTheModuleDecided(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, st := h(bus.ModuleInvocation{StageID: StageReduce}, body); st != bus.ModuleStatusOK {
+	if _, st := h(ring.ModuleInvocation{StageID: StageReduce}, body); st != ring.ModuleStatusOK {
 		t.Fatalf("reduce status = %v", st)
 	}
 
@@ -142,7 +142,7 @@ func TestStatsStageCountsWhatTheModuleDecided(t *testing.T) {
 
 	// The next turn is blocked by the breaker, and that has its own counter
 	// rather than reading as a reduction fault.
-	if _, st := h(bus.ModuleInvocation{StageID: StageReduce}, body); st != bus.ModuleStatusOK {
+	if _, st := h(ring.ModuleInvocation{StageID: StageReduce}, body); st != ring.ModuleStatusOK {
 		t.Fatalf("reduce status = %v", st)
 	}
 	snap = statsSnapshot(t, h, StatsRequest{Op: "snapshot"})
@@ -170,7 +170,7 @@ func TestStatsStageIsReadOnly(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(StatsRequest{Op: "inc"})
-	if _, st := h(bus.ModuleInvocation{StageID: StageStats}, body); st != bus.ModuleStatusInvalidRequest {
+	if _, st := h(ring.ModuleInvocation{StageID: StageStats}, body); st != ring.ModuleStatusInvalidRequest {
 		t.Errorf("a write operation should be refused, got %v", st)
 	}
 }

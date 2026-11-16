@@ -24,6 +24,7 @@ func TestHandleHostsProxiesV1(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	s.handleHosts(rr, httptest.NewRequest(http.MethodGet, "/api/hosts", nil))
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%q", rr.Code, rr.Body.String())

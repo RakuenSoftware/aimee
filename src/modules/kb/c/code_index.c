@@ -1,10 +1,11 @@
+#include "index_observer_internal.h"
 /* kb_store/code_index.c: code-index primitives — Postgres via libpq. */
 
 #include "code_index.h"
-#include "../headers/aimee.h"        /* MAX_PATH_LEN, now_utc */
-#include "../headers/code_match.h"   /* code_match_line (P1b span enrichment) */
-#include "cross_repo_resolver.h"     /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
-#include "../support/kb_store_log.h" /* aimee_log */
+#include "../headers/aimee.h"      /* MAX_PATH_LEN, now_utc */
+#include "../headers/code_match.h" /* code_match_line (P1b span enrichment) */
+#include "cross_repo_resolver.h"   /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
+#include "log.h"                   /* aimee_log */
 #include "kb_store.h"
 #include "kb_store_internal.h"
 #include "db_postgres.h"
@@ -57,23 +58,6 @@ static int64_t code_index_resolve_file(void *conn, int64_t project_id, const cha
    return id;
 }
 
-int kb_store_code_index_project_count(void)
-{
-   void *conn = kb_store_conn();
-   if (!conn)
-      return 0;
-   static const char *sql = "SELECT COUNT(*) FROM projects WHERE lifecycle_state = 'current'";
-   char err[CIDX_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return 0;
-   int n = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      n = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
-   return n;
-}
-
 int kb_store_code_index_project_current_generation(const char *name, int64_t *generation_out)
 {
    if (generation_out)
@@ -100,30 +84,6 @@ int kb_store_code_index_project_current_generation(const char *name, int64_t *ge
    }
    aimee_pg_finalize(st);
    return rc;
-}
-
-int kb_store_code_index_project_last_scan(char *out, size_t cap)
-{
-   if (!out || cap == 0)
-      return -1;
-   out[0] = '\0';
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-   static const char *sql =
-       "SELECT MAX(scanned_at) FROM projects WHERE lifecycle_state = 'current'";
-   char err[CIDX_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return -1;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *ts = aimee_pg_column_text(st, 0);
-      if (ts)
-         snprintf(out, cap, "%s", ts);
-   }
-   aimee_pg_finalize(st);
-   return 0;
 }
 
 int kb_store_code_index_project_list(project_info_t *out, int max)
@@ -703,6 +663,9 @@ int64_t kb_store_code_index_project_upsert(const char *name, const char *root)
    if (!conn)
       return -1;
 
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_begin(&observer, conn, name, "project_upsert", 1) != 0)
+      return -1;
    char ts[32];
    now_utc(ts, sizeof(ts));
 
@@ -891,7 +854,7 @@ int64_t kb_store_code_index_project_upsert(const char *name, const char *root)
 
    if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
       goto rollback;
-   return id;
+   return kb_index_mutation_finish(&observer) == 0 ? id : -1;
 
 rollback:
    aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
@@ -907,6 +870,9 @@ int64_t kb_store_code_index_file_upsert(int64_t project_id, const char *rel_path
    if (!conn)
       return -1;
 
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_project_id(&observer, conn, project_id, "file_upsert") != 0)
+      return -1;
    /* H0b: per-file language + vendored flag, derived from the path at index time. */
    const char *language = xrepo_lang_name(xrepo_lang_from_path(rel_path));
    int vendored = xrepo_path_is_vendored(rel_path);
@@ -930,7 +896,7 @@ int64_t kb_store_code_index_file_upsert(int64_t project_id, const char *rel_path
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       id = aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
-   return id;
+   return id >= 0 && kb_index_mutation_finish(&observer) == 0 ? id : -1;
 }
 
 int kb_store_code_index_file_modified_since(int64_t project_id, const char *rel_path, time_t mtime)
@@ -980,6 +946,10 @@ int kb_store_code_index_purge_files_matching(int64_t project_id, const char *pat
    if (!conn)
       return -1;
 
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_project_id(&observer, conn, project_id,
+                                    "kb_store_code_index_purge_files_matching") != 0)
+      return -1;
    static const char *sql = "DELETE FROM files WHERE project_id = ?1 AND path LIKE ?2"
                             " AND generation=(SELECT current_generation FROM projects WHERE id=?1)";
    char err[CIDX_ERRBUF] = "";
@@ -992,7 +962,7 @@ int kb_store_code_index_purge_files_matching(int64_t project_id, const char *pat
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
       affected = aimee_pg_stmt_changes(st);
    aimee_pg_finalize(st);
-   return affected;
+   return affected >= 0 && kb_index_mutation_finish(&observer) == 0 ? affected : -1;
 }
 
 /* SQL mirror of ci_path_ingest_excluded / ci_is_wanted_dotfile. A hidden
@@ -1014,6 +984,10 @@ int kb_store_code_index_purge_hidden_except_manifests(int64_t project_id)
       return -1;
 
    /* Per-project hidden-path purge that spares wanted dotfile manifests. */
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_project_id(&observer, conn, project_id,
+                                    "kb_store_code_index_purge_hidden_except_manifests") != 0)
+      return -1;
    static const char *sql = "DELETE FROM files WHERE project_id = ?1 AND " CIDX_HIDDEN_NOT_MANIFEST
                             " AND generation=(SELECT current_generation FROM projects WHERE id=?1)";
    char err[CIDX_ERRBUF] = "";
@@ -1025,7 +999,7 @@ int kb_store_code_index_purge_hidden_except_manifests(int64_t project_id)
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
       affected = aimee_pg_stmt_changes(st);
    aimee_pg_finalize(st);
-   return affected;
+   return affected >= 0 && kb_index_mutation_finish(&observer) == 0 ? affected : -1;
 }
 
 int kb_store_code_index_purge_hidden_pollution(void)
@@ -1034,6 +1008,9 @@ int kb_store_code_index_purge_hidden_pollution(void)
    if (!conn)
       return -1;
 
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_observer_startup_begin(&observer, conn) != 0)
+      return -1;
    int total = 0;
    char err[CIDX_ERRBUF] = "";
 
@@ -1057,7 +1034,7 @@ int kb_store_code_index_purge_hidden_pollution(void)
     * erase its stable project identity. Detach/purge remain explicit audited
     * operations; startup hygiene only removes inadmissible files from the
     * current generation. */
-   return total;
+   return kb_index_mutation_finish(&observer) == 0 ? total : -1;
 }
 
 int kb_store_code_index_project_delete(const char *name)
@@ -1068,6 +1045,9 @@ int kb_store_code_index_project_delete(const char *name)
    if (!conn)
       return -1;
 
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_begin(&observer, conn, name, "project_delete", 0) != 0)
+      return -1;
    char err[CIDX_ERRBUF] = "";
    /* Children (files -> file_exports/file_imports/terms/code_calls/
     * file_contents) all cascade off the projects row (schema.sql FKs). */
@@ -1079,7 +1059,7 @@ int kb_store_code_index_project_delete(const char *name)
    aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
    int changes = aimee_pg_stmt_changes(st);
    aimee_pg_finalize(st);
-   return (rc == AIMEE_PG_DONE) ? changes : -1;
+   return rc == AIMEE_PG_DONE && kb_index_mutation_finish(&observer) == 0 ? changes : -1;
 }
 
 int kb_store_code_index_file_replace(int64_t file_id, const code_index_file_data_t *data)
@@ -1090,6 +1070,9 @@ int kb_store_code_index_file_replace(int64_t file_id, const code_index_file_data
    if (!conn)
       return -1;
 
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_file_id(&observer, conn, file_id, "file_replace") != 0)
+      return -1;
    char *clean_content = strdup(data->content ? data->content : "");
    if (!clean_content)
       return -1;
@@ -1257,7 +1240,7 @@ int kb_store_code_index_file_replace(int64_t file_id, const code_index_file_data
    else
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
    free(clean_content);
-   return rc;
+   return rc == 0 && kb_index_mutation_finish(&observer) == 0 ? 0 : -1;
 }
 
 static int code_search_scoped(const char *query, const char *project, const char *excluded_project,

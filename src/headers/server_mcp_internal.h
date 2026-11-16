@@ -58,6 +58,10 @@ struct mcp_call
 typedef cJSON *(*mcp_tool_handler_fn)(struct mcp_call *c);
 cJSON *json_result_content(cJSON *result);
 mcp_tool_handler_fn mcp_tool_lookup(const char *tool);
+/* Only absent project metadata is inferred. The caller chooses its trusted cwd:
+ * HTTP retains its transport-cwd contract; native execution uses held host cwd. */
+void server_mcp_inject_active_project(cJSON *args, const char *cwd);
+cJSON *server_mcp_native_call(const char *tool, cJSON *args, const char *sid);
 
 /* Give aimee's own agents the MCP tools marked native in mcp_tool_table, and
  * register the handler that runs them. Call once at server startup, BEFORE the
@@ -101,6 +105,7 @@ cJSON *smcp_tool_search_notes(cJSON *args);
 cJSON *tool_store_workflow(cJSON *args);
 cJSON *json_result_content(cJSON *result);
 mcp_tool_handler_fn mcp_tool_lookup(const char *tool);
+
 cJSON *tool_complete_prospective_memory(cJSON *args);
 cJSON *smcp_tool_create_note(cJSON *args);
 cJSON *tool_create_prospective_memory(cJSON *args);

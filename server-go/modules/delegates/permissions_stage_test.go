@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type permReq struct{ w wireWriter }
@@ -61,8 +61,8 @@ func decodePermissionsFull(t *testing.T, b []byte) (map[string]decodedGrant, []s
 }
 
 func TestPermissionsStageAnswersFromTheBuiltInTable(t *testing.T) {
-	response, status := handlePermissions(bus.ModuleInvocation{}, newPermReq("review", false).bytes())
-	if status != bus.ModuleStatusOK {
+	response, status := handlePermissions(ring.ModuleInvocation{}, newPermReq("review", false).bytes())
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	grants, unenforced := decodePermissions(t, response)
@@ -90,8 +90,8 @@ permissions:
 ---
 `).bytes()
 
-	response, status := handlePermissions(bus.ModuleInvocation{}, request)
-	if status != bus.ModuleStatusOK {
+	response, status := handlePermissions(ring.ModuleInvocation{}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	grants, unenforced := decodePermissions(t, response)
@@ -117,8 +117,8 @@ permissions:
 func TestPermissionsStageReportsWhatNothingEnforces(t *testing.T) {
 	request := newPermReq("custom", true).definition("permissions:\n  - tools\n  - deploy\n").bytes()
 
-	response, status := handlePermissions(bus.ModuleInvocation{}, request)
-	if status != bus.ModuleStatusOK {
+	response, status := handlePermissions(ring.ModuleInvocation{}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	grants, unenforced := decodePermissions(t, response)
@@ -134,16 +134,16 @@ func TestPermissionsStageReportsWhatNothingEnforces(t *testing.T) {
 // A definition granting nothing is a powerless role. No definition falls back to
 // the built-in. The wire has to keep those apart.
 func TestAnEmptyDefinitionIsNotTheSameAsNoDefinition(t *testing.T) {
-	empty, status := handlePermissions(bus.ModuleInvocation{},
+	empty, status := handlePermissions(ring.ModuleInvocation{},
 		newPermReq("code", true).definition("permissions:\n").bytes())
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	if grants, _ := decodePermissions(t, empty); len(grants) != 0 {
 		t.Errorf("an empty definition grants nothing, got %v", grants)
 	}
 
-	builtin, _ := handlePermissions(bus.ModuleInvocation{}, newPermReq("code", false).bytes())
+	builtin, _ := handlePermissions(ring.ModuleInvocation{}, newPermReq("code", false).bytes())
 	if grants, _ := decodePermissions(t, builtin); len(grants) == 0 {
 		t.Error("no definition falls back to the built-in")
 	}
@@ -183,7 +183,7 @@ func TestPermissionsStageRejectsMalformedRequests(t *testing.T) {
 		"unreadable":     unreadable,
 		"empty":          nil,
 	} {
-		if _, status := handlePermissions(bus.ModuleInvocation{}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := handlePermissions(ring.ModuleInvocation{}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: want InvalidRequest, got %v", name, status)
 		}
 	}
@@ -191,7 +191,7 @@ func TestPermissionsStageRejectsMalformedRequests(t *testing.T) {
 
 func TestPermissionsStageHonoursCancellation(t *testing.T) {
 	request := newPermReq("review", false).bytes()
-	if _, status := handlePermissions(bus.ModuleInvocation{DeadlineNS: 1}, request); status != bus.ModuleStatusCancelled {
+	if _, status := handlePermissions(ring.ModuleInvocation{DeadlineNS: 1}, request); status != ring.ModuleStatusCancelled {
 		t.Errorf("want Cancelled, got %v", status)
 	}
 }

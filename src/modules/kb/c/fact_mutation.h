@@ -114,10 +114,6 @@ extern "C"
    int kb_store_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_input_t *input,
                                      fact_mutation_result_t *out);
 
-   /* Episode/experience correction annotates the original assertion. */
-   int kb_store_fact_mutation_annotate(const fact_actor_t *actor, int64_t assertion_id,
-                                       const char *annotation, fact_mutation_result_t *out);
-
    typedef enum
    {
       FACT_REVIEW_APPROVE = 1,

@@ -5,8 +5,9 @@
  * Extracted from cmd_hooks.c to keep file sizes tractable. Hooks-scope
  * helpers shared with cmd_hooks.c live in cmd_hooks_scope.c. */
 #include "aimee.h"
+#include "headers/owned_feature.h"
+AIMEE_OWNED_GUARD_CONTRACT_V1(aimee_owned_context_legacy_guard_contract_v1);
 #include "db1_client/db1.h"
-#include "modules/kb/c/memory_query.h"
 #include "modules/kb/c/rules.h"
 #include "kb_client.h"
 #include "headers/cmd_hooks_scope.h"
@@ -28,6 +29,7 @@
 #include "persona.h"
 #include "session_briefing.h"
 #include "cJSON.h"
+#include "json_fluent.h"
 #include <dirent.h>
 #include <pthread.h>
 #include <sys/stat.h>
@@ -300,6 +302,7 @@ static char *build_session_context(const char *client_cwd)
     * and local — sourced from DB1, never the shared KB. Renders nothing when the
     * switch is off or nothing has been learned yet. The observer that fills it is
     * memory_recall_handler (per user turn). */
+   if (aimee_owned_feature_status("working_profile") == 0)
    {
       char *wp = prompt_apply_working_profile("");
       if (wp && wp[0])
@@ -566,6 +569,54 @@ static void remove_stale_worktrees(const char *sid)
    }
 }
 
+/* The memory overlay's owner maintenance lane: folds each named ended session's
+ * raw memories into one summary under that owner's maintenance Operator. Absent
+ * when the memory overlay is not linked; a request can never reach it. */
+extern int aimee_module_memory_maintenance_extension(const char *verb, const char *principal,
+                                                      const char *args_json, char *out, int cap)
+    __attribute__((weak));
+
+/* Fold the pruned sessions' memories, grouped by the owner each session
+ * belongs to (at most 64 sessions per owner per call). */
+static void compact_pruned_sessions(char (*ids)[DB1_SS_SID_LEN],
+                                    char (*owners)[DB1_SS_PRINCIPAL_LEN], int n)
+{
+   if (!aimee_module_memory_maintenance_extension)
+      return;
+   int done[64] = {0};
+   for (int i = 0; i < n && i < 64; i++)
+   {
+      if (done[i] || !ids[i][0] || !owners[i][0])
+         continue;
+      cJSON *args = cJSON_CreateObject();
+      cJSON *sessions = cJSON_AddArrayToObject(args, "sessions");
+      for (int j = i; j < n && j < 64; j++)
+      {
+         if (done[j] || !ids[j][0] || strcmp(owners[j], owners[i]) != 0)
+            continue;
+         cJSON_AddItemToArray(sessions, cJSON_CreateString(ids[j]));
+         done[j] = 1;
+      }
+      char *raw = cJSON_PrintUnformatted(args);
+      cJSON_Delete(args);
+      static char reply[16384];
+      reply[0] = '\0';
+      int rc = raw ? aimee_module_memory_maintenance_extension("compact_windows", owners[i], raw,
+                                                               reply, (int)sizeof(reply))
+                   : -1;
+      free(raw);
+      cJSON *answer = rc == 0 ? cJSON_Parse(reply) : NULL;
+      const cJSON *summaries = cJSON_GetObjectItemCaseSensitive(answer, "summaries");
+      if (answer && strcmp(jo_cstr(answer, "status"), "ok") == 0 && cJSON_IsNumber(summaries))
+         LOG_INFO("session", "folded %d ended session(s) of %s into summaries",
+                  (int)summaries->valuedouble, owners[i]);
+      else
+         LOG_WARN("session", "ended-session memory fold for %s did not run: %.200s", owners[i],
+                  reply[0] ? reply : "no reply");
+      cJSON_Delete(answer);
+   }
+}
+
 /* Prune stale sessions: fold their memories, run maintenance, clean up worktrees
  * and DB1 state rows. This replaces the explicit wrapup command for ended sessions. */
 void prune_stale_sessions(void)
@@ -573,6 +624,9 @@ void prune_stale_sessions(void)
    int did_maintenance = 0;
 
    char stale_ids[64][DB1_SS_SID_LEN];
+   static char owners[64][DB1_SS_PRINCIPAL_LEN];
+   char pruned[64][DB1_SS_SID_LEN];
+   int pruned_count = 0;
    int n = db1_session_state_list_expired(stale_session_threshold_secs(), stale_ids, 64);
    const char *cur = session_id();
 
@@ -582,11 +636,15 @@ void prune_stale_sessions(void)
       if (!stale_sid[0] || strcmp(stale_sid, cur) == 0)
          continue;
 
-      /* Fold this session's L0 memories into L1 (runs inside aimee-kb). */
-      cJSON *fold_request = cJSON_CreateObject();
-      cJSON_AddStringToObject(fold_request, "session_id", stale_sid);
-      char *fold_response = kb_v1_action_request("maintenance.fold_session", fold_request);
-      free(fold_response);
+      /* Remember whose session this was: its memories are folded below. */
+      db1_server_session_owner_t owner;
+      memset(&owner, 0, sizeof(owner));
+      if (db1_server_session_owner_get(stale_sid, &owner) == 0 && owner.principal[0])
+      {
+         snprintf(pruned[pruned_count], sizeof(pruned[pruned_count]), "%s", stale_sid);
+         snprintf(owners[pruned_count], sizeof(owners[pruned_count]), "%s", owner.principal);
+         pruned_count++;
+      }
       did_maintenance = 1;
 
       /* Remove worktrees for this session */
@@ -607,11 +665,6 @@ void prune_stale_sessions(void)
       /* Expire session directives */
       kb_client_directive_expire_session();
 
-      cJSON *maintenance_args = cJSON_CreateObject();
-      cJSON_AddNumberToObject(maintenance_args, "modes", 1);
-      cJSON_AddBoolToObject(maintenance_args, "force", 1);
-      char *maintenance_reply = kb_v1_action_request("memory.maintenance_run", maintenance_args);
-      free(maintenance_reply);
 
       /* Extract anti-patterns */
       kb_client_anti_pattern_extract_from_feedback();
@@ -620,9 +673,8 @@ void prune_stale_sessions(void)
       /* Learn style */
       kb_client_memory_learn_style();
 
-      /* Compact old windows */
-      int sc = 0, fc = 0;
-      kb_client_memory_compact_windows(&sc, &fc);
+      /* Fold the ended sessions' raw memories into summaries. */
+      compact_pruned_sessions(pruned, owners, pruned_count);
 
       /* Regenerate rules — round-tripped through aimee-kb so the cache
        * inside that process gets refreshed alongside the local one. */
@@ -1223,264 +1275,6 @@ void session_brief_emit(FILE *out)
    free(brief);
 }
 
-/* CLI dispatch wrapper: read the hook payload from stdin and emit the brief
- * to stdout. Server callers reach session_start_emit() directly so they can
- * supply the payload they received over the wire and capture the output. */
-void cmd_session_start(app_ctx_t *ctx, int argc, char **argv)
-{
-   (void)argv;
-   (void)argc;
-
-   char hook_input[4096];
-   size_t hi_total = 0;
-   if (platform_hooks_stdin_ready())
-   {
-      while (hi_total < sizeof(hook_input) - 1)
-      {
-         ssize_t n = read(STDIN_FILENO, hook_input + hi_total, sizeof(hook_input) - 1 - hi_total);
-         if (n <= 0)
-            break;
-         hi_total += (size_t)n;
-      }
-   }
-   hook_input[hi_total] = '\0';
-
-   session_start_emit(ctx, hook_input, stdout);
-}
-
 /* --- cmd_launch --- */
 
-void cmd_launch(app_ctx_t *ctx, int argc, char **argv)
-{
-   /* Always generate a fresh session ID for each launch.
-    *
-    * session_id() is keyed by PPID so that hooks and MCP servers (children
-    * of a running Claude agent) can find their parent's session.  But for
-    * a new launch we must NOT inherit a stale session-ppid-{PPID} file left
-    * by a previous launch from the same parent process — that would put two
-    * independent Claude sessions into the same worktree.
-    *
-    * Set the override BEFORE cmd_session_start so every downstream
-    * session_id() call in this process uses the new unique ID. */
-   {
-      /* 10 random bytes -> 20 hex chars. The per-session worktree key uses the
-       * first 16 chars (64 bits), so the id must carry at least that much
-       * entropy; the old 4-byte (8-hex) id left the key at only 32 bits, where
-       * independent launches collided onto a shared worktree. */
-      unsigned char rnd[10];
-      if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
-      {
-         fprintf(stderr,
-                 "aimee: secure entropy is unavailable; refusing to create a shared session\n");
-         return;
-      }
-      char fresh_id[32];
-      int off = 0;
-      for (size_t i = 0; i < sizeof(rnd); i++)
-         off += snprintf(fresh_id + off, sizeof(fresh_id) - off, "%02x", rnd[i]);
-      session_id_set_override(fresh_id);
-   }
-
-   /* Run session-start (prints context to stdout) */
-   cmd_session_start(ctx, argc, argv);
-
-   /* Now emit a JSON metadata line with launch info for the client.
-    * The client needs: provider, and the worktree path to chdir to. */
-
-   /* Determine provider */
-   const char *provider = "claude";
-   if (config_provider()[0])
-      provider = config_provider();
-
-   int use_builtin = 1;
-
-   /* Determine worktree target for cwd */
-   const char *launch_sid = session_id();
-   session_state_t state;
-   session_state_load(&state, launch_sid);
-
-   /* Eagerly create sibling worktrees for all registered repos */
-   {
-      for (int i = 0; i < state.worktree_count; i++)
-         worktree_create_sibling(state.worktrees[i].git_root, launch_sid, NULL);
-   }
-
-   char target_dir[MAX_PATH_LEN] = "";
-   char cwd[MAX_PATH_LEN];
-   if (getcwd(cwd, sizeof(cwd)) && state.worktree_count > 0)
-   {
-      /* If CWD is inside a tracked git root, compute the equivalent worktree path */
-      const char *wt = worktree_for_cwd(&state, cwd);
-      if (wt)
-      {
-         /* Compute the relative suffix within the git root */
-         for (int i = 0; i < state.worktree_count; i++)
-         {
-            size_t rlen = strlen(state.worktrees[i].git_root);
-            if (strncmp(cwd, state.worktrees[i].git_root, rlen) == 0 &&
-                (cwd[rlen] == '/' || cwd[rlen] == '\0'))
-            {
-               const char *suffix = cwd + rlen;
-               snprintf(target_dir, sizeof(target_dir), "%s%s", state.worktrees[i].worktree_path,
-                        suffix);
-               state.dirty = 1;
-               session_state_save(&state, launch_sid);
-               break;
-            }
-         }
-      }
-      else
-      {
-         /* CWD is not inside a tracked git root — check if CWD is a parent
-          * of any tracked git root. This happens when aimee is launched from
-          * a workspace directory (e.g. /home/user/dev) that contains tracked
-          * repos (e.g. /home/user/dev/aimee). Without this fallback, the
-          * worktree_cwd field is omitted from launch metadata and the agent
-          * operates on the main repo instead of the worktree. */
-         size_t cwd_len = strlen(cwd);
-         for (int i = 0; i < state.worktree_count; i++)
-         {
-            const char *gr = state.worktrees[i].git_root;
-            if (strncmp(gr, cwd, cwd_len) == 0 && (gr[cwd_len] == '/' || gr[cwd_len] == '\0'))
-            {
-               /* CWD is a parent of this git root. Map CWD to the
-                * equivalent parent of the worktree path. E.g.:
-                *   CWD      = /home/user/dev
-                *   git_root = /home/user/dev/aimee
-                *   worktree = /home/user/dev/.aimee-aimee-abc12345
-                *   target   = /home/user/dev  (keep CWD, but now the
-                *              agent knows the worktree mapping exists) */
-               snprintf(target_dir, sizeof(target_dir), "%s", state.worktrees[i].worktree_path);
-               state.dirty = 1;
-               session_state_save(&state, launch_sid);
-               break;
-            }
-         }
-      }
-   }
-
-   /* Check if this session has a changelog in working memory */
-   int launch_has_changelog = 0;
-   {
-      /* No open needed: the read below goes to the store over the bus, and
-         db1_wm_get says so itself when it cannot be reached. */
-      wm_entry_t wm_entry;
-      if (db1_wm_get(session_id(), "session_changelog", &wm_entry) == 0)
-         launch_has_changelog = 1;
-   }
-
-   if (config_autonomous())
-      fprintf(stderr,
-              "aimee: warning: autonomous mode is active — aimee guardrails are the sole safety "
-              "boundary\n");
-
-   /* Emit launch metadata as a JSON line with a known prefix */
-   cJSON *meta = cJSON_CreateObject();
-   cJSON_AddStringToObject(meta, "provider", provider);
-   if (strcmp(provider, "claude") == 0 && config_claude_model()[0])
-      cJSON_AddStringToObject(meta, "model", config_claude_model());
-   cJSON_AddBoolToObject(meta, "builtin", use_builtin);
-   cJSON_AddStringToObject(meta, "session_id", session_id());
-   if (config_autonomous())
-      cJSON_AddBoolToObject(meta, "autonomous", 1);
-   if (target_dir[0])
-      cJSON_AddStringToObject(meta, "worktree_cwd", target_dir);
-   if (launch_has_changelog)
-      cJSON_AddBoolToObject(meta, "has_changelog", 1);
-   char *json_str = cJSON_PrintUnformatted(meta);
-   if (json_str)
-   {
-      printf("__LAUNCH__%s\n", json_str);
-      free(json_str);
-   }
-   cJSON_Delete(meta);
-}
-
 /* --- cmd_wrapup --- */
-
-/* Clean up worktrees for a session. Warns if unpushed commits exist. */
-static void cleanup_worktrees(const session_state_t *state, const char *sid)
-{
-   if (state->worktree_count == 0)
-      return;
-
-   for (int i = 0; i < state->worktree_count; i++)
-      worktree_cleanup(state->worktrees[i].git_root, sid, NULL);
-}
-
-void cmd_wrapup(app_ctx_t *ctx, int argc, char **argv)
-{
-   (void)argc;
-   (void)argv;
-
-   const char *sid = session_id();
-
-   /* Load session state for worktree cleanup */
-   session_state_t state;
-   session_state_load(&state, sid);
-
-   /* Clean up worktrees */
-   cleanup_worktrees(&state, sid);
-
-   /* Run eval-to-behavior feedback loop — every helper below routes
-    * through aimee-kb (kb_client_*), which auto-spawns the daemon if
-    * needed, so no caller-side KB_STORE init check is required. */
-   {
-      /* Extract anti-patterns from feedback and failures */
-      kb_client_anti_pattern_extract_from_feedback();
-      kb_client_anti_pattern_extract_from_failures();
-
-      /* Escalate anti-patterns with 5+ hits to hard directives */
-      int escalated = kb_client_anti_pattern_escalate(5);
-
-      /* Legacy monolithic command path. This file is not linked into the
-       * shipped DB-free client; the server RPC port must split DB1 reads
-       * from KB_STORE writes before this is routed through shipped surfaces. */
-      int adjustments = eval_feedback_loop();
-      if (adjustments < 0)
-         adjustments = 0;
-
-      /* Decay stale rule weights */
-
-      int decayed = kb_client_rules_decay();
-
-      /* Learn style preferences from feedback */
-      kb_client_memory_learn_style();
-
-      /* Record session outcome based on recent agent_log entries (DB1). */
-      {
-         int successes = 0, total = 0;
-         if (db1_agent_log_session_outcome(sid, &successes, &total) == 0 && total > 0)
-         {
-            const char *outcome = (successes == total) ? "success"
-                                  : (successes > 0)    ? "partial"
-                                                       : "failure";
-            (void)db1_server_session_set_outcome(sid, outcome);
-         }
-      }
-      /* Legacy monolithic command path; typed server/kb RPCs are required
-       * before this flow can be exposed through aimee-client again. */
-      (void)trace_mine();
-
-      if (!ctx->json_output && (escalated > 0 || adjustments > 0))
-         fprintf(stderr, "Feedback loop: %d rule adjustments, %d anti-pattern escalations.\n",
-                 adjustments, escalated);
-      if (!ctx->json_output && (escalated > 0 || adjustments > 0 || decayed > 0))
-         fprintf(stderr,
-                 "Feedback loop: %d rule adjustments, %d anti-pattern escalations, %d rules "
-                 "decayed.\n",
-                 adjustments, escalated, decayed);
-   }
-
-   /* Delete session state (row + CASCADEd child tables) from DB1. */
-   db1_session_state_delete(sid);
-
-   /* Prune other stale sessions in background (non-blocking).
-    * Done at exit so new session startup isn't impacted by old session cleanup. */
-   platform_hooks_background_cleanup();
-
-   if (ctx->json_output)
-      emit_ok_ctx(ctx->json_fields, ctx->response_profile);
-   else
-      fprintf(stderr, "Session cleaned up.\n");
-}

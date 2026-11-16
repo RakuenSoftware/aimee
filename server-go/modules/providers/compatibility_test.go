@@ -121,10 +121,19 @@ func TestCatalogIdentityUsesHostLabelsAndOperatorDeclaration(t *testing.T) {
 }
 func TestMetadataPublishedValuesAndBandsWin(t *testing.T) {
 	m, home, _ := manager(t)
+	for _, op := range []string{"metadata.alias", "metadata.aliases", "metadata.detect"} {
+		if _, err := m.Manage(context.Background(), Request{Operation: op, Arguments: object{"name": "opus", "model": "claude-opus-4"}}); err == nil {
+			t.Fatalf("retired metadata operation accepted: %s", op)
+		}
+	}
 	snapshot := filepath.Join(home, "snapshot.json")
 	os.WriteFile(snapshot, []byte(`{"openai":{"models":{"sample":{"name":"Sample","tool_call":true,"reasoning":true,"limit":{"context":1000000,"output":128000},"cost":{"input":5,"output":22.5,"cache_read":0.5,"tiers":[{"tier":{"type":"context","size":272000},"input":10,"output":45,"cache_read":1}]}}}}}`), 0600)
 	t.Setenv("XDG_CACHE_HOME", home)
 	t.Setenv("AIMEE_MODELS_DEV_SNAPSHOT", snapshot)
+	call(t, m, "metadata.refresh", nil)
+	if got := call(t, m, "metadata.show", object{"name": "opus"})["model"].(map[string]any); str(got, "provider") != "anthropic" {
+		t.Fatal("active lookup lost alias/provider resolution", got)
+	}
 	call(t, m, "model.add", object{"args": []string{"model", "https://example.invalid/v1", "sample"}})
 	model := rows(call(t, m, "model.list", nil), "agents")[0]
 	if number(model, "effective_context_window") != 1000000 || number(model, "effective_max_output") != 128000 || number(model, "price_base_in_per_mtok") != 5 || len(rows(model, "price_bands")) != 1 {

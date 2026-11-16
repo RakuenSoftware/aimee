@@ -1,3 +1,4 @@
+#include "host_original_text.h"
 /* server_auth.c: authentication, capability tokens, and per-method capability checks */
 #include "aimee.h"
 #include "db1_client/db1.h"
@@ -5,7 +6,10 @@
 #include "log.h"
 #include "platform_process.h"
 #include "cJSON.h"
-#include "json_fluent.h"     /* jo_ok */
+#include "json_fluent.h" /* jo_ok */
+#include <aimee/translation/aimee_frontend.h>
+#include "aimee_sha256.h"
+#include "db1_client/primary_sessions.h"
 #include "request_context.h" /* request_context_caller_subject: the account ingress proved */
 #include <aimee/core/connection/auth.h>
 #include <sys/stat.h>
@@ -46,6 +50,7 @@ const method_policy_t method_registry[] = {
     {"task.projection", CAP_MEMORY_WRITE,
      "operate on owned disposable task state and promotion drafts"},
     {"memory.store", CAP_MEMORY_WRITE, "store memory"},
+    {"memory.protected-intake", CAP_MEMORY_WRITE, "submit protected human input"},
     /* Destructive: hard-deletes the row and its provenance, and the audit event
      * carries only the id — the content is not recoverable afterwards. Graded
      * memory:admin, not memory:write, for the same reason rules.delete is graded
@@ -77,6 +82,7 @@ const method_policy_t method_registry[] = {
     {"entities.merge", CAP_MEMORY_WRITE, "merge two entities"},
     {"entities.unmerge", CAP_MEMORY_WRITE, "reverse an entity merge"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
+    {"learning.approaches", CAP_MEMORY_READ, "read scoped canonical approach observations"},
     {"learning.task_cost", CAP_MEMORY_READ, "report declared task costs without policy promotion"},
     {"action.receipt", CAP_TOOL_EXECUTE, "inspect and reconcile owned action receipts"},
     {"learning.application", CAP_MEMORY_WRITE, "record receipt-bound user procedure feedback"},
@@ -174,6 +180,7 @@ const method_policy_t method_registry[] = {
     {"model.episodes", CAP_DELEGATE, "agent episode history"},
     {"eval.*", CAP_DELEGATE, "eval harness"},
     {"chat.send_stream", CAP_CHAT, "chat stream"},
+    {"model.generate", CAP_CHAT, "tool-free canonical completion"},
     {"chat.graceful_cancel", CAP_CHAT, "cancel an in-flight chat turn (owner-authz)"},
     {"chat.interrupt", CAP_CHAT, "stop an in-flight turn and queue a steer (owner-authz)"},
     /* Tool definitions are read-only session metadata. Keeping this behind
@@ -181,6 +188,7 @@ const method_policy_t method_registry[] = {
      * fail during the MCP startup handshake before it can call even read-only
      * tools. Tool execution remains independently gated at mcp.call. */
     {"mcp.tools_list", CAP_SESSION_READ, "MCP tool list"},
+    {"mcp.tools_wait", CAP_SESSION_READ, "wait for the MCP tool list to change"},
     {"mcp.audit", CAP_TOOL_EXECUTE, "MCP OSV audit"},
     {"mcp.recheck", CAP_TOOL_EXECUTE, "MCP OSV recheck"},
     {"mcp.call", CAP_TOOL_EXECUTE, "MCP tool call"},
@@ -217,7 +225,6 @@ const method_policy_t method_registry[] = {
     {"kb.docs.push", CAP_INDEX_ADMIN, "push documents into the knowledge base (ingest)"},
     {"kb.ingest.status", CAP_INDEX_READ, "knowledge-base ingest status (read)"},
     {"kb.reembed", CAP_INDEX_ADMIN, "reset and re-embed the vector store (dim change)"},
-    {"kb.erase-subject", CAP_SESSION_ADMIN, "erase one subject's mutable content graph"},
     {"memory.embed", CAP_INDEX_ADMIN, "(re)generate memory embeddings"},
     /* Code index/graph rebuilds (mutating) — distinct from the index.* reads. */
     {"index.scan", CAP_INDEX_ADMIN, "scan / re-index the codebase"},
@@ -332,6 +339,17 @@ static int generate_uuid(char *buf, size_t len)
    return 0;
 }
 
+/* Use the account the ingress authenticated. Root web backends and certificate
+ * clients share process UIDs, which are not their session ownership identity. */
+static const char *session_caller_principal(const server_conn_t *conn, char fallback[32])
+{
+   if (conn->attested_transport > ATTEST_NONE && conn->attested_transport <= ATTEST_MTLS_CLIENT &&
+       conn->vault_principal[0])
+      return conn->vault_principal;
+   snprintf(fallback, 32, "uid:%d", (int)conn->peer_uid);
+   return fallback;
+}
+
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    cJSON *jct = cJSON_GetObjectItemCaseSensitive(req, "client_type");
@@ -344,9 +362,8 @@ int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (generate_uuid(sid, sizeof(sid)) != 0)
       return server_send_error(conn, "secure entropy unavailable; session not created", NULL);
 
-   /* Build principal from peer UID */
-   char principal[32];
-   snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
+   char fallback[32];
+   const char *principal = session_caller_principal(conn, fallback);
 
    char ts[32];
    now_utc(ts, sizeof(ts));
@@ -360,12 +377,9 @@ int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-/* session.record_transcript: persist a session's conversation to DB1 under its
- * real host id. The hook-driven primary (e.g. Claude Code) posts the transcript
- * it already keeps on disk (transcript_path) here each turn, so a session driven
- * through the anonymous /v1/messages gateway — which stores no conversation — is
- * still logged and recoverable after a crash. `messages` is the transcript JSON
- * (array preferred; any JSON value is stored verbatim). Idempotent upsert. */
+/* External SDK archive only. This scope never replaces host primary history or
+ * introduces execution/proof/control events. Repeated equal snapshots reuse an
+ * exact content-bound checkpoint; old compatibility transcripts are not merged. */
 int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -374,27 +388,60 @@ int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJS
    if (!sid || !sid[0])
       return server_send_error(conn, "session_id required", NULL);
    /* Enforce the same id invariant as handle_hooks_session_start: this route
-    * makes durable server_sessions + primary_sessions writes keyed by sid, so it
+    * makes durable canonical session writes keyed by sid, so it
     * must not admit ids the other session entry points would reject. */
    if (!is_safe_id(sid))
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                NULL);
 
    cJSON *jmsgs = cJSON_GetObjectItemCaseSensitive(req, "messages");
-   if (!jmsgs)
-      return server_send_error(conn, "messages required", NULL);
+   if (!cJSON_IsArray(jmsgs) || !aimee_ir_json_unique(req))
+      return server_send_error(conn, "unique transcript array required", NULL);
 
-   /* Optional host metadata; the defaults suit the Claude Code hook, but a
-    * non-Claude host may identify itself. */
-   cJSON *jct = cJSON_GetObjectItemCaseSensitive(req, "client_type");
-   const char *client_type =
-       (cJSON_IsString(jct) && jct->valuestring[0]) ? jct->valuestring : "claude-code";
-   cJSON *jprov = cJSON_GetObjectItemCaseSensitive(req, "provider");
-   const char *provider =
-       (cJSON_IsString(jprov) && jprov->valuestring[0]) ? jprov->valuestring : "claude-code";
+   const char *client_type = "claude-code";
+   const cJSON *jct = cJSON_GetObjectItemCaseSensitive(req, "client_type");
+   const cJSON *provider = cJSON_GetObjectItemCaseSensitive(req, "provider");
+   if ((jct && (!cJSON_IsString(jct) || strcmp(jct->valuestring, client_type))) ||
+       (provider && (!cJSON_IsString(provider) || strcmp(provider->valuestring, client_type))))
+      return server_send_error(conn, "unsupported external transcript source", NULL);
+   char fallback[32];
+   const char *caller = session_caller_principal(conn, fallback);
 
-   char caller[DB1_SS_PRINCIPAL_LEN];
-   snprintf(caller, sizeof(caller), "uid:%d", (int)conn->peer_uid);
+   /* Check an existing owner before parsing/hashing content. A missing row is
+    * not registered until the upload is valid and this lane is supported. */
+   db1_server_session_owner_t existing;
+   int missing_session = db1_server_session_owner_get(sid, &existing) != 0;
+   if (!missing_session && strcmp(existing.principal, caller) != 0)
+      return server_send_error(conn, "session_id owned by another principal", NULL);
+
+   /* Authenticated upload ownership is not proof of original authorship of
+    * each imported role:user segment. No adapter for safe-source-v2 exists. */
+   if (host_text_required())
+      return server_send_error(conn, "original transcript provenance unsupported", NULL);
+   cJSON *observations = aimee_frontend_claude_transcript_import(jmsgs, sid);
+   if (!observations)
+      return server_send_error(conn, "unsupported or invalid external transcript", NULL);
+   char *messages_json = cJSON_PrintUnformatted(observations);
+   cJSON_Delete(observations);
+   if (!messages_json)
+      return server_send_error(conn, "failed to serialize canonical observations", NULL);
+   /* Include the exact parsed source (including SDK IDs/bookkeeping), fixed
+    * import scope and session. Equal display text is not equal source custody. */
+   cJSON *source = cJSON_CreateObject();
+   char *source_json = NULL;
+   if (source && cJSON_AddStringToObject(source, "scope", "external-sdk:claude-code") &&
+       cJSON_AddStringToObject(source, "session_id", sid) &&
+       cJSON_AddItemReferenceToObject(source, "records", jmsgs))
+      source_json = cJSON_PrintUnformatted(source);
+   cJSON_Delete(source);
+   char checkpoint[65];
+   int bound = source_json && !aimee_sha256_hex(source_json, strlen(source_json), checkpoint);
+   free(source_json);
+   if (!bound)
+   {
+      free(messages_json);
+      return server_send_error(conn, "failed to bind external transcript", NULL);
+   }
 
    /* Register (idempotent) so the session is locatable even if SessionStart never
     * ran, then enforce ownership on the FINAL row before any durable write. When
@@ -404,26 +451,32 @@ int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJS
     * pre-existed, we just created it, or it appeared via a race, it must belong to
     * the caller — otherwise a caller could overwrite another principal's transcript
     * under a known session id. */
-   db1_server_session_t existing;
-   if (db1_server_session_get(sid, &existing) != 0)
+   db1_server_session_owner_t final_owner;
+   if (db1_server_session_owner_get(sid, &final_owner) != 0)
    {
       (void)db1_server_session_create(sid, client_type, caller);
-      if (db1_server_session_get(sid, &existing) != 0)
+      if (db1_server_session_owner_get(sid, &final_owner) != 0)
+      {
+         free(messages_json);
          return server_send_error(conn, "failed to register session", NULL);
+      }
    }
-   if (existing.principal[0] && strcmp(existing.principal, caller) != 0)
+   if (strcmp(final_owner.principal, caller) != 0)
+   {
+      free(messages_json);
       return server_send_error(conn, "session_id owned by another principal", NULL);
+   }
 
-   char *messages_json = cJSON_PrintUnformatted(jmsgs);
-   if (!messages_json)
-      return server_send_error(conn, "failed to serialize transcript", NULL);
-   int rc = db1_primary_session_save(sid, client_type, provider, messages_json);
+   int rc = db1_session_ir_history_save(sid, checkpoint, "external-sdk:claude-code", caller,
+                                        messages_json);
    free(messages_json);
    if (rc != 0)
-      return server_send_error(conn, "failed to persist transcript", NULL);
+      return server_send_error(conn, "failed to persist canonical external observations", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "session_id", sid);
+   cJSON_AddStringToObject(resp, "view", "external_sdk");
+   cJSON_AddStringToObject(resp, "snapshot_digest", checkpoint);
    return server_send_ok(conn, resp);
 }
 
@@ -438,8 +491,8 @@ int handle_session_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (limit > 100)
       limit = 100;
 
-   db1_server_session_t rows[100];
-   int n = db1_server_session_list_recent(rows, limit);
+   db1_server_session_record_t rows[100];
+   int n = db1_server_session_record_list_recent(rows, limit);
    if (n < 0)
       return server_send_error(conn, "failed to list sessions", NULL);
 
@@ -457,6 +510,7 @@ int handle_session_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (rows[i].claude_session_id[0])
          cJSON_AddStringToObject(s, "claude_session_id", rows[i].claude_session_id);
       cJSON_AddItemToArray(sessions, s);
+      db1_server_session_record_free(&rows[i]);
    }
 
    cJSON *resp = jo_ok();
@@ -473,8 +527,8 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!sid || !sid[0])
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "missing session_id", NULL);
 
-   db1_server_session_t row;
-   if (db1_server_session_get(sid, &row) != 0)
+   db1_server_session_record_t row;
+   if (db1_server_session_record_get(sid, &row) != 0)
       return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND, "session not found", NULL);
 
    cJSON *resp = jo_ok();
@@ -489,6 +543,7 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (row.claude_session_id[0])
       cJSON_AddStringToObject(s, "claude_session_id", row.claude_session_id);
    cJSON_AddItemToObject(resp, "session", s);
+   db1_server_session_record_free(&row);
 
    return server_send_ok(conn, resp);
 }
@@ -507,7 +562,10 @@ int server_account_is_person(const char *account)
 
 memory_authority_t server_account_memory_authority(const char *account)
 {
-   return server_account_is_person(account) ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
+   const request_context_t *owner = request_context_get();
+   return server_account_is_person(account) && !(owner && owner->model_execution)
+              ? MEMORY_AUTHORITY_USER
+              : MEMORY_AUTHORITY_MODEL;
 }
 
 const char *server_request_account(void)

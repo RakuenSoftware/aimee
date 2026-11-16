@@ -1,5 +1,5 @@
 /* test_curator_synthesize.c: synthesize_topic pass.
- * The full _one path is config-gated + sidecar-driven; here we drive the topic
+ * The full _one path is config-gated and provider-driven; here we drive the topic
  * picker seam directly so the artifacts.payload SELECT is actually exercised
  * (empty-path-only tests masked a subsystem-wide column bug — see #2488). */
 #include <assert.h>
@@ -10,7 +10,6 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "modules/kb/c/artifacts.h"
 #include "modules/kb/c/kb_store_test_shim.h"
 #include "kb_curator_synthesize.h"
 
@@ -24,7 +23,7 @@ static void seed(sqlite3 *db, const char *sql)
 static void test_gated_empty(void)
 {
    kb_store_test_shim_open();
-   /* Gated off (no synthesize_command) → returns 0 before any DB work. */
+   /* Disabled synthesis returns 0 before any DB work. */
    assert(kb_curator_synthesize_one(NULL) == 0);
    kb_store_test_shim_close();
    printf("  synthesize gated/empty OK\n");
@@ -64,45 +63,6 @@ static void test_pick_seeded(void)
    printf("  synth_pick_topic selects an un-synthesised entity OK\n");
 }
 
-static int count_sql(sqlite3 *db, const char *sql)
-{
-   sqlite3_stmt *st = NULL;
-   assert(sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK);
-   assert(sqlite3_step(st) == SQLITE_ROW);
-   int n = sqlite3_column_int(st, 0);
-   sqlite3_finalize(st);
-   return n;
-}
-
-static void test_restore_fragment_record(void)
-{
-   kb_store_test_shim_open();
-   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
-   assert(db != NULL);
-   seed(db, "INSERT INTO artifacts (id,kind,state,scope_kind,scope_id,payload) VALUES"
-            " ('base','summary','committed','doc','base-doc','{\"text\":\"base\"}')");
-
-   char out_id[64] = "";
-   assert(kb_curator_restore_fragment_record(42, "base",
-                                             "Restored title: [unknown]. Preserved number 17.",
-                                             0.82, "restore-test-v1", out_id, sizeof(out_id)) == 0);
-   assert(out_id[0] != '\0');
-   assert(count_sql(db, "SELECT COUNT(*) FROM artifacts WHERE id != 'base' AND kind='restoration'"
-                        " AND state='committed' AND payload LIKE '%unknown_sentinel_present%'"
-                        " AND payload LIKE '%synthesised%'") == 1);
-   assert(count_sql(db, "SELECT COUNT(*) FROM artifact_citations WHERE artifact_id != 'base'"
-                        " AND source_kind='doc' AND source_id='42'") == 1);
-   assert(count_sql(db, "SELECT COUNT(*) FROM artifact_links WHERE from_id != 'base'"
-                        " AND to_id='base' AND kind='restored_from'") == 1);
-   assert(count_sql(db, "SELECT COUNT(*) FROM artifact_links WHERE from_id='base'"
-                        " AND kind='restores'") == 1);
-   assert(count_sql(
-              db, "SELECT COUNT(*) FROM audit_events WHERE target_surface='corpus.restore'") == 1);
-
-   kb_store_test_shim_close();
-   printf("  restore_fragment_record writes provenance OK\n");
-}
-
 int main(void)
 {
    if (kb_store_test_shim_skip_on_postgres("curator_synthesize"))
@@ -110,7 +70,6 @@ int main(void)
 
    test_gated_empty();
    test_pick_seeded();
-   test_restore_fragment_record();
    printf("curator_synthesize: all tests passed\n");
    return 0;
 }

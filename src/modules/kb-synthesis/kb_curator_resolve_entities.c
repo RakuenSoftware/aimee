@@ -1,5 +1,6 @@
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 /* kb_curator_resolve_entities.c: deep-curator resolve_entities pass.
  *
  * Claims one proposed `entity` mention artifact, embeds its name+context via the
@@ -218,8 +219,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
    cJSON_AddNumberToObject(embed_0_args, "max_dim", CURATOR_ENTITY_DIM);
    (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
    cJSON_Delete(embed_0_args);
-   int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
-                            CURATOR_ENTITY_DIM);
+   int dim = embed_reply_vector(embed_0_reply, vec, CURATOR_ENTITY_DIM);
    cJSON_Delete(embed_0_reply);
    if (dim > 0)
    {

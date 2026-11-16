@@ -28,8 +28,8 @@
  *   5. *outbound routing* — mapping a session-tagged async event (delegate
  *      done, cron/trigger fire, reflection) to the attachments subscribed to
  *      it, dispatched through a delivery callback the server wires to the
- *      gateway's delivery_router (kept behind a function pointer so this core
- *      module stays free of gateway/link dependencies and unit-testable).
+ *      typed notify path (kept behind a function pointer so this core module
+ *      stays free of delivery link dependencies and unit-testable).
  *
  * The durable session set itself (transcript, working set) continues to live
  * in DB1 (src/session_state.c, server_session.c); this module references
@@ -60,8 +60,8 @@ extern "C"
 #define PRESENCE_EVENT_RING 64 /* presence-event ring slots per session     */
 
 #define PRESENCE_SESSION_ID_MAX 128
-#define PRESENCE_OWNER_MAX      64
-#define PRESENCE_SURFACE_MAX    32 /* "cli" / "webchat" / "telegram" / "acp" …  */
+#define PRESENCE_OWNER_MAX      160 /* full host-attested vault principal, including NUL */
+#define PRESENCE_SURFACE_MAX    32  /* "cli" / "webchat" / "telegram" / "acp" …  */
 #define PRESENCE_TURN_ID_MAX    64
 #define PRESENCE_WORKSPACE_MAX  128
 #define PRESENCE_EVENT_NAME_MAX 64
@@ -214,6 +214,16 @@ extern "C"
     * the head of the queue (if any), waking its waiter. Also releases any
     * workspace leases the turn's holder acquired. No-op if turn_id is not the
     * live turn. Returns 1 on release, 0 otherwise. */
+   /* Retain turn arbitration and workspace leases when a browser detaches. */
+   int presence_turn_host_own(const char *session_id, const char *turn_id);
+
+   /* Authenticated no-attachment chat admission. Creates and detaches a temporary
+    * attachment while retaining the actual host-owned turn. Caller releases the
+    * returned turn on every dispatch failure and after worker completion. */
+   presence_turn_result_t presence_turn_acquire_host(const char *session_id, const char *owner,
+                                                     char *turn_id, size_t turn_n, char *inflight,
+                                                     size_t inflight_n);
+
    int presence_turn_release(const char *session_id, const char *turn_id);
 
    /* True (1) if turn_id is the live in-flight turn for session_id. Lets a
@@ -300,8 +310,8 @@ extern "C"
    /* ====================================================================== */
 
    /* Delivery callback signature: deliver `text` to `target` (already parsed).
-    * Returns 0 on success, non-zero on failure. The server wires this to
-    * gateway delivery_router_send at startup; unit tests install a stub. */
+    * Returns 0 on success, non-zero on failure. The server wires this to the
+    * typed notify path (ntfy / local) at startup; unit tests install a stub. */
    typedef int (*presence_delivery_fn)(const delivery_target_t *target, const char *text,
                                        void *user);
 

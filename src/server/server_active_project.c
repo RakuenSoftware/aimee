@@ -19,9 +19,11 @@
 #include "index.h"
 #include "kb_client.h"
 #include <aimee/workspace/workspace.h>
+#include "modules/workspace/workspace_turn.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 /* A root prefixes cwd only on a path-component boundary: root /a/foo covers
  * /a/foo and /a/foo/bar, but never /a/foobar. */
@@ -86,44 +88,54 @@ int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen)
    if (!cwd || !cwd[0] || !out || outlen == 0)
       return -1;
 
-   /* Co-located caller: the working tree is readable here, so prefer the durable
-    * repo identity. */
+   /* A readable repository's manifest/forge/persisted UUID is its owner.
+    * An old index label at this path must not substitute another identity. */
    char identity[MAX_PATH_LEN] = "";
-   int have_identity =
-       workspace_repo_identity(cwd, identity, sizeof(identity), NULL, 0) == 0 && identity[0];
-
-   project_info_t projects[128];
-   int count = kb_client_index_list(projects, (int)(sizeof(projects) / sizeof(projects[0])));
-
-   /* An identity is only useful if it NAMES SOMETHING INDEXED. `index scan <name>
-    * <root>` lets a caller name the project, while this resolution returns the
-    * repo's persisted identity — a UUID for a repo with no remote. The two need
-    * not agree, and when they disagree every cwd-scoped query silently addressed
-    * a project that does not exist: a freshly scanned workspace answered
-    * "code index lookup failed" while the same lookup with an explicit project
-    * name returned hits. Verify before trusting it, and otherwise fall back to
-    * the registered root, which by construction names a real project. */
-   if (have_identity && count > 0)
+   if (workspace_repo_identity(cwd, identity, sizeof identity, NULL, 0) == 0 && identity[0])
    {
-      for (int i = 0; i < count; i++)
-      {
-         if (strcmp(projects[i].name, identity) != 0)
-            continue;
-         snprintf(out, outlen, "%s", identity);
-         return 0;
-      }
-   }
-   else if (have_identity && count < 0)
-   {
-      /* The project list is unavailable, so the identity cannot be checked.
-       * Returning it unverified preserves the previous behaviour for a
-       * co-located caller rather than failing a lookup that used to work. */
       snprintf(out, outlen, "%s", identity);
       return 0;
    }
-
+   /* A remote thin-client path may be unreadable here. Only then may the
+    * existing registry root supply its recorded identity. */
+   project_info_t projects[128];
+   int count = kb_client_index_list(projects, (int)(sizeof projects / sizeof projects[0]));
+   if (count > 0 && server_active_project_match(cwd, projects, count, out, outlen) == 0)
+      return 0;
    out[0] = '\0';
-   if (count <= 0)
+   return -1;
+}
+
+/* Learning scopes name the approved repository, independently of whether an
+ * index service has indexed it under that identity or another display label.
+ * Resolve through the held resource; a raw client path grants no authority. */
+int server_learning_project_from_cwd(const char *cwd, char *out, size_t outlen)
+{
+   if (out && outlen)
+      out[0] = '\0';
+   if (!cwd || !cwd[0] || !out || !outlen)
       return -1;
-   return server_active_project_match(cwd, projects, count, out, outlen);
+   int fd = -1;
+   char identity[65];
+   if (workspace_turn_source_identity(cwd, &fd, identity) || fd < 0)
+   {
+      if (fd >= 0)
+         close(fd);
+      return -1;
+   }
+#ifdef __linux__
+   char held[128];
+   snprintf(held, sizeof held, "/proc/%ld/fd/%d", (long)getpid(), fd);
+   const char *source = held;
+#else
+   const char *source = cwd;
+#endif
+   int rc = workspace_repo_identity(source, out, outlen, NULL, 0);
+   close(fd);
+   if (rc || !out[0])
+   {
+      out[0] = '\0';
+      return -1;
+   }
+   return 0;
 }

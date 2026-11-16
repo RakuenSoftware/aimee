@@ -22,7 +22,7 @@
 #include "log.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
-#define KEEP 16 /* must match AB_CAP_KEEP in obs_bus.c */
+#define KEEP 4 /* must match AB_CAP_KEEP in obs_bus.c */
 
 static int count_capture_files(const char *dir)
 {

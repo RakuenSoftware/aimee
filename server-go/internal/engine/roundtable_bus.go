@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
@@ -40,20 +39,6 @@ type busStageCaller interface {
 	Call(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error)
 }
 
-// NewBusReviewer attaches to the daemon's module bus as the WFE principal.
-func NewBusReviewer(ctx context.Context, socketPath string, principalClass, principalRef uint32,
-	timeout time.Duration) (*BusReviewer, error) {
-	client, err := bus.ConnectClient(ctx, socketPath, principalClass, principalRef)
-	if err != nil {
-		return nil, fmt.Errorf("attach to the module bus: %w", err)
-	}
-	caller, err := bus.NewModuleCaller(client)
-	if err != nil {
-		return nil, err
-	}
-	return NewBusReviewerFromCaller(caller, timeout)
-}
-
 // NewBusReviewerFromCaller uses an already attached caller. Long-lived
 // processes must prefer this constructor: the bus admits one live slot per
 // principal, so attaching again with the same identity is correctly denied.
@@ -74,6 +59,9 @@ func NewBusReviewerFromCaller(caller busStageCaller, timeout time.Duration) (*Bu
 func (r *BusReviewer) Review(ctx context.Context, request roundtablecfg.ReviewRequest) (roundtablecfg.RunResult, error) {
 	if r == nil || r.caller == nil {
 		return roundtablecfg.RunResult{}, errors.New("roundtable bus reviewer is not configured")
+	}
+	if request.Request == nil || !request.Request.Valid() || request.OriginalRequest != "" {
+		return roundtablecfg.RunResult{}, errors.New("internal roundtable review requires canonical Request")
 	}
 	body, err := json.Marshal(request)
 	if err != nil {

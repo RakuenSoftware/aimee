@@ -39,11 +39,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#define CRON_CONTEXT_OUTPUT_LIMIT 8192
-#define PROPOSALS_DEFAULT_DIR     "docs/proposals/pending"
-#define PROPOSALS_MAX_ENTRIES     512
-#define PROPOSALS_GIT_MAX_OUT     (256 * 1024)
-#define PROPOSALS_GIT_TIMEOUT_MS  15000
+#define PROPOSALS_DEFAULT_DIR    "docs/proposals/pending"
+#define PROPOSALS_MAX_ENTRIES    512
+#define PROPOSALS_GIT_MAX_OUT    (256 * 1024)
+#define PROPOSALS_GIT_TIMEOUT_MS 15000
 
 /* ------------------------------------------------------------------ */
 /* Cron expression parser                                              */
@@ -856,6 +855,17 @@ static time_t g_last_fired[TRIGGER_RULES_MAX];
 static time_t g_last_cron_job_fired[CRON_JOBS_MAX];
 static time_t g_last_db_cron_job_fired[CRON_JOBS_MAX];
 
+static pthread_mutex_t g_sched_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_sched_cond = PTHREAD_COND_INITIALIZER;
+static int g_sched_stop;  /* under g_sched_lock */
+static int g_sched_woken; /* under g_sched_lock: a change not yet ticked on */
+
+/* Stored cron jobs, re-read only when agent work (where they live) or config is
+ * announced to have changed, not on every tick. */
+static cron_job_t g_db_jobs[CRON_JOBS_MAX];
+static int g_db_job_count;
+static int g_db_jobs_stale = 1;
+
 /* Implemented in server_cron.c. Kept as a narrow forward declaration so the
  * cron parser unit test can include this file with a tiny local stub. */
 int cron_run_config_job(const cron_job_t *job, cJSON **out_resp);
@@ -976,7 +986,7 @@ int cron_build_context_preamble(char *buf, size_t bufsz, const char *workdir,
        "You are running as a cron job. The operator is not at the keyboard.\n"
        "\n"
        "DELIVERY: Your final response is automatically delivered to the configured channel; do "
-       "not call send_message or its analogues. Just respond.\n"
+       "not try to send it yourself. Just respond.\n"
        "\n"
        "SILENT: If there is genuinely nothing new to report, respond with exactly [SILENT] and "
        "nothing else. Suppressed responses do not notify the operator.\n"
@@ -994,91 +1004,6 @@ int cron_build_context_preamble(char *buf, size_t bufsz, const char *workdir,
    if (n < 0)
       return -1;
    return n;
-}
-
-static int cron_append_bytes(char *buf, size_t bufsz, size_t *used, const char *src, size_t n)
-{
-   if (!used || !src)
-      return -1;
-
-   size_t start = *used;
-   if (buf && bufsz > 0 && start < bufsz)
-   {
-      size_t room = bufsz - start - 1;
-      size_t copy = n < room ? n : room;
-      memcpy(buf + start, src, copy);
-      buf[start + copy] = '\0';
-   }
-   *used += n;
-   return 0;
-}
-
-static int cron_append_literal(char *buf, size_t bufsz, size_t *used, const char *src)
-{
-   return cron_append_bytes(buf, bufsz, used, src ? src : "", src ? strlen(src) : 0);
-}
-
-static int cron_append_output_block(char *buf, size_t bufsz, size_t *used, const char *label,
-                                    const char *text, size_t limit)
-{
-   if (!text || !text[0])
-      return 0;
-
-   size_t len = strlen(text);
-   const char *body = text;
-   int truncated = 0;
-   if (limit > 0 && len > limit)
-   {
-      body = text + (len - limit);
-      len = limit;
-      truncated = 1;
-   }
-
-   if (cron_append_literal(buf, bufsz, used, "\n") != 0 ||
-       cron_append_literal(buf, bufsz, used, label) != 0 ||
-       cron_append_literal(buf, bufsz, used, "\n") != 0)
-      return -1;
-   if (truncated && cron_append_literal(buf, bufsz, used, "[truncated to last 8192 bytes]\n") != 0)
-      return -1;
-   if (cron_append_bytes(buf, bufsz, used, body, len) != 0)
-      return -1;
-   if (len == 0 || body[len - 1] != '\n')
-      return cron_append_literal(buf, bufsz, used, "\n");
-   return 0;
-}
-
-int cron_build_job_prompt(char *buf, size_t bufsz, const char *prompt, const char *workdir,
-                          const char *skills_csv, const char *prior_output,
-                          const char *script_output, const char *deliver_target)
-{
-   if (!buf || bufsz == 0)
-      return -1;
-   buf[0] = '\0';
-
-   char preamble[2048];
-   int preamble_len =
-       cron_build_context_preamble(preamble, sizeof(preamble), workdir, skills_csv, deliver_target);
-   if (preamble_len < 0)
-      return -1;
-
-   size_t used = 0;
-   if (cron_append_bytes(buf, bufsz, &used, preamble, strlen(preamble)) != 0)
-      return -1;
-   if (cron_append_output_block(buf, bufsz, &used, "SCRIPT_OUTPUT:", script_output, 0) != 0)
-      return -1;
-   if (cron_append_output_block(buf, bufsz, &used, "PRIOR JOB OUTPUT:", prior_output,
-                                CRON_CONTEXT_OUTPUT_LIMIT) != 0)
-      return -1;
-   const char *job_prompt = prompt && prompt[0] ? prompt : "";
-   size_t job_prompt_len = strlen(job_prompt);
-   if (cron_append_literal(buf, bufsz, &used, "\nJOB PROMPT:\n") != 0 ||
-       cron_append_literal(buf, bufsz, &used, job_prompt) != 0)
-      return -1;
-   if ((job_prompt_len == 0 || job_prompt[job_prompt_len - 1] != '\n') &&
-       cron_append_literal(buf, bufsz, &used, "\n") != 0)
-      return -1;
-
-   return used > (size_t)INT_MAX ? INT_MAX : (int)used;
 }
 
 static void trigger_scheduler_fire_rule(const trigger_rule_t *rule)
@@ -1414,11 +1339,25 @@ static void sched_tick(void)
                    job->schedule);
    }
 
-   cron_job_t db_jobs[CRON_JOBS_MAX];
-   int db_count = db1_cron_jobs_load(db_jobs, CRON_JOBS_MAX, 1);
-   for (int i = 0; i < db_count && i < CRON_JOBS_MAX; i++)
+   pthread_mutex_lock(&g_sched_lock);
+   int reload = g_db_jobs_stale;
+   g_db_jobs_stale = 0;
+   pthread_mutex_unlock(&g_sched_lock);
+   if (reload)
    {
-      const cron_job_t *job = &db_jobs[i];
+      int loaded = db1_cron_jobs_load(g_db_jobs, CRON_JOBS_MAX, 1);
+      if (loaded < 0)
+      {
+         pthread_mutex_lock(&g_sched_lock);
+         g_db_jobs_stale = 1; /* the store did not answer: ask again next tick */
+         pthread_mutex_unlock(&g_sched_lock);
+         loaded = 0;
+      }
+      g_db_job_count = loaded;
+   }
+   for (int i = 0; i < g_db_job_count && i < CRON_JOBS_MAX; i++)
+   {
+      const cron_job_t *job = &g_db_jobs[i];
       if (config_has_cron_job(job->id) || !job->enabled || !job->id[0] || !job->schedule[0])
          continue;
       int match = schedule_matches(job->schedule, &tm);
@@ -1443,7 +1382,20 @@ static void sched_tick(void)
 /* ------------------------------------------------------------------ */
 
 static pthread_t g_sched_thread;
-static int g_sched_stop;
+
+/* Whether any source could fire on a later minute. Schedules are minute
+ * granular, so with one the thread wakes at each minute boundary; with none it
+ * sleeps until a config or agent-work change is announced. */
+static int sched_has_timed_work(void)
+{
+   const char *engine = getenv("AIMEE_WFE_ENGINE");
+   if (!engine || strcmp(engine, "go") != 0)
+      return 1; /* the native WFE's trigger rules and armed workflows */
+   pthread_mutex_lock(&g_sched_lock);
+   int stale = g_db_jobs_stale;
+   pthread_mutex_unlock(&g_sched_lock);
+   return stale || g_db_job_count > 0 || config_cron_job_count() > 0;
+}
 
 static void *sched_thread_fn(void *arg)
 {
@@ -1451,17 +1403,42 @@ static void *sched_thread_fn(void *arg)
 
    for (;;)
    {
-      /* Sleep 30 seconds in 1-second chunks so shutdown is responsive. */
-      for (int slept = 0; slept < 30; slept++)
+      int timed = sched_has_timed_work();
+      pthread_mutex_lock(&g_sched_lock);
+      if (!g_sched_stop && !g_sched_woken)
       {
-         if (g_sched_stop)
-            return NULL;
-         sleep(1);
+         if (timed)
+         {
+            /* One second past the next minute boundary, so the tick sees the
+             * minute a schedule names. */
+            struct timespec deadline;
+            clock_gettime(CLOCK_REALTIME, &deadline);
+            deadline.tv_sec += 61 - deadline.tv_sec % 60;
+            deadline.tv_nsec = 0;
+            pthread_cond_timedwait(&g_sched_cond, &g_sched_lock, &deadline);
+         }
+         else
+         {
+            while (!g_sched_stop && !g_sched_woken)
+               pthread_cond_wait(&g_sched_cond, &g_sched_lock);
+         }
       }
-      if (g_sched_stop)
+      g_sched_woken = 0;
+      int stop = g_sched_stop;
+      pthread_mutex_unlock(&g_sched_lock);
+      if (stop)
          return NULL;
       sched_tick();
    }
+}
+
+void trigger_scheduler_jobs_changed(void)
+{
+   pthread_mutex_lock(&g_sched_lock);
+   g_db_jobs_stale = 1;
+   g_sched_woken = 1;
+   pthread_cond_signal(&g_sched_cond);
+   pthread_mutex_unlock(&g_sched_lock);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1473,12 +1450,19 @@ void trigger_scheduler_init(void)
    memset(g_last_fired, 0, sizeof(g_last_fired));
    memset(g_last_cron_job_fired, 0, sizeof(g_last_cron_job_fired));
    memset(g_last_db_cron_job_fired, 0, sizeof(g_last_db_cron_job_fired));
+   pthread_mutex_lock(&g_sched_lock);
    g_sched_stop = 0;
+   g_sched_woken = 0;
+   g_db_jobs_stale = 1;
+   pthread_mutex_unlock(&g_sched_lock);
    pthread_create(&g_sched_thread, NULL, sched_thread_fn, NULL);
 }
 
 void trigger_scheduler_shutdown(void)
 {
+   pthread_mutex_lock(&g_sched_lock);
    g_sched_stop = 1;
+   pthread_cond_signal(&g_sched_cond);
+   pthread_mutex_unlock(&g_sched_lock);
    pthread_join(g_sched_thread, NULL);
 }

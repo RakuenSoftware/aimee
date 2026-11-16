@@ -5,8 +5,8 @@
  * server-go/modules/delegates/testdata/xml_fallback_golden.json. Test binaries
  * that reach it host no bus, and for every one of them the parse is SETUP: the
  * subject is what the caller does once a block has a call -- the IR refusing to
- * dispatch one found inside reasoning, the response pipeline rebuilding an
- * assistant message, a driver counting a rescued turn.
+ * dispatch one found inside reasoning, the canonical response retaining prose beside a call,
+ * a driver counting a rescued turn.
  *
  * So this reads back exactly the one spelling those fixtures are written in:
  *
@@ -21,6 +21,7 @@
 #ifndef DEC_TEST_RESCUE_FIXTURE_PROVIDER_H
 #define DEC_TEST_RESCUE_FIXTURE_PROVIDER_H 1
 
+#include "cJSON.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -44,7 +45,7 @@ static const char *rescue_fixture_tag(const char *from, const char *tag, const c
 }
 
 static int rescue_fixture_provider(const char *text, int allow_json, int detect_only,
-                                   parsed_response_t *out)
+                                   aimee_message_t *out)
 {
    (void)allow_json;
    if (!text)
@@ -52,65 +53,58 @@ static int rescue_fixture_provider(const char *text, int allow_json, int detect_
    if (detect_only)
       return strstr(text, "<tool_call>") != NULL;
    if (!out)
+      return -1;
+   const char *first = strstr(text, "<tool_call>"), *p = text;
+   if (!first)
       return 0;
-
-   int found = 0;
-   const char *p = text;
-   const char *first = strstr(text, "<tool_call>");
-   while (out->call_count < AGENT_MAX_TOOL_CALLS)
+   out->role = strdup("assistant");
+   if (!out->role)
+      return -1;
+   size_t pre = (size_t)(first - text);
+   while (pre && (text[pre - 1] == ' ' || text[pre - 1] == '\n'))
+      pre--;
+   if (pre)
    {
-      const char *block_end = NULL;
-      const char *block = rescue_fixture_tag(p, "tool_call", &block_end);
+      out->blocks = calloc(1, sizeof *out->blocks);
+      if (!out->blocks)
+         return -1;
+      out->n_blocks = 1;
+      out->blocks[0].type = AIMEE_BLK_TEXT;
+      out->blocks[0].text = strndup(text, pre);
+      if (!out->blocks[0].text)
+         return -1;
+   }
+   int found = 0;
+   while (1)
+   {
+      const char *end = NULL, *block = rescue_fixture_tag(p, "tool_call", &end);
       if (!block)
          break;
-
       const char *name_end = NULL, *args_end = NULL;
-      const char *name = rescue_fixture_tag(block, "name", &name_end);
-      const char *args = rescue_fixture_tag(block, "arguments", &args_end);
-      if (name && name_end && name_end <= block_end)
-      {
-         parsed_tool_call_t *tc = &out->calls[out->call_count++];
-         memset(tc, 0, sizeof(*tc));
-         snprintf(tc->id, sizeof(tc->id), "xml_call_%d", out->call_count);
-         size_t n = (size_t)(name_end - name);
-         if (n >= sizeof(tc->name))
-            n = sizeof(tc->name) - 1;
-         memcpy(tc->name, name, n);
-         if (args && args_end && args_end <= block_end)
-         {
-            size_t a = (size_t)(args_end - args);
-            tc->arguments = malloc(a + 1);
-            if (tc->arguments)
-            {
-               memcpy(tc->arguments, args, a);
-               tc->arguments[a] = '\0';
-            }
-         }
-         if (!tc->arguments)
-            tc->arguments = strdup("{}");
-         found++;
-      }
-      p = block_end + strlen("</tool_call>");
-   }
-
-   if (found > 0)
-   {
-      out->is_tool_call = 1;
-      if (first && first > text)
-      {
-         size_t pre = (size_t)(first - text);
-         while (pre > 0 && (text[pre - 1] == '\n' || text[pre - 1] == ' '))
-            pre--;
-         if (pre > 0 && !out->content)
-         {
-            out->content = malloc(pre + 1);
-            if (out->content)
-            {
-               memcpy(out->content, text, pre);
-               out->content[pre] = '\0';
-            }
-         }
-      }
+      const char *name = rescue_fixture_tag(block, "name", &name_end),
+                 *args = rescue_fixture_tag(block, "arguments", &args_end);
+      if (!name || !name_end || name_end > end || out->n_blocks >= AIMEE_IR_MAX_BLOCKS)
+         return -1;
+      aimee_block_t *blocks = realloc(out->blocks, (size_t)(out->n_blocks + 1) * sizeof *blocks);
+      if (!blocks)
+         return -1;
+      out->blocks = blocks;
+      aimee_block_t *call = &blocks[out->n_blocks++];
+      memset(call, 0, sizeof *call);
+      call->type = AIMEE_BLK_TOOL_USE;
+      char id[64];
+      snprintf(id, sizeof id, "xml_call_%d", ++found);
+      call->tool_id = strdup(id);
+      call->tool_name = strndup(name, (size_t)(name_end - name));
+      char *arguments = args && args_end && args_end <= end
+                            ? strndup(args, (size_t)(args_end - args))
+                            : strdup("{}");
+      call->tool_input = arguments ? cJSON_ParseWithOpts(arguments, NULL, 1) : NULL;
+      free(arguments);
+      if (!call->tool_id || !call->tool_name || !cJSON_IsObject(call->tool_input) ||
+          !aimee_ir_json_unique(call->tool_input))
+         return -1;
+      p = end + strlen("</tool_call>");
    }
    return found;
 }

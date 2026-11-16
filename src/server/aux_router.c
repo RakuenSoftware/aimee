@@ -34,12 +34,15 @@ static void cooldown_set(int secs)
    pthread_mutex_unlock(&g_lock);
 }
 
-char *aux_call(const char *task_name, const char *prompt, int max_tokens)
+int aux_call(const char *task_name, const aimee_request_t *input, aimee_response_t *out)
 {
+   if (!out || !task_name || aimee_ir_request_admit(input))
+      return -1;
+   memset(out, 0, sizeof *out);
    if (!config_aux_enabled())
-      return NULL;
+      return -1;
    if (cooldown_active())
-      return NULL;
+      return -1;
 
    /* Resolve provider and model from per-task config, falling back to defaults.
     * Both are copied into local storage rather than pointed at: they are held
@@ -49,7 +52,7 @@ char *aux_call(const char *task_name, const char *prompt, int max_tokens)
    char model[128] = "";
    snprintf(provider, sizeof(provider), "%s", config_aux_default_provider());
    snprintf(model, sizeof(model), "%s", config_aux_default_model());
-   int tok = (max_tokens > 0) ? max_tokens : config_aux_default_max_tokens();
+   int tok = (input->max_tokens > 0) ? input->max_tokens : config_aux_default_max_tokens();
 
    int n = config_aux_task_count();
    for (int i = 0; i < n && i < CONFIG_AUX_MAX_TASKS; i++)
@@ -71,7 +74,7 @@ char *aux_call(const char *task_name, const char *prompt, int max_tokens)
       LOG_WARN("aux", "no provider configured for task '%s'; cooldown %ds", task_name,
                AUX_COOLDOWN_NOCONFIG_SECS);
       cooldown_set(AUX_COOLDOWN_NOCONFIG_SECS);
-      return NULL;
+      return -1;
    }
 
    agent_config_t ac;
@@ -80,7 +83,7 @@ char *aux_call(const char *task_name, const char *prompt, int max_tokens)
    {
       LOG_WARN("aux", "aux_call: could not load agents.json");
       cooldown_set(AUX_COOLDOWN_TRANSIENT_SECS);
-      return NULL;
+      return -1;
    }
 
    agent_t *ag = agent_find(&ac, provider);
@@ -88,7 +91,7 @@ char *aux_call(const char *task_name, const char *prompt, int max_tokens)
    {
       LOG_WARN("aux", "aux_call: no enabled agent '%s' in agents.json", provider);
       cooldown_set(AUX_COOLDOWN_NOCONFIG_SECS);
-      return NULL;
+      return -1;
    }
 
    /* Clone so we can override model without touching shared state */
@@ -96,49 +99,24 @@ char *aux_call(const char *task_name, const char *prompt, int max_tokens)
    if (model[0])
       snprintf(local.model, sizeof(local.model), "%s", model);
 
-   agent_result_t res;
+   agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
-   int rc = agent_dispatch_one(&local, NULL, NULL, NULL, prompt, tok, 0.0, 0 /* use_tools */, &res);
-   if (rc != 0 || !res.response || !res.response[0])
+   aimee_request_t request = {0};
+   if (aimee_ir_request_clone(input, &request))
+      return -1;
+   request.max_tokens = tok;
+   request.has_max_tokens = tok > 0;
+   int rc = agent_dispatch_one(&local, NULL, NULL, &request, 0 /* use_tools */, &res);
+   aimee_request_free(&request);
+   if (rc != 0 || aimee_ir_response_complete_text_valid(&res.canonical_response))
    {
       LOG_WARN("aux", "aux_call task '%s': %s", task_name,
                res.error[0] ? res.error : "empty response");
-      free(res.response);
+      agent_result_clear_response(&res);
       cooldown_set(AUX_COOLDOWN_TRANSIENT_SECS);
-      return NULL;
+      return -1;
    }
-   return res.response;
-}
-
-void aux_config_show(void)
-{
-   printf("auxiliary.enabled:          %s\n", config_aux_enabled() ? "true" : "false");
-   /* Each printf consumes its accessor's buffer before the next call, so these
-    * can read one at a time -- unlike the loop below, which needs three values
-    * from one element live at once and takes a copy. */
-   printf("auxiliary.default_provider: %s\n",
-          config_aux_default_provider()[0] ? config_aux_default_provider() : "(none)");
-   printf("auxiliary.default_model:    %s\n",
-          config_aux_default_model()[0] ? config_aux_default_model() : "(none)");
-   printf("auxiliary.default_max_tokens: %d\n", config_aux_default_max_tokens());
-   int n = config_aux_task_count();
-   if (n == 0)
-   {
-      printf("(no per-task overrides)\n");
-      return;
-   }
-   printf("\n%-30s  %-20s  %-40s  %s\n", "task", "provider", "model", "max_tokens");
-   printf("%-30s  %-20s  %-40s  %s\n", "----", "--------", "-----", "----------");
-   for (int i = 0; i < n && i < CONFIG_AUX_MAX_TASKS; i++)
-   {
-      config_aux_task_t t;
-      if (config_aux_task_at(i, &t) != 0)
-         continue;
-      const char *prov = t.provider[0] ? t.provider : "(default)";
-      const char *mod = t.model[0] ? t.model : "(default)";
-      if (t.max_tokens > 0)
-         printf("%-30s  %-20s  %-40s  %d\n", t.task, prov, mod, t.max_tokens);
-      else
-         printf("%-30s  %-20s  %-40s  (default)\n", t.task, prov, mod);
-   }
+   int cloned = aimee_ir_response_clone(&res.canonical_response, out);
+   agent_result_clear_response(&res);
+   return cloned;
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that Go process contracts produce Go binaries, never C fallbacks."""
+"""Verify that every module process contract produces a Go binary, never C."""
 
 from __future__ import annotations
 
@@ -30,8 +30,17 @@ def main() -> int:
         # so it is a Go module with source and a repository, but not a row here.
         expected_spawned = [name for name, row in contracts.items()
                             if row.get("runtime") == "go" and not row.get("hosted_by")]
-        expected_c = [name for name, row in contracts.items()
-                      if row.get("runtime") == "c"]
+        # The ring's telemetry exporter is the same module runtime under its own
+        # name, spawned in every placement, though it serves no stage.
+        expected_spawned.append(json.loads(exporter.process_contracts.CONTRACTS.read_text(
+            encoding="utf-8"))["telemetry"]["id"])
+        # Every module process is Go; the C core is only their caller. A
+        # contract naming any other runtime is a regression to the retired C
+        # module processes, which the exporter no longer knows how to build.
+        other = sorted(name for name, row in contracts.items()
+                       if row["execution"] == "process" and row.get("runtime") != "go")
+        if other:
+            return fail(f"module processes not in Go: {other!r}")
         with tempfile.TemporaryDirectory(prefix="aimee-go-module-bundle-") as temporary:
             temporary_root = Path(temporary)
             bundle = temporary_root / "bundle"
@@ -39,19 +48,9 @@ def main() -> int:
             actual_go = (bundle / "go.modules").read_text(encoding="utf-8").splitlines()
             if actual_go != expected_spawned:
                 return fail(f"Go module list {actual_go!r} differs from {expected_spawned!r}")
-            actual_c = sorted(path.stem.removeprefix("aimee-module-")
-                              for path in (bundle / "src").glob("aimee-module-*.c"))
-            if actual_c != sorted(expected_c):
-                return fail(f"C runtime sources {actual_c!r} differ from {sorted(expected_c)!r}")
-            if set(actual_go) & set(actual_c):
-                return fail("a migrated module also has a generated C runtime")
+            if (bundle / "src").exists() or (bundle / "c-build.json").exists():
+                return fail("the runtime bundle carries C module process sources")
             manifest = json.loads((bundle / "MANIFEST.json").read_text(encoding="utf-8"))
-            c_build = json.loads((bundle / "c-build.json").read_text(encoding="utf-8"))
-            if c_build.get("schema_version") != 1 or \
-                    [row.get("id") for row in c_build.get("modules", [])] != sorted(expected_c):
-                return fail("C build manifest differs from the canonical contracts")
-            if manifest.get("c_build") != "c-build.json":
-                return fail("runtime manifest does not bind the C build manifest")
             if manifest.get("runtimes") != {name: row["runtime"] for name, row in contracts.items()
                                              if row["execution"] == "process"}:
                 return fail("runtime manifest differs from the canonical contracts")
@@ -70,9 +69,17 @@ def main() -> int:
                 if not (repository / "runtime/main.go").is_file() or \
                         (repository / "runtime/main.c").exists():
                     return fail(f"{module_id}: isolated repository is not Go-only at runtime")
-                canonical_bus = exporter.go_bus_sources(module_id)
+                # The ring is a dependency, never a copy: an export that carried
+                # its own bus drifted from every later ring fix (aimee-module-config
+                # did until 2026-10-27).
+                if (repository / "server-go/bus").exists():
+                    return fail(f"{module_id}: isolated repository carries a private ring copy")
+                ring_pin = exporter.go_dependency_version("github.com/RakuenSoftware/ouroboros-ring/go")
+                go_mod = (repository / "go.mod").read_text(encoding="utf-8")
+                if f"github.com/RakuenSoftware/ouroboros-ring/go {ring_pin}" not in go_mod:
+                    return fail(f"{module_id}: isolated go.mod does not require the ring release aimee requires")
                 shared_sources = exporter.go_process_shared_sources(module_id)
-                for relative in [*canonical_bus, *shared_sources, *descriptor.get("go_sources", []),
+                for relative in [*shared_sources, *descriptor.get("go_sources", []),
                                  *descriptor.get("go_assets", [])]:
                     if (repository / relative).read_bytes() != (ROOT / relative).read_bytes():
                         return fail(f"{module_id}: isolated repository changed {relative}")
@@ -89,17 +96,17 @@ def main() -> int:
         for dockerfile in (ROOT / "Dockerfile", ROOT / "Dockerfile.server"):
             text = dockerfile.read_text(encoding="utf-8")
             for required in ("AS module-go-build", "./cmd/aimee-module",
-                             "/module-runtime/go.modules", "/tmp/aimee-module-go",
-                             "build_c_module_runtime_bundle.py"):
+                             "/module-runtime/go.modules", "/tmp/aimee-module-go"):
                 if required not in text:
                     return fail(f"{dockerfile.name}: missing {required!r}")
             for forbidden in ("for source in /module-runtime/src/*.c",
-                              "src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c"):
+                              "src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c",
+                              "build_c_module_runtime_bundle.py"):
                 if forbidden in text:
                     return fail(f"{dockerfile.name}: retains legacy C build fragment {forbidden!r}")
     except (OSError, UnicodeError, json.JSONDecodeError, exporter.ExportError) as exc:
         return fail(str(exc))
-    print(f"check_go_module_runtime_bundle: ok ({len(expected_go)} Go, {len(expected_c)} C)")
+    print(f"check_go_module_runtime_bundle: ok ({len(expected_go)} Go module processes)")
     return 0
 
 

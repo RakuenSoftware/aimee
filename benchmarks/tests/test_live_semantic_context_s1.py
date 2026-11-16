@@ -52,6 +52,32 @@ def load_release_validator():
     return module
 
 
+# Historical validator regression fixtures must not move with the application.
+# The 1.1 memory replacement intentionally changes these host surfaces; it does
+# not inherit the frozen S1 study's certificate. The validator itself still
+# rejects unreviewed source changes when invoked on a descendant checkout.
+HISTORICAL_RELEASE = "53e5ccf2b6b5093ecf904a279d36d2f9f31c973f"
+
+
+def historical_release_source(path):
+    return subprocess.run(["git", "show", f"{HISTORICAL_RELEASE}:{path}"], cwd=ROOT,
+                          check=True, capture_output=True, text=True).stdout
+
+
+LIVE_READ_TEXT = Path.read_text
+HISTORICAL_PROTECTED_PATHS = load_release_validator().PROTECTED_PATHS
+
+
+def historical_protected_text(path, *args, **kwargs):
+    try:
+        relative = path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return LIVE_READ_TEXT(path, *args, **kwargs)
+    if relative in HISTORICAL_PROTECTED_PATHS:
+        return historical_release_source(relative)
+    return LIVE_READ_TEXT(path, *args, **kwargs)
+
+
 class LiveSemanticContextS1Test(unittest.TestCase):
     def test_contract_and_instrumentation_pins(self) -> None:
         subprocess.run(
@@ -253,7 +279,8 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         self.assertEqual(aggregate["reference_false_positive_rate"], 0.0)
         self.assertEqual(aggregate["peak_process_tree_count"], 3)
 
-    def test_release_validator_accepts_descendant_with_unchanged_semantic_surface(self) -> None:
+    @mock.patch.object(Path, "read_text", new=historical_protected_text)
+    def test_release_validator_accepts_historical_descendant_with_unchanged_semantic_surface(self) -> None:
         validator = load_release_validator()
         candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
         candidate_tree = "e6ba59ceba5a40323b006e834ac28ef39a2abc46"
@@ -372,7 +399,8 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
         for path, blocks in validator.REVIEWED_MEMORY_INTEGRATIONS.items():
             frozen = validator.git_output("show", f"{candidate}:{path}")
-            current = (ROOT / path).read_text()
+            current = historical_release_source(path)
+            current = validator.host_integration_base(path, current) or current
             with self.subTest(path=path):
                 self.assertTrue(validator.reviewed_memory_equivalent(path, frozen, current))
                 # Both unrelated semantic drift and changes within the reviewed
@@ -386,6 +414,270 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                 ):
                     self.assertFalse(validator.reviewed_memory_equivalent(path, frozen, drift))
         self.assertFalse(validator.reviewed_memory_equivalent("src/tests/test_lsp.c", "same", "same"))
+
+    def test_release_validator_refuses_cli_discriminator_accessor_drift(self) -> None:
+        validator = load_release_validator()
+        path = "src/modules/protocols/mcp/mcp_tools_extended.c"
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        current = historical_release_source(path)
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+        block = next(row["release_text"] for row in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                     if "const char *mcp_family_discriminator(" in row["release_text"])
+        for drift in (
+            current.replace(block, block.replace('return "command";', 'return "action";'), 1),
+            current.replace(block, "", 1),
+            current + block,
+        ):
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_refuses_drift_in_tool_metadata_coverage(self) -> None:
+        validator = load_release_validator()
+        path = "src/tests/test_mcp_client_registry.c"
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        current = historical_release_source(path)
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+        blocks = validator.REVIEWED_HOST_INTEGRATIONS[path]
+        coverage = next(block["release_text"] for block in blocks
+                        if "flat_metadata" in block["release_text"])
+        for drift in (
+            current.replace("assert(aimee_tool_metadata_valid(&metadata));", "assert(1);", 1),
+            current.replace("flat_metadata = mcp_build_tools_list_flat()", "flat_metadata = cJSON_CreateArray()", 1),
+            current.replace(coverage, "", 1),
+            current + coverage,
+        ):
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_only_allows_exact_typed_graph_integration(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        for path, blocks in validator.REVIEWED_TYPED_GRAPH_INTEGRATIONS.items():
+            current = (ROOT / path).read_text()
+            frozen = validator.git_output("show", f"{candidate}:{path}")
+            self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+            for block in blocks:
+                release = block["release_text"]
+                for drift in (current.replace(release, "", 1), current + release,
+                              current.replace(release, release + "/* unreviewed */", 1),
+                              current.replace("lsp", "unreviewed_lsp", 1)):
+                    with self.subTest(path=path, block=release[:40]):
+                        self.assertNotEqual(current, drift)
+                        self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_only_allows_exact_source_custody_integration(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        for path, blocks in validator.REVIEWED_SOURCE_CUSTODY_INTEGRATIONS.items():
+            current = historical_release_source(path)
+            frozen = validator.git_output("show", f"{candidate}:{path}")
+            self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+            # Every new exact block must reverse to the previously reviewed
+            # source, whose own frozen-candidate check still runs afterwards.
+            original = validator.source_custody_integration_base(path, current)
+            self.assertEqual(original.strip(), validator.git_output(
+                "show", f"6157e7f3c:{path}"))
+            for block in blocks:
+                release = block["release_text"]
+                for drift in (current.replace(release, "", 1), current + release,
+                              current.replace(release, release + "/* unreviewed */", 1),
+                              current.replace("lsp", "unreviewed_lsp", 1)):
+                    with self.subTest(path=path, block=release[:40]):
+                        self.assertNotEqual(current, drift)
+                        self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_only_allows_exact_host_integration(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        for path, blocks in validator.REVIEWED_HOST_INTEGRATIONS.items():
+            frozen = validator.git_output("show", f"{candidate}:{path}")
+            current = historical_release_source(path)
+            with self.subTest(path=path):
+                self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+                # Exact dispatch/catalog changes do not permit semantic drift,
+                # removed assertions, duplicate blocks or edits to their bodies.
+                # The config stub's only reviewed change is the ring rename, so
+                # its drifts edit a stub body and a renamed result instead.
+                stub = path.endswith("/config_module_stub.c")
+                for drift in (
+                    current.replace("return -1;", "return 0;", 1)
+                    if stub else current.replace("lsp", "unreviewed_lsp", 1),
+                    current + blocks[0]["release_text"],
+                    current.replace(blocks[0]["release_text"], "", 1),
+                    current.replace("*result = OURO_MODULE_CALL_OK;",
+                                    "*result = OURO_MODULE_CALL_INVALID_REQUEST;", 1)
+                    if stub else
+                    current.replace("git_push", "git_status", 1)
+                    if "test_mcp" in path else
+                    current.replace('{"lsp_context",', '{"lsp_context_drift",', 1)
+                    if path.endswith("server_mcp_call_table.c") else
+                    current.replace("if (!declared)", "if (0)", 1)
+                    if path.endswith("/mcp_tools.c") else
+                    current.replace('"git_%s"', '"%s"', 1),
+                ):
+                    self.assertNotEqual(current, drift)
+                    self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+        self.assertFalse(validator.reviewed_host_equivalent("src/tests/test_lsp.c", "same", "same"))
+
+    def test_release_validator_rejects_native_verification_dispatch_drift(self) -> None:
+        validator = load_release_validator()
+        path = "src/server/server_mcp_call_table.c"
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        current = historical_release_source(path)
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+        wrapper = next(block["release_text"] for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                       if block["release_text"].startswith("static cJSON *mcph_git_verify("))
+        row = '    {"git_verify", mcph_git_verify, "core,current_code"},\n'
+        for drift in (
+            current.replace('mcp_git_run_tool("git_verify", args, c->sid)',
+                            'mcp_git_run_tool("git_status", args, c->sid)', 1),
+            current.replace("const char *cwd = run_cmd_get_cwd();",
+                            'const char *cwd = "/unreviewed";', 1),
+            current.replace(wrapper, "", 1),
+            current + wrapper,
+            current.replace(row, "", 1),
+            current + row,
+            current.replace(row, row.replace('"core,current_code"', 'NULL'), 1),
+        ):
+            self.assertNotEqual(current, drift)
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_rejects_verifier_role_membership_drift(self) -> None:
+        validator = load_release_validator()
+        path = "src/server/server_mcp_call_table.c"
+        current = historical_release_source(path)
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        blocks = [block for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                  if "canonical-git-role-membership:" in block.get("review", "")]
+        self.assertEqual(len(blocks), 1)
+        release, prior = blocks[0]["release_text"], blocks[0]["frozen_text"]
+        self.assertEqual(current.count(release), 1)
+        original = validator.source_custody_integration_base(path, current)
+        for block in validator.REVIEWED_HOST_INTEGRATIONS[path]:
+            if "canonical-native-project-dispatch:" in block.get("review", ""):
+                self.assertEqual(original.count(block["release_text"]), 1)
+                original = original.replace(block["release_text"], block["frozen_text"], 1)
+        self.assertEqual(original.replace(release, prior, 1), subprocess.run(
+            ["git", "show", f"5780aa09a92d86e89412ecea0a714b8088efaaca:{path}"],
+            cwd=ROOT, check=True, capture_output=True, text=True).stdout)
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+        for drift in (current.replace(release, "", 1), current + release,
+                      current.replace(release, prior, 1),
+                      current.replace(release, release.replace("core,current_code",
+                                                              "core,current_code,git_write"), 1)):
+            self.assertNotEqual(current, drift)
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_rejects_canonical_session_search_drift(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        baseline = "1ec815d36ae628a51d6a551264f9a1dc19ef13e9"
+        for path in ("src/server/server_mcp_call_table.c",
+                     "src/tests/test_mcp_client_registry.c"):
+            current = historical_release_source(path)
+            frozen = validator.git_output("show", f"{candidate}:{path}")
+            blocks = [block for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                      if "canonical-session-search:" in block.get("review", "")]
+            self.assertEqual(len(blocks), 1 if "server_mcp" in path else 4)
+            # Prove these exact changes restore the reviewed host source before
+            # any pre-existing host or frozen memory normalization is applied.
+            original = validator.source_custody_integration_base(path, current)
+            # Normalize the separately reviewed later native callback extraction,
+            # role membership and gateway retirement first; search must still
+            # restore its own base.
+            for block in validator.REVIEWED_HOST_INTEGRATIONS[path]:
+                if ("canonical-git-role-membership:" in block.get("review", "") or
+                        "canonical-native-project-dispatch:" in block.get("review", "") or
+                        "retired-delegate-reply:" in block.get("review", "") or
+                        "gateway-retirement:" in block.get("review", "")):
+                    self.assertEqual(original.count(block["release_text"]), 1)
+                    original = original.replace(block["release_text"], block["frozen_text"], 1)
+            for block in blocks:
+                self.assertEqual(original.count(block["release_text"]), 1)
+                original = original.replace(block["release_text"], block["frozen_text"], 1)
+            self.assertEqual(original, subprocess.run(
+                ["git", "show", f"{baseline}:{path}"], cwd=ROOT, check=True,
+                capture_output=True, text=True).stdout)
+            self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+            # In particular, the adapter cannot regress to UID-only authority,
+            # duplicate forged principals cannot pass, and the reviewed schema
+            # cannot silently lose its explicit canonical view selectors.
+            semantic_drift = (
+                current.replace("c->conn->vault_principal[0]", "0", 1),
+            ) if "server_mcp" in path else (
+                current.replace("assert(count == 1);", "assert(count >= 1);", 1),
+                current.replace("limit,offset,query", "limit,query", 1),
+                current.replace("authenticated-actor", "foreign-actor", 1),
+            )
+            for drift in semantic_drift:
+                self.assertNotEqual(current, drift)
+                self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+            for block in blocks:
+                release = block["release_text"]
+                for label, drift in (
+                    ("changed", current.replace(release, "/* unreviewed search change */\n" +
+                                                release[1:], 1)),
+                    ("removed", current.replace(release, "", 1)),
+                    ("duplicated", current + release),
+                ):
+                    with self.subTest(path=path, delta=release[:70], drift=label):
+                        self.assertNotEqual(current, drift)
+                        self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_pins_retired_delegate_reply(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        for path in ("src/modules/protocols/mcp/mcp_tools.c",
+                     "src/tests/test_mcp_client_registry.c"):
+            current = historical_release_source(path)
+            frozen = validator.git_output("show", f"{candidate}:{path}")
+            self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+            for row in validator.REVIEWED_HOST_INTEGRATIONS[path]:
+                if "retired-delegate-reply:" not in row.get("review", ""):
+                    continue
+                release = row["release_text"]
+                for drift in (current.replace(release, "", 1), current + release,
+                              current.replace(release, row["frozen_text"], 1)):
+                    self.assertNotEqual(current, drift)
+                    self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_rejects_native_project_dispatch_drift(self) -> None:
+        validator = load_release_validator()
+        path = "src/server/server_mcp_call_table.c"
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        current = historical_release_source(path)
+        blocks = [block for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                  if "canonical-native-project-dispatch:" in block.get("review", "")]
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual(validator.REVIEWED_HOST_INTEGRATIONS[path][:2], blocks)
+        original = validator.source_custody_integration_base(path, current)
+        for block in blocks:
+            self.assertEqual(original.count(block["release_text"]), 1)
+            original = original.replace(block["release_text"], block["frozen_text"], 1)
+        self.assertEqual(original, subprocess.run(
+            ["git", "show", f"4eeee289ed3dd636de1664db4f63fe52d9fa6a86:{path}"], cwd=ROOT, check=True,
+            capture_output=True, text=True).stdout)
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+
+        # The new callback identity, advert body and LSP dispatch remain exact.
+        # Restoring only an old wrapper (even its original body) is not reviewed.
+        for drift in (
+            current.replace("agent_tools_set_mcp_provider(server_mcp_native_call,",
+                            "agent_tools_set_mcp_provider(unreviewed_native_call,", 1),
+            current.replace("agent_tools_set_mcp_provider(server_mcp_native_call,",
+                            "agent_tools_set_mcp_provider(mcp_native_call,", 1),
+            current.replace("   return found;\n", "   return NULL;\n", 1),
+            current.replace('{"lsp_context",', '{"lsp_context_drift",', 1),
+            current.replace(blocks[0]["release_text"], blocks[0]["frozen_text"], 1),
+            current.replace(blocks[0]["release_text"], blocks[0]["frozen_text"].replace(
+                "   return fn(&c);\n", "   return NULL;\n", 1), 1),
+        ):
+            self.assertNotEqual(current, drift)
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+        for block in blocks:
+            release = block["release_text"]
+            for drift in (current + release, current.replace(release, "", 1),
+                          current.replace(release, release + "/* unreviewed body */\n", 1)):
+                self.assertNotEqual(current, drift)
+                self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
 
     def test_release_validator_only_allows_exact_reviewed_build_additions(self) -> None:
         validator = load_release_validator()

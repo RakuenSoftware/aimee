@@ -246,10 +246,66 @@ static void test_git_toplevel_rejects_a_non_repo(void)
    printf("  test_git_toplevel_rejects_a_non_repo: PASS\n");
 }
 
+static void test_lossy_configuration_cannot_qualify(void)
+{
+   char temporary[512], yaml[2048], command[4096];
+   snprintf(temporary, sizeof temporary, "%s/aimee-verify-config-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(temporary));
+   const char *previous = getenv("AIMEE_HOME");
+   char *saved = previous ? strdup(previous) : NULL;
+   assert(setenv("AIMEE_HOME", temporary, 1) == 0);
+   assert(project_yaml_path(temporary, yaml, sizeof yaml) == 0);
+   char *slash = strrchr(yaml, '/');
+   assert(slash);
+   *slash = 0;
+   snprintf(command, sizeof command, "mkdir -p '%s'", yaml);
+   assert(system(command) == 0);
+   *slash = '/';
+   verify_config_t cfg;
+   FILE *file = fopen(yaml, "w");
+   assert(file);
+   fputs("verify:\n  steps:\n    - name: exact\n      run: true\n", file);
+   assert(fclose(file) == 0);
+   assert(verify_load_config(temporary, &cfg) == 0 && !cfg.incomplete && cfg.count == 1);
+
+   file = fopen(yaml, "w");
+   assert(file);
+   fputs("verify:\n  steps:\n    - name: truncated\n      run: ", file);
+   for (int i = 0; i < 1600; ++i)
+      fputc('x', file);
+   fputc('\n', file);
+   assert(fclose(file) == 0);
+   assert(verify_load_config(temporary, &cfg) == 0 && cfg.incomplete);
+
+   file = fopen(yaml, "w");
+   assert(file);
+   fputs("verify:\n  steps:\n", file);
+   for (int i = 0; i <= MAX_VERIFY_STEPS; ++i)
+      fprintf(file, "    - name: step%d\n      run: true\n", i);
+   assert(fclose(file) == 0);
+   assert(verify_load_config(temporary, &cfg) == 0 && cfg.incomplete);
+
+   file = fopen(yaml, "w");
+   assert(file);
+   fputs("verify:\n  steps:\n    - name: multiline\n      run: |\n        false\n        true\n",
+         file);
+   assert(fclose(file) == 0);
+   assert(verify_load_config(temporary, &cfg) == 0 && cfg.incomplete);
+   if (saved)
+      assert(setenv("AIMEE_HOME", saved, 1) == 0);
+   else
+      assert(unsetenv("AIMEE_HOME") == 0);
+   free(saved);
+   snprintf(command, sizeof command, "rm -rf '%s'", temporary);
+   assert(system(command) == 0);
+   puts("  lossy configuration cannot qualify a grade: PASS");
+}
+
 int main(void)
 {
    printf("git_verify_contract:\n");
    test_git_toplevel_rejects_a_non_repo();
+   test_lossy_configuration_cannot_qualify();
    test_all_pass();
    test_one_fail();
    test_skip();

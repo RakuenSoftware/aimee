@@ -26,19 +26,14 @@ def main() -> int:
     try:
         lock = exporter.load_json(exporter.LOCK)
         inventory = exporter.load_json(exporter.INVENTORY)
-        core = lock.get("core")
         modules = lock.get("modules")
-        if lock.get("schema_version") != 1 or not isinstance(core, dict) or not isinstance(modules, list):
+        if lock.get("schema_version") != 1 or not isinstance(modules, list):
             return fail("invalid lock structure")
+        # The C core is built from this tree and bundled; it has no repository
+        # of its own to pin. A "core" entry would name one that does not exist.
+        if "core" in lock:
+            return fail("the lock pins a C core repository; the core is bundled, not pinned")
         version = exporter.CORE_VERSION_FILE.read_text(encoding="utf-8").strip()
-        if core.get("version") != version or core.get("ref") != f"v{version}":
-            return fail("core semantic version pin does not match src/core/VERSION")
-        if core.get("repository") != f"{exporter.REMOTE_ROOT}/aimee-core-c.git":
-            return fail("unexpected core repository")
-        if not isinstance(core.get("commit"), str) or not COMMIT.fullmatch(core["commit"]):
-            return fail("core commit is not an exact SHA-1")
-        if core.get("source_sha256") != exporter.digest_files(exporter.core_files()):
-            return fail("core vendored mirror differs from its repository pin")
 
         expected_ids = inventory.get("required", []) + inventory.get("optional", [])
         # Declared, not positional: see validate_module_process_contracts. A
@@ -92,7 +87,7 @@ def main() -> int:
                 return fail(f"{module_id}: vendored mirror differs from its repository pin")
     except (OSError, UnicodeError, json.JSONDecodeError, exporter.ExportError) as exc:
         return fail(str(exc))
-    print(f"check_c_repository_lock: ok (1 core, {len(modules)} modules)")
+    print(f"check_c_repository_lock: ok ({len(modules)} modules)")
     return 0
 
 

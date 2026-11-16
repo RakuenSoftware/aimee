@@ -54,7 +54,38 @@ typedef struct
    int (*rekey_field)(void *ctx, const char *principal, const char *field,
                       const uint8_t old_kek[VAULT_KEK_LEN], const uint8_t new_kek[VAULT_KEK_LEN]);
    int (*list_principals)(void *ctx, char (*out)[VAULT_PRINCIPAL_MAX], int max);
+   /* Optional provider-atomic operation. NULL means unsupported, with no
+    * sequential read/upsert fallback. Appended for legacy initializers. */
+   vault_create_once_result_t (*create_server_once)(void *ctx, const char *principal,
+                                                    const uint8_t server_kek[VAULT_KEK_LEN],
+                                                    const char *agent, const char *cred,
+                                                    const char *secret, char *generation,
+                                                    size_t generation_capacity);
+   int (*get_server_generation)(void *ctx, const char *principal,
+                                const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+                                const char *cred, const char *expected_generation, char *out,
+                                size_t out_len);
+   /* Must retain the provider retirement/write fence through use(). The facade
+    * supplies and cleanses out; callback must receive that exact bounded buffer.
+    * Optional: NULL is unsupported, never a snapshot-get fallback. */
+   int (*use_server_generation_fenced)(void *ctx, const char *principal,
+                                       const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+                                       const char *cred, const char *expected_generation, char *out,
+                                       size_t out_len, vault_store_secret_use_fn use,
+                                       void *use_context);
+   /* Optional; no fallback to legacy delete or a read-then-delete sequence. */
+   vault_retire_generation_result_t (*retire_server_generation)(void *ctx, const char *principal,
+                                                                const char *agent, const char *cred,
+                                                                const char *expected_generation);
+   /* Optional atomic immutable-slot closure, including absence. No fallback. */
+   vault_retire_generation_result_t (*close_server_slot_once)(void *ctx, const char *principal,
+                                                              const char *agent, const char *cred,
+                                                              char *closed_generation,
+                                                              size_t generation_capacity);
 } vault_store_backend_t;
+
+/* Internal reentry guard only; not an authorization/capability API. */
+int vault_fenced_use_callback_active(void);
 
 /* ── Custody provider ─────────────────────────────────────────────────────────
  * The source of the SERVER KEK for dual-access credentials (WP-C.4) and the

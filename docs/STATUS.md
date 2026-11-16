@@ -1,21 +1,53 @@
 # Feature status
 
-This page describes the **1.0.0 release target**, inspected integration code, checked on
-2026-10-05. Published [0.4.6](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.6) predates
-some of these paths. PR status and release qualification are separate from implementation status. `Done` means the path is implemented and covered by
+This page describes the current tree, the release after published
+[1.0.2](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.2), checked on 2026-11-10.
+Published 1.0.2 predates some of these paths. PR status and release qualification are separate from implementation status. `Done` means the path is implemented and covered by
 its normal tests. `Gated` means it ships behind configuration or deployment requirements. `Next`
 means the contract or branch exists but is not part of the integrated path yet.
 
 Use [Server and KB](SERVER_AND_KB.md) for placement and deployment boundaries. The
 [Atlas review](reviews/agent-memory-atlas-2026-09-29.md) records remaining source-confirmed gaps.
 
-The published 0.4.6 release adds governed memory revisions, source checks at provider dispatch,
-reviewed corrections, erasure protection, and durable async run ownership. See the
-[release preparation](validation/release-0.4.6-preparation-2026-09-27.md) for completed checks
-and its point-in-time preparation gates. Optional adaptive policies are not promoted by this release;
-MR-07 remains observe-only, selection and utility-horizon policies remain disabled, and clean
-retry remains opt-in. Existing detached source spans still require a published snapshot, and
-workspace registration alone does not start a client runner.
+Memory is a separate implementation from this release on. The public tree keeps the generic
+memory SDK, the module transport and the host-side guarantees of a provider-bound request;
+records, retrieval and lifecycle belong to an implementation whose source is private and which
+ships in the application image as a vendored binary bundle, provisioned per deployment at first
+start ([Memory boundary](MEMORY.md)). Rows below marked `Installed implementation` describe
+behaviour that implementation provides; public CI tests the packaging, provisioning and host
+paths, not the implementation's internals. Existing 1.0.x memories are carried forward with the
+procedure in [Upgrading](UPGRADING.md#upgrade-from-102).
+
+## Browser chat integration (2026-10-20)
+
+The browser submits canonical IR turns and replays the Server-owned event log through one reducer.
+Primary loading, model switching and compaction use that durable source. Qualified Linux Codex
+and Claude schedulers use held native executables, closed environments and the existing workspace
+and supervised tool owners. The Server supplies original model context, tool calls and typed results;
+SDK conversation observations cannot replace them. Codex npm registrations resolve the matching
+native package without running the launcher script.
+
+Actual-SDK integration covers API-key and Vault OAuth forwarding, rotation,
+compaction, resume and seeded runs. The current continuation also passes actual
+Codex/Claude daemon-crash and interrupted-question recovery, source-bound unknown
+outcomes, one-use operator denial and replay without renewed effects or prompts.
+Session-selected models persist in owner-checked metadata across restarts.
+Private delegate histories now own canonical question/permission scopes; browser
+replies target the child session after replay readiness. The web transport rejects
+ambiguous reply frames before forwarding validated bytes unchanged.
+
+HTTP and host-owned native executors retain complete owned responses through
+selection and repair. Cache claims require durable terminal state and actual tree
+quiescence when the optional Linux containment boundary is configured. KB-free
+configured-test grading, delegate observations and source-checked next-run reuse
+are implemented and have actual-store integration coverage. Legacy import records
+exact/normalized fidelity, explicit refusal or a passive text archive, with large
+messages and retained sources handled in bounded chunks. Final exact-head CI
+qualification remains in progress in #3052.
+Production remains KB-free and unpromoted; live subscription and independently
+reviewed promotion are separate qualification gates. Existing macOS/Windows
+thin-client support does not imply native server execution on those platforms.
+See the [current handoff](IR_MIGRATION_HANDOFF.md).
 
 ## Runtime
 
@@ -28,20 +60,22 @@ workspace registration alone does not start a client runner.
 | Workflow triggers on the bus | Next | Go trigger scanning and HTTP fire exist; general bus trigger delivery is not integrated. |
 | Module replay | Next | Capture replay is observational; it does not re-execute modules. |
 | Source-module boundaries | Done for the canonical catalog | 34 module descriptors and 26 Go process identities are checked for ownership, placement and exported builds. Deeper C resource/domain migration remains work. |
-| Go workflow control plane | Done | Go WFE owns workflow lifecycle; Go domain/memory/PostgreSQL modules own their state and decisions. C remains the resource host and mechanical enforcement boundary. |
+| Go workflow control plane | Done | Go WFE owns workflow lifecycle; Go domain and PostgreSQL modules own their state and decisions. C remains the resource host and mechanical enforcement boundary. |
 | Versioned `/v1` operations | Done | Named routes replace the generic RPC endpoint. |
 
 ## Memory and code
 
 | Feature | State | Boundary |
 | --- | --- | --- |
-| Persistent typed memory | Done | Facts, rules, decisions, episodes, provenance, contradiction, and staleness. |
-| Server/KB placement | Done | Independent stores and immutable roles. Server owns personal memory and private code; KB owns the shared corpus. Both use Go memory and PostgreSQL modules. |
+| Shared memory on a KB | Done | Global and every project and workspace by default, or the exact list in `AIMEE_MEMORY_SHARED_SCOPES`; facts stored as written, no extraction pipeline. |
+| Memory boundary | Done | Generic memory SDK and module transport; implementation vendored as a binary bundle (`linux/amd64`), provisioned per deployment by `aimee-memory-init` and re-prepared on image update with stored memory kept. An instance without a provisioned installation reports `missing_module: memory` and is not ready. |
+| Persistent typed memory | Installed implementation | Facts, rules, decisions, episodes, provenance, contradiction, and staleness are the installed implementation's contract. |
+| Server/KB placement | Done | Independent stores and immutable roles. Server owns private code and the personal placement; KB owns the shared corpus and the shared placement. Both use the Go PostgreSQL module and select their own memory implementation. |
 | PostgreSQL deployment | Done | Separate PostgreSQL service per standard composition; ordinary persistent storage by default, LUKS opt-in. Both roles use the Go PostgreSQL provider; native KB algorithms use session transport. |
-| KB-free personal recall | Done | Ordinary recall defaults to Server; local semantic retrieval needs its embedding service. Missing personal records never fall back to KB. |
-| Current-memory eligibility | Done | Active, unsuppressed, currently valid rows; legacy lifecycle flags do not enable this filter. Historical inspection uses a separate contract. |
-| Memory reliability baseline | Done, qualified per recorded gates | Governed revisions, correction review UI, source revalidation, rejection identity, runtime-role refusal protection and erasure replay are implemented. Qualification evidence is scoped to the cited release and Atlas reports; optional adaptive policies remain gated. |
-| Replaceable memory / Cognee | Merged; deployed-tested | Generic Store contract, native default, Cognee 1.6.2 alternative; canonical guarantees stay in Aimee. Required real-provider CI is added. Not included in 0.4.6; 256-record scope bound and restart interruption apply. |
+| KB-free personal recall | Installed implementation | Ordinary recall defaults to Server; local semantic retrieval needs its embedding service. Missing personal records never fall back to KB. |
+| Current-memory eligibility | Installed implementation | Active, unsuppressed, currently valid rows; legacy lifecycle flags do not enable this filter. Historical inspection uses a separate contract. |
+| Memory reliability baseline | Installed implementation; host checks Done | Governed revisions, correction review UI, source revalidation, rejection identity, runtime-role refusal protection and erasure replay are implemented. Qualification evidence is scoped to the cited release and Atlas reports; optional adaptive policies remain gated. Revisions, corrections and erasure replay are the installed implementation's; source revalidation at provider dispatch, the byte budget, the send guard and provider receipts remain host checks. |
+| Replaceable memory | Done | The implementation is selected per role in the module manifest; the Cognee adapter and the built-in native engine were removed with the extraction. |
 | Native-memory model delivery | Integrated source; five-model 0.3.3 candidate prepared separately | Enrolled `/v1/native/primitive` selects personal source records. Separate vLLM plugin prepares model-native banks locally. Five dedicated adapters share one runtime and passed 7900 XTX native-memory smokes. The final candidate is unsigned; current testing passed 2,314 installed-runtime checks; signing and publication remain separate. See the [plugin guide](NATIVE_MEMORY_PLUGIN.md). |
 | Hybrid retrieval | Done | Lexical, dense, graph, evidence, synthesis, and abstention stages. |
 | Cross-repo code graph | Done | Symbols, calls, imports, dependencies, co-change, callers, and blast radius. |
@@ -91,7 +125,8 @@ workspace registration alone does not start a client runner.
 | WORM audit chain | Done | Hash chain, checkpoints, verification, seal, and evidence exports. |
 | External witness and anchor | Gated | Needed for evidence against a compromised host. |
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
-| Browser workspace | Done | Top session tabs open chat with a session-owned project and history. The left panel opens projects, agents, workflows, graph, logs, settings, and VS Code. |
+| Browser workspace | Done | Top session tabs open chat with a session-owned project and history. Chat forwards the authenticated actor and displays tool lifecycle activity, including direct primary models. The left panel opens projects, agents, workflows, graph, logs, settings, and VS Code. |
+| Canonical IR migration | In progress | Canonical primary/delegate history, persistent model selection, source-owned Linux native execution, durable interruption recovery and child browser replies are implemented. Legacy-import fidelity and final CI remain in progress; production promotion requires separate review. |
 | Managed container deploy | Done | Browser manages Server model containers through the mounted Docker socket. A KB is deployed and enrolled separately. |
 | Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test schema 45 against persisted erasure states in a disposable replay DB.
+"""Test schema 46 against persisted erasure states in a disposable replay DB.
 
 Requires initialized AIMEE_KB_STORE_REPLAY_URL. All fixture changes roll back.
 """
@@ -35,12 +35,9 @@ DO $$ DECLARE result RECORD; BEGIN
   UPDATE kb_subject_erasure_request SET state='db2_done' WHERE request_id='schema45-fixture-pending';
   RAISE EXCEPTION 'retired state accepted';
  EXCEPTION WHEN check_violation THEN NULL; END;
- SELECT * INTO result FROM kb_subject_erasure_begin('schema45-fixture-db2_done','schema45-subject','[]');
- IF NOT result.already_done OR result.deleted_memories<>7 OR result.deleted_documents<>3 THEN
-  RAISE EXCEPTION 'resumed erasure lost saved counts or replay status'; END IF;
- SELECT * INTO result FROM kb_subject_erasure_begin('schema45-fixture-completed','schema45-subject','[]');
- IF NOT result.already_done OR result.deleted_memories<>7 OR result.deleted_documents<>3 THEN
-  RAISE EXCEPTION 'completed erasure replay changed'; END IF;
+ IF to_regprocedure('kb_subject_erasure_begin(text,text,jsonb)') IS NOT NULL
+ OR to_regprocedure('kb_subject_erasure_ack(text,text,text,bigint)') IS NOT NULL THEN
+  RAISE EXCEPTION 'retired destructive routines survived upgrade'; END IF;
 END $$;
 ROLLBACK;
 """
@@ -56,7 +53,7 @@ def main():
                             input=migration_test_sql(), text=True, env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     print(('PASS' if result.returncode == 0 else 'FAIL') +
-          ' schema 45 migration, reapply, saved counts and erasure replay')
+          ' schema 46 migration, reapply, saved counts and retired routine removal')
     if result.returncode:
         print('PostgreSQL connection failed' if result.returncode == 2 else
               'PostgreSQL rejected the schema upgrade regression transaction')

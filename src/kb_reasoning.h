@@ -50,12 +50,6 @@ extern "C"
 
    void kb_reasoning_result_free(kb_reasoning_result_t *r);
 
-   /* Write a case artifact (kind="case", state="proposed").
-    * payload_json: full case payload (trigger_features, outcome, ...).
-    * id_out:       receives UUID on success; may be NULL.
-    * Returns 0 on success, -1 on error. */
-   int kb_reasoning_case_write(const char *payload_json, char *id_out, int id_out_len);
-
    /* Structural contradiction check for a proposed contradicts link.
     * Returns 1 if the Datalog check passes, 0 if it fails, -1 if disabled/error. */
    int kb_reasoning_contradiction_check(const char *artifact_a_id, const char *artifact_b_id);

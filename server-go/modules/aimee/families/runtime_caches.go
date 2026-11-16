@@ -27,7 +27,7 @@ const (
 	contextCachePutSQL = `INSERT INTO context_cache (hash, output, created_at)
 	                      VALUES ($1, $2, now())
 	                      ON CONFLICT (hash) DO UPDATE SET
-	                          output = EXCLUDED.output, created_at = now()`
+	                          output = EXCLUDED.output, created_at = now(), revision = context_cache.revision + 1`
 
 	contextCacheInvalidateSQL = `DELETE FROM context_cache`
 

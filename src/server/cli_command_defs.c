@@ -21,18 +21,6 @@
 
 #include <stddef.h>
 
-typedef struct
-{
-   const char *name;
-   const char *help;
-   aimee_cmd_tier_t tier;
-   /* Listed only under `aimee help --all`. Not secrecy: these are commands whose
-    * audience is narrow enough that showing them by default costs every other
-    * reader attention. */
-   int hidden_default;
-   const char *subcommands;
-} cli_command_def_t;
-
 static const cli_command_def_t g_cli_commands[] = {
 /* Rows live in cli_command_defs_data.h to keep this TU under the source
  * line-count limit (same pattern as agent_help_data.h). */

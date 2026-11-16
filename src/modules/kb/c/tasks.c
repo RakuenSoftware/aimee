@@ -256,48 +256,24 @@ int kb_store_task_get_edges(int64_t task_id, task_edge_t *out, int max)
    return count;
 }
 
-int kb_store_task_get_subtasks(int64_t parent_id, aimee_task_t *out, int max)
+int kb_store_task_children(int64_t parent_id, aimee_task_t *out, int max)
 {
    void *conn = kb_store_conn();
-   if (!conn || !out)
-      return 0;
-
+   if (!conn || !out || max <= 0)
+      return -1;
    char err[TASK_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
                                           "SELECT id, parent_id, title, state, confidence, "
                                           "session_id, created_at, updated_at FROM tasks "
-                                          "WHERE parent_id = ?1 ORDER BY created_at ASC",
+                                          "WHERE parent_id = ?1 ORDER BY id LIMIT ?2",
                                           err, sizeof(err));
    if (!st)
-      return 0;
+      return -1;
    aimee_pg_bind_int64(st, "?1", parent_id);
-
-   int count = 0;
-   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW && count < max)
-      row_to_task(st, &out[count++]);
+   aimee_pg_bind_int(st, "?2", max);
+   int n = 0, rc = AIMEE_PG_DONE;
+   while (n < max && (rc = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
+      row_to_task(st, &out[n++]);
    aimee_pg_finalize(st);
-   return count;
-}
-
-int64_t kb_store_task_get_active(const char *session_id)
-{
-   void *conn = kb_store_conn();
-   if (!conn || !session_id)
-      return 0;
-
-   char err[TASK_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "SELECT id FROM tasks WHERE state = 'in_progress' AND session_id = ?1 "
-                        "ORDER BY updated_at DESC LIMIT 1",
-                        err, sizeof(err));
-   if (!st)
-      return 0;
-   aimee_pg_bind_text(st, "?1", session_id);
-
-   int64_t result = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      result = aimee_pg_column_int64(st, 0);
-   aimee_pg_finalize(st);
-   return result;
+   return rc == AIMEE_PG_ERR ? -1 : n;
 }

@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Did a write delegate that reported success actually change anything?
@@ -34,25 +34,25 @@ const (
 		noopFlagHeadSnapshot | noopFlagHasWorktree
 )
 
-func handleNoopWrite(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleNoopWrite(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != noopWriteReqLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != noopWriteRequestMagic ||
 		request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	flags := binary.LittleEndian.Uint32(request[8:12])
 	if flags&^noopFlagsKnown != 0 {
 		// An unknown flag means the caller believes it is sending something
 		// this module does not read, and a judgement made on a partial view of
 		// the evidence is worse than none.
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	namedCount := int(int32(binary.LittleEndian.Uint32(request[12:16])))
 	if namedCount < 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	verdict := JudgeNoopWrite(NoopWriteEvidence{
@@ -75,5 +75,5 @@ func handleNoopWrite(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 	putBool(response[4:8], verdict.Noop)
 	putBool(response[8:12], verdict.Benign)
 	response = append(response, verdict.Message...)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

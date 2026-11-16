@@ -184,8 +184,16 @@ def main() -> int:
             "--xml-version=2",
             "-Iheaders",
             "-Ivendor/headers",
-            *sources,
         ]
+        # A persistent analyzer build directory lets cppcheck reuse its result
+        # for any file whose content and configuration are unchanged, and
+        # replay those findings into the report. The verdict is identical; CI
+        # restores the directory per shard from the previous run.
+        build_dir = os.environ.get("CPPCHECK_BUILD_DIR")
+        if build_dir:
+            Path(build_dir).mkdir(parents=True, exist_ok=True)
+            command.append(f"--cppcheck-build-dir={build_dir}")
+        command.extend(sources)
         completed = subprocess.run(command, stderr=report, check=False)
         if completed.returncode != 0:
             print(f"cppcheck-ratchet: analyzer exited {completed.returncode}", file=sys.stderr)

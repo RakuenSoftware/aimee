@@ -10,7 +10,7 @@ Claude Code sub-agents (the `Agent`/`Task` tool) are **banned** in this repo; us
 **aimee delegates** instead (`aimee delegate <role> …`, `aimee delegate roundtable …`).
 
 Why the script is needed: aimee's own sub-agent ban lives in the runtime gateway
-(`src/modules/gateway/gateway_policy.c` → `gateway_policy_strip_tools` → `is_subagent_tool_name`,
+(`src/modules/gateway/gateway_policy.c` → `gateway_policy_apply_ir` → `is_subagent_tool_name`,
 canonicalizing `Task`/`Agent`/`spawn_agent` → `"Subagent"`). That only strips tools
 flowing **through aimee's `/v1` gateway** to model providers, so it governs *aimee's
 own* agents. It never sees Claude Code's harness-level `Agent`/`Task` tool. This

@@ -53,7 +53,7 @@ func TestGatewayFoldKeepsAnthropicToolPairsIntact(t *testing.T) {
 	// Every surviving tool_result must still have its tool_use ahead of it.
 	open := map[string]bool{}
 	for i := 0; i < out.Messages.Len(); i++ {
-		content := out.Messages.At(i).Get("content")
+		content := out.Messages.At(i).Get("blocks")
 		if !content.IsArray() {
 			continue
 		}
@@ -61,11 +61,11 @@ func TestGatewayFoldKeepsAnthropicToolPairsIntact(t *testing.T) {
 			b := content.At(j)
 			switch b.GetString("type") {
 			case "tool_use":
-				open[b.GetString("id")] = true
+				open[b.GetString("tool_id")] = true
 			case "tool_result":
-				if !open[b.GetString("tool_use_id")] {
+				if !open[b.GetString("tool_id")] {
 					t.Fatalf("orphaned tool_result %q survived the fold",
-						b.GetString("tool_use_id"))
+						b.GetString("tool_id"))
 				}
 			}
 		}

@@ -1,4 +1,4 @@
-/* mcp_tools_gateway.c: MCP tool registrations for the ambient-presence gateway. */
+/* mcp_tools_gateway.c: MCP registration for ask_user, the interaction tool. */
 #include "mcp_tools_gateway.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
 #include <cJSON.h>
@@ -6,32 +6,7 @@
 
 void mcp_add_gateway_tools(cJSON *tools)
 {
-   /* send_message: send text to a delivery target without waiting for a reply */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *tgt = cJSON_AddObjectToObject(p, "target");
-      cJSON_AddStringToObject(tgt, "type", "string");
-      cJSON_AddStringToObject(tgt, "description", "Delivery target spec or 'origin'");
-      cJSON *txt = cJSON_AddObjectToObject(p, "text");
-      cJSON_AddStringToObject(txt, "type", "string");
-      cJSON_AddStringToObject(txt, "description", "Message text to send");
-      cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("target"));
-      cJSON_AddItemToArray(req, cJSON_CreateString("text"));
-      cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(
-          tools,
-          mcp_tool_new(
-              "send_message",
-              "Send a text message to a delivery target (telegram:<chat_id>, ntfy:<topic>, "
-              "webhook:<url>, or origin) without waiting for a reply. Use to deliver findings "
-              "to an unattended operator.",
-              s));
-   }
-
-   /* ask_user: present a question to the operator on the originating channel */
+   /* ask_user: format a question for the requesting client to present. */
    {
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
@@ -51,12 +26,13 @@ void mcp_add_gateway_tools(cJSON *tools)
       cJSON_AddItemToArray(req, cJSON_CreateString("question"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, mcp_tool_new(
-                     "ask_user",
-                     "Present a question to the operator on the originating messaging channel. "
-                     "Formats up to 4 numbered choices; an implicit 'Other (type your answer)' is "
-                     "always appended. The agent's turn ends after delivery; the operator's next "
-                     "message on that channel is the answer.",
-                     s));
+          tools,
+          mcp_tool_new(
+              "ask_user",
+              "Format a question for the requesting client to display or present to its user. "
+              "Formats up to 4 numbered choices with an implicit 'Other (type your answer)'. "
+              "With no choices, formats an open-ended question. This tool does not contact "
+              "a messaging channel or end the agent's turn.",
+              s));
    }
 }

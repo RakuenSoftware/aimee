@@ -175,8 +175,4 @@ typedef struct
    int line;
 } code_search_hit_t;
 
-/* Lexical search across indexed code. Returns count of results. Ranking and
- * snippet extraction stay behind the code-index implementation. */
-int index_code_search(const char *query, const char *project, code_search_hit_t *out, int max);
-
 #endif /* DEC_INDEX_H */

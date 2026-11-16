@@ -45,32 +45,7 @@ int kb_store_entity_node_key_symbol(const char *project, const char *name, char 
 int kb_store_entity_node_key_concept(const char *token, char *out, size_t cap);
 int kb_store_entity_node_key_project(const char *name, char *out, size_t cap);
 
-/* Upsert an entity_nodes row. Returns 0 on success, -1 on DB error. */
-int kb_store_entity_node_upsert(const char *node_key, int node_kind, const char *project,
-                                const char *display_name, const char *full_key,
-                                const char *file_path, const char *symbol, const char *node_origin,
-                                int64_t generation_id);
-
 /* Look up a node by key. Returns 0 on success, -1 if not found or error. */
 int kb_store_entity_node_get(const char *node_key, kb_store_entity_node_t *out);
-
-/* Upsert an alias row. Returns 0 on success, -1 on error. */
-int kb_store_entity_node_alias_upsert(const char *alias, const char *node_key,
-                                      const char *alias_kind, const char *project,
-                                      int64_t generation_id);
-
-/* Project-scoped alias resolution. Writes up to max canonical node_keys
- * for the given alias within the project. Returns count. */
-int kb_store_entity_node_resolve_alias(const char *alias, const char *project,
-                                       char (*out_keys)[GRAPH_ENDPOINT_MAX], int max);
-
-/* Stale cleanup: delete entity_nodes with node_origin='code_projection' and
- * last_seen_generation_id < min_generation_id. Returns deleted count. */
-int kb_store_entity_node_cleanup_stale_code(int64_t min_generation_id);
-
-/* Stale cleanup: delete entity_node_aliases with last_seen_generation_id <
- * min_generation_id for the given project (or all projects if NULL).
- * Returns deleted count. */
-int kb_store_entity_node_alias_cleanup_stale(const char *project, int64_t min_generation_id);
 
 #endif /* ENTITY_NODES_H */

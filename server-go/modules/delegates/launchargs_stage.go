@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Asking the module for the command that creates a delegate's container.
@@ -126,13 +126,13 @@ func decodeLaunchArgsRequest(request []byte) (launchArgsRequest, bool) {
 // The caller must therefore send the SAME flag it sent to stage 11. It is the
 // one fact that has to agree across the two calls, which is why it is a single
 // composed boolean rather than a set of inputs each side re-combines.
-func handleLaunchArgs(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleLaunchArgs(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	req, ok := decodeLaunchArgsRequest(request)
 	if !ok {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	plan := WorktreePlan{Isolated: true, ReadOnlyMount: !req.WritesAllowed}
@@ -140,21 +140,21 @@ func handleLaunchArgs(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 		req.IsGitCheckout, req.ParentSocketHost, req.ParentSocketTarget, req.EgressProxy)
 	sandboxReq.RunAsUser = req.RunAsUser
 	if req.ScratchDir != "" || req.ScratchTarget != "" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	spec, err := BuildSandboxSpec(sandboxReq)
 	if err != nil {
 		// A spec this module refuses to build is not a request to answer
 		// partially. The caller gets nothing to run.
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	// The name is computed HERE, from the spec that is about to be rendered, so
 	// it cannot describe a different set of mounts than the ones created.
 	name, err := ContainerName(req.TaskID, spec, req.MountTable)
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	args, err := DockerCreateArgs(DockerCreateRequest{
@@ -166,7 +166,7 @@ func handleLaunchArgs(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 		Command:       req.Command,
 	})
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	total := 12 + len(name)
@@ -189,5 +189,5 @@ func handleLaunchArgs(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 		response = append(response, n[:]...)
 		response = append(response, a...)
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

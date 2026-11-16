@@ -175,41 +175,6 @@ int kb_store_server_registry_client_match(const char *id, int64_t team, const ch
    return rc;
 }
 
-int kb_store_server_registry_get(int64_t team, const char *id, kb_store_server_row_t *r)
-{
-   if (kb_store_tenant_require_pg() != 0 || !id || !r)
-      return -1;
-   void *c = kb_store_conn();
-   if (!c)
-      return -1;
-   char e[256];
-   aimee_pg_stmt_t *s = aimee_pg_prepare(
-       c,
-       "SELECT server_id,cert_cn,mgmt_cert_cn,endpoint,status,health,version,team_id FROM "
-       "kb_server_registry_list(?1) WHERE server_id=?2",
-       e, sizeof(e));
-   if (!s)
-      return -1;
-   aimee_pg_bind_int64(s, "?1", team);
-   aimee_pg_bind_text(s, "?2", id);
-   int rc = -1;
-   if (aimee_pg_step(s, e, sizeof(e)) == AIMEE_PG_ROW)
-   {
-      memset(r, 0, sizeof(*r));
-      cp(r->server_id, sizeof(r->server_id), aimee_pg_column_text(s, 0));
-      cp(r->cert_cn, sizeof(r->cert_cn), aimee_pg_column_text(s, 1));
-      cp(r->mgmt_cert_cn, sizeof(r->mgmt_cert_cn), aimee_pg_column_text(s, 2));
-      cp(r->endpoint, sizeof(r->endpoint), aimee_pg_column_text(s, 3));
-      cp(r->status, sizeof(r->status), aimee_pg_column_text(s, 4));
-      cp(r->health, sizeof(r->health), aimee_pg_column_text(s, 5));
-      cp(r->version, sizeof(r->version), aimee_pg_column_text(s, 6));
-      r->team_id = aimee_pg_column_int64(s, 7);
-      rc = 0;
-   }
-   aimee_pg_finalize(s);
-   return rc;
-}
-
 int kb_store_server_registry_snapshot(int64_t team, const char *id, kb_store_server_snapshot_t *r)
 {
    if (kb_store_tenant_require_pg() != 0 || !id || !r)
@@ -246,46 +211,6 @@ int kb_store_server_registry_snapshot(int64_t team, const char *id, kb_store_ser
    }
    else if (step == AIMEE_PG_DONE)
       rc = 1;
-   aimee_pg_finalize(s);
-   return rc;
-}
-
-int kb_store_management_status_lookup(const char *issuer, const char *serial,
-                                      const char *fingerprint, const char *target,
-                                      const char *purpose, int64_t *generation,
-                                      char *target_fingerprint, size_t target_fingerprint_len)
-{
-   if (kb_store_tenant_require_pg() != 0 || !issuer || !serial || !fingerprint || !target ||
-       !purpose || !generation || !target_fingerprint || target_fingerprint_len < 65)
-      return -1;
-   void *c = kb_store_conn();
-   if (!c)
-      return -1;
-   char e[256];
-   aimee_pg_stmt_t *s =
-       aimee_pg_prepare(c,
-                        "SELECT revocation_generation,target_mgmt_fingerprint FROM "
-                        "kb_management_status_lookup(?1,?2,?3,?4,?5)",
-                        e, sizeof(e));
-   if (!s)
-      return -1;
-   aimee_pg_bind_text(s, "?1", issuer);
-   aimee_pg_bind_text(s, "?2", serial);
-   aimee_pg_bind_text(s, "?3", fingerprint);
-   aimee_pg_bind_text(s, "?4", target);
-   aimee_pg_bind_text(s, "?5", purpose);
-   int rc = -1;
-   if (aimee_pg_step(s, e, sizeof(e)) == AIMEE_PG_ROW)
-   {
-      int64_t g = aimee_pg_column_int64(s, 0);
-      const char *fp = aimee_pg_column_text(s, 1);
-      if (g >= 1 && fp && strlen(fp) == 64)
-      {
-         *generation = g;
-         cp(target_fingerprint, target_fingerprint_len, fp);
-         rc = 0;
-      }
-   }
    aimee_pg_finalize(s);
    return rc;
 }

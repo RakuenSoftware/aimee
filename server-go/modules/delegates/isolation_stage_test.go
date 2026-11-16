@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func isolationRequest(report string, probeFailed bool) []byte {
@@ -20,13 +20,13 @@ func isolationRequest(report string, probeFailed bool) []byte {
 
 func TestIsolationStageIsUnconditionallyFailClosed(t *testing.T) {
 	for _, request := range [][]byte{isolationRequest("bridge=172.17.0.2;", false), isolationRequest("", true)} {
-		response, status := Handle(bus.ModuleInvocation{StageID: StageIsolation}, request)
-		if status != bus.ModuleStatusOK || len(response) < 16 || binary.LittleEndian.Uint32(response[4:8]) != 1 {
+		response, status := Handle(ring.ModuleInvocation{StageID: StageIsolation}, request)
+		if status != ring.ModuleStatusOK || len(response) < 16 || binary.LittleEndian.Uint32(response[4:8]) != 1 {
 			t.Fatalf("unverified isolation did not refuse: status=%v response=%x", status, response)
 		}
 	}
-	response, status := Handle(bus.ModuleInvocation{StageID: StageIsolation}, isolationRequest("none=;", false))
-	if status != bus.ModuleStatusOK || binary.LittleEndian.Uint32(response[4:8]) != 0 {
+	response, status := Handle(ring.ModuleInvocation{StageID: StageIsolation}, isolationRequest("none=;", false))
+	if status != ring.ModuleStatusOK || binary.LittleEndian.Uint32(response[4:8]) != 0 {
 		t.Fatalf("confirmed isolation refused: status=%v response=%x", status, response)
 	}
 }

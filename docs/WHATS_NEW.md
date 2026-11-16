@@ -1,5 +1,104 @@
 # What's new
 
+## After 1.0.2: memory leaves the application image
+
+This is the largest change since [1.0.2](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.2).
+Read [Upgrading](UPGRADING.md#upgrade-from-102) before starting this release on an existing
+deployment.
+
+- **Memory is a new, separate implementation that ships in the image.** The built-in Go memory
+  owner, the Cognee adapter and their evaluation tools were removed from the public tree. Memory
+  is now served by the aims-db database and its Aimee memory module, vendored as a binary bundle
+  and provisioned for each deployment at first start by the one-shot `aimee-memory-init` service.
+  After an image update the installation is prepared again and the stored memory is kept. Aimee
+  keeps the generic memory SDK, the module transport and the host-side guarantees of a
+  provider-bound request. The bundle exists for `linux/amd64`. A KB serves global and every
+  project and workspace by default; `AIMEE_MEMORY_SHARED_SCOPES` can restrict it. See [Memory boundary](MEMORY.md) and
+  [Deployment](DEPLOYMENT.md#memory).
+- **Existing memories are kept and can be carried forward.** The 1.0.x memory tables are retained
+  by the upgrade. `scripts/upgrade/migrate-memory.py` exports the active records read-only and
+  imports them through the public store command, idempotently, for both
+  a Server's personal memory and a KB's shared memory.
+- **Every module process is Go.** The C module processes were retired and C that no shipped binary
+  reaches was removed. The C resource hosts, the CLI and the bus embedding remain.
+- **The event bus is consumed by contract.** The ouroboros ring lives in its own repository and
+  is pinned in `dependencies/ouroboros-ring.json`; the in-tree core copy is gone.
+- **Idle instances do no polling.** Ring events leave the host as they are stamped.
+- **Session cache with compare-and-set receipts.** A per-session cache in the Server store lets
+  a host component commit a value against an expected revision and read back the receipt.
+- **Owner calls are bounded by the receipt deadline.** Ingress pre-injection passes the remaining
+  deadline, at most 500 ms, to each memory-owner call instead of a fixed timeout.
+- **Oversized requests are always `request_budget_exceeded`.** When a memory implementation has
+  already refused an oversized input, the wire fence still evaluates the deployment and caller
+  byte budget and reports a definite overflow as HTTP 413, so every implementation classifies the
+  same input the same way. Nothing is sent in either case.
+- **One `[DONE]` on streamed chat completions.** `/v1/chat/completions` with `stream: true`
+  ended with two `data: [DONE]` events; it now ends with one.
+  Import also protects retained legacy SQL payloads and the export snapshot with authenticated
+  Vault references, preserving rows, revisions and lifecycle state. See the upgrade guide for
+  the host-side `--psql` and container-side API transport commands.
+
+## Browser chat uses the canonical IR session log
+
+The existing web GUI now renders canonical model messages, thinking, tool arguments and results
+from an ordered Server-owned log. Live delivery and replay use the same reducer; reconnecting
+from another machine replays committed events, and closing a tab does not cancel the running turn.
+The web backend forwards canonical bytes without rebuilding model events.
+Direct primary sessions now retain canonical history across model changes and reload it from
+owner-checked checkpoints in that same log. Provider transcripts are imported only for legacy
+sessions. Compaction checkpoints preserve the executed history without replacing the original
+observation events. Transcript reads no longer have a separate 1 MiB buffer ceiling.
+Untouched native Anthropic requests preserve client cache breakpoints and TTLs; typed edits
+force rebuilding instead of replaying stale content.
+
+Qualified Linux Codex and Claude primary/delegate turns now use the Server-owned canonical
+execution path. The SDK receives an opaque scheduler trigger and a local capability in a private
+launch home. The Server retains Vault credentials, supplies complete original model context and
+executes original tool calls through the supervised registry. Original typed responses supply
+streaming, durable history and final results. SDK-normalized arguments cannot become effect input.
+Native compaction uses the canonical session owner; asynchronous seeded runs preserve full context,
+workspace scope and cumulative usage. Codex npm commands resolve their matching held native binary.
+
+Twenty actual-SDK journeys pass locally across API-key and Vault OAuth paths, including credential
+rotation, tool execution, compaction, replay, resume and seeded execution. Browser operators reply
+through authenticated, session/turn-bound control requests; actual root-UDS operator question,
+replay and reconnect journeys pass in the published qualification checkpoint. Session-selected models now survive daemon restarts. Actual Codex/Claude crash and
+interrupted-question journeys verify source-bound unknown outcomes, explicit new-action permission,
+denial suppression and replay without repeated effects. Delegates own private canonical controls;
+expanded browser transcripts send replies to the exact child. Strict web reply validation preserves
+original JSON bytes. KB-free configured-test grading and source-bound delegate observations/reuse
+are implemented with actual-store coverage. Legacy import records exact/normalized fidelity,
+explicit refusal or a passive archive; large messages and retained sources use bounded chunks.
+Final exact-head CI, live subscription acceptance and reviewed production promotion remain
+pending. No KB service is enabled for production `.100`.
+
+CLI index discovery now registers a missing canonical repository through the existing bounded
+client ingest path before querying it. Main checkouts and linked worktrees retain the caller's
+project scope; an unavailable registry does not trigger an upload.
+
+## Canonical result ownership and workspace probes
+
+Internal HTTP and host-owned native execution retain complete canonical output, including signed
+reasoning, tool identities, usage and opaque adapter sidecars. Selection and repair transfer that
+owned output; display annotations preserve the original observation. Optional pure-text result
+reuse now stores canonical snapshots under the exact admitted request and authenticated owner.
+Credential-backed calls and captured user turns execute through their existing owners.
+
+Native hooks preserve their enclosing workspace lease and use the approved server resource for
+memory interception and filesystem policy probes. Verification requires an explicit clean-tree
+reply; a missing module or malformed state cannot reuse an earlier successful check. Windows and
+macOS thin-client checks now run for executable changes targeting testing as well as main.
+
+Process completion no longer manufactures a KB `fixes` relationship. Independent local task grades
+and next-run learning reuse remain unfinished; these changes do not claim a completed migration.
+
+## Browser chat repairs
+
+Browser chat now forwards the authenticated actor to Runtime and displays tool lifecycle events.
+Direct primary model sessions emit the same activity as the existing agent path. Credentials remain
+in the environment Vault; tool lifecycle events carry tool names rather than credential material.
+Hook installation also preserves separate MCP and hook files when existing configurations are large.
+
 ## 1.0.1 release in preparation
 
 The next application release is **1.0.1**, following published

@@ -2,6 +2,9 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import tempfile
+import os
+from unittest.mock import Mock
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,9 +19,30 @@ class Stack:
         self.starts = 0
         self.downs = 0
         self.defect = defect
+        self.postgres = 'fixture-postgres'
+        self.schema_version = '47'
+        self.retired = False
 
     def start(self):
         self.starts += 1
+        if self.starts > 1 and self.defect != 'stale-schema':
+            self.schema_version = '47'
+            if self.defect != 'retired-routines':
+                self.retired = False
+
+    def sql(self, *args, data):
+        assert args[:4] == ('docker', 'exec', '-i', self.postgres)
+        if data.startswith("UPDATE kb_meta SET value='45'"):
+            self.schema_version = '45'
+            self.retired = True
+            return ''
+        if data.startswith('SELECT bool_and(to_regprocedure(signature) IS NOT NULL)'):
+            return 't' if self.retired else 'f'
+        if data.startswith('SELECT bool_and(to_regprocedure(signature) IS NULL)'):
+            return 'f' if self.retired else 't'
+        if data == "SELECT value FROM kb_meta WHERE key='schema_version'":
+            return self.schema_version
+        raise AssertionError('unexpected fixture SQL')
 
     def compose(self, action):
         assert action == 'down'
@@ -39,17 +63,43 @@ class Stack:
 
 
 class KBRecreationTests(unittest.TestCase):
+    def test_cli_passes_only_explicit_reference_to_stack(self):
+        for selected in (None, '/external/aimee-module-memory'):
+            with self.subTest(selected=selected), tempfile.TemporaryDirectory() as directory:
+                arguments = ['kb-upgrade-e2e.py', '--output', directory]
+                if selected:
+                    arguments += ['--reference-memory-owner', selected]
+                stack = Mock()
+                def exercise(candidate, check):
+                    self.assertIs(candidate, stack)
+                    check('fixture ready', True)
+                with patch('sys.argv', arguments), patch.object(gate.os, 'geteuid', return_value=0), \
+                     patch.dict(os.environ, dict(AIMEE_APPLICATION_IMAGE='app',
+                                AIMEE_POSTGRES_IMAGE='pg', AIMEE_EMBEDDER_IMAGE='embed')), \
+                     patch.object(gate.matrix, 'Stack', return_value=stack) as factory, \
+                     patch.object(gate, 'exercise', side_effect=exercise):
+                    self.assertEqual(gate.main(), 0)
+                self.assertEqual(factory.call_args.args[3], Path(selected) if selected else None)
+                stack.compose.assert_called_once_with('down', '--volumes', '--remove-orphans')
+
     def run_gate(self, stack):
         def check(name, passed):
             if not passed:
                 raise AssertionError(name)
-        with patch.object(gate.matrix, 'application_metadata_is_private', return_value=True):
+        with patch.object(gate.matrix, 'application_metadata_is_private', return_value=True), \
+             patch.object(gate.matrix, 'command', side_effect=stack.sql):
             gate.exercise(stack, check)
 
     def test_current_store_survives_two_recreations(self):
         stack = Stack()
         self.run_gate(stack)
         self.assertEqual((stack.starts, stack.downs, len(stack.records)), (3, 2, 4))
+
+    def test_missing_schema_migration_fails_the_gate(self):
+        for defect, message in (('stale-schema', 'applies schema 47'),
+                                ('retired-routines', 'removes every retired SQL routine')):
+            with self.subTest(defect=defect), self.assertRaisesRegex(AssertionError, message):
+                self.run_gate(Stack(defect))
 
     def test_data_or_authority_loss_fails_the_gate(self):
         for defect in ('lost-content', 'authority'):

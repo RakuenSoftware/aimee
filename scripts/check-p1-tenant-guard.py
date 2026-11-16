@@ -16,7 +16,6 @@ MODULES = [
     "src/modules/kb/c/team.c",
     "src/modules/kb/c/project.c",
     "src/modules/kb/c/membership.c",
-    "src/modules/kb/c/admin_grant.c",
     "src/modules/kb/c/oidc_jwks.c",
 ]
 

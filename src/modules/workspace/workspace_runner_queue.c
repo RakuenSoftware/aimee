@@ -17,25 +17,6 @@
 /* Same bound as a submit: the caller is waiting on real work. */
 #define WS_RUNNER_OP_MS 600000ULL
 
-void ws_runner_queue_init(ws_runner_queue_t *q)
-{
-   if (q)
-      q->id[0] = '\0';
-}
-
-void ws_runner_queue_destroy(ws_runner_queue_t *q)
-{
-   (void)q; /* nothing is owned here any more */
-}
-
-void ws_runner_queue_close(ws_runner_queue_t *q)
-{
-   /* Waking blocked waiters was this file's job when the waiting happened here.
-    * It happens in the module now, and unregistering the tree is what releases
-    * anyone parked on it. */
-   (void)q;
-}
-
 /* Send `request` and return the module's answer. Consumes `request` either way,
  * per ws_detached_transport_fn. */
 static int queue_send(ws_runner_queue_t *q, unsigned op, cJSON *request, char **out,
@@ -124,22 +105,4 @@ int ws_runner_queue_transport_stream(void *ctx, cJSON *request, ws_runner_partia
                        WS_RUNNER_OP_MS) != 0)
          return -1;
    }
-}
-
-cJSON *ws_runner_queue_poll(ws_runner_queue_t *q, int timeout_ms)
-{
-   /* This wrapper has no way to report "unserved" to its caller, so it does not
-    * pretend to: the distinction is made and acted on at the two poll endpoints
-    * that own a retry loop. */
-   return q ? ws_runner_registry_poll(q->id, timeout_ms, NULL) : NULL;
-}
-
-int ws_runner_queue_respond(ws_runner_queue_t *q, cJSON *response)
-{
-   if (!q)
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   return ws_runner_registry_respond(q->id, response);
 }

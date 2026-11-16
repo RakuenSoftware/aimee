@@ -614,20 +614,32 @@ int webuser_editor_reap_idle(long idle_secs)
 
 void webuser_editor_reap_tick(void)
 {
-   /* Called once per ~1s server park-loop tick; reaps idle editors on a coarse
-    * ~30s cadence (single-threaded caller, so the static counter needs no lock).
-    * The idle bound is read once and cached. A live editor's idle timer is kept
-    * warm by webchat's periodic ensure / WebSocket keepalive, so only genuinely
-    * idle editors are reaped. */
+   /* Called from the server park loop, which wakes for it only while editors
+    * are running; reaps idle editors at most every ~30s (single-threaded
+    * caller, so the statics need no lock). The idle bound is read once and
+    * cached. A live editor's idle timer is kept warm by webchat's periodic
+    * ensure / WebSocket keepalive, so only genuinely idle editors are reaped. */
    static long idle = -1;
-   static int tick = 0;
+   static time_t last = 0;
    if (idle < 0)
       idle = webuser_editor_idle_secs();
-   if (idle > 0 && ++tick >= 30)
+   time_t now = time(NULL);
+   if (idle > 0 && now - last >= WEBUSER_EDITOR_REAP_EVERY_SECS)
    {
-      tick = 0;
+      last = now;
       webuser_editor_reap_idle(idle);
    }
+}
+
+int webuser_editor_running(void)
+{
+   int n = 0;
+   pthread_mutex_lock(&g_lock);
+   for (int i = 0; i < WEBUSER_EDITOR_MAX; i++)
+      if (g_editors[i].pid > 0)
+         n++;
+   pthread_mutex_unlock(&g_lock);
+   return n;
 }
 
 long webuser_editor_idle_secs(void)

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -36,52 +36,52 @@ func auxResponse(magic uint32, result uint16, payload []byte) []byte {
 	return out
 }
 
-func handleJSONCompact(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleJSONCompact(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) > JSONMaxInput {
-		return auxResponse(compactMagic, uint16(JSONTooLarge), nil), bus.ModuleStatusOK
+		return auxResponse(compactMagic, uint16(JSONTooLarge), nil), ring.ModuleStatusOK
 	}
 	out, result := JSONCompact(request)
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
-	return auxResponse(compactMagic, uint16(result), out), bus.ModuleStatusOK
+	return auxResponse(compactMagic, uint16(result), out), ring.ModuleStatusOK
 }
 
 // Tool-recall requests are binary so paths and recalled output remain byte
 // preserving. Layout: magic, version, reserved, dir length, ref length, bytes.
-func handleToolRecall(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleToolRecall(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < recallRequestLen || binary.LittleEndian.Uint32(request[0:4]) != recallMagic ||
 		binary.LittleEndian.Uint16(request[4:6]) != auxWireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	dirLen := int(binary.LittleEndian.Uint32(request[8:12]))
 	refLen := int(binary.LittleEndian.Uint32(request[12:16]))
 	if dirLen <= 0 || dirLen > maxSpillDirLen || refLen <= 0 || refLen > maxSpillRefLen ||
 		dirLen > len(request)-recallRequestLen || refLen != len(request)-recallRequestLen-dirLen {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	dir := string(request[recallRequestLen : recallRequestLen+dirLen])
 	ref := string(request[recallRequestLen+dirLen:])
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir || strings.IndexByte(dir, 0) >= 0 ||
 		strings.IndexByte(ref, 0) >= 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if !TCRefValid(ref) {
-		return auxResponse(recallMagic, recallInvalidRef, nil), bus.ModuleStatusOK
+		return auxResponse(recallMagic, recallInvalidRef, nil), ring.ModuleStatusOK
 	}
 	out, err := TCRecall(dir, ref)
 	if err != nil {
-		return auxResponse(recallMagic, recallExpired, nil), bus.ModuleStatusOK
+		return auxResponse(recallMagic, recallExpired, nil), ring.ModuleStatusOK
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
-	return auxResponse(recallMagic, recallOK, []byte(out)), bus.ModuleStatusOK
+	return auxResponse(recallMagic, recallOK, []byte(out)), ring.ModuleStatusOK
 }
 
-func handleToolStats(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleToolStats(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	totals := TCStatsSnapshot()
 	values := [...]int64{
@@ -95,7 +95,7 @@ func handleToolStats(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 		binary.LittleEndian.PutUint64(out[8+i*8:16+i*8], uint64(value))
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
-	return out, bus.ModuleStatusOK
+	return out, ring.ModuleStatusOK
 }

@@ -17,6 +17,7 @@ KNOWN_GAPS is empty and should stay that way: the seven original violations
 authoritative sources rather than guessed. Adding a name here is a regression —
 write the help entry instead.
 """
+import ast
 import re
 import sys
 from pathlib import Path
@@ -29,6 +30,22 @@ HELP = ROOT / "src" / "server" / "cli_command_defs_data.h"
 
 # Routed commands that still lack a client_help[] entry. Shrink this, never grow it.
 KNOWN_GAPS: set[str] = set()
+
+
+def missing_memory_delete_help(routes: str, help_text: str) -> bool:
+    """The retirement verb must be discoverable in served help.
+
+    Family-level coverage alone missed a working memory.delete route. Check
+    the memory row itself, rather than accepting a mention in another family.
+    """
+    if not re.search(r'^\s*\{"memory",\s*"delete",', routes, re.M):
+        return False
+    row = re.search(r'\{"memory",.*?(?=^\s*\{"|\Z)', help_text, re.M | re.S)
+    if row is None:
+        return True
+    strings = re.findall(r'"(?:[^"\\]|\\.)*"', row.group())
+    rendered = ''.join(ast.literal_eval(value) for value in strings[2:])
+    return re.search(r'^\s*delete(?:\s|$)', rendered, re.M) is None
 
 
 def main() -> int:
@@ -62,6 +79,12 @@ def main() -> int:
               "listed as KNOWN_GAPS; remove them from the list in this script:")
         for name in sorted(stale):
             print(f"  {name}")
+        return 1
+
+    if missing_memory_delete_help(ROUTES.read_text(encoding="utf-8"),
+                                  HELP.read_text(encoding="utf-8")):
+        print("check-cli-help-coverage: FAIL — memory delete routes but is missing "
+              "from the served memory subcommand help")
         return 1
 
     covered = len(routed & helped)

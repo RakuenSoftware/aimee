@@ -25,6 +25,7 @@
 #include "kb_calibrate.h"
 #include "platform_process.h"
 #include <cJSON.h>
+#include "support/config_test_setters.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void open_db(void)
@@ -302,19 +303,6 @@ static void test_config_tau_and_versions(void)
    printf("  config_tau_and_versions: ok\n");
 }
 
-static void test_threshold_from_profile_json(void)
-{
-   const char *profile = "{\"buckets\":["
-                         "{\"range\":[0.0,0.6],\"lower_credible_bound\":0.70},"
-                         "{\"range\":[0.6,0.8],\"lower_credible_bound\":0.85}],"
-                         "\"conformal\":{\"reject_below\":0.65}}";
-   double threshold = 0.0;
-   assert(kb_store_calibration_threshold_from_profile_json(profile, 0.80, &threshold) == 0);
-   assert(fabs(threshold - 0.65) < 1e-9);
-
-   printf("  threshold_from_profile_json: ok\n");
-}
-
 static void test_kb_calibrate_run_high_bucket(void)
 {
    open_db();
@@ -470,7 +458,6 @@ int main(void)
    test_surface_list_discovers_audit_tuples();
    test_config_defaults();
    test_config_tau_and_versions();
-   test_threshold_from_profile_json();
    test_kb_calibrate_run_high_bucket();
    test_kb_calibrate_run_discovers_dynamic_surface();
    test_calibration_sidecar_fixture();

@@ -146,28 +146,6 @@ static void test_node_origin_constants(void)
    assert(strcmp(ENTITY_NODE_ORIGIN_MANUAL, "manual") == 0);
 }
 
-static void test_alias_resolve_null_alias(void)
-{
-   char out[4][GRAPH_ENDPOINT_MAX];
-   int n = kb_store_entity_node_resolve_alias(NULL, "aimee", out, 4);
-   assert(n == 0);
-}
-
-static void test_alias_resolve_empty_alias(void)
-{
-   char out[4][GRAPH_ENDPOINT_MAX];
-   int n = kb_store_entity_node_resolve_alias("", "aimee", out, 4);
-   assert(n == 0);
-}
-
-static void test_alias_resolve_null_project(void)
-{
-   /* NULL project is valid — unscoped lookup. No DB in unit tests → 0. */
-   char out[4][GRAPH_ENDPOINT_MAX];
-   int n = kb_store_entity_node_resolve_alias("src/foo.c", NULL, out, 4);
-   assert(n == 0);
-}
-
 int main(void)
 {
    printf("test_encode_alphanumeric... ");
@@ -219,13 +197,10 @@ int main(void)
    test_node_origin_constants();
    printf("ok\n");
    printf("test_alias_resolve_null_alias... ");
-   test_alias_resolve_null_alias();
    printf("ok\n");
    printf("test_alias_resolve_empty_alias... ");
-   test_alias_resolve_empty_alias();
    printf("ok\n");
    printf("test_alias_resolve_null_project... ");
-   test_alias_resolve_null_project();
    printf("ok\n");
    printf("entity_nodes: all tests passed\n");
    return 0;

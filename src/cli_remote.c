@@ -6,6 +6,7 @@
  * remote aimee-server persistently.
  */
 #include "cli_remote.h"
+#include "cli_client.h"
 #include "aimee_client.h"
 #include "aimee_home.h"
 #include "aimee_tls.h"
@@ -131,21 +132,7 @@ static void ensure_dir_p(const char *dir)
  * buffers. Returns 1 if a non-empty URL was read, else 0. */
 static int read_remote_conf(char *url, size_t url_sz, char *token, size_t token_sz)
 {
-   if (url_sz)
-      url[0] = '\0';
-   if (token_sz)
-      token[0] = '\0';
-   char path[512];
-   remote_conf_path(path, sizeof(path));
-   FILE *f = fopen(path, "r");
-   if (!f)
-      return 0;
-   if (fgets(url, (int)url_sz, f))
-      url[strcspn(url, "\r\n")] = '\0';
-   if (fgets(token, (int)token_sz, f))
-      token[strcspn(token, "\r\n")] = '\0';
-   fclose(f);
-   return url[0] != '\0';
+   return cli_remote_read_at_home(aimee_home(), url, url_sz, token, token_sz);
 }
 
 /* remote_enroll is defined below; forward-declare for the load-time auto-enroll. */

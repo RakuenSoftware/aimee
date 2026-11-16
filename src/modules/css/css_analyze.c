@@ -237,21 +237,6 @@ static void css_spec_scan(const char *s, size_t len, int *a, int *b, int *c, int
    }
 }
 
-void css_selector_specificity(const char *selector, int *a, int *b, int *c, int *uncertain)
-{
-   int la = 0, lb = 0, lc = 0, lu = 0;
-   if (selector)
-      css_spec_scan(selector, strlen(selector), &la, &lb, &lc, &lu);
-   if (a)
-      *a = la;
-   if (b)
-      *b = lb;
-   if (c)
-      *c = lc;
-   if (uncertain)
-      *uncertain = lu;
-}
-
 /* ---- parser ------------------------------------------------------------ */
 
 typedef struct

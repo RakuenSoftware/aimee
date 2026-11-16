@@ -7,7 +7,7 @@
 #include "kb_store.h"
 #include "kb_store_internal.h" /* kb_store_now_utc */
 #include "db_postgres.h"
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <math.h>
 #include <stdio.h>

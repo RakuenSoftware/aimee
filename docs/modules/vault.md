@@ -7,6 +7,66 @@ and injection, sealing, rotation, and custody-provider binding. It does not own 
 Git or forge protocols, optional OIDC governance, tool execution, workspace selection, or the policy
 that decides whether a caller may request a credential.
 
+Selected native API-key connections use `agent_api_connection_credentials` under the captured
+Vault principal. It resolves only the selected registration, commits the actual key and connection
+profile to opaque lineage, and refuses competing credential headers. A host binds that exact
+credential with `agent_set_request_api_credentials_for` for one request; target edits in that
+registration refuse. Other registrations resolve their own credentials without borrowing the key. These values stay off the module bus and child environment, and are
+cleansed with the per-request credential snapshot. Existing unscoped compatibility resolution is
+unchanged.
+
+Selected Claude subscription connections use `agent_claude_connection_credentials`. The source is
+only the selected registration's sealed native login document. The adapter preserves its persisted
+client ID and exact granted scopes, normalizes expiry from milliseconds, and refreshes through a
+fixed server-owned endpoint using a JSON body on stdin. Missing/removed or ambiguous source
+fields refuse; neither client files nor another registration supply a fallback. Codex and Claude
+share the registration's refresh lock and normalized-source fence, preventing a vendor switch from
+reusing the other vendor's rotated token. Successful refresh retains original source lineage.
+
+The native runtime checks that lineage on callbacks and binds the selected bearer only to model
+requests. Request snapshots retain the registration/target binding; endpoint/profile edits refuse,
+and MCP tools/delegates resolve their own credentials. OAuth beta admission preserves the other
+Anthropic beta capabilities. Source/refresh fixtures and loopback broker tests do not qualify a live
+Claude subscription or activate production SDK spawning.
+
+OAuth refresh and native-source seeding now use `vault_service_write_server_batch`: access,
+refresh, expiry, rejection state and the selected source fence commit through one encrypted Vault
+file replacement. The existing field layout is retained. Missing refresh in a normal refresh
+response preserves the existing refresh credential; a newly selected source requires its own
+refresh credential. Token validity reads access/expiry/rejection from one immutable snapshot.
+Batch updates reject duplicate fields and unsupported backends, with no sequential fallback. Each
+field emits only non-secret audit metadata. Production native activation and live subscription
+qualification remain outstanding.
+
+### Conditional immutable custody
+
+The opt-in [conditional custody contract](../VAULT_CONDITIONAL_CUSTODY.md) provides per-principal create/replay/conflict with authenticated immutable generations, mutable-overwrite refusal and generation-checked trusted use. Its optional fenced-use operation holds the provider retirement fence through a bounded trusted callback; the earlier snapshot-use operation retains its snapshot semantics. Unsupported providers refuse without a snapshot fallback; the reserved instance/server namespace retains its separate existing API. The separate local-use guard holds the actual local key/seal generation for an independently authorized use; it grants no entry access and does not replace the existing primary-epoch admission for organizational key use. This generic Vault contract supplies custody primitives, not application sensitivity classification, native database authorization or a model-facing secret getter. `test_vault_create_once.c`, `test_vault_fenced_use.c` and `test_vault_local_use.c` cover generation, failure, retirement and seal races, callback bounds, reentry and rotation paths.
+
+### Ordinary content intake and retained history
+
+The Server and KB establish encrypted custody for recognized private text before a
+memory command enters the module bus. Server prompt intake runs before canonical
+capture and provider dispatch. Opaque locators are scoped to the authenticated
+principal and survive master rotation; they confer no read/use capability. Host
+content slots use immutable local Vault custody, including on a KB whose separate
+organization Vault uses PostgreSQL. Rotation enumerates both stores.
+
+The recognizers are local and bounded. The regression covers the tested credential,
+email, phone, IPv4/IPv6, identity, name and postal-address forms; it does not certify
+universal PII classification. Invalid UTF-8 and unavailable custody fail closed.
+Ordinary non-private text and exact JSON integer tokens retain their values.
+
+Updating a mutable local credential retains its old encrypted version. Retirement
+makes values unavailable while retaining ciphertext and key wraps. Organization
+Vault retirement likewise preserves encrypted SQL versions and records the former
+current pointer. Key rotation includes retained versions. Legacy value-free
+retirement markers remain unavailable; payloads erased by older builds cannot be
+reconstructed by this upgrade.
+
+An initialized Vault never replaces a missing master automatically. Restore the
+original key and matching Vault inventory from a protected backup. Retain the
+`.server-master.key.initialized` marker with that inventory.
+
 ## Public contracts
 
 Canonical implementation lives in `src/modules/vault`: the server-wrap retrieval path begins at
@@ -15,8 +75,8 @@ Canonical implementation lives in `src/modules/vault`: the server-wrap retrieval
 attested identities, and `vault_capability` limits delegated access. Direct calls to internal vault
 implementations outside these facades are boundary violations rather than alternate public APIs.
 
-The descriptor declares this module's twelve sources, thirteen module-root headers, eleven direct
-tests, and this document; it sets `ownership_complete: true`. All thirteen headers are declared
+The descriptor declares this module's canonical sources, module-root headers, direct
+tests and documentation; it sets `ownership_complete: true`. Module-root headers are declared
 as `private_headers` because they live at the module root rather than under
 `src/modules/vault/include/aimee/vault/`, the layout the header-layout checker treats as private;
 `vault_internal.h` is the backend-seam header and has no paired source. The four custody backends
@@ -24,10 +84,8 @@ as `private_headers` because they live at the module root rather than under
 always compiled by Make: `WITH_TPM2` and `WITH_PKCS11` toggle a `-D` flag that switches the tpm2 and
 pkcs11 sources between a real implementation and a fail-closed stub rather than omitting them.
 `vault_hwm.c` has no external includer but is live: `vault_custody_kms.c` calls
-`vault_hwm_attest_verify` in its high-water-mark attestation path. CMake compiles the six sources the
-thin `aimee` client reaches (`vault_capability.c`, `vault_crypto.c`, `vault_kek_cache.c`,
-`vault_principal.c`, `vault_service.c`, `vault_store.c`) and omits the four custody backends,
-`vault_hwm.c`, and `vault_server_key.c`, the same intentional thin-client boundary recorded for
+`vault_hwm_attest_verify` in its high-water-mark attestation path. The CMake
+thin client compiles no vault source, the same intentional thin-client boundary recorded for
 gateway, learning, and workspace. `docs/validation/core-modularization-slice-46.md` records the declaration audit and
 `docs/validation/core-modularization-slice-47.md` the completeness audit; the two were split so the
 latch reviews declarations merged on their own first. Adding a new module-local source or module-root
@@ -68,6 +126,14 @@ presence checks, provider bootstrap, and scoped injection into delegates or Git 
 and health output expose references and state only; protocol clients and GUI forms must never receive
 stored secret values merely to display whether a credential exists.
 
+Org-vault egress credentials are adopted, bound and rotated through `aimee-kb vault
+adopt|bind|rotate|remediate|schedule|rotations`: the
+command files a request in `org_rotation_request`, and the KB daemon's rotation worker
+(`src/kb/kb_vault_rotation_worker.c`) starts and drives the fenced workflow with the AWS IAM
+provider (`src/kb/kb_vault_rotation_aws.c`). Rotation needs KMS custody, the only custody that keeps a
+signed high-water mark per slot. See the
+[credential rotation runbook](../runbooks/org-vault-credential-rotation.md).
+
 ## Data and migrations
 
 Encrypted records carry principal, agent/provider, credential name, wrapped data key, ciphertext,
@@ -92,8 +158,8 @@ principal, decision, and outcome metadata before transient plaintext is discarde
 
 ## Tests and failure behavior
 
-The descriptor's eleven direct tests are `test_vault_capability.c`, `test_vault_crypto.c`,
-`test_vault_kek_cache.c`, `test_vault_kms.c`, `test_vault_master_rotate.c`, `test_vault_principal.c`,
+The descriptor's direct tests are `test_vault_capability.c`, `test_vault_create_once.c`, `test_vault_crypto.c`, `test_vault_fenced_use.c`,
+`test_vault_kek_cache.c`, `test_vault_kms.c`, `test_vault_local_use.c`, `test_vault_master_rotate.c`, `test_vault_principal.c`,
 `test_vault_seam.c`, `test_vault_server_key.c`, `test_vault_service.c`, `test_vault_store.c`, and
 `test_vault_tpm2.c`. The last backs the `WITH_TPM2`-gated `p7-tpm2-harness` and is the only test that
 links and exercises the real `vault_custody_tpm2.c`, so it is claimed despite the gate. Several

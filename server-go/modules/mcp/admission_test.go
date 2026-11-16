@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // A plugin module must not start its plugin on its own. Starting it executes
@@ -18,7 +18,7 @@ func TestPendingPluginIsNotStartedAndIsReported(t *testing.T) {
 	m.SetPending([]string{"/nonexistent/should-never-run", "--x"}, "", PermDangerous)
 
 	payload, status := m.Handle(invocation(StageDeclareCommands), EncodeDeclareRequest())
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	// DCMP, not DCMR: "I am waiting on a verdict" is a different answer from
@@ -45,7 +45,7 @@ func TestRefusalStopsThePluginFromEverStarting(t *testing.T) {
 
 	_, status := m.Handle(invocation(StageDeclareCommands),
 		EncodeAdmitRequest(AdmitRefuse, ArgvDigest(argv)))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if !m.Refused() || m.Admitted() {
@@ -53,7 +53,7 @@ func TestRefusalStopsThePluginFromEverStarting(t *testing.T) {
 	}
 	// After a refusal the module declares nothing and stays that way.
 	payload, status := m.Handle(invocation(StageDeclareCommands), EncodeDeclareRequest())
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if got := binary.LittleEndian.Uint32(payload[0:4]); got != commandsResponseMagic {
@@ -62,7 +62,7 @@ func TestRefusalStopsThePluginFromEverStarting(t *testing.T) {
 	if got := decodeCommands(t, payload); len(got) != 0 {
 		t.Fatalf("a refused plugin declared %d commands", len(got))
 	}
-	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("anything", nil)); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("anything", nil)); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatalf("invoke on a refused instance = %v, want CapabilityAbsent", status)
 	}
 }
@@ -76,7 +76,7 @@ func TestAdmissionMustMatchTheArgvThatWasScanned(t *testing.T) {
 
 	wrong := ArgvDigest([]string{"/bin/echo", "something-else"})
 	_, status := m.Handle(invocation(StageDeclareCommands), EncodeAdmitRequest(AdmitAllow, wrong))
-	if status != bus.ModuleStatusInvalidRequest {
+	if status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("status = %v, want InvalidRequest for a mismatched digest", status)
 	}
 	if m.Admitted() {
@@ -90,7 +90,7 @@ func TestAZeroedVerdictIsNotAnAdmit(t *testing.T) {
 	m := New("github", PermDangerous)
 	m.SetPending(argv, "", PermDangerous)
 	if _, status := m.Handle(invocation(StageDeclareCommands),
-		EncodeAdmitRequest(0, ArgvDigest(argv))); status != bus.ModuleStatusOK {
+		EncodeAdmitRequest(0, ArgvDigest(argv))); status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if m.Admitted() {
@@ -106,7 +106,7 @@ func TestAModuleWithNoPendingPluginDeclaresNormally(t *testing.T) {
 	// directly (the ordinary attached case).
 	m := attached(t, "github", &fakePlugin{tools: []Tool{{Name: "ok"}}})
 	payload, status := m.Handle(invocation(StageDeclareCommands), EncodeDeclareRequest())
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if got := binary.LittleEndian.Uint32(payload[0:4]); got != commandsResponseMagic {
@@ -212,7 +212,7 @@ func TestAnUndeclaredOverPrivilegedToolIsAlsoUncallable(t *testing.T) {
 	if got := decodeCommands(t, payload); len(got) != 0 {
 		t.Fatalf("a destructive tool was declared under a read ceiling: %+v", got)
 	}
-	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("wipe", nil)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("wipe", nil)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("invoke = %v, want InvalidRequest for a tool above the ceiling", status)
 	}
 	if got := plugin.callNames(); len(got) != 0 {

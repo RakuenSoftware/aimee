@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func economicsRequestBytes(tasks []EconomicsTask, agents []AgentTier) []byte {
@@ -45,9 +45,9 @@ func TestEconomicsStageRoundTrip(t *testing.T) {
 	}
 	agents := []AgentTier{{Name: "cheap", Tier: 0}}
 
-	response, status := Handle(bus.ModuleInvocation{StageID: StageEconomics},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageEconomics},
 		economicsRequestBytes(tasks, agents))
-	if status != bus.ModuleStatusOK || len(response) != economicsResponseLen ||
+	if status != ring.ModuleStatusOK || len(response) != economicsResponseLen ||
 		binary.LittleEndian.Uint32(response[0:4]) != economicsResponseMagic {
 		t.Fatalf("status %d, %d bytes", status, len(response))
 	}
@@ -68,26 +68,26 @@ func TestEconomicsStageRoundTrip(t *testing.T) {
 func TestEconomicsStageRejectsInvalidEnvelope(t *testing.T) {
 	good := economicsRequestBytes([]EconomicsTask{{Status: "done", ClaimedBy: "a"}}, nil)
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageEconomics},
-		good[:economicsReqHeaderLen-1]); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageEconomics},
+		good[:economicsReqHeaderLen-1]); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("truncated status = %d", status)
 	}
 
 	// A task count that outruns the body must be refused, not read past.
 	lying := economicsRequestBytes([]EconomicsTask{{Status: "done"}}, nil)
 	binary.LittleEndian.PutUint32(lying[8:12], 99)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageEconomics}, lying); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageEconomics}, lying); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("overrunning task count status = %d", status)
 	}
 
 	// Trailing bytes mean the caller and the module disagree about the frame.
 	trailing := append(economicsRequestBytes(nil, nil), 0)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageEconomics}, trailing); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageEconomics}, trailing); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("trailing-byte status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageEconomics, DeadlineNS: 1},
-		good); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageEconomics, DeadlineNS: 1},
+		good); status != ring.ModuleStatusCancelled {
 		t.Errorf("expired status = %d", status)
 	}
 }
@@ -95,9 +95,9 @@ func TestEconomicsStageRejectsInvalidEnvelope(t *testing.T) {
 // An empty run is answerable, not an error: no delegates ran, so nothing is
 // established either way.
 func TestEconomicsStageEmptyRun(t *testing.T) {
-	response, status := Handle(bus.ModuleInvocation{StageID: StageEconomics},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageEconomics},
 		economicsRequestBytes(nil, nil))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
 	}
 	at := 4 + 19*4

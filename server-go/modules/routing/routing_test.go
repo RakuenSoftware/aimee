@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func routingRequest(mode uint16, count uint32) []byte {
@@ -17,9 +17,9 @@ func routingRequest(mode uint16, count uint32) []byte {
 	return request
 }
 
-func selectedIndex(t *testing.T, response []byte, status bus.ModuleStatus) uint32 {
+func selectedIndex(t *testing.T, response []byte, status ring.ModuleStatus) uint32 {
 	t.Helper()
-	if status != bus.ModuleStatusOK || len(response) != responseLen ||
+	if status != ring.ModuleStatusOK || len(response) != responseLen ||
 		binary.LittleEndian.Uint32(response[0:4]) != responseMagic {
 		t.Fatalf("response = %x, status = %d", response, status)
 	}
@@ -28,7 +28,7 @@ func selectedIndex(t *testing.T, response []byte, status bus.ModuleStatus) uint3
 
 func TestBalancedAndRandomizedSelection(t *testing.T) {
 	selector := &Selector{}
-	invocation := bus.ModuleInvocation{StageID: StageSelect, TraceID: 0x12345678}
+	invocation := ring.ModuleInvocation{StageID: StageSelect, TraceID: 0x12345678}
 	response, status := selector.Handle(invocation, routingRequest(selectBalanced, 3))
 	if got := selectedIndex(t, response, status); got != 0 {
 		t.Fatalf("first balanced index = %d", got)
@@ -48,7 +48,7 @@ func TestBalancedSelectionIsConcurrent(t *testing.T) {
 	selector := &Selector{}
 	type result struct {
 		response []byte
-		status   bus.ModuleStatus
+		status   ring.ModuleStatus
 	}
 	results := make(chan result, 64)
 	var workers sync.WaitGroup
@@ -56,7 +56,7 @@ func TestBalancedSelectionIsConcurrent(t *testing.T) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			response, status := selector.Handle(bus.ModuleInvocation{StageID: StageSelect},
+			response, status := selector.Handle(ring.ModuleInvocation{StageID: StageSelect},
 				routingRequest(selectBalanced, 64))
 			results <- result{response: response, status: status}
 		}()
@@ -74,16 +74,16 @@ func TestBalancedSelectionIsConcurrent(t *testing.T) {
 
 func TestRoutingRejectsInvalidAndExpiredRequests(t *testing.T) {
 	selector := &Selector{}
-	if _, status := selector.Handle(bus.ModuleInvocation{StageID: StageSelect},
-		routingRequest(99, 2)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := selector.Handle(ring.ModuleInvocation{StageID: StageSelect},
+		routingRequest(99, 2)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("invalid mode status = %d", status)
 	}
-	if _, status := selector.Handle(bus.ModuleInvocation{StageID: StageSelect, DeadlineNS: 1},
-		routingRequest(selectBalanced, 2)); status != bus.ModuleStatusCancelled {
+	if _, status := selector.Handle(ring.ModuleInvocation{StageID: StageSelect, DeadlineNS: 1},
+		routingRequest(selectBalanced, 2)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
-	if _, status := selector.Handle(bus.ModuleInvocation{StageID: StageSelect, DeadlineNS: 1},
-		[]byte("malformed")); status != bus.ModuleStatusCancelled {
+	if _, status := selector.Handle(ring.ModuleInvocation{StageID: StageSelect, DeadlineNS: 1},
+		[]byte("malformed")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired malformed invocation status = %d", status)
 	}
 }

@@ -10,6 +10,7 @@
 #include "roundtable_preset.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include "support/config_test_setters.h"
 
 static const char *PRESET_JSON = "{"
                                  "  \"name\": \"deep-review\","

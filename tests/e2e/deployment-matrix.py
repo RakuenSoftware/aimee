@@ -11,6 +11,7 @@ import select
 import argparse
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import re
@@ -41,12 +42,228 @@ def command(*argv, env=None, data=None, timeout=300):
         # emitting potentially credential-bearing arguments or Docker output.
         operation = next((value for value in argv[1:]
                           if value in ('up', 'config', 'inspect', 'exec', 'run', 'restart', 'down')), '')
+        # A gate is `python3 <repo script> ...`: the script's file name is fixed
+        # by this file, never caller data, and says which gate failed.
+        if Path(argv[0]).name.startswith('python') and len(argv) > 1 and str(argv[1]).endswith('.py'):
+            operation = Path(str(argv[1])).name
         raise RuntimeError(f'{Path(argv[0]).name} {operation} failed with exit {result.returncode} ({reason})')
     return result.stdout.strip()
 
 
+REFERENCE_TARGET = '/opt/aimee-test-memory-reference/aimee-module-memory'
+
+
+def safe_readiness_payload(role, status_code, payload):
+    """Project only fixed readiness keys, enums and booleans; never error text."""
+    result = {'status_code': status_code if type(status_code) is int and 100 <= status_code <= 599 else -1}
+    if not isinstance(payload, dict):
+        return result
+    value = payload.get('status')
+    result['status'] = value if value in ('ok', 'degraded', 'unknown', 'error') else 'unknown'
+    reasons = {'no readiness provider registered': 'provider_absent',
+               'readiness provider returned an invalid status': 'provider_status_invalid',
+               'readiness provider wrote no body': 'provider_body_absent',
+               'readiness provider returned 200 without ready:true': 'provider_success_contradiction',
+               'readiness provider returned 503 with ready:true': 'provider_failure_contradiction'}
+    if 'reason' in payload:
+        value = payload['reason']
+        result['reason_category'] = reasons.get(value, 'unknown') if isinstance(value, str) else 'unknown'
+    for key in ('ready', 'capture_ok', 'postgres_ok', 'knowledge_tables_ok',
+                'pgvec_ok', 'pgvec_collection_ok', 'embed_ok'):
+        if type(payload.get(key)) is bool:
+            result[key] = payload[key]
+    dependencies = payload.get('dependencies')
+    if isinstance(dependencies, dict):
+        result['dependencies'] = {key: dependencies[key] if dependencies.get(key) in
+                                  ('ok', 'disabled', 'fail', 'unknown') else 'unknown'
+                                  for key in ('db1', 'kb', 'retrieval', 'modules')}
+    diagnostics = payload.get('diagnostics')
+    if isinstance(diagnostics, dict):
+        allowed = {
+            'failed_boundary': ('', 'unknown', 'kb_transport', 'kb_store', 'kb_schema',
+                                'pgvector', 'vector_collection', 'embedder', 'kb_breaker',
+                                'local_store', 'modules', 'audit_capacity'),
+            'breaker_state': ('', 'unknown', 'disabled', 'open', 'closed', 'half_open'),
+            'missing_module': ('', 'unknown', 'config', 'postgres', 'memory', 'learning', 'routing', 'delegates',
+                               'tools', 'workspace', 'git', 'skills', 'response-composition', 'runtime-web'),
+        }
+        result['diagnostics'] = {key: diagnostics.get(key) if diagnostics.get(key) in values
+                                 else 'unknown' for key, values in allowed.items()}
+    pool = payload.get('pool')
+    if isinstance(pool, dict):
+        result['pool'] = {key: pool[key] for key in ('size', 'in_use', 'waiters',
+                          'lease_timeouts', 'stuck', 'poisoned')
+                          if type(pool.get(key)) is int and 0 <= pool[key] <= 2147483647}
+        if type(pool.get('available')) is bool:
+            result['pool']['available'] = pool['available']
+    return result
+
+
+def safe_startup_log_summary(text):
+    """Counts of known messages/components only, including logs with no listener."""
+    text = text[-262144:]
+    lower = text.lower()
+    messages = ('config module unavailable', 'module bus failed', 'memory module unavailable',
+                'memory capability unavailable', 'ring: attach denied', 'capability absent',
+                'kb_store not ready', 'vault initialization failed',
+                'operator authority/status unavailable', 'http listener failed',
+                'startup rejected', 'permission denied', 'connection refused')
+    components = ('ready', 'vault', 'kb_http', 'config', 'event-bus', 'commands')
+    return {'sample_characters': len(text),
+            'messages': {name: lower.count(name) for name in messages},
+            'components': {name: len(re.findall(r'\b(?:ERROR|WARN|INFO|DEBUG)\s+' +
+                           re.escape(name) + r':', text)) for name in components}}
+
+
+def safe_container_state(state):
+    if not isinstance(state, dict):
+        state = {}
+    health = state.get('Health', {})
+    if not isinstance(health, dict):
+        health = {}
+    integer = lambda value: value if type(value) is int and -2147483648 <= value <= 2147483647 else -1
+    records = health.get('Log', [])
+    if not isinstance(records, list):
+        records = []
+    return dict(status=state.get('Status') if state.get('Status') in
+                ('created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead') else 'unknown',
+                health=health.get('Status') if health.get('Status') in
+                ('healthy', 'unhealthy', 'starting') else 'absent',
+                exit_code=integer(state.get('ExitCode')), oom_killed=state.get('OOMKilled') is True,
+                health_failing_streak=integer(health.get('FailingStreak')),
+                health_exit_codes=[integer(row.get('ExitCode')) for row in records[-8:]
+                                   if isinstance(row, dict)])
+
+
+def container_readiness_probe(stack):
+    # Sanitize inside the container: HTTP bodies and source logs never leave it.
+    code = ('import http.client,json,socket,sys,pathlib,re\n' +
+            inspect.getsource(safe_readiness_payload) + '\n' +
+            inspect.getsource(safe_startup_log_summary) + '\n' + r'''
+role = sys.argv[1]
+result = {'transport': 'io_error'}
+connection = None
+try:
+    if role == 'server':
+        class UnixConnection(http.client.HTTPConnection):
+            def connect(self):
+                self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                self.sock.settimeout(4)
+                self.sock.connect('/var/lib/aimee/aimee-http.sock')
+        connection = UnixConnection('localhost', timeout=4)
+        path = '/v1/ready'
+    else:
+        connection = http.client.HTTPConnection('127.0.0.1', 8741, timeout=4)
+        path = '/v1/health'
+    connection.request('GET', path)
+    response = connection.getresponse()
+    raw = response.read(65537)
+    result = {'transport': 'http', 'status_code': response.status}
+    if len(raw) > 65536:
+        result['transport'] = 'response_too_large'
+    else:
+        try:
+            result.update(safe_readiness_payload(role, response.status, json.loads(raw)))
+            result['json_valid'] = True
+        except (ValueError, UnicodeError):
+            result['json_valid'] = False
+except FileNotFoundError:
+    result = {'transport': 'socket_missing'}
+except ConnectionRefusedError:
+    result = {'transport': 'connection_refused'}
+except PermissionError:
+    result = {'transport': 'permission_denied'}
+except TimeoutError:
+    result = {'transport': 'timeout'}
+except (OSError, http.client.HTTPException):
+    result = {'transport': 'io_error'}
+finally:
+    if connection:
+        connection.close()
+try:
+    result['server_socket_present'] = pathlib.Path('/var/lib/aimee/aimee-http.sock').is_socket()
+except OSError:
+    result['server_socket_present'] = False
+log = pathlib.Path('/var/lib/aimee/server.log')
+result['server_file_log'] = {'present': False}
+try:
+    with log.open('rb') as stream:
+        stream.seek(0, 2)
+        size = stream.tell()
+        stream.seek(max(0, size - 262144))
+        sample = stream.read(262144).decode('utf-8', errors='replace')
+    result['server_file_log'] = dict(safe_startup_log_summary(sample), present=True,
+                                    truncated=size > 262144)
+except OSError:
+    pass
+print(json.dumps(result))
+''')
+    try:
+        result = json.loads(command('docker', 'exec', stack.application, 'python3', '-c',
+                                    code, stack.role, timeout=15))
+        return result if isinstance(result, dict) else {'transport': 'probe_unavailable'}
+    except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, TypeError):
+        return {'transport': 'probe_unavailable'}
+
+
+def validate_reference_owner(path):
+    """Accept only the explicitly pinned, external test implementation."""
+    path = Path(path).absolute()
+    expected = json.loads((ROOT / 'tests/fixtures/legacy-memory-owner.json').read_text())
+    sidecar = Path(str(path) + '.json')
+    if (path.is_symlink() or not path.is_file() or not os.access(path, os.X_OK)
+            or sidecar.is_symlink() or not sidecar.is_file()):
+        raise ValueError('reference owner must be a regular executable with provenance')
+    actual = json.loads(sidecar.read_text())
+    if any(actual.get(key) != value for key, value in expected.items()):
+        raise ValueError('reference owner provenance does not match the frozen fixture')
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual.get('binary_sha256') != digest:
+        raise ValueError('reference owner binary does not match its provenance')
+    return path, dict(expected, binary_sha256=digest)
+
+
+def reference_overlay(role, image, owner, output, project):
+    """Change the selected executable; retain every existing grant capability."""
+    path, provenance = validate_reference_owner(owner)
+    manifest_target = f'/opt/aimee/module-grants/{role}.modules'
+    def metadata(target):
+        return command('docker', 'run', '--rm', '--network', 'none', '--read-only',
+                       '--entrypoint', 'cat', image, target)
+    manifest = metadata(manifest_target).splitlines()
+    rows = [i for i, row in enumerate(manifest) if row.split('\t', 1)[0] == 'memory']
+    if len(rows) != 1 or len(manifest[rows[0]].split('\t')) != 2:
+        raise ValueError('candidate must declare exactly one memory owner')
+    previous_executable = manifest[rows[0]].split('\t')[1]
+    manifest[rows[0]] = 'memory\t' + REFERENCE_TARGET
+    overlays = [('modules', manifest, manifest_target)]
+    # The real owner also attaches its PostgreSQL/config and egress callers.
+    # Their existing refs/capabilities must attest the same selected executable.
+    for name in ('memory', 'memory-postgres', 'memory-egress'):
+        target = f'/opt/aimee/module-grants/{role}/{name}.grant'
+        grant = metadata(target).splitlines()
+        executables = [i for i, row in enumerate(grant) if row.startswith('executable=')]
+        if len(executables) != 1 or grant[executables[0]] != 'executable=' + previous_executable:
+            raise ValueError('candidate memory manifest and grant disagree')
+        grant[executables[0]] = 'executable=' + REFERENCE_TARGET
+        overlays.append(('grant' if name == 'memory' else name + '.grant', grant, target))
+    mounts = [(path, REFERENCE_TARGET)]
+    for name, lines, target in overlays:
+        overlay = output.resolve() / (project + '-reference.' + name)
+        overlay.write_text('\n'.join(lines) + '\n')
+        overlay.chmod(0o644)
+        provenance[name + '_sha256'] = hashlib.sha256(overlay.read_bytes()).hexdigest()
+        mounts.append((overlay, target))
+    (output / (project + '-reference.json')).write_text(json.dumps(provenance, indent=2) + '\n')
+    # JSON scalars are valid YAML and preserve paths containing spaces/colons.
+    return '    volumes:\n' + ''.join(
+        '      - type: bind\n        source: ' + json.dumps(str(source)) +
+        '\n        target: ' + json.dumps(target) + '\n        read_only: true\n'
+        for source, target in mounts)
+
+
 class Stack:
-    def __init__(self, role, env, output):
+    def __init__(self, role, env, output, reference_memory_owner=None):
         self.role = role
         self.project = 'aimee-e2e-' + role + '-' + uuid.uuid4().hex[:10]
         self.env = dict(env)
@@ -59,6 +276,11 @@ class Stack:
         self.env['AIMEE_KB_HOST'] = 'aimee-kb'
         for kind in ('ADMIN', 'MIGRATOR', 'RUNTIME'):
             self.env[f'AIMEE_STORE_{kind}_PASSWORD'] = secrets.token_hex(24)
+        # The frozen reference owner is selected through the image's public
+        # module manifest. Leave the shipped memory unprovisioned for those
+        # runs so that manifest, and therefore the reference, is what serves.
+        if reference_memory_owner:
+            self.env['AIMEE_MEMORY_PROVISION'] = 'off'
         self.file = 'compose.kb.yaml' if role == 'kb' else 'compose.yaml'
         self.application = f'{self.project}-aimee-{role}-1'
         self.postgres = f'{self.project}-aimee-store-db-1'
@@ -69,10 +291,13 @@ class Stack:
         # mappings can collide on newer Docker daemons, especially mixed
         # loopback and wildcard bindings. Keep the production service intact.
         self.network_override = output.resolve() / (self.project + '-network.yaml')
+        reference = (reference_overlay(role, env['AIMEE_APPLICATION_IMAGE'],
+                     reference_memory_owner, output, self.project)
+                     if reference_memory_owner else '')
         self.network_override.write_text(
             'services:\n  aimee-' + role + ':\n    ports: !reset []\n' +
             ('    environment:\n      AIMEE_MEMORY_HEALTH_ENABLED: \"1\"\n'
-             if role == 'server' and env.get('AIMEE_MEMORY_HEALTH_FIXTURE') == '1' else ''))
+             if role == 'server' and env.get('AIMEE_MEMORY_HEALTH_FIXTURE') == '1' else '') + reference)
 
     def compose_args(self):
         encryption = ('-f', 'compose.kb.luks.yaml' if self.role == 'kb' else 'compose.luks.yaml') if self.env.get('AIMEE_POSTGRES_STORAGE') == 'luks' else ()
@@ -114,10 +339,15 @@ class Stack:
         deadline = time.monotonic() + 240
         while time.monotonic() < deadline:
             status = command('docker', 'inspect', '--format', '{{.State.Health.Status}}', self.application)
-            if status == 'healthy':
+            # Application health proves the store and module owners, while the
+            # embedder starts independently after the application. Index setup
+            # requires its loaded model; the image health check verifies that.
+            embedding = command('docker', 'inspect', '--format', '{{.State.Health.Status}}', self.embedder)
+            if status == 'healthy' and embedding == 'healthy':
                 return
             time.sleep(2)
-        raise RuntimeError(self.role + ' did not become healthy')
+        safe = lambda value: value if value in ('healthy', 'unhealthy', 'starting') else 'unknown'
+        raise RuntimeError(f'{self.role} health timeout: application={safe(status)} embedder={safe(embedding)}')
 
     def kb_request(self, path, body=None, authenticated=True):
         code = '''import http.client,json,sys
@@ -583,6 +813,61 @@ def locked_episode_fixture_parent(kb, parent_id):
                 proc.communicate()
 
 
+def activate_embedding_generation(kb, check, version):
+    """Give each isolated KB a verified dense arm before evidence coverage."""
+    # Coverage requires an available dense arm as well as the lexical hit.
+    # Fresh installations have no active generation. Initialize it through
+    # the real owner, including any exact fixture assertion revisions.
+    # The ordinary fixture bearer remains service-scoped. Only the local
+    # disposable instance owner may run cross-scope index maintenance.
+    service_token = kb.env['AIMEE_KB_API_BEARER_TOKEN']
+    def install_bearer(token):
+        command('docker', 'exec', '-i', '-u', '1000',
+                '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1', kb.application,
+                'aimee-kb', '--bootstrap-vault-stdin',
+                data='AIMEE_KB_API_BEARER_TOKEN=' + token + '\0')
+        command('docker', 'restart', kb.application)
+        deadline = time.monotonic() + 120
+        while command('docker', 'inspect', '--format', '{{.State.Health.Status}}', kb.application) != 'healthy':
+            if time.monotonic() >= deadline:
+                raise RuntimeError('typed fixture owner restart did not become healthy')
+            time.sleep(1)
+        kb.env['AIMEE_KB_API_BEARER_TOKEN'] = token
+    try:
+        install_bearer(secrets.token_hex(32))
+        deadline = time.monotonic() + 180
+        while True:
+            code, indexed = kb.kb_request('/v1/actions/memory.reembed_start', dict(
+                version=version, embedding_command=kb.env['EMBEDDER_URL'], scope='all'))
+            # Retain only fixed diagnostic fields. Never export response text,
+            # provider URLs, caller input or enrollment credentials.
+            diagnostic = dict(http_status=code,
+                status=indexed.get('status') if indexed.get('status') in ('ok', 'error') else 'other')
+            for field in ('failed', 'embedded', 'total', 'done', 'last_id'):
+                value = indexed.get(field)
+                if type(value) is int and value >= 0:
+                    diagnostic[field] = value
+            for field in ('ready', 'more'):
+                if type(indexed.get(field)) is bool:
+                    diagnostic[field] = indexed[field]
+            (kb.output / 'typed-index-state.json').write_text(json.dumps(diagnostic, indent=2) + '\n')
+            indexing_ok = code == 200 and indexed.get('status') == 'ok' and not indexed.get('failed', 0)
+            if not indexing_ok:
+                # The same fixed fields as the evidence file, so the log says why.
+                print('typed fixture indexing state: ' + json.dumps(diagnostic, sort_keys=True), flush=True)
+            check('Typed fixture indexing succeeds', indexing_ok)
+            if indexed.get('ready') is True:
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError('typed fixture indexing did not become ready')
+            time.sleep(1)
+        code, activated = kb.kb_request('/v1/actions/memory.reembed_cutover', dict(scope='all'))
+        check('Typed fixture activates its verified embedding generation', code == 200 and
+              activated.get('status') == 'ok')
+    finally:
+        install_bearer(service_token)
+
+
 def typed_source_version_gate(kb, check):
     """Observe real assertion versions through the authenticated KB/Go path."""
     key = 'typed-version-' + uuid.uuid4().hex
@@ -628,42 +913,7 @@ def typed_source_version_gate(kb, check):
         raw = json.dumps(identity, ensure_ascii=False, separators=(',', ':')).encode()
         return result.get('selection_digest') == 'sha256:' + hashlib.sha256(raw).hexdigest()
     try:
-        # Coverage requires an available dense arm as well as the lexical hit.
-        # Fresh installations have no active generation. Initialize it through
-        # the real owner, including this fixture's exact assertion revision.
-        # The ordinary fixture bearer remains service-scoped. Only the local
-        # disposable instance owner may run cross-scope index maintenance.
-        service_token = kb.env['AIMEE_KB_API_BEARER_TOKEN']
-        def install_bearer(token):
-            command('docker', 'exec', '-i', '-u', '1000',
-                    '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1', kb.application,
-                    'aimee-kb', '--bootstrap-vault-stdin',
-                    data='AIMEE_KB_API_BEARER_TOKEN=' + token + '\0')
-            command('docker', 'restart', kb.application)
-            deadline = time.monotonic() + 120
-            while command('docker', 'inspect', '--format', '{{.State.Health.Status}}', kb.application) != 'healthy':
-                if time.monotonic() >= deadline:
-                    raise RuntimeError('typed fixture owner restart did not become healthy')
-                time.sleep(1)
-            kb.env['AIMEE_KB_API_BEARER_TOKEN'] = token
-        try:
-            install_bearer(secrets.token_hex(32))
-            deadline = time.monotonic() + 180
-            while True:
-                code, indexed = kb.kb_request('/v1/actions/memory.reembed_start', dict(
-                    version=key, embedding_command=kb.env['EMBEDDER_URL'], scope='all'))
-                check('Typed fixture indexing succeeds', code == 200 and indexed.get('status') == 'ok'
-                      and not indexed.get('failed', 0))
-                if indexed.get('ready') is True:
-                    break
-                if time.monotonic() >= deadline:
-                    raise RuntimeError('typed fixture indexing did not become ready')
-                time.sleep(1)
-            code, activated = kb.kb_request('/v1/actions/memory.reembed_cutover', dict(scope='all'))
-            check('Typed fixture activates its verified embedding generation', code == 200 and
-                  activated.get('status') == 'ok')
-        finally:
-            install_bearer(service_token)
+        activate_embedding_generation(kb, check, key)
         code, before = call()
         source = selected(before).get('source_version', {})
         expected = dict(schema_version=1, **{k:fixture[k] for k in ('owner_id','record_id','record_revision')})
@@ -1085,24 +1335,37 @@ def lineage_release_gate(kb, check):
         sql(f"DELETE FROM memories WHERE scope_value IN ('{scope}','{scope}-hidden')")
 
 
-def correction_review_gate(kb, server, placement, output):
-    """Exercise the shipping KB actions and model MCP adapter on fresh stores."""
-    from types import SimpleNamespace
-    gate = placement.Gate(SimpleNamespace(server=server.application, kb=kb.application,
-        kb_store_db=kb.postgres, store_db=server.postgres))
-    scope = 'review-e2e-' + uuid.uuid4().hex
-    def check(name, passed):
-        gate.check(name, passed)
-        if not passed:
-            raise RuntimeError(name)
-    def action(verb, values):
-        payload = dict(project=scope, scope_context=True)
-        payload.update(values)
-        # Exercise the existing authenticated host-caller transport. A direct
-        # service bearer intentionally supplies no human actor. The enrolled
-        # Server certificate, rotating bearer and service identity authenticate
-        # the host before it can assert this synthetic operator account.
-        code = '''import http.client,json,os,ssl,sys,tempfile
+def safe_correction_summary(proposed, unchanged):
+    proposal = proposed.get('proposal')
+    proposal = proposal if isinstance(proposal, dict) else {}
+    kinds = ('review_required', 'forbidden', 'conflict', 'invalid_argument', 'unavailable', 'not_found')
+    reasons = ('idempotency_conflict', 'expected_version_conflict', 'idempotent_result_unavailable',
+               'instruction_override')
+    messages = {'idempotent mutations require an authenticated principal': 'retry_principal_absent',
+                'expected_version must identify the owner, target and positive revision using schema_version=1': 'version_invalid',
+                'idempotency_key requires 16-128 printable ASCII characters and expected_version': 'retry_key_invalid',
+                'memory module unavailable': 'owner_unavailable'}
+    message = proposed.get('message')
+    return dict(kind=proposed.get('kind') if proposed.get('kind') in kinds else 'unknown',
+                reason=proposed.get('reason') if proposed.get('reason') in reasons else 'unknown',
+                message_category=messages.get(message, 'unknown') if isinstance(message, str) else 'unknown',
+                proposal_present=bool(proposal), proposal_pending=proposal.get('state') == 'pending',
+                authoritative_content_unchanged=unchanged is True)
+
+
+def review_action_headers(bearer, service, model):
+    headers = {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + bearer,
+               'X-Aimee-Service-Authorization': 'Bearer ' + service}
+    # Only the operator path asserts a human account. Model commands retain the
+    # authenticated service principal and cannot gain user authority via payload.
+    if not model:
+        headers['X-Aimee-Caller-Subject'] = 'review_operator'
+    return headers
+
+
+def authenticated_reference_owner_action(server, path, payload, bearer, service, model=False):
+    code = ('import http.client,json,os,ssl,sys,tempfile\n' +
+            inspect.getsource(review_action_headers) + '''
 a=json.load(sys.stdin)
 i=json.load(open('/var/lib/aimee/kb-client-identity.json'))
 with tempfile.TemporaryDirectory() as directory:
@@ -1112,17 +1375,44 @@ with tempfile.TemporaryDirectory() as directory:
   context=ssl.create_default_context(cadata=i['ca'])
   context.load_cert_chain(os.path.join(directory,'cert'),os.path.join(directory,'key'))
   c=http.client.HTTPSConnection('aimee-kb',8745,context=context,timeout=70)
-  h={'Content-Type':'application/json','Authorization':'Bearer '+a['bearer'],
-     'X-Aimee-Service-Authorization':'Bearer '+a['service'],
-     'X-Aimee-Caller-Subject':'review_operator'}
+  h=review_action_headers(a['bearer'],a['service'],a['model'])
   c.request('POST',a['path'],json.dumps(a['body']),h)
   r=c.getresponse(); print(json.dumps([r.status,json.loads(r.read())]))
-'''
-        status, result = json.loads(command('docker', 'exec', '-i', server.application,
-            'python3', '-c', code, data=json.dumps(dict(path='/v1/actions/memory.' + verb,
-            body=payload, bearer=kb.env['AIMEE_KB_API_BEARER_TOKEN'], service=kb.service_identity))))
-        if status != 200:
-            raise RuntimeError('authenticated review action transport returned HTTP ' + str(status))
+''')
+    status, result = json.loads(command('docker', 'exec', '-i', server,
+        'python3', '-c', code, data=json.dumps(dict(path=path,
+        body=payload, bearer=bearer, service=service, model=model))))
+    if status != 200:
+        raise RuntimeError('authenticated owner action transport returned HTTP ' + str(status))
+    return result
+
+
+def correction_review_gate(kb, server, placement, output, profile='owner-client'):
+    """Qualify selected KB owner model commands and its authenticated review path."""
+    from types import SimpleNamespace
+    gate = placement.Gate(SimpleNamespace(server=server.application, kb=kb.application,
+        kb_store_db=kb.postgres, store_db=server.postgres))
+    if profile not in ('owner-client', 'public-reference'):
+        raise ValueError('unknown shared memory qualification profile')
+    scope = 'review-e2e-' + uuid.uuid4().hex
+    def check(name, passed, detail=None):
+        gate.check(name, passed, detail)
+        if not passed:
+            raise RuntimeError(name)
+    def action(verb, values, model=False):
+        payload = dict(project=scope, scope_context=True)
+        payload.update(values)
+        return authenticated_reference_owner_action(server.application, '/v1/actions/memory.' + verb,
+            payload, kb.env['AIMEE_KB_API_BEARER_TOKEN'], kb.service_identity, model)
+    def model_command(name, values):
+        if profile == 'owner-client':
+            return gate.mcp_document(name, 'mutate', values)
+        if values.get('verb') != 'update':
+            raise RuntimeError('review fixture model command must be a declared update')
+        payload = dict(values, view='mcp')
+        payload.pop('verb', None)
+        result = action('update', payload, model=True)
+        check(name + ' owner envelope', isinstance(result, dict))
         return result
     try:
         recovery_requirements = dict(schema_version=1, task_revision=scope+'-recovery:1',
@@ -1151,10 +1441,17 @@ with tempfile.TemporaryDirectory() as directory:
         correction = dict(verb='update', store='kb', project=scope, id=str(old_id),
             content='reviewed model correction', authority='user', expected_version=version,
             idempotency_key=scope + '-retry')
-        proposed = gate.mcp_document('MCP creates linked correction draft', 'mutate', correction)
+        if profile == 'public-reference':
+            unavailable = gate.mcp_document('Server MCP missing owner-client boundary', 'mutate', correction)
+            check('Server MCP cannot fall back to shared HTTP without its owner client',
+                  unavailable.get('status') == 'unavailable' and
+                  unavailable.get('message') == 'memory bus service unavailable or unsupported' and
+                  'proposal' not in unavailable)
+        proposed = model_command('Selected owner creates linked model correction draft', correction)
+        unchanged = action('get', dict(id=old_id))['memory']['content'] == 'verified original'
         check('model draft preserves authoritative current memory', proposed.get('kind') == 'review_required' and
             proposed.get('proposal', {}).get('state') == 'pending' and
-            action('get', dict(id=old_id))['memory']['content'] == 'verified original')
+            unchanged, safe_correction_summary(proposed, unchanged))
         proposal = proposed['proposal']
         pid, digest = proposal['proposal_id'], proposal['payload_digest']
         inspected = action('correction_proposals', dict(proposal_id=pid))['proposals']
@@ -1164,14 +1461,27 @@ with tempfile.TemporaryDirectory() as directory:
             dict(proposal_id=pid, project='other-' + scope)).get('proposals') == [])
         command('docker', 'restart', kb.application)
         kb.start()
-        # Container health checks KB locally. The enrolled Server also needs
-        # to reconnect to the restarted owner before exercising a mutation.
-        # Use the same end-to-end readiness check as the placement restart
-        # gates; never retry a conflicting mutation until it appears to pass.
-        restored = gate.good('enrolled Server reaches restarted memory owner', gate.wait(
-            'get', dict(store='kb', id=old_id, project=scope, include_version=True)))['memory']
-        check('Server observes the exact target version after KB restart', restored.get('version') == version)
-        replay = gate.mcp_document('MCP draft retry after KB restart', 'mutate', correction)
+        # Container health checks KB locally. Wait for the same authenticated
+        # host transport to read the restarted owner before any mutation.
+        # Only this read is retried; conflicting mutations are never retried.
+        if profile == 'owner-client':
+            restored = gate.good('enrolled Server reaches restarted memory owner', gate.wait(
+                'get', dict(store='kb', id=old_id, project=scope, include_version=True)))['memory']
+        else:
+            deadline = time.monotonic() + 180
+            restored = None
+            while time.monotonic() < deadline:
+                try:
+                    observed = action('get', dict(id=old_id, include_version=True))
+                    if observed.get('status') == 'ok' and isinstance(observed.get('memory'), dict):
+                        restored = observed['memory']
+                        break
+                except (RuntimeError, subprocess.SubprocessError):
+                    pass
+                time.sleep(1)
+            check('authenticated host reaches restarted selected owner', restored is not None)
+        check('qualified transport observes the exact target version after KB restart', restored.get('version') == version)
+        replay = model_command('Owner model draft retry after KB restart', correction)
         retry_ok = (replay.get('proposal', {}).get('proposal_id') == pid and
             replay['proposal'].get('replayed') is True)
         if not retry_ok:
@@ -1211,7 +1521,7 @@ with tempfile.TemporaryDirectory() as directory:
         check('review replay keeps one canonical commit', repeated.get('replayed') is True and
             repeated.get('review_commit_id') == approved['review_commit_id'])
         followup = dict(verb='update', store='kb', project=scope, id=new_id, content='rejected model follow-up')
-        pending = gate.mcp_document('MCP reviewed content requires another review', 'mutate', followup)
+        pending = model_command('Owner reviewed content requires another model review', followup)
         check('reviewed model text cannot be silently overwritten', pending.get('kind') == 'review_required' and
             pending.get('proposal', {}).get('state') == 'pending')
         reject = pending['proposal']
@@ -1219,7 +1529,7 @@ with tempfile.TemporaryDirectory() as directory:
             payload_digest=reject['payload_digest'], expected_version=reject['target_version'], action='reject'))
         check('verified reviewer rejects the exact follow-up', rejected.get('status') == 'ok' and
             rejected.get('proposal', {}).get('state') == 'rejected')
-        duplicate = gate.mcp_document('MCP repeats rejected draft', 'mutate', followup)
+        duplicate = model_command('Owner model command repeats rejected draft', followup)
         check('rejected draft cannot reopen through another model call',
             duplicate.get('proposal', {}).get('proposal_id') == reject['proposal_id'] and
             duplicate['proposal'].get('state') == 'rejected')
@@ -1227,9 +1537,10 @@ with tempfile.TemporaryDirectory() as directory:
             f"SELECT count(*) FROM memories WHERE scope_type='project' AND scope_value='{scope}'") == '2')
         check('rejected draft never enters recall storage', gate.sql(
             f"SELECT count(*) FROM memories WHERE scope_value='{scope}' AND content='rejected model follow-up'") == '0')
-        check('explicit erasure removes original proposal parent', action('delete', dict(id=old_id, authority='user')).get('status') == 'ok')
+        erasure = action('delete', dict(id=old_id, authority='user'))
+        check('explicit erasure removes original proposal parent', erasure.get('status') == 'ok')
         check('parent erasure removes draft payload', action('correction_proposals', dict(proposal_id=pid)).get('proposals') == [])
-        erased = gate.mcp_document('MCP erased proposal retry', 'mutate', correction)
+        erased = model_command('Owner model command retries erased proposal', correction)
         check('erasure does not free a committed proposal retry key', erased.get('reason') == 'idempotent_result_unavailable')
     finally:
         (output / 'correction-review.json').write_text(json.dumps(gate.checks, indent=2) + '\n')
@@ -1240,6 +1551,22 @@ def main():
     parser.add_argument('--topology', choices=('T1', 'T2', 'T3'), required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--keep', action='store_true')
+    parser.add_argument('--reference-memory-owner', type=Path,
+                        help='explicit frozen external reference owner for compatibility gates; not shipped')
+    # Each storage-agnostic gate runs in exactly one CI leg. These two switches
+    # are how a leg declines a gate another leg owns; neither is a fast mode for
+    # a single local run, which should run everything.
+    parser.add_argument('--boot-only', action='store_true',
+                        help='start every role and prove it boots on this storage (the KB '
+                             'also stores a record), then stop: the application gates do not '
+                             'depend on how PostgreSQL storage is backed and run in the '
+                             'plain-storage legs')
+    parser.add_argument('--skip-kb-gates', action='store_true',
+                        help='boot the KB and prove it stores a record, but leave its direct '
+                             'gates to the T1 leg, which runs them on the identical KB stack')
+    parser.add_argument('--skip-kb-free-gate', action='store_true',
+                        help='omit the KB-free personal memory gate on the standalone Server; '
+                             'T3 runs that gate against the identical composition')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, AIMEE_RUNTIME_WEB_ENABLED='0', AIMEE_POSTGRES_VOLUME_MIB='512',
@@ -1260,7 +1587,7 @@ def main():
     try:
         kb = None
         if args.topology in ('T1', 'T2'):
-            kb = Stack('kb', env, args.output)
+            kb = Stack('kb', env, args.output, args.reference_memory_owner)
             stacks.append(kb)
             kb.start()
             check('KB application metadata contains no database or enrollment credential', application_metadata_is_private(kb))
@@ -1273,6 +1600,7 @@ def main():
             code, body = kb.kb_request('/v1/actions/memory.store', dict(key='shared-e2e-' + uuid.uuid4().hex,
                 content='Synthetic shared deployment fixture'))
             check('KB shared memory module stores a record', code == 200 and body.get('status') == 'ok')
+        if kb and not (args.boot_only or args.skip_kb_gates):
             code, preview = kb.kb_request('/v1/actions/memory.hygiene', dict(
                 dry_run=True, scope=dict(type='global', value='_global'), max_rows=16))
             check('Direct KB hygiene accepts its authenticated action envelope',
@@ -1300,26 +1628,45 @@ def main():
             check('KB ranked search uses its local embedding service', code == 200 and isinstance(body.get('hits'), list))
             code, body = kb.kb_request('/v1/actions/memory.find_facts', dict(query='shared deployment fixture', limit=3, graph_code_fusion_state='on'))
             check('KB graph and memory retrieval survives the deepest worker path', code == 200 and isinstance(body.get('facts'), list))
-            typed_context_budget_gate(kb, check)
-            typed_source_version_gate(kb, check)
-            linked_relation_input_gate(kb, check)
-            relation_consumer_rebuild_gate(kb, check)
-            future_index_admission_gate(kb, check)
-            graph_intermediate_scope_gate(kb, check)
-            legacy_query_eligibility_gate(kb, check)
-            preview_source_version_gate(kb, check)
+            code, body = kb.kb_request('/v1/actions/memory.stats', dict(view='console'))
+            check('KB memory statistics count the stored shared record',
+                  code == 200 and body.get('status') == 'ok' and body.get('stats', {}).get('total', 0) >= 1)
             evidence_exact_identity_gate(kb, check)
-            lineage_release_gate(kb, check)
+            if args.reference_memory_owner:
+                # These gates seed and read the frozen 1.0 owner's PostgreSQL
+                # tables (typed facts, relations, lineage, embedding generations);
+                # the shipped implementation keeps none of them.
+                typed_context_budget_gate(kb, check)
+                typed_source_version_gate(kb, check)
+                linked_relation_input_gate(kb, check)
+                relation_consumer_rebuild_gate(kb, check)
+                future_index_admission_gate(kb, check)
+                graph_intermediate_scope_gate(kb, check)
+                legacy_query_eligibility_gate(kb, check)
+                preview_source_version_gate(kb, check)
+                lineage_release_gate(kb, check)
+        if kb and args.skip_kb_gates and not args.boot_only and args.reference_memory_owner:
+            # The direct T1 assertion gate initializes its own generation. T2
+            # owns a different fresh KB, so skipping those assertions must not
+            # skip the setup required by authenticated recovery below.
+            activate_embedding_generation(kb, check, 'recovery-' + uuid.uuid4().hex)
         if args.topology in ('T2', 'T3'):
-            server = Stack('server', env, args.output)
+            server = Stack('server', env, args.output, args.reference_memory_owner)
             stacks.append(server)
             server.start()
             check('Server boots without a KB connection', True)
             check('Server application metadata contains no database or enrollment credential', application_metadata_is_private(server))
+        if args.topology in ('T2', 'T3') and not args.boot_only:
             gate_script = ROOT / 'tests/e2e/memory-placement-e2e.py'
             common = ['--server', server.application, '--store-db', server.postgres]
-            command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'), timeout=900)
-            check('KB-free personal memory regression gate', True)
+            shipped_script = ROOT / 'tests/e2e/shipped-memory-e2e.py'
+            if not args.skip_kb_free_gate:
+                if args.reference_memory_owner:
+                    command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'), timeout=900)
+                else:
+                    command('python3', str(shipped_script), '--server', server.application,
+                            '--output', str(args.output / 'local-memory.json'), timeout=900)
+                check('KB-free personal memory regression gate', True)
             if kb:
                 # The two projects retain separate stores, model identities and
                 # Vaults. Only the optional KB application joins the API network.
@@ -1345,16 +1692,29 @@ def main():
                         raise RuntimeError('KB credential response was not redacted')
                 command('docker', 'restart', server.application)
                 server.start()
-                correction_review_gate(kb, server, placement, args.output)
-                check('Linked model correction drafts and authenticated decisions', True)
-                command('python3', str(gate_script), *common, '--kb', kb.application,
-                    '--kb-store-db', kb.postgres, '--output', str(args.output / 'shared-memory.json'), timeout=900)
-                check('Enrolled optional KB, scope isolation, restart and outage regressions', True)
+                if args.reference_memory_owner:
+                    # The frozen 1.0 owner's own placement and correction gates
+                    # read its PostgreSQL tables directly.
+                    profile = 'public-reference'
+                    correction_review_gate(kb, server, placement, args.output, profile)
+                    check('Model correction drafts and authenticated decisions via ' + profile, True)
+                    command('python3', str(gate_script), *common, '--kb', kb.application,
+                        '--kb-store-db', kb.postgres, '--shared-profile', profile,
+                        '--output', str(args.output / 'shared-memory.json'), timeout=900,
+                        env=dict(os.environ, AIMEE_E2E_REFERENCE_BEARER=kb.env['AIMEE_KB_API_BEARER_TOKEN'],
+                                 AIMEE_E2E_REFERENCE_SERVICE=kb.service_identity))
+                    check('Shared memory qualification via ' + profile, True)
+                else:
+                    command('python3', str(shipped_script), '--server', server.application, '--kb', kb.application,
+                        '--output', str(args.output / 'shared-memory.json'), timeout=900,
+                        env=dict(os.environ, AIMEE_E2E_KB_BEARER=kb.env['AIMEE_KB_API_BEARER_TOKEN']))
+                    check('Shared memory qualification via the shipped implementation', True)
                 command('python3', str(ROOT / 'tests/e2e/instance-identity-e2e.py'),
                     '--server', server.application, '--kb', kb.application,
                     '--image', env['AIMEE_APPLICATION_IMAGE'], '--output', str(args.output / 'identity.json'))
                 check('One application image and immutable first-boot identities', True)
-            else:
+            elif args.reference_memory_owner:
+                # Both read and seed the 1.0 owner's user_memories tables.
                 command('python3', str(ROOT / 'tests/e2e/local-model-memory-e2e.py'), *common,
                     '--embedder', server.embedder, '--output', str(args.output / 'semantic-memory.json'), timeout=600)
                 check('Real local semantic recall, outage recovery and retirement gate', True)
@@ -1365,8 +1725,15 @@ def main():
                 '--server', server.application, '--output', str(args.output / 'provider-boundary.json'), timeout=600)
             check('Provider-bound memory, constraints, tools and continuation gate', True)
             command('python3', str(ROOT / 'tests/e2e/memory-native-async-e2e.py'),
-                '--server', server.application, '--output', str(args.output / 'native-async.json'), timeout=600)
+                '--server', server.application,
+                '--shared-profile', 'public-reference' if args.reference_memory_owner else 'kb-link',
+                '--output', str(args.output / 'native-async.json'), timeout=600)
             check('Live asynchronous native memory refusal and recovery gate', True)
+            if args.topology == 'T3' and not args.reference_memory_owner:
+                command('python3', str(ROOT / 'tests/e2e/standalone-index-release-e2e.py'),
+                    '--server', server.application, '--store-db', server.postgres,
+                    '--output', str(args.output / 'standalone-index'), timeout=900)
+                check('Standalone repository indexing, retained snapshots and SQL outage readiness', True)
             if env.get('AIMEE_MEMORY_HEALTH_FIXTURE') == '1':
                 command('python3', str(ROOT / 'tests/e2e/memory-health-e2e.py'),
                     '--server', server.application, '--output', str(args.output / 'memory-health.json'), timeout=600)
@@ -1374,21 +1741,42 @@ def main():
     except (RuntimeError, subprocess.SubprocessError, ValueError, OSError) as error:
         checks.append(dict(name='topology completed', passed=False, error=str(error)))
         print('FAIL ' + str(error), flush=True)
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            # The message is the sanitized error above; it never carries arguments or Docker output.
+            passed = [row['name'] for row in checks if row['passed']]
+            after = ('after "' + passed[-1] + '"') if passed else 'before any gate passed'
+            print(f'::error title=e2e {args.topology} failed::{error} ({after})', flush=True)
     finally:
         (args.output / 'topology.json').write_text(json.dumps(checks, indent=2) + '\n')
         # Export only this fixed diagnostic grammar. Full Docker output may
         # contain bootstrap credentials, request bodies or SQL driver details.
         failures = []
+        startup = []
         pattern = re.compile(r'memory data failure operation="([a-z-]{1,64})" trace=([0-9]+) status=([0-9]+) class=(internal|deadline|cancelled|store_unavailable|result_capacity|transaction_closed|sqlstate_[0-9A-Z]{5})(?=\s|$)')
         for stack in stacks:
             try:
                 logs = subprocess.run(['docker', 'logs', '--tail', '2000', stack.application],
                     capture_output=True, text=True, timeout=15)
+                # Only fixed categories, never raw logs, credential values or request data.
+                text = (logs.stdout + logs.stderr).lower()
+                categories = ('config module unavailable', 'module bus failed',
+                              'memory capability unavailable', 'permission denied',
+                              'connection refused', 'vault initialization failed',
+                              'no such file or directory')
+                states = {}
+                for label, container in (('application', stack.application), ('embedder', stack.embedder)):
+                    state = json.loads(command('docker', 'inspect', '--format', '{{json .State}}', container))
+                    states[label] = safe_container_state(state)
+                startup.append(dict(role=stack.role, states=states,
+                                    categories=[category for category in categories if category in text],
+                                    readiness=container_readiness_probe(stack),
+                                    container_log=safe_startup_log_summary(logs.stdout + logs.stderr)))
                 for operation, trace, status, kind in pattern.findall(logs.stdout + logs.stderr):
                     failures.append(dict(role=stack.role, operation=operation, trace=trace,
                                          status=int(status), error_class=kind))
-            except (OSError, subprocess.SubprocessError):
+            except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, TypeError, KeyError):
                 failures.append(dict(role=stack.role, diagnostics='unavailable'))
+        (args.output / 'startup.json').write_text(json.dumps(startup, indent=2) + '\n')
         (args.output / 'memory-failures.json').write_text(json.dumps(failures, indent=2) + '\n')
         if not args.keep:
             for stack in reversed(stacks):

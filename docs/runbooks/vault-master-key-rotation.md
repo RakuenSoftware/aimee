@@ -23,7 +23,9 @@ aimee-server --rotate-master-key
 
 The command creates its own private pre-rotation backup, rewraps every server-decryptable data key,
 and writes the new master key last with atomic replace and sync. A present but unreadable or short
-key is an error; it is never overwritten.
+key is an error; it is never overwritten. A missing key in an initialized Vault is
+also an error; restore its original key rather than initializing a replacement.
+Retained unavailable versions and host content-index keys participate in rotation.
 
 ## Verify
 
@@ -34,8 +36,9 @@ key is an error; it is never overwritten.
 5. Check the new key owner, mode `0600`, and modification time.
 6. Restart once more and repeat a probe to prove the key was persisted, not only cached.
 
-Keep the pre-rotation backup until all checks pass. Then remove it through the deployment's approved
-secure-retention process. It contains old-key ciphertext and remains sensitive.
+Retain the pre-rotation backup under the deployment's access controls, including after
+verification. It contains the old key and ciphertext and remains sensitive. Archive
+it intact before another rotation in the same process needs its reserved backup path.
 
 ## Failure
 

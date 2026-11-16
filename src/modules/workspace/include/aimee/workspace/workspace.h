@@ -32,30 +32,8 @@ int workspace_active_root(const char *cwd, char *out, size_t out_len);
  * the workspace directory's name, which is not its project. */
 int workspace_active_root_from_cwd(const char *cwd, char *out, size_t out_len);
 
-/* Resolve a path-independent project identity for code and memory scoping.
- *
- * For a git repo this yields the canonical remote identity rather than the
- * local checkout path, so two clones of the same repo on different machines
- * resolve to the same scope (the cross-environment recall bug otherwise):
- *   project_out   = canonical repo URL  (https://host/owner/repo) or
- *                   local:<persisted-uuid> for a local-only project.
- *   workspace_out = the repo's org/namespace parent (https://host/owner) when
- *                   it has one, else the repo identity itself.
- * Either out pointer may be NULL. Returns 0 when a repo identity was resolved,
- * For non-git directories, a generated UUID is persisted under .aimee and
- * follows the directory when it moves. Returns -1 only when no durable
- * identity can be read or created. */
-int workspace_repo_identity(const char *cwd, char *project_out, size_t project_len,
-                            char *workspace_out, size_t workspace_len);
-
-/* Canonical index keys for a discovered repo root: the project name and its
- * workspace, used to key the shared kb_store index (projects.name, kb_documents.project)
- * and the ingest queue. Prefers the repository identity (workspace_repo_identity)
- * so a repo indexed from any machine resolves to one project. Returns -1 and
- * leaves both outputs empty when no durable identity can be read or persisted;
- * callers must skip/refuse indexing rather than substitute a path basename. */
-int workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
-                              size_t name_len, char *ws_out, size_t ws_len);
+/* Identity is also available without the server/workspace umbrella. */
+#include <aimee/workspace/identity.h>
 
 /* Resolve a proposal path: try path as is, then search docs/proposals/ subdirectories.
  * Returns newly allocated absolute path string, or NULL if not found. Caller frees. */
@@ -111,27 +89,6 @@ int worktree_find_branch_in_repo(const char *git_root, const char *branch, char 
 int worktree_find_branch_registered(const char *branch, char *out_dir, size_t out_len);
 int check_merged_pr_for_branch(const char *git_dir);
 const char *worktree_for_cwd(const session_state_t *state, const char *cwd);
-
-/* Detect the base branch for a new worktree rooted at git_root.
- * Prefers the repository's DEFAULT branch (origin/HEAD), then local
- * main/master/trunk, then the current HEAD as a last resort. Writes result
- * into buf (at most buf_len bytes including NUL). */
-/* Resolve the base ref for a new session worktree: the REMOTE default branch (e.g.
- * "origin/testing"). Returns 0 and fills buf, or -1 with buf empty when no remote default
- * is resolvable -- callers must then refuse to create the worktree rather than guess. */
-int worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len);
-
-/* SUGGEST a feature branch name (aimee/feat/<slug>) for the session working in
- * `wt_path`, derived from the work_name the launcher recorded in the worktree
- * registry. `wt_path` is the worktree or any path inside it; the owning row is found
- * by walking up, as the attention guard does. Returns 0 with `buf` filled, -1 when
- * nothing usable can be derived.
- *
- * A SUGGESTION, not a lookup: this reads a file under the checkout, so only a caller
- * running where the checkout is may use it (the CLI). The PR path runs on
- * aimee-server, which cannot see a detached or mirrored workspace's directory, and
- * must use feature_branch_for_session() (db1) instead. */
-int feature_branch_suggest(const char *wt_path, char *buf, size_t buf_len);
 
 /* Count active aimee-managed worktrees for git_root. */
 int count_active_worktrees_for_root(const char *git_root);

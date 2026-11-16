@@ -2,9 +2,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import SetupChip from './SetupChip';
-import { DISMISSED_KEY } from '../setup/setupState';
+import { DISMISSED_KEY, setDismissed } from '../setup/setupState';
 
-const mocks = vi.hoisted(() => ({ open: vi.fn(), accountReady: true }));
+const mocks = vi.hoisted(() => ({ open: vi.fn(), accountReady: true, scope: 'a'.repeat(64) }));
 
 vi.mock('../setup/configApi', () => ({
   loadConfig: async () => ({ provider: 'claude', embedder_url: 'http://embedder' }),
@@ -12,6 +12,7 @@ vi.mock('../setup/configApi', () => ({
 
 vi.mock('../setup/setupSignals', () => ({
   fetchSetupAccountReady: async () => mocks.accountReady,
+  fetchSetupAccountStatus: async () => ({ complete: mocks.accountReady, dismissal_scope: mocks.scope }),
   fetchProjectCount: async () => 1,
   fetchHostCount: async () => 0,
   fetchGitIdentityReady: async () => false,
@@ -26,6 +27,8 @@ afterEach(() => {
   cleanup();
   mocks.open.mockClear();
   mocks.accountReady = true;
+  mocks.scope = 'a'.repeat(64);
+  setDismissed(false);
   localStorage.clear();
 });
 
@@ -68,4 +71,29 @@ describe('First-boot setup after reinstall', () => {
 
     await waitFor(() => expect(mocks.open).toHaveBeenCalledOnce());
   });
+});
+
+it('remembers dismissal for this pending instance without completing its account step', async () => {
+  mocks.accountReady = false;
+  localStorage.setItem(`${DISMISSED_KEY}:scope:${mocks.scope}`, '1');
+  render(<SetupChip />);
+  await screen.findByRole('button', { name: /Setup — 2 left/ });
+  expect(mocks.open).not.toHaveBeenCalled();
+});
+
+it('does not reuse a prior installation scope even with the same account username', async () => {
+  mocks.accountReady = false;
+  localStorage.setItem(`${DISMISSED_KEY}:scope:${'b'.repeat(64)}`, '1');
+  localStorage.setItem(DISMISSED_KEY, '1');
+  render(<SetupChip />);
+  await waitFor(() => expect(mocks.open).toHaveBeenCalledOnce());
+  expect(screen.getByRole('button', { name: /Setup — 2 left/ })).toBeTruthy();
+});
+
+it('keeps pending setup visible without a scope despite an old global flag', async () => {
+  mocks.accountReady = false;
+  mocks.scope = '';
+  localStorage.setItem(DISMISSED_KEY, '1');
+  render(<SetupChip />);
+  await waitFor(() => expect(mocks.open).toHaveBeenCalledOnce());
 });

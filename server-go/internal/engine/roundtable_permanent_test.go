@@ -6,17 +6,17 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-type statusReviewer struct{ status bus.ModuleStatus }
+type statusReviewer struct{ status ring.ModuleStatus }
 
 func (r statusReviewer) Review(context.Context, roundtablecfg.ReviewRequest) (roundtablecfg.RunResult, error) {
 	return roundtablecfg.RunResult{}, fmt.Errorf("roundtable review over the bus: %w",
-		&bus.ModuleCallStatusError{Status: r.status})
+		&ring.ModuleCallStatusError{Status: r.status})
 }
 
 // Parking exists for a runner that might come back. A request the panel refuses
@@ -25,11 +25,11 @@ func (r statusReviewer) Review(context.Context, roundtablecfg.ReviewRequest) (ro
 func TestRoundtableFailsTheStepWhenThePanelRefusesTheRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		status bus.ModuleStatus
+		status ring.ModuleStatus
 		failed bool
 	}{
-		{"invalid request is permanent", bus.ModuleStatusInvalidRequest, true},
-		{"internal may be transient", bus.ModuleStatusInternal, false},
+		{"invalid request is permanent", ring.ModuleStatusInvalidRequest, true},
+		{"internal may be transient", ring.ModuleStatusInternal, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := &NativeRunner{agents: &recordingAgents{}}

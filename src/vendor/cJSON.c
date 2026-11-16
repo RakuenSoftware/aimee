@@ -267,6 +267,10 @@ CJSON_PUBLIC(void) cJSON_Delete(cJSON *item)
          global_hooks.deallocate(item->valuestring);
          item->valuestring = NULL;
       }
+      if (!(item->type & cJSON_IsReference) && item->number_lexeme)
+      {
+         global_hooks.deallocate(item->number_lexeme);
+      }
       if (!(item->type & cJSON_StringIsConst) && (item->string != NULL))
       {
          global_hooks.deallocate(item->string);
@@ -305,6 +309,47 @@ typedef struct
 #define cannot_access_at_index(buffer, index) (!can_access_at_index(buffer, index))
 /* get a pointer to the buffer at the position */
 #define buffer_at_offset(buffer) ((buffer)->content + (buffer)->offset)
+
+/* JSON numbers are opaque transport data as well as optional double views.
+ * Validate the complete token before retaining its exact decimal spelling. */
+static cJSON_bool valid_number_token(const unsigned char *s, size_t n)
+{
+   size_t i = 0;
+   if (i < n && s[i] == '-')
+      i++;
+   if (i == n)
+      return false;
+   if (s[i] == '0')
+      i++;
+   else
+   {
+      if (s[i] < '1' || s[i] > '9')
+         return false;
+      while (i < n && s[i] >= '0' && s[i] <= '9')
+         i++;
+   }
+   if (i < n && s[i] == '.')
+   {
+      size_t start = ++i;
+      while (i < n && s[i] >= '0' && s[i] <= '9')
+         i++;
+      if (i == start)
+         return false;
+   }
+   if (i < n && (s[i] == 'e' || s[i] == 'E'))
+   {
+      size_t start;
+      i++;
+      if (i < n && (s[i] == '+' || s[i] == '-'))
+         i++;
+      start = i;
+      while (i < n && s[i] >= '0' && s[i] <= '9')
+         i++;
+      if (i == start)
+         return false;
+   }
+   return i == n;
+}
 
 /* Parse the input text to generate a number, and populate the result into item. */
 static cJSON_bool parse_number(cJSON *const item, parse_buffer *const input_buffer)
@@ -357,6 +402,10 @@ static cJSON_bool parse_number(cJSON *const item, parse_buffer *const input_buff
       }
    }
 loop_end:
+   if (!valid_number_token(buffer_at_offset(input_buffer), number_string_length))
+   {
+      return false;
+   }
    /* malloc for temporary buffer, add 1 for '\0' */
    number_c_string = (unsigned char *)input_buffer->hooks.allocate(number_string_length + 1);
    if (number_c_string == NULL)
@@ -380,7 +429,7 @@ loop_end:
    }
 
    number = strtod((const char *)number_c_string, (char **)&after_end);
-   if (number_c_string == after_end)
+   if ((size_t)(after_end - number_c_string) != number_string_length)
    {
       /* free the temporary buffer */
       input_buffer->hooks.deallocate(number_c_string);
@@ -406,8 +455,12 @@ loop_end:
    item->type = cJSON_Number;
 
    input_buffer->offset += (size_t)(after_end - number_c_string);
-   /* free the temporary buffer */
-   input_buffer->hooks.deallocate(number_c_string);
+   /* Retain the original JSON token, not the locale-adjusted strtod input.
+    * Numeric tokens have separate storage so number nodes remain distinguishable
+    * from string-valued nodes even for legacy callers testing valuestring. */
+   memcpy(number_c_string, buffer_at_offset(input_buffer) - number_string_length,
+          number_string_length);
+   item->number_lexeme = (char *)number_c_string;
    return true;
 }
 
@@ -418,6 +471,12 @@ CJSON_PUBLIC(double) cJSON_SetNumberHelper(cJSON *object, double number)
    {
       return (double)NAN;
    }
+
+   if (object->number_lexeme && !(object->type & cJSON_IsReference))
+   {
+      global_hooks.deallocate(object->number_lexeme);
+   }
+   object->number_lexeme = NULL; /* Explicit mutation invalidates the retained number token. */
 
    if (number >= INT_MAX)
    {
@@ -592,11 +651,35 @@ static void update_offset(printbuffer *const buffer)
    buffer->offset += strlen((const char *)buffer_pointer);
 }
 
-/* securely comparison of floating-point variables */
-static cJSON_bool compare_double(double a, double b)
+/* Detect direct valuedouble mutation too. Locale conversion is needed only
+ * in locale-enabled builds; allocation failure must refuse, never round data. */
+static int retained_number_current(const cJSON *item)
 {
-   double maxVal = fabs(a) > fabs(b) ? fabs(a) : fabs(b);
-   return (fabs(a - b) <= maxVal * DBL_EPSILON);
+   char *localized = NULL;
+   const char *token = item->number_lexeme;
+   double parsed;
+   unsigned char decimal_point;
+   size_t i, length;
+   if (!token)
+      return 0;
+   decimal_point = get_decimal_point();
+   if (decimal_point != '.')
+   {
+      length = strlen(token);
+      localized = (char *)global_hooks.allocate(length + 1);
+      if (!localized)
+         return -1;
+      memcpy(localized, token, length + 1);
+      for (i = 0; i < length; i++)
+         if (localized[i] == '.')
+            localized[i] = (char)decimal_point;
+      token = localized;
+   }
+   parsed = strtod(token, NULL);
+   if (localized)
+      global_hooks.deallocate(localized);
+   return parsed == item->valuedouble &&
+          (parsed != 0.0 || signbit(parsed) == signbit(item->valuedouble));
 }
 
 /* Render the number nicely from the given item into a string. */
@@ -615,7 +698,23 @@ static cJSON_bool print_number(const cJSON *const item, printbuffer *const outpu
       return false;
    }
 
-   /* This checks for NaN and Infinity */
+   {
+      int retained = retained_number_current(item);
+      if (retained < 0)
+         return false;
+      if (retained)
+      {
+         size_t token_length = strlen(item->number_lexeme);
+         output_pointer = ensure(output_buffer, token_length + 1);
+         if (!output_pointer)
+            return false;
+         memcpy(output_pointer, item->number_lexeme, token_length + 1);
+         output_buffer->offset += token_length;
+         return true;
+      }
+   }
+
+   /* Constructed or explicitly changed numbers use their numeric value. */
    if (isnan(d) || isinf(d))
    {
       length = sprintf((char *)number_buffer, "null");
@@ -730,6 +829,8 @@ static unsigned char utf16_literal_to_utf8(const unsigned char *const input_poin
 
    /* get the first utf16 sequence */
    first_code = parse_hex4(first_sequence + 2);
+   if (first_code == 0)
+      goto fail;
 
    /* check that the code is valid */
    if (((first_code >= 0xDC00) && (first_code <= 0xDFFF)))
@@ -852,6 +953,8 @@ static cJSON_bool parse_string(cJSON *const item, parse_buffer *const input_buff
       while (((size_t)(input_end - input_buffer->content) < input_buffer->length) &&
              (*input_end != '\"'))
       {
+         if (input_end[0] < 0x20)
+            goto fail; /* JSON forbids unescaped controls. */
          /* is escape sequence */
          if (input_end[0] == '\\')
          {
@@ -2865,6 +2968,13 @@ cJSON *cJSON_Duplicate_rec(const cJSON *item, size_t depth, cJSON_bool recurse)
    newitem->type = item->type & (~cJSON_IsReference);
    newitem->valueint = item->valueint;
    newitem->valuedouble = item->valuedouble;
+   if (item->number_lexeme)
+   {
+      newitem->number_lexeme =
+          (char *)cJSON_strdup((const unsigned char *)item->number_lexeme, &global_hooks);
+      if (!newitem->number_lexeme)
+         goto fail;
+   }
    if (item->valuestring)
    {
       newitem->valuestring =
@@ -3137,6 +3247,138 @@ CJSON_PUBLIC(cJSON_bool) cJSON_IsRaw(const cJSON *const item)
    return (item->type & 0xFF) == cJSON_Raw;
 }
 
+/* Decimal equality must not merge adjacent opaque integers above 2^53.
+ * Normalize significant digits and decimal exponent without a double roundtrip.
+ * Extreme exponent overflow is conservatively unequal unless tokens match. */
+typedef struct
+{
+   const char *first, *last;
+   long long exponent;
+   int negative, overflow;
+} decimal_view;
+
+static decimal_view decimal_normalize(const char *token)
+{
+   decimal_view view = {NULL, NULL, 0, 0, 0};
+   const char *p = token;
+   size_t fractional = 0, trailing = 0;
+   int fraction = 0, negative_exponent = 0;
+   long long exponent = 0;
+   if (*p == '-')
+   {
+      view.negative = 1;
+      p++;
+   }
+   for (; *p && *p != 'e' && *p != 'E'; p++)
+   {
+      if (*p == '.')
+      {
+         fraction = 1;
+         continue;
+      }
+      if (fraction)
+         fractional++;
+      if (*p != '0')
+      {
+         if (!view.first)
+            view.first = p;
+         view.last = p;
+         trailing = 0;
+      }
+      else
+         trailing++;
+   }
+   if (!view.first)
+   {
+      view.negative = 0;
+      return view;
+   }
+   if (*p)
+   {
+      p++;
+      if (*p == '-' || *p == '+')
+      {
+         negative_exponent = *p == '-';
+         p++;
+      }
+      for (; *p; p++)
+      {
+         int digit = *p - '0';
+         if (exponent > (LLONG_MAX - digit) / 10)
+         {
+            view.overflow = 1;
+            return view;
+         }
+         exponent = exponent * 10 + digit;
+      }
+   }
+   if (negative_exponent)
+      exponent = -exponent;
+   if ((unsigned long long)fractional > (unsigned long long)LLONG_MAX ||
+       (unsigned long long)trailing > (unsigned long long)LLONG_MAX ||
+       exponent < LLONG_MIN + (long long)fractional)
+   {
+      view.overflow = 1;
+      return view;
+   }
+   exponent -= (long long)fractional;
+   if (exponent > LLONG_MAX - (long long)trailing)
+   {
+      view.overflow = 1;
+      return view;
+   }
+   view.exponent = exponent + (long long)trailing;
+   return view;
+}
+
+static cJSON_bool exact_number_equal(const cJSON *a, const cJSON *b)
+{
+   char *left = cJSON_PrintUnformatted(a), *right = cJSON_PrintUnformatted(b);
+   decimal_view x, y;
+   const char *p, *q;
+   cJSON_bool equal = false;
+   if (!left || !right || !strcmp(left, "null") || !strcmp(right, "null"))
+      goto done;
+   if (!strcmp(left, right))
+   {
+      equal = true;
+      goto done;
+   }
+   x = decimal_normalize(left);
+   y = decimal_normalize(right);
+   if (x.overflow || y.overflow || x.negative != y.negative)
+      goto done;
+   if (!x.first || !y.first)
+   {
+      equal = !x.first && !y.first;
+      goto done;
+   }
+   if (x.exponent != y.exponent)
+      goto done;
+   p = x.first;
+   q = y.first;
+   for (;;)
+   {
+      if (*p != *q)
+         goto done;
+      if (p == x.last || q == y.last)
+      {
+         equal = p == x.last && q == y.last;
+         goto done;
+      }
+      p++;
+      q++;
+      if (*p == '.')
+         p++;
+      if (*q == '.')
+         q++;
+   }
+done:
+   cJSON_free(left);
+   cJSON_free(right);
+   return equal;
+}
+
 CJSON_PUBLIC(cJSON_bool)
 cJSON_Compare(const cJSON *const a, const cJSON *const b, const cJSON_bool case_sensitive)
 {
@@ -3177,11 +3419,7 @@ cJSON_Compare(const cJSON *const a, const cJSON *const b, const cJSON_bool case_
       return true;
 
    case cJSON_Number:
-      if (compare_double(a->valuedouble, b->valuedouble))
-      {
-         return true;
-      }
-      return false;
+      return exact_number_equal(a, b);
 
    case cJSON_String:
    case cJSON_Raw:

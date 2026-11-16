@@ -567,14 +567,15 @@ void mcp_collapse_families(cJSON *tools)
       int found = 0;
       for (const struct fam_member *m = f->members; m->command; m++)
       {
-         cJSON_AddItemToArray(en, cJSON_CreateString(m->command));
-         if (cl < sizeof(clist))
-            cl += (size_t)snprintf(clist + cl, sizeof(clist) - cl, "%s%s", cl ? ", " : "",
-                                   m->command);
          cJSON *mt = family_member_retains_direct(m->tool) ? family_copy_member(tools, m->tool)
                                                            : family_detach_member(tools, m->tool);
          if (!mt)
             continue;
+         /* Partial/host-filtered catalogs must not advertise absent members. */
+         cJSON_AddItemToArray(en, cJSON_CreateString(m->command));
+         if (cl < sizeof(clist))
+            cl += (size_t)snprintf(clist + cl, sizeof(clist) - cl, "%s%s", cl ? ", " : "",
+                                   m->command);
          found++;
          cJSON *ms = cJSON_GetObjectItemCaseSensitive(mt, "inputSchema");
          cJSON *mp = ms ? cJSON_GetObjectItemCaseSensitive(ms, "properties") : NULL;
@@ -601,8 +602,31 @@ void mcp_collapse_families(cJSON *tools)
    }
 }
 
+const char *mcp_family_discriminator(const char *tool)
+{
+   if (!tool)
+      return NULL;
+   if (!strcmp(tool, "git"))
+      return "command";
+   for (const struct fam_def *f = MCP_FAMILIES; f->name; f++)
+      if (!strcmp(tool, f->name))
+         return f->cmd_key;
+   return NULL;
+}
+
 int mcp_family_demux(const char *tool, cJSON *args, char *out, size_t n)
 {
+   /* Git has its own advertised multiplexed schema. Resolve it at the same
+    * boundary as the collapsed families, before permission and workflow gates.
+    * Do not truncate a command into a different callable identity. */
+   if (strcmp(tool, "git") == 0)
+   {
+      const cJSON *command = cJSON_GetObjectItemCaseSensitive(args, "command");
+      if (!cJSON_IsString(command) || !command->valuestring[0])
+         return -1;
+      int length = snprintf(out, n, "git_%s", command->valuestring);
+      return length >= 0 && (size_t)length < n ? 1 : -1;
+   }
    for (const struct fam_def *f = MCP_FAMILIES; f->name; f++)
    {
       if (strcmp(tool, f->name) != 0)
@@ -613,8 +637,8 @@ int mcp_family_demux(const char *tool, cJSON *args, char *out, size_t n)
       for (const struct fam_member *m = f->members; m->command; m++)
          if (strcmp(jc->valuestring, m->command) == 0)
          {
-            snprintf(out, n, "%s", m->tool);
-            return 1;
+            int length = snprintf(out, n, "%s", m->tool);
+            return length >= 0 && (size_t)length < n ? 1 : -1;
          }
       return -1;
    }

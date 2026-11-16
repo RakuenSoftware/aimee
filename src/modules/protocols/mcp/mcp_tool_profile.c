@@ -97,9 +97,8 @@ static const char *const MCP_CORE_TOOLS[] = {
      * same reasoning that puts roundtable_review here. */
     "delegate_status",
     "roundtable_review", /* multi-agent */
-    "ask_user",
-    "send_message", /* interaction */
-    "note",         /* capture (note family: create/list/search) */
+    "ask_user",          /* interaction */
+    "note",              /* capture (note family: create/list/search) */
     /* peer family: send/inbox. One entry, and it earns the slot for a reason
      * that does not apply to anything else on this floor.
      *
@@ -109,13 +108,7 @@ static const char *const MCP_CORE_TOOLS[] = {
      * searches. Peer messaging has NO fallback. There is no clumsier way for one
      * session to reach another; the alternative to being shown this tool is not
      * coordinating at all, and an agent that does not know the capability exists
-     * never calls find_tools looking for it.
-     *
-     * `send_message` sitting two lines above is a live hazard rather than a
-     * coincidence: it delivers to an operator over telegram/ntfy/webhook and
-     * reads, to an agent wanting to reach another session, exactly like the tool
-     * for doing that. Being on the floor beside it is what keeps the two
-     * distinguishable at the moment of choosing. */
+     * never calls find_tools looking for it. */
     "peer",
     NULL,
 };

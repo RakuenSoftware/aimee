@@ -115,3 +115,59 @@ func TestCertSANsIncludeDeploymentOverrides(t *testing.T) {
 		}
 	}
 }
+
+func TestConfiguredTLSCertificateIgnoresEphemeralContainerAddresses(t *testing.T) {
+	t.Setenv("AIMEE_TLS_EXTRA_SAN", "")
+	t.Setenv("AIMEE_WEBCHAT_TLS_SANS", "DNS:stable.example,IP:192.0.2.45")
+	names, ips := requiredCertSANs()
+	if strings.Join(names, ",") != "localhost,stable.example" || len(ips) != 3 {
+		t.Fatalf("reuse requires ephemeral addresses: %v %v", names, ips)
+	}
+	mintedNames, _ := certSANs()
+	if host, err := os.Hostname(); err == nil && host != "" {
+		found := false
+		for _, name := range mintedNames {
+			if name == host {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("new certificates lost automatic hostname coverage")
+		}
+	}
+	dir := t.TempDir()
+	cfg := &config{port: 8443, dbPath: filepath.Join(dir, "webchat.db")}
+	vault := &fakeWebchatVault{}
+	if _, err := ensureTLSCertificate(cfg, vault); err != nil {
+		t.Fatal(err)
+	}
+	key := vault.snapshot.TLSKey
+	signer, err := parseTLSPrivateKey([]byte(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This already-trusted cert intentionally lacks the current container's
+	// discovered hostname/IPs, as happens after a Docker address changes.
+	stable := &x509.Certificate{SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "stable.example"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, DNSNames: names, IPAddresses: ips}
+	der, err := x509.CreateCertificate(rand.Reader, stable, stable, signer.Public(), signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "webchat.crt"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := ensureTLSCertificate(cfg, vault)
+	if err != nil || string(der) != string(second.Certificate[0]) {
+		t.Fatal("stable configured certificate was replaced", err)
+	}
+	// Explicit extension still renews the public cert, without rekeying.
+	t.Setenv("AIMEE_WEBCHAT_TLS_SANS", "DNS:stable.example,IP:192.0.2.45,DNS:added.example")
+	third, err := ensureTLSCertificate(cfg, vault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(third.Certificate[0])
+	if err != nil || cert.VerifyHostname("added.example") != nil || string(der) == string(third.Certificate[0]) || key != vault.snapshot.TLSKey {
+		t.Fatal("explicit SAN extension did not preserve key and renew certificate", err)
+	}
+}

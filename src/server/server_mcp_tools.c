@@ -1,5 +1,8 @@
 /* server_mcp_tools.c: server-owned MCP tool discovery */
 #include "server.h"
+
+#include <stdatomic.h>
+#include <time.h>
 #include "server_mcp_surface.h"
 #include "config.h"
 #include "db1_client/db1.h"
@@ -299,6 +302,56 @@ int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * session polls it to decide whether to send notifications/tools/list_changed
     * -- a capability the server advertises and, before this, never honoured. */
    cJSON_AddNumberToObject(resp, "generation", (double)aimee_command_registry_generation());
+   return server_send_ok(conn, resp);
+}
+
+/* mcp.tools_wait: answer once the tool-list generation differs from the
+ * caller's, or at the caller's timeout. An MCP bridge holds one of these open
+ * instead of listing tools every 15s; the generation only moves when a module
+ * attaches or leaves, which the registry learns without asking anyone
+ * (obs_bus_slot_fingerprint), so the recheck below makes no module call while
+ * nothing changes. Each wait holds a connection, so they are capped: past the
+ * cap the server answers at once with busy, and the bridge waits before asking
+ * again. */
+#define TOOLS_WAIT_MAX_MS     290000
+#define TOOLS_WAIT_RECHECK_MS 2000
+#define TOOLS_WAIT_MAX        16
+
+static atomic_int g_tools_waiters;
+
+int handle_mcp_tools_wait(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const cJSON *jgen = cJSON_GetObjectItemCaseSensitive(req, "generation");
+   const cJSON *jtimeout = cJSON_GetObjectItemCaseSensitive(req, "timeout_ms");
+   double have = cJSON_IsNumber(jgen) ? jgen->valuedouble : -1;
+   long timeout_ms = cJSON_IsNumber(jtimeout) ? (long)jtimeout->valuedouble : TOOLS_WAIT_MAX_MS;
+   if (timeout_ms < 0)
+      timeout_ms = 0;
+   if (timeout_ms > TOOLS_WAIT_MAX_MS)
+      timeout_ms = TOOLS_WAIT_MAX_MS;
+
+   int busy = atomic_fetch_add(&g_tools_waiters, 1) >= TOOLS_WAIT_MAX;
+   double now_generation = 0;
+   for (long waited = 0;; waited += TOOLS_WAIT_RECHECK_MS)
+   {
+      (void)aimee_module_commands_refresh(2000);
+      now_generation = (double)aimee_command_registry_generation();
+      if (busy || now_generation != have || waited >= timeout_ms)
+         break;
+      long step =
+          timeout_ms - waited < TOOLS_WAIT_RECHECK_MS ? timeout_ms - waited : TOOLS_WAIT_RECHECK_MS;
+      struct timespec pause = {.tv_sec = step / 1000, .tv_nsec = (step % 1000) * 1000000L};
+      nanosleep(&pause, NULL);
+   }
+   atomic_fetch_sub(&g_tools_waiters, 1);
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return server_send_error(conn, "out of memory", NULL);
+   cJSON_AddStringToObject(resp, "status", busy ? "busy" : "ok");
+   cJSON_AddNumberToObject(resp, "generation", now_generation);
+   cJSON_AddBoolToObject(resp, "changed", now_generation != have);
    return server_send_ok(conn, resp);
 }
 

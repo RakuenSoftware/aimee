@@ -11,8 +11,14 @@ count=$((count + 1))
 # can see this start, the pid for that same start is already durable. Bumping
 # the count first would let the test read the pid file while it is still being
 # rewritten (empty) or still holding the previous, dead process's pid.
-printf '%s\n' "$$" > "$AIMEE_TEST_MODULE_PID"
-printf '%s\n' "$count" > "$AIMEE_TEST_MODULE_COUNT"
+# Rename complete files into place: truncating either visible file lets the
+# polling reader observe EOF and abort under set -e before a value is written.
+pid_tmp="$AIMEE_TEST_MODULE_PID.$$.tmp"
+count_tmp="$AIMEE_TEST_MODULE_COUNT.$$.tmp"
+printf '%s\n' "$$" > "$pid_tmp"
+mv "$pid_tmp" "$AIMEE_TEST_MODULE_PID"
+printf '%s\n' "$count" > "$count_tmp"
+mv "$count_tmp" "$AIMEE_TEST_MODULE_COUNT"
 
 # The first process simulates an isolated module crash. The supervisor must
 # restart it without involving the daemon or another module.

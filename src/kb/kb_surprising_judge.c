@@ -149,8 +149,18 @@ int kb_surprising_judge(const char *judge_cmd, const char *project,
    }
 
    char local_err[256];
-   char *response = kb_curator_llm_run(KB_CURATOR_STAGE_JUDGE, SJ_SYSTEM_PROMPT, request, NULL,
-                                       judge_cmd, 0, local_err, sizeof(local_err));
+   aimee_request_t model_request = {0};
+   aimee_response_t model_response = {0};
+   int model_rc = kb_curator_llm_request_init(&model_request, SJ_SYSTEM_PROMPT, request, NULL);
+   if (!model_rc)
+      model_rc = kb_curator_llm_run(KB_CURATOR_STAGE_JUDGE, &model_request, &model_response,
+                                    local_err, sizeof(local_err));
+   else
+      snprintf(local_err, sizeof(local_err), "invalid canonical curator request");
+   char *response =
+       model_rc ? NULL : kb_curator_llm_text(&model_response, local_err, sizeof(local_err));
+   aimee_request_free(&model_request);
+   aimee_response_free(&model_response);
    free(request);
    if (!response)
    {

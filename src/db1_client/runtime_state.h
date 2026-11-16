@@ -25,10 +25,10 @@ extern "C"
     * string when the stored value is empty. */
    int db1_runtime_state_get(const char *key, char *out, size_t out_len);
 
-   /* Parse the stored integer value for `key`, add `delta`, and persist the
-    * result. Missing/empty rows are treated as zero. Writes the new value to
-    * `new_value_out` when non-NULL. Returns 0 on success. */
-   int db1_runtime_state_add_int(const char *key, int delta, int *new_value_out);
+   /* Optional lookup: 0 on hit (including empty), 1 only on an explicit store
+    * missing reply, -1 on transport/store/malformed-reply failure. Clears out
+    * unless a value was successfully read; never treats failure as absence. */
+   int db1_runtime_state_lookup(const char *key, char *out, size_t out_len);
 
 #ifdef __cplusplus
 }

@@ -64,7 +64,6 @@ void delegate_register_patch_provider(delegate_patch_provider_fn provider);
 void delegate_patch_coordinator_build_report(const db1_coord_job_t *job,
                                              const db1_coord_task_t *tasks, int task_count,
                                              delegate_patch_report_t *out);
-void delegate_patch_coordinator_add_json(cJSON *obj, const delegate_patch_report_t *report);
 const char *delegate_patch_coordinator_brief(const delegate_patch_report_t *report, char *buf,
                                              size_t cap);
 

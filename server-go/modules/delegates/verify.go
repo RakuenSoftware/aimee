@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Whether a verification run says anything about the delegate's WORK, or only
@@ -105,18 +105,18 @@ func VerifyEscalationWarranted(delegateRC int32, outcome VerifyOutcome) bool {
 	return outcome == VerifyFailed
 }
 
-func handleVerify(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleVerify(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != verifyRequestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != verifyRequestMagic ||
 		request[4] != wireVersion || request[5] > verifyOpEscalate {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	op := request[5]
 	first := int32(binary.LittleEndian.Uint32(request[8:12]))
 	delegateRC := int32(binary.LittleEndian.Uint32(request[12:16]))
 	maxSignalStatus := int32(binary.LittleEndian.Uint32(request[16:20]))
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	response := make([]byte, verifyResponseLen)
@@ -125,24 +125,24 @@ func handleVerify(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.
 	if op == verifyOpEscalate {
 		outcome := VerifyOutcome(first)
 		if outcome > VerifyInfraError {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		binary.LittleEndian.PutUint32(response[4:8], uint32(outcome))
 		if VerifyEscalationWarranted(delegateRC, outcome) {
 			binary.LittleEndian.PutUint32(response[8:12], 1)
 		}
-		return response, bus.ModuleStatusOK
+		return response, ring.ModuleStatusOK
 	}
 
 	// A ceiling below 128 cannot be a signal status; taking it would classify
 	// every killed verifier as a work-product failure.
 	if maxSignalStatus < 128 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	outcome := ClassifyVerify(first, maxSignalStatus)
 	binary.LittleEndian.PutUint32(response[4:8], uint32(outcome))
 	if VerifyEscalationWarranted(delegateRC, outcome) {
 		binary.LittleEndian.PutUint32(response[8:12], 1)
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

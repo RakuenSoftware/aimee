@@ -2,8 +2,6 @@ import asyncio
 from dataclasses import replace
 import json
 import os
-import ssl
-import subprocess
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -11,6 +9,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from behavior import BehaviorStore
+from model_ir import message as ir_message, display_text
+from copy import deepcopy
 
 from aiohttp import web
 import aiohttp
@@ -21,6 +21,23 @@ from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, spl
 GUILD, CHANNEL, USER, BOT = 111111111111111111, 222222222222222222, 333333333333333333, 444444444444444444
 FAKE_WEBHOOK = "https://discord.com/api/webhooks/555555555555555555/" + "x" * 68
 
+def response(text):
+    return [ir_message("assistant", text)]
+
+
+async def domain_request_fixture(client, method, path, body=None, **kwargs):
+    """Exercise domain handlers without requiring an installed C SDK.
+
+    The actual C transport has its own test_model_client fixture suite.
+    """
+    async with aiohttp.ClientSession(connector=aiohttp.UnixConnector(path=str(client.socket))) as session:
+        async with session.request(method, "http://localhost" + path, json=body,
+                                   allow_redirects=False) as reply:
+            if reply.status != 200:
+                raise RuntimeError("Aimee domain request refused")
+            return await reply.json()
+
+
 KLINGON_TEST_CONTEXT = "You are Aimee. Speak exclusively in Klingon. No English translations."
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -28,13 +45,29 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        environment = dict(os.environ)
+        for key in ("AIMEE_API_ENDPOINT", "AIMEE_API_BEARER", "AIMEE_SERVER_URL",
+                    "AIMEE_SERVER_TOKEN", "AIMEE_PROFILE"):
+            environment.pop(key, None)
+        environment["AIMEE_HOME"] = str(self.root)
+        isolated = patch.dict(os.environ, environment, clear=True)
+        isolated.start()
+        self.addCleanup(isolated.stop)
         self.webhook = self.root / "webhook.url"
         self.key = self.root / "model.key"
         for path, value in ((self.webhook, FAKE_WEBHOOK), (self.key, "test-model-key")):
             path.write_text(value)
             path.chmod(0o600)
-        self.config = Config(self.webhook, self.root / "bot.token", self.key, GUILD, CHANNEL,
-                             system_context="You are Aimee. Answer directly using approved memory.")
+        self.chat = AsyncMock(return_value=response("A reply"))
+        self.thin_patch = patch("bridge.ThinClient.chat", self.chat)
+        self.thin_patch.start()
+        self.addCleanup(self.thin_patch.stop)
+        domain_patch = patch("bridge.ThinClient.request", domain_request_fixture)
+        domain_patch.start()
+        self.addCleanup(domain_patch.stop)
+        self.config = Config(self.webhook, self.root / "bot.token", GUILD, CHANNEL,
+                             system_context="You are Aimee. Answer directly using approved memory.",
+                             aimee_library=os.environ.get("AIMEE_TEST_CLIENT_LIBRARY", Config.aimee_library))
 
     def message(self, **changes):
         value = SimpleNamespace(
@@ -66,7 +99,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 async def reply(*args, **kwargs):
                     order.append("reply")
                     self.assertEqual(kwargs["memory_unavailable"], scenario == "capture-outage")
-                    return "The backpack was reported as 7kg."
+                    return ir_message("assistant", "The backpack was reported as 7kg.")
                 async def guard(operation):
                     order.append(operation)
                     if scenario == "guard-refusal":
@@ -104,7 +137,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 return True
             async def reply(*args, **kwargs):
                 order.append("reply")
-                return f"Confirmed height for {subject}: 69 cm."
+                return ir_message("assistant", f"Confirmed height for {subject}: 69 cm.")
             bot.model_client = SimpleNamespace(capture_turn=capture, reply=reply)
             bot.delivery = SimpleNamespace(send=AsyncMock())
             worker = asyncio.create_task(bot.process_turns())
@@ -130,7 +163,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         client.fact_sources = AsyncMock(return_value=[{"author": f"<@{USER}>", "url": "https://discord.com/channels/1/2/3"}])
         for subject in ("Kibukx", f"<@{USER+1}>"):
             records[0]["subject"] = subject
-            context = await client.memory_context(None, f"Who told you {subject}'s height?", CHANNEL, provenance=True)
+            context = await client.memory_context(f"Who told you {subject}'s height?", CHANNEL, provenance=True)
             answer = client.provenance_reply(context)
             self.assertIn("69 cm", answer)
             self.assertIn(f"from <@{USER}>", answer)
@@ -151,7 +184,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             mentions=[SimpleNamespace(id=BOT), SimpleNamespace(id=peer, display_name="Samy", bot=True)])
         self.assertTrue(ModelClient.is_social_request(text))
         self.assertEqual(bot.admitted_turn(message).peer_target, peer)
-        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value="Samy, what would you like to discuss?"), capture_turn=AsyncMock())
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value=ir_message("assistant", "Samy, what would you like to discuss?")), capture_turn=AsyncMock())
         bot.delivery = SimpleNamespace(send=AsyncMock())
         worker = asyncio.create_task(bot.process_turns())
         try:
@@ -181,22 +214,22 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
 
     def test_bound_configuration_rejects_external_endpoints(self):
         value = {"webhook_file": str(self.webhook), "bot_token_file": str(self.root / "bot.token"),
-                 "model_key_file": str(self.key), "guild_id": str(GUILD), "channel_id": str(CHANNEL)}
+                 "guild_id": str(GUILD), "channel_id": str(CHANNEL)}
         path = self.root / "config.json"
         path.write_text(json.dumps(value))
         self.assertEqual(Config.load(path).guild_id, GUILD)
-        for endpoint in ("http://example.com:80/v1/chat/completions", "http://127.0.0.1:8000/other",
+        for endpoint in ("http://example.com:80/v1/memory", "http://127.0.0.1:8000/other",
                          "http://user:password@127.0.0.1:8000/v1/chat/completions",
-                         "http://127.0.0.1:8000/v1/chat/completions?token=x"):
-            path.write_text(json.dumps({**value, "endpoint": endpoint}))
+                         "http://127.0.0.1:8000/v1/memory?token=x"):
+            path.write_text(json.dumps({**value, "memory_endpoint": endpoint}))
             with self.assertRaises(ValueError):
                 Config.load(path)
 
     def test_durable_memory_configuration_requires_local_api_and_private_key(self):
         value = {"webhook_file": str(self.webhook), "bot_token_file": str(self.root / "bot.token"),
-                 "model_key_file": str(self.key), "guild_id": str(GUILD), "channel_id": str(CHANNEL),
+                 "guild_id": str(GUILD), "channel_id": str(CHANNEL),
                  "aimee_socket": str(self.root / "aimee.sock"),
-                 "endpoint": "http://127.0.0.1:18743/v1/chat/completions",
+
                  "knowledge_key_file": str(self.key)}
         path = self.root / "config.json"
         for endpoint in ("http://example.com:18741/v1/actions", "https://127.0.0.1:18741/v1/actions",
@@ -213,7 +246,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         events = []
         async def reply(*args, **kwargs):
             events.append("draft" if not events else "final")
-            return "old draft" if len(events) == 1 else "corrected answer"
+            return ir_message("assistant", "old draft" if len(events) == 1 else "corrected answer")
         async def capture(*args):
             events.append("capture")
             return True
@@ -231,7 +264,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(events, ["draft", "capture", "final", "archive", "delivery"])
             bot.send_chat_reply.assert_awaited_once_with(CHANNEL, "corrected answer", ())
             bot.delivery.send.assert_not_awaited()
-            self.assertEqual(bot.conversations.get((GUILD, CHANNEL))[-1]["content"], "corrected answer")
+            self.assertEqual(display_text(bot.conversations.get((GUILD, CHANNEL))[-1]), "corrected answer")
             self.assertEqual(bot.model_client.archive_turn.await_args.args[1:], ("corrected answer", False, "response"))
         finally:
             worker.cancel()
@@ -241,7 +274,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_capture_failure_prevents_delivery_and_history_commit(self):
         bot = self.bot()
         bot.delivery = SimpleNamespace(send=AsyncMock())
-        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value="answer"),
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value=ir_message("assistant", "answer")),
                                           capture_turn=AsyncMock(side_effect=OSError("memory unavailable")))
         worker = asyncio.create_task(bot.process_turns())
         try:
@@ -281,13 +314,13 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                     ("Kibukx mountains", "has_height", "69 feet"), ("Kibukx", "can_lift", "500 pounds"))]}
         client.knowledge_action = AsyncMock(side_effect=action)
         client.fact_sources = AsyncMock(return_value=[{"author": f"<@{USER}>", "url": "https://discord.com/channels/1/2/3"}])
-        answer = await client.reply([], "How much can Kibukx lift?", CHANNEL)
+        answer = display_text(await client.reply([], "How much can Kibukx lift?", CHANNEL))
         self.assertIn("Kibukx can lift 500 pounds", answer)
         self.assertIn(str(USER), answer)
         for statement in ("Kibukx can lift 500 pounds.", "I'm telling you, Kibukx can lift 500 pounds."):
-            answer = await client.reply([], statement, CHANNEL)
+            answer = display_text(await client.reply([], statement, CHANNEL))
             self.assertIn("Recorded lifting capacity for Kibukx: 500 pounds", answer)
-        memory = await client.memory_context(None, "How much can Kibukx lift?", CHANNEL)
+        memory = await client.memory_context("How much can Kibukx lift?", CHANNEL)
         for text in ("Can Kibukx lift 500 pounds?", "Kibukx can lift 600 pounds", "Kibukx cannot lift 500 pounds", "Kibukx mountains can lift 500 pounds"):
             self.assertIsNone(client.confirmed_statement(memory, text))
 
@@ -297,12 +330,12 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         client.knowledge_action = AsyncMock(return_value={"assertions": [fact]})
         client.fact_sources = AsyncMock(return_value=[{"author": f"<@{USER+1}>"}])
         turn = Turn(1, GUILD, CHANNEL, USER, "How tall am I?", author_name="Kibukx")
-        answer = await client.reply([], turn.text, CHANNEL, turn=turn)
+        answer = display_text(await client.reply([], turn.text, CHANNEL, turn=turn))
         self.assertIn(f"<@{USER}> is 6 feet tall", answer)
         self.assertIn(f"<@{USER+1}>", answer)
         client.knowledge_action.assert_awaited_once_with("memory.search_assertions", {"query": f"<@{USER}>", "project": client.channel_project(CHANNEL), "include_historical": False, "limit": 4})
         for question in ("how tall do you think I am?", "What is my height?"):
-            answer = await client.reply([], question, CHANNEL, turn=replace(turn, text=question))
+            answer = display_text(await client.reply([], question, CHANNEL, turn=replace(turn, text=question)))
             self.assertIn(f"<@{USER}> is 6 feet tall", answer)
         memory = "Facts:\n" + json.dumps([fact])
         self.assertIn("Confirmed height", client.confirmed_statement(memory, f"Remember that <@{USER}> is 6 feet tall"))
@@ -319,12 +352,12 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             return {"assertions": []}
         client.knowledge_action = AsyncMock(side_effect=action)
         client.fact_sources = AsyncMock(return_value=[{"author": f"<@{USER+1}>"}])
-        context = await client.memory_context(None, f"How much can <@{USER}> lift?", CHANNEL)
+        context = await client.memory_context(f"How much can <@{USER}> lift?", CHANNEL)
         self.assertIn("500 pounds", context)
         self.assertIn(str(USER+1), context)
         self.assertNotIn("69 feet", context)
         self.assertIn(f"<@{USER}>", context)
-        self.assertEqual(await client.memory_context(None, f"How much can <@{USER+2}> lift?", CHANNEL), "")
+        self.assertEqual(await client.memory_context(f"How much can <@{USER+2}> lift?", CHANNEL), "")
 
     async def test_personal_correction_commits_before_model_can_reject_old_memory(self):
         bot = self.bot(replace(self.config, knowledge_endpoint="http://127.0.0.1:8741/v1/actions"))
@@ -335,7 +368,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             return True
         async def reply(*args,**kwargs):
             self.assertEqual(order, ["commit"])
-            return "Recorded height: 4 feet."
+            return ir_message("assistant", "Recorded height: 4 feet.")
         bot.model_client=SimpleNamespace(capture_turn=capture, reply=reply, archive_turn=AsyncMock())
         bot.delivery=SimpleNamespace(send=AsyncMock())
         task=asyncio.create_task(bot.process_turns())
@@ -360,17 +393,17 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         client.knowledge_action=AsyncMock(side_effect=action)
         client.fact_sources=AsyncMock(return_value=[{"author":f"<@{USER}>"}])
         for question in (f"How tall is <@{USER}> ?","How tall is Kibukx?"):
-            context=await client.memory_context(None,question,CHANNEL)
+            context=await client.memory_context(question,CHANNEL)
             self.assertIn("4 feet",context)
             self.assertNotIn("6 feet",context)
-            answer=await client.reply([{"role":"assistant","content":"Source is benchmarks/fake.py"}],question,CHANNEL)
+            answer=display_text(await client.reply([ir_message("assistant", "Source is benchmarks/fake.py")],question,CHANNEL))
             self.assertIn("4 feet",answer)
             self.assertIn(str(USER),answer)
             self.assertNotIn("benchmarks",answer)
 
     def test_config_load_retains_and_validates_peer_bot_ids(self):
         value = {"webhook_file": str(self.webhook), "bot_token_file": str(self.root / "bot.token"),
-                 "model_key_file": str(self.key), "guild_id": str(GUILD), "channel_id": str(CHANNEL),
+                 "guild_id": str(GUILD), "channel_id": str(CHANNEL),
                  "peer_bot_ids": [str(USER+1)]}
         path = self.root / "peers.json"
         path.write_text(json.dumps(value))
@@ -473,7 +506,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_three_bot_request_addresses_every_bot_without_allowlist(self):
         bot = self.bot()
         bot.delivery = SimpleNamespace(send=AsyncMock())
-        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value="What makes belly lint fascinating?"), capture_turn=AsyncMock(return_value=False))
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value=ir_message("assistant", "What makes belly lint fascinating?")), capture_turn=AsyncMock(return_value=False))
         peers = (USER+1, USER+2)
         message = self.message(content=f"Hi <@{BOT}> <@{peers[0]}> <@{peers[1]}> You three need to have a conversation about how fascinating belly lint is. Do it.",
             mentions=[SimpleNamespace(id=BOT), SimpleNamespace(id=peers[0], bot=True, display_name="Samy"), SimpleNamespace(id=peers[1], bot=True, display_name="daimon")])
@@ -513,7 +546,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         bot = self.bot(replace(self.config, peer_bot_ids=(peer,)))
         partner = SimpleNamespace(id=peer, bot=True, display_name="Samy")
         bot.delivery = SimpleNamespace(send=AsyncMock())
-        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value=f"@{peer} Hello! @999999999999999999"),
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value=ir_message("assistant", f"@{peer} Hello! @999999999999999999")),
                                           capture_turn=AsyncMock(return_value=False))
         worker = asyncio.create_task(bot.process_turns())
         try:
@@ -608,40 +641,22 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ValueError):
                     WebhookDelivery(self.config, session)
 
-    async def serve(self, handler):
-        app = web.Application()
-        app.router.add_post("/v1/chat/completions", handler)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "127.0.0.1", 0)
-        await site.start()
-        self.addAsyncCleanup(runner.cleanup)
-        port = site._server.sockets[0].getsockname()[1]
-        return f"http://127.0.0.1:{port}/v1/chat/completions"
 
     async def test_social_message_does_not_retrieve_entity_facts(self):
-        requests = []
-        async def model(request):
-            requests.append(await request.json())
-            return web.json_response({"choices": [{"message": {"content": "Hello Samy! Kibukx smells."}}]})
-        endpoint = await self.serve(model)
-        config = replace(self.config, endpoint=endpoint, aimee_socket=self.root / "unused.sock", knowledge_endpoint="http://127.0.0.1:8741/v1/actions")
-        async with aiohttp.ClientSession() as session:
-            client = ModelClient(config, session)
-            client.memory_context = AsyncMock(side_effect=AssertionError("irrelevant fact lookup"))
-            text = f"Say hello to <@{USER+1}> and tell <@{USER+2}> he smells."
-            with patch("bridge.aiohttp.UnixConnector", side_effect=lambda **kwargs: aiohttp.TCPConnector()):
-                await client.reply([], text, CHANNEL)
-            client.memory_context.assert_not_awaited()
-        self.assertEqual(requests[0]["messages"][-1]["content"], text)
+        config = replace(self.config, aimee_socket=self.root / "unused.sock", knowledge_endpoint="http://127.0.0.1:8741/v1/actions")
+        client = ModelClient(config, None)
+        client.memory_context = AsyncMock(side_effect=AssertionError("irrelevant fact lookup"))
+        text = f"Say hello to <@{USER+1}> and tell <@{USER+2}> he smells."
+        await client.reply([], text, CHANNEL)
+        client.memory_context.assert_not_awaited()
+        self.assertEqual(self.chat.await_args.args[0]["blocks"][1]["text"], text)
         self.assertTrue(ModelClient.is_social_request(text))
-        self.assertFalse(ModelClient.is_social_request("Say hello to Samy and tell him how tall Kibukx is."))
         self.assertFalse(ModelClient.is_social_request("Tell me how much Kibukx can lift?"))
 
     async def test_peer_message_preserves_second_explicit_recipient(self):
         peer, recipient = USER+1, USER+2
         bot = self.bot(replace(self.config, peer_bot_ids=(peer,)))
-        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value=f"Samy Hello! Kibukx smells."), capture_turn=AsyncMock(return_value=False))
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value=ir_message("assistant", "Samy Hello! Kibukx smells.")), capture_turn=AsyncMock(return_value=False))
         bot.delivery = SimpleNamespace(send=AsyncMock())
         task = asyncio.create_task(bot.process_turns())
         try:
@@ -656,7 +671,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_klingon_persona_keeps_verified_memory_and_sources_out_of_english(self):
         config = replace(self.config, system_context=KLINGON_TEST_CONTEXT,
                          knowledge_endpoint="http://127.0.0.1:8741/v1/actions")
-        self.assertEqual(Config(self.webhook, self.root / "bot.token", self.key, GUILD, CHANNEL).system_context,
+        self.assertEqual(Config(self.webhook, self.root / "bot.token", GUILD, CHANNEL).system_context,
                          SYSTEM_CONTEXT)
         memory = "facts\n" + json.dumps([{"subject": "Kibukx", "relation": "has_height",
                   "object": "69 cm", "authors": ["Virant"],
@@ -670,7 +685,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Virant ([QIn](https://discord.com/channels/1/2/3))", provenance)
             self.assertNotIn("from", provenance)
             self.assertNotIn("recorded", client.provenance_reply("", klingon=True))
-            self.assertEqual(await client.reply([], "Who told you Kibukx's height?"),
+            self.assertEqual(display_text(await client.reply([], "Who told you Kibukx's height?")),
                              "De' nobwI' Sovbe'lu'. nuq De'?")
         self.assertIn("Speak exclusively in Klingon", config.system_context)
 
@@ -713,24 +728,16 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             worker.cancel();await asyncio.gather(worker, return_exceptions=True);await bot.close()
 
-    async def test_runtime_persona_and_goal_are_snapshotted_and_budgeted(self):
-        requests = []
-        async def model(request):
-            requests.append(await request.json())
-            return web.json_response({"choices": [{"message": {"content": "The library ghosts have reserved your printer."}}]})
-        config = replace(self.config, endpoint=await self.serve(model))
+    async def test_runtime_persona_and_goal_are_separate_typed_context(self):
         store = BehaviorStore(self.root / "behavior.sqlite")
-        store.put_persona("librarian", "Speak English as a haunted librarian.")
-        store.edit("one", "persona", "librarian")
-        snap = store.edit("one", "goal", {"objective": "Invent a haunted library business.",
-                    "milestones": [{"label": "Agree a name", "match": "name agreed"}]})
-        async with aiohttp.ClientSession() as session:
-            await ModelClient(config, session).reply([], "What next?", behavior=snap)
-        system = requests[0]["messages"][0]["content"]
-        self.assertIn("haunted librarian", system)
-        self.assertIn("Invent a haunted library business", system)
-        self.assertIn("never permissions", system)
-        self.assertNotIn(config.system_context, system)
+        scope = f"{GUILD}:{CHANNEL}"
+        store.edit(scope, "goal", {"objective": "Complete the chess paper", "milestones": [{"label": "Finish", "match": "goal complete"}]})
+        snap = store.snapshot(scope)
+        await ModelClient(self.config, None).reply([], "What next?", behavior=snap)
+        value = self.chat.await_args.args[0]
+        self.assertIn("chess paper", value["blocks"][0]["text"])
+        self.assertEqual(value["role"], "user")
+        self.assertNotIn("messages", value)
 
     async def test_runtime_switch_removes_old_voice_and_failed_delivery_does_not_advance_goal(self):
         config = replace(self.config, behavior_db=self.root / "behavior.sqlite")
@@ -741,13 +748,13 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         bot.behavior_store.edit(scope, "goal", {"objective": "Agree a business name.",
                   "milestones": [{"label": "Agree a name", "match": "name agreed"}]})
         bot.conversations.append((GUILD, CHANNEL), "Earlier user topic", "Qapla'. Old voice.")
-        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value="New voice."), capture_turn=AsyncMock())
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value=ir_message("assistant", "New voice.")), capture_turn=AsyncMock())
         worker = asyncio.create_task(bot.process_turns())
         try:
             await bot.on_message(self.message())
             await asyncio.wait_for(bot.queue.join(), 1)
             history = bot.model_client.reply.await_args.args[0]
-            self.assertEqual(history, [{"role": "user", "content": "Earlier user topic"}])
+            self.assertEqual(history, [ir_message("user", "Earlier user topic")])
             self.assertNotIn("Qapla'", str(bot.conversations.get((GUILD, CHANNEL))))
             bot.send_chat_reply.side_effect = OSError("delivery failed")
             await bot.on_message(self.message(id=42, content=f"<@{BOT}> name agreed"))
@@ -758,187 +765,153 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             worker.cancel();await asyncio.gather(worker, return_exceptions=True);await bot.close()
 
-    async def test_model_wire_auth_rotation_history_budget_and_bound_response(self):
-        requests = []
-        async def model(request):
-            requests.append((request.headers.get("Authorization"), await request.json()))
-            return web.json_response({"choices": [{"message": {"content": "Hello Discord"}}]})
-        endpoint = await self.serve(model)
-        config = replace(self.config, endpoint=endpoint)
-        async with aiohttp.ClientSession() as session:
-            client = ModelClient(config, session)
-            history = [{"role": "user", "content": "old question" * 300},
-                       {"role": "assistant", "content": "old answer" * 300}]
-            self.assertEqual(await client.reply(history, "hello"), "Hello Discord")
-            self.key.write_text("rotated-test-key")
-            await client.reply([], "again")
-        self.assertEqual(requests[0][0], "Bearer test-model-key")
-        self.assertEqual(requests[1][0], "Bearer rotated-test-key")
-        self.assertEqual(requests[0][1]["messages"], [
-            {"role": "system", "content": config.system_context + "\n" + CHAT_BEHAVIOR}, {"role": "user", "content": "hello"}])
-        self.assertEqual(requests[0][1]["max_tokens"], 384)
-        self.assertIn(CHAT_BEHAVIOR, requests[1][1]["messages"][0]["content"])
 
     async def test_klingon_prefix_does_not_allow_english_prose(self):
-        requests = []
-        async def model(request):
-            requests.append(await request.json())
-            answer = "Qapla'. The scaffolding of the dream is indeed fragile." if len(requests) == 1 else "Qapla'. jIjang."
-            return web.json_response({"choices": [{"message": {"content": answer}}]})
-        config = replace(self.config, endpoint=await self.serve(model), system_context=KLINGON_TEST_CONTEXT)
-        async with aiohttp.ClientSession() as session:
-            answer = await ModelClient(config, session).reply(
-                [{"role": "assistant", "content": "An old English answer."}], "Discuss dreams.")
-        self.assertEqual(answer, "Qapla'. jIjang.")
-        self.assertEqual(len(requests), 2)
-        self.assertEqual(len(requests[1]["messages"]), 2)
-        self.assertIn("contained English", requests[1]["messages"][0]["content"])
+        self.chat.side_effect = [response("Qapla'. The scaffolding of the dream is indeed fragile."), response("Qapla'. jIjang.")]
+        value = await ModelClient(replace(self.config, system_context=KLINGON_TEST_CONTEXT), None).reply([ir_message("assistant", "An old English answer.")], "Discuss dreams.")
+        self.assertEqual(display_text(value), "Qapla'. jIjang.")
+        retry = self.chat.await_args.args[0]
+        self.assertEqual(retry["role"], "user")
+        self.assertIn("contained English", retry["blocks"][1]["text"])
         self.assertFalse(ModelClient.contains_english_prose("De' qawlu': Kibukx: 69 cm. Qapla'."))
 
     async def test_klingon_english_repair_failure_is_not_delivered(self):
-        requests = []
-        async def model(request):
-            requests.append(await request.json())
-            return web.json_response({"choices": [{"message": {"content": "Qapla'. The Federation will issue a memo."}}]})
-        config = replace(self.config, endpoint=await self.serve(model), system_context=KLINGON_TEST_CONTEXT)
-        async with aiohttp.ClientSession() as session:
-            with self.assertRaisesRegex(RuntimeError, "English under Klingon-only"):
-                await ModelClient(config, session).reply([], "Talk to Samy.")
-        self.assertEqual(len(requests), 2)
+        self.chat.return_value = response("Qapla'. The Federation will issue a memo.")
+        with self.assertRaisesRegex(RuntimeError, "English under Klingon-only"):
+            await ModelClient(replace(self.config, system_context=KLINGON_TEST_CONTEXT), None).reply([], "Talk to Samy.")
+        self.assertEqual(self.chat.await_count, 2)
 
-    async def test_conversation_profile_uses_token_counter_instead_of_byte_pretrim(self):
+    async def test_conversation_profile_uses_normal_server_history(self):
         question = "a" * 8192
-        history = [{"role": "user", "content": "b" * 8192},
-                   {"role": "assistant", "content": "Earlier statement."}]
-        received = []
-        async def model(request):
-            received.append(await request.json())
-            return web.json_response({"choices": [{"message": {"content": "Accepted."}}],
-                                      "usage": {"prompt_tokens": 100}})
-        config = replace(self.config, endpoint=await self.serve(model), memory_profile="conversation-v2")
-        async with aiohttp.ClientSession() as session:
-            client = ModelClient(config, session)
-            client.prompt_budget.fit = AsyncMock(return_value={"prompt_tokens": 100})
-            self.assertEqual(await client.reply(history, question), "Accepted.")
-        self.assertEqual(received[0]["messages"][1:], [*history, {"role": "user", "content": question}])
-        client.prompt_budget.fit.assert_awaited_once()
+        history = [ir_message("user", "b" * 8192), ir_message("assistant", "Earlier statement.")]
+        await ModelClient(replace(self.config, memory_profile="conversation-v2"), None).reply(history, question)
+        value, session_id, alias = self.chat.await_args.args
+        self.assertEqual(value["blocks"][1]["text"], question)
+        self.assertEqual(session_id, f"discord-{GUILD}-{CHANNEL}")
+        self.assertNotIn("messages", value)
+        self.assertEqual(alias, self.config.model)
+        self.assertNotIn("model", value)
+
+    async def test_memory_outage_notice_does_not_mutate_the_canonical_turn(self):
+        source = response("A reply")
+        before = deepcopy(source)
+        self.chat.return_value = source
+        value = await ModelClient(self.config, None).reply([], "hello", memory_unavailable=True)
+        self.assertTrue(display_text(value).startswith("I couldn't save or retrieve memory"))
+        self.assertEqual(value.messages, before)
+        self.assertEqual(source, before)
 
     async def test_repeated_persona_reply_is_repaired_once(self):
-        requests = []
         canned = "Whoa, hold the phone! Groovy! What's the scoop?"
-        async def model(request):
-            requests.append(await request.json())
-            answer = canned if len(requests) == 1 else "Your cat has promoted the laundry basket to executive housing."
-            return web.json_response({"choices": [{"message": {"content": answer}}]})
-        config = replace(self.config, endpoint=await self.serve(model))
-        history = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": canned}]
-        async with aiohttp.ClientSession() as session:
-            answer = await ModelClient(config, session).reply(history, "Found my cat in the laundry basket.")
-        self.assertIn("laundry basket", answer)
-        self.assertEqual(len(requests), 2)
-        self.assertIn("fresh, topic-specific", requests[1]["messages"][0]["content"])
-        self.assertEqual(history[-1]["content"], canned)
+        self.chat.side_effect = [response(canned), response("Your cat has promoted the laundry basket to executive housing.")]
+        history = [ir_message("user", "hello"), ir_message("assistant", canned)]
+        before = deepcopy(history)
+        answer = await ModelClient(self.config, None).reply(history, "Found my cat in the laundry basket.")
+        self.assertIn("laundry basket", display_text(answer))
+        self.assertEqual(self.chat.await_count, 2)
+        retry = self.chat.await_args.args[0]
+        self.assertIn("fresh, topic-specific", retry["blocks"][1]["text"])
+        self.assertEqual(self.chat.await_args_list[0].args[1], self.chat.await_args_list[1].args[1])
+        self.assertNotIn(canned, str(retry))
+        self.assertEqual(history, before)
 
     async def test_repetition_repair_is_bounded(self):
-        requests = []
         canned = "Whoa, hold the phone! Groovy! What's the scoop?"
-        async def model(request):
-            requests.append(await request.json())
-            return web.json_response({"choices": [{"message": {"content": canned}}]})
-        config = replace(self.config, endpoint=await self.serve(model))
-        async with aiohttp.ClientSession() as session:
-            with self.assertRaisesRegex(RuntimeError, "repeated recent dialogue"):
-                await ModelClient(config, session).reply([{"role": "assistant", "content": canned}], "My hamster escaped.")
-        self.assertEqual(len(requests), 2)
+        self.chat.return_value = response(canned)
+        with self.assertRaisesRegex(RuntimeError, "repeated recent dialogue"):
+            await ModelClient(self.config, None).reply([ir_message("assistant", canned)], "My hamster escaped.")
+        self.assertEqual(self.chat.await_count, 2)
+
+    async def test_canonical_generation_failures_never_deliver_or_commit_history(self):
+        variants = [response(""), response("x" * 8001), RuntimeError("thinclient unavailable")]
+        variants += [[], [ir_message("user", "not an assistant")]]
+        variants += [[{"role": "assistant", "blocks": [
+            *response("visible")[-1]["blocks"], {"type": kind, "tool_id": "call"}]}]
+            for kind in ("tool_use", "tool_result", "refusal")]
+        variants += [[{"role": "assistant", "blocks": [{"type": "text", "text": "private",
+            "context": {"model_visible": visible, "sensitivity": sensitivity}}]}]
+            for visible, sensitivity in ((False, 1), (True, 3))]
+        for variant in variants:
+            with self.subTest(variant=type(variant).__name__):
+                self.chat.reset_mock()
+                self.chat.side_effect = variant if isinstance(variant, Exception) else None
+                self.chat.return_value = variant
+                bot = self.bot()
+                bot.model_client = ModelClient(self.config, None)
+                key = (GUILD, CHANNEL)
+                bot.conversations.append(key, "old question", "old response")
+                before = bot.conversations.get(key)
+                worker = asyncio.create_task(bot.process_turns())
+                try:
+                    await bot.queue.put(Turn(1, GUILD, CHANNEL, USER, "new question"))
+                    await asyncio.wait_for(bot.queue.join(), 1)
+                    bot.send_chat_reply.assert_not_awaited()
+                    self.assertEqual(bot.conversations.get(key), before)
+                    self.chat.assert_awaited_once()
+                finally:
+                    worker.cancel()
+                    await asyncio.gather(worker, return_exceptions=True)
+                    await bot.close()
+
+    async def test_actual_bot_retains_canonical_messages_beyond_delivery_view(self):
+        source = response("visible answer")
+        source[-1]["blocks"].insert(0, {"type": "thinking", "encrypted_content": "opaque", "signature": "typed-signature"})
+        source[-1]["blocks"].append({"type": "text", "text": "private", "context": {
+            "model_visible": False, "sensitivity": 3}})
+        self.chat.return_value = source
+        bot = self.bot()
+        bot.model_client = ModelClient(self.config, None)
+        key = (GUILD, CHANNEL)
+        worker = asyncio.create_task(bot.process_turns())
+        try:
+            await bot.queue.put(Turn(1, GUILD, CHANNEL, USER, "question"))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, "visible answer", ())
+            retained = bot.conversations.get(key)[-1]
+            self.assertEqual(retained["blocks"][0]["encrypted_content"], "opaque")
+            self.assertEqual(retained["blocks"][0]["signature"], "typed-signature")
+            self.assertEqual(retained["blocks"][-1]["text"], "private")
+            source[-1]["blocks"].clear()
+            self.assertEqual(len(bot.conversations.get(key)[-1]["blocks"]), 3)
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+            await bot.close()
 
     def test_repetition_detection_preserves_requested_and_factual_repeats(self):
-        previous = [{"role": "assistant", "content": "The cat is hiding under the bed near the closet."}]
-        self.assertFalse(ModelClient.repeats_recent_reply(previous[0]["content"], previous, "Repeat that verbatim."))
+        previous = [ir_message("assistant", "The cat is hiding under the bed near the closet.")]
+        self.assertFalse(ModelClient.repeats_recent_reply(display_text(previous[0]), previous, "Repeat that verbatim."))
         self.assertFalse(ModelClient.repeats_recent_reply("The cat is hiding under the sofa next to the window.", previous, "Where else?"))
-        self.assertFalse(ModelClient.repeats_recent_reply("Yes.", [{"role": "assistant", "content": "Yes."}], "Are you sure?"))
+        self.assertFalse(ModelClient.repeats_recent_reply("Yes.", [ir_message("assistant", "Yes.")], "Are you sure?"))
 
-    async def test_cpu_model_requires_trusted_mtls_and_fixed_server_name(self):
-        def openssl(*args):
-            subprocess.run(["openssl", *args], cwd=self.root, check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
-                "-subj", "/CN=Test CA", "-keyout", "ca.key", "-out", "ca.pem",
-                "-addext", "keyUsage=critical,keyCertSign,cRLSign")
-        for name, subject, purpose in (("server", "aimee-llm", "serverAuth"),
-                                      ("client", "discord-cpu", "clientAuth"),
-                                      ("wrong-server", "other-model", "serverAuth")):
-            openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=" + subject,
-                    "-keyout", name + ".key", "-out", name + ".csr")
-            ext = self.root / (name + ".ext")
-            ext.write_text("extendedKeyUsage=" + purpose + "\nsubjectAltName=DNS:" + subject + "\n")
-            openssl("x509", "-req", "-in", name + ".csr", "-CA", "ca.pem",
-                    "-CAkey", "ca.key", "-CAcreateserial", "-days", "1", "-extfile",
-                    name + ".ext", "-out", name + ".pem")
-        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        context.load_cert_chain(self.root / "server.pem", self.root / "server.key")
-        context.load_verify_locations(self.root / "ca.pem")
-        context.verify_mode = ssl.CERT_REQUIRED
-        context.minimum_version = ssl.TLSVersion.TLSv1_3
-        requests = []
-        async def model(request):
-            requests.append(request.headers.get("Authorization"))
-            return web.json_response({"choices": [{"message": {"content": "CPU reply"}}]})
-        app = web.Application()
-        app.router.add_post("/v1/chat/completions", model)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        self.addAsyncCleanup(runner.cleanup)
-        site = web.TCPSite(runner, "127.0.0.1", 0, ssl_context=context)
-        await site.start()
-        port = site._server.sockets[0].getsockname()[1]
-        config = replace(self.config, endpoint=f"https://127.0.0.1:{port}/v1/chat/completions",
-                         model_tls_dir=self.root)
-        async with aiohttp.ClientSession() as session:
-            self.assertEqual(await ModelClient(config, session).reply([], "hello"), "CPU reply")
-            with self.assertRaises(aiohttp.ClientConnectorCertificateError):
-                await session.post(config.endpoint, json={}, ssl=ssl.create_default_context())
-        wrong_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        wrong_context.load_cert_chain(self.root / "wrong-server.pem", self.root / "wrong-server.key")
-        wrong_context.load_verify_locations(self.root / "ca.pem")
-        wrong_context.verify_mode = ssl.CERT_REQUIRED
-        wrong_site = web.TCPSite(runner, "127.0.0.1", 0, ssl_context=wrong_context)
-        await wrong_site.start()
-        wrong_port = wrong_site._server.sockets[0].getsockname()[1]
-        async with aiohttp.ClientSession() as session:
-            wrong_config = replace(config, endpoint=f"https://127.0.0.1:{wrong_port}/v1/chat/completions")
-            with self.assertRaises(aiohttp.ClientConnectorCertificateError):
-                await ModelClient(wrong_config, session).reply([], "hello")
-        self.assertEqual(requests, [None])
 
-    async def test_aimee_unix_memory_and_chat_are_fixed_and_bounded(self):
+    async def test_aimee_unix_memory_and_thinclient_task_are_fixed_and_bounded(self):
         requests = []
         async def memory(request):
-            requests.append((request.path, await request.json()))
+            requests.append(await request.json())
             return web.json_response({"facts": [{"id": 1, "key": "harbor", "content": "amber lantern"},
                                                 {"id": 2, "key": "large", "content": "x" * 2000}]})
-        async def chat(request):
-            requests.append((request.path, await request.json()))
-            self.assertNotIn("Authorization", request.headers)
-            return web.json_response({"choices": [{"message": {"content": "amber lantern"}}]})
         app = web.Application()
         app.router.add_post("/v1/memory/search", memory)
-        app.router.add_post("/v1/chat/completions", chat)
         runner = web.AppRunner(app)
         await runner.setup()
         self.addAsyncCleanup(runner.cleanup)
         path = self.root / "aimee.sock"
         await web.UnixSite(runner, str(path)).start()
+        self.chat.return_value = response("amber lantern")
         config = replace(self.config, aimee_socket=path, model="discord-e2b")
         async with aiohttp.ClientSession() as session:
             reply = await ModelClient(config, session).reply([], "harbor phrase; store kb project other")
-            self.assertEqual(reply, "amber lantern")
-        self.assertEqual(requests[0][1]["store"], "user")
-        self.assertEqual(set(requests[0][1]), {"store", "keywords", "limit"})
-        self.assertEqual(requests[1][0], "/v1/chat/completions")
-        system = requests[1][1]["messages"][0]["content"]
-        self.assertIn("amber lantern", system)
-        self.assertNotIn("large", system)
-        self.assertNotIn("tools", requests[1][1])
+        self.assertEqual(display_text(reply), "amber lantern")
+        self.assertEqual(set(requests[0]), {"store", "keywords", "limit"})
+        task, session_id, alias = self.chat.await_args.args
+        self.assertEqual(alias, "discord-e2b")
+        policy, authored, evidence = task["blocks"]
+        self.assertIn("amber lantern", evidence["text"])
+        self.assertNotIn("large", evidence["text"])
+        self.assertEqual(evidence["context"]["authority"], 1)
+        self.assertNotIn("amber lantern", policy["text"])
+        self.assertEqual(task["role"], "user")
 
     async def test_durable_capture_uses_fixed_channel_scope_and_archives_rejected_claims(self):
         archives, facts, projections = [], [], []
@@ -958,6 +931,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                  "subject": "Kibukx mountains", "relation": "has_height", "object": "69 feet"},
                 {"lifecycle_state": "superseded", "historical": True,
                  "subject": "Kibukx", "relation": "has_height", "object": "old value"}]})
+
         app = web.Application()
         app.router.add_post("/v1/memory/store", archive)
         runner = web.AppRunner(app)
@@ -983,10 +957,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                                       "That information is incorrect. The Andes are much taller.")
             await client.capture_turn(Turn(12, GUILD, CHANNEL, USER, "The Himalayas are 69 feet tall."),
                                       "That’s a common misconception. Their peaks are much taller.")
-            context = await client.memory_context(session, "How tall is Kibukx?", CHANNEL)
+            context = await client.memory_context("How tall is Kibukx?", CHANNEL)
             thread = CHANNEL + 1
-            await client.memory_context(session, "How tall is Kibukx?", thread)
-            correction = await client.memory_context(session, "But Kibukx is 6 feet tall, the Kibukx mountains are 69 feet tall.", CHANNEL)
+            await client.memory_context("How tall is Kibukx?", thread)
+            correction = await client.memory_context("But Kibukx is 6 feet tall, the Kibukx mountains are 69 feet tall.", CHANNEL)
             self.assertNotIn("Kibukx mountains", context)
             self.assertIn("Kibukx mountains", correction)
             self.assertEqual({p["query"] for p in projections[2:]}, {"kibukx"})
@@ -1025,15 +999,15 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             return {"memory": {"key": f"{project}:{message_ids[i]}", "source_session": project,
                                "use_cases": json.dumps({"source": "discord", "author_id": str(USER+i), "message_id": message_ids[i]})}}
         client.knowledge_action = AsyncMock(side_effect=action)
-        history = [{"role": "user", "content": "So how tall is Kibukx? How tall are the Kibukx Mountains?"},
-                   {"role": "assistant", "content": "Kibukx is 6 feet tall, and the mountains are 69 feet tall."}]
+        history = [ir_message("user", "So how tall is Kibukx? How tall are the Kibukx Mountains?"),
+                   ir_message("assistant", "Kibukx is 6 feet tall, and the mountains are 69 feet tall.")]
         for question in ("Where did you get that information from?", "Who did you get that information from?", "Who told you?"):
-            answer = await client.reply(history, question, CHANNEL)
+            answer = display_text(await client.reply(history, question, CHANNEL))
             self.assertIn(f"Kibukx: 6 feet — from <@{USER}>", answer)
             self.assertIn(f"Kibukx mountains: 69 feet — from <@{USER+1}>", answer)
             self.assertIn(f"https://discord.com/channels/{GUILD}/{CHANNEL}/{message_ids[0]}", answer)
-            history += [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
-        context = await client.memory_context(None, "How tall is Kibukx?", CHANNEL)
+            history += [ir_message("user", question), ir_message("assistant", answer)]
+        context = await client.memory_context("How tall is Kibukx?", CHANNEL)
         self.assertIn(str(USER), context)
         self.assertNotIn(str(USER+1), context)
         self.assertLess(len(context.encode()), 384)
@@ -1071,7 +1045,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 {"subject": "car wash", "relation": "located_in", "object": "Kansas City, Kansas", "lifecycle_state": "persistent", "historical": False}]
             return {"assertions": assertions if body["query"] in ("car", "wash", "car wash") else assertions[:1] if "house" in body["query"] else []}
         client.knowledge_action = AsyncMock(side_effect=action)
-        context = await client.memory_context(None, "Where is <@333333333333333333>'s house? How far away is the car wash from the Himalayas?", CHANNEL)
+        context = await client.memory_context("Where is <@333333333333333333>'s house? How far away is the car wash from the Himalayas?", CHANNEL)
         self.assertIn("himalayas", queries)
         self.assertIn("car", queries)
         self.assertIn("house", queries)
@@ -1081,17 +1055,15 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("333333333333333333", distance["subject"])
         self.assertNotIn("Himalayas", distance["subject"])
         self.assertLess(len(context.encode()), 384)
-        house_context = await client.memory_context(None, "Where is <@333333333333333333>'s house?", CHANNEL)
+        house_context = await client.memory_context("Where is <@333333333333333333>'s house?", CHANNEL)
         self.assertIn("Kansas City, Kansas", house_context)
         self.assertIn("car wash", queries)
 
     async def test_aimee_memory_outage_never_calls_model(self):
-        chat = AsyncMock()
         app = web.Application()
         async def unavailable(request):
             return web.json_response({"error": "unavailable"}, status=503)
         app.router.add_post("/v1/memory/search", unavailable)
-        app.router.add_post("/v1/chat/completions", chat)
         runner = web.AppRunner(app)
         await runner.setup()
         self.addAsyncCleanup(runner.cleanup)
@@ -1099,35 +1071,14 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         await web.UnixSite(runner, str(path)).start()
         async with aiohttp.ClientSession() as session:
             with self.assertRaises(RuntimeError):
-                await ModelClient(replace(self.config, aimee_socket=path), session).reply([], "harbor")
-        chat.assert_not_called()
+                display_text(await ModelClient(replace(self.config, aimee_socket=path), session).reply([], "harbor"))
+        self.chat.assert_not_awaited()
 
-    async def test_native_refusal_and_redirect_never_deliver_or_forward_auth(self):
-        async def refusing(request):
-            return web.Response(status=503, text="private model error")
-        endpoint = await self.serve(refusing)
-        async with aiohttp.ClientSession() as session:
-            client = ModelClient(replace(self.config, endpoint=endpoint), session)
-            with self.assertRaisesRegex(RuntimeError, "refused or unavailable"):
-                await client.reply([], "hello")
-        forwarded = []
-        async def sink(request):
-            forwarded.append(request.headers.get("Authorization"))
-            return web.json_response({"choices": [{"message": {"content": "wrong"}}]})
-        sink_endpoint = await self.serve(sink)
-        async def redirect(request):
-            return web.Response(status=307, headers={"Location": sink_endpoint})
-        endpoint = await self.serve(redirect)
-        async with aiohttp.ClientSession() as session:
-            client = ModelClient(replace(self.config, endpoint=endpoint), session)
-            with self.assertRaises(RuntimeError):
-                await client.reply([], "hello")
-        self.assertEqual(forwarded, [])
 
     async def test_channel_history_is_shared_across_users_and_committed_after_delivery(self):
         bot = self.bot()
         bot.delivery = SimpleNamespace(send=AsyncMock())
-        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value="An E2B answer"), capture_turn=AsyncMock())
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value=ir_message("assistant", "An E2B answer")), capture_turn=AsyncMock())
         worker = asyncio.create_task(bot.process_turns())
         try:
             await bot.on_message(self.message())
@@ -1135,7 +1086,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             bot.send_chat_reply.assert_awaited_once_with(CHANNEL, "An E2B answer", ())
             bot.delivery.send.assert_not_awaited()
             key = (GUILD, CHANNEL)
-            self.assertEqual(bot.conversations.get(key)[-1]["content"], "An E2B answer")
+            self.assertEqual(display_text(bot.conversations.get(key)[-1]), "An E2B answer")
             shared_history = bot.conversations.get(key)
             await bot.on_message(self.message(
                 id=123, author=SimpleNamespace(id=USER + 1, bot=False),

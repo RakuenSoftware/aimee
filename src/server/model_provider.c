@@ -149,13 +149,3 @@ model_provider_t *model_provider_get(const char *name)
    pthread_mutex_unlock(&lock);
    return p;
 }
-int model_provider_list(model_provider_t **out, int max)
-{
-   pthread_mutex_lock(&lock);
-   load();
-   int n = count < max ? count : max;
-   for (int i = 0; out && i < n; i++)
-      out[i] = &profiles[i];
-   pthread_mutex_unlock(&lock);
-   return n;
-}

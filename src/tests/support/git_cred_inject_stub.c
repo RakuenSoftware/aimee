@@ -13,18 +13,47 @@
 #include <stdlib.h>
 #include <string.h>
 
+__thread char git_cred_test_repo[4096];
+__thread char git_cred_test_remote[4096];
+__thread int git_cred_test_calls;
+/* When set, build_env returns this as the credential env (a test that needs the
+ * caller's credentialed path, e.g. with a PATH holding a fake git). */
+__thread char **git_cred_test_env;
+
 char **git_cred_inject_build_env_for_repo(const char *principal, const char *remote_url,
                                           const char *repo_dir, const char *preferred_token,
                                           char *const *parent_environ, int *out_token_fd)
 {
    (void)principal;
-   (void)remote_url;
-   (void)repo_dir;
+   snprintf(git_cred_test_remote, sizeof(git_cred_test_remote), "%s", remote_url ? remote_url : "");
+   snprintf(git_cred_test_repo, sizeof(git_cred_test_repo), "%s", repo_dir ? repo_dir : "");
+   git_cred_test_calls++;
    (void)preferred_token;
    (void)parent_environ;
    if (out_token_fd)
       *out_token_fd = -1;
-   return NULL;
+   return git_cred_test_env;
+}
+
+int git_cred_env_has_ssh_agent(char *const *envp)
+{
+   for (int i = 0; envp && envp[i]; i++)
+      if (strncmp(envp[i], "SSH_AUTH_SOCK=", 14) == 0)
+         return 1;
+   return 0;
+}
+
+/* The URL policy itself is tested against the real object
+ * (unit-test-git-cred-inject); this stand-in returns a sentinel for an scp-form
+ * SSH URL without an agent, so a caller's test can see that it substituted
+ * whatever the policy chose, without linking util_url into every stub binary. */
+char *git_cred_transport_url(const char *url, char *const *envp)
+{
+   if (!url || !url[0])
+      return NULL;
+   if (strncmp(url, "git@", 4) == 0 && strchr(url, ':') && !git_cred_env_has_ssh_agent(envp))
+      return strdup("https://transport.test/rewritten");
+   return strdup(url);
 }
 
 void git_cred_inject_free_env(char **envp)

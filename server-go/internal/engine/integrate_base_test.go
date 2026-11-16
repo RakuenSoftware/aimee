@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -245,8 +246,8 @@ type partialNoCommitAgents struct{}
 
 func (partialNoCommitAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
 	return DelegateResult{
-		Response: "named file 'docs/runbooks/x.md' was not created by delegate; the task remains unimplemented",
-		Partial:  true,
+		Output:  canonical.TextResponse("named file 'docs/runbooks/x.md' was not created by delegate; the task remains unimplemented"),
+		Partial: true,
 	}, nil
 }
 
@@ -254,8 +255,8 @@ type documentedNoopAgents struct{}
 
 func (documentedNoopAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
 	return DelegateResult{
-		Response: "Partial result; delegate ended with error: delegate code: no owned files changed; " +
-			"result treated as incomplete\n\nNo changes made. Documentation is already complete.",
+		Output: canonical.TextResponse("Partial result; delegate ended with error: delegate code: no owned files changed; " +
+			"result treated as incomplete\n\nNo changes made. Documentation is already complete."),
 		Partial: true,
 	}, nil
 }
@@ -268,8 +269,8 @@ type implementationSatisfiedNoopAgents struct{}
 
 func (implementationSatisfiedNoopAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
 	return DelegateResult{
-		Response: "Partial result; delegate ended with error: delegate code: no owned files changed; " +
-			"result treated as incomplete\n\nTask already complete on the current branch. No changes made.",
+		Output: canonical.TextResponse("Partial result; delegate ended with error: delegate code: no owned files changed; " +
+			"result treated as incomplete\n\nTask already complete on the current branch. No changes made."),
 		Partial: true,
 	}, nil
 }
@@ -281,7 +282,7 @@ func (implementationSatisfiedNoopAgents) DelegateGroup(_ context.Context, reques
 func (a partialNoCommitAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
 	out := make([]DelegateGroupResult, len(requests))
 	for i := range requests {
-		out[i] = DelegateGroupResult{Response: "partial"}
+		out[i] = DelegateGroupResult{Output: canonical.TextResponse("partial")}
 	}
 	return out
 }
@@ -413,8 +414,8 @@ func TestReviewResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *testi
 	if err == nil || agents.calls != 1 {
 		t.Fatalf("failed verification retry bypassed delegate: calls=%d err=%v", agents.calls, err)
 	}
-	if !strings.Contains(agents.last.Prompt, "PREVIOUS ATTEMPT FAILURE TO FIX:\nverify failed: clang-format violation") {
-		t.Fatalf("repair delegate did not receive verifier failure: %q", agents.last.Prompt)
+	if !strings.Contains(fixtureInputText(agents.last.Input), "PREVIOUS ATTEMPT FAILURE TO FIX:\nverify failed: clang-format violation") {
+		t.Fatalf("repair delegate did not receive verifier failure: %q", fixtureInputText(agents.last.Input))
 	}
 	if verifier.calls != verifierCalls {
 		t.Fatalf("failed verification retry replayed verifier: calls=%d, want %d", verifier.calls, verifierCalls)

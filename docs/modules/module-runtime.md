@@ -89,9 +89,8 @@ error/empty results, bounded capacity, reset, count, and per-turn message applic
 excess registrations fail; a failing callback is skipped and later callbacks still run. Output is
 bounded by the caller-provided buffer.
 
-Both build systems register the declared test. Make builds `unit-test-plugin-c-hook` from
-`src/tests/Rules.mk`, and `src/tests/CMakeLists.txt` registers `test_plugin_c_hook` as a CTest
-case. `scripts/check_module_test_registration.py` derives that from the build files, bound to the
+Make builds the declared test as `unit-test-plugin-c-hook` from `src/tests/Rules.mk`; CMake builds
+only the thin client and registers no tests. `scripts/check_module_test_registration.py` derives that from the build files, bound to the
 declared source path rather than to a target name, and pins it to
 `tests/baselines/refactor/module-test-registration.json`, so a change in build-file registration
 fails until the baseline is regenerated and re-reviewed.
@@ -113,3 +112,8 @@ without forwarding headers because no installed-header manifest exported them.
 New callback kinds must update `pre_llm_hook.h`, `pre_llm_hook.c`, the `agent_runtime.c` consumer,
 `src/tests/test_plugin_c_hook.c`, `module.yaml`, and this document together. Removing module-runtime
 is impossible without breaking the required module architecture and the core agent round trip.
+
+PRE_LLM_CALL hooks inspect a read-only user-text view and return ephemeral
+context. The host retains the original Message and appends hook output as a
+separate unverified evidence block in an owned IR request; the old API that
+rebuilt the user text is retired. System policy is not exposed to these hooks.

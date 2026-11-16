@@ -54,9 +54,10 @@ Explain how aimee itself works.
 Subcommands:
 
 ```
-  <topic>          Explain a topic -- work queue, delegation, memory,
-                   git, build, conventions. The words are joined, so
-                   `aimee get-help work queue` is one topic.
+  <topic>          Explain a topic -- mcp tools, delegate, memory, code
+                   index, verification, build, git, pr workflow,
+                   conventions, diagnostics. The words are joined, so
+                   `aimee get-help pr workflow` is one topic.
 ```
 
 ### `aimee get_help`
@@ -166,6 +167,7 @@ Subcommands:
   store            Store a memory
   list             List memories
   get              Read a memory by id (--as-of <ts>: was it in force then?)
+  delete <id>      Remove a memory from current recall (--store user|kb)
   evidence <id>    Inspect authorized evidence lineage (--json)
   health           Receipt-backed health (--window 24h --project P --workspace W --traces --json)
   receipt <request-id>  Inspect durable provider attempts (--json)
@@ -631,6 +633,7 @@ Model roster management.
 Subcommands:
 
 ```
+  generate         Tool-free canonical text completion (JSON request on stdin)
   list             List configured models
   add              Add or update a model
   setup            Run a provider's attended OAuth setup
