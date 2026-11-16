@@ -427,10 +427,21 @@ func (c *Checker) historicalFailure(ctx context.Context, sha, base string, id in
 		if !clean["Reject AI author and committer identities in new commits"] || !clean["Reject AI co-authorship trailers in new commits"] {
 			return false
 		}
-		count, number, reason := 0, 0, ""
+		count, exits, number, reason := 0, 0, 0, ""
 		for _, line := range strings.Split(string(raw), "\n") {
 			if !regexp.MustCompile(`^\d{4}-\d\d-\d\dT[0-9:.]+Z ##\[error\]`).MatchString(line) {
 				continue
+			}
+			// The runner emits one termination annotation after the actual error.
+			if regexp.MustCompile(`^\d{4}-\d\d-\d\dT[0-9:.]+Z ##\[error\]Process completed with exit code 1\.\r?$`).MatchString(line) {
+				if count != 1 || exits != 0 {
+					return false
+				}
+				exits++
+				continue
+			}
+			if exits != 0 {
+				return false
 			}
 			count++
 			match := regexp.MustCompile(`^\d{4}-\d\d-\d\dT[0-9:.]+Z ##\[error\]PR #([1-9][0-9]*) carries GitHub app attribution: ([a-zA-Z0-9_-]+) \(performed_via_github_app\)\r?$`).FindStringSubmatch(line)
@@ -440,7 +451,7 @@ func (c *Checker) historicalFailure(ctx context.Context, sha, base string, id in
 			number, _ = strconv.Atoi(match[1])
 			reason = fmt.Sprintf("PR #%d carries GitHub app attribution: %s", number, match[2])
 		}
-		return count == 1 && c.approvedHistoricalRejection(ctx, number, reason, sha)
+		return count == 1 && exits == 1 && c.approvedHistoricalRejection(ctx, number, reason, sha)
 	}
 	failures := 0
 	reason := ""
@@ -505,7 +516,9 @@ func (c *Checker) approvedHistoricalRejection(ctx context.Context, number int, r
 	if approved.merged {
 		source = approved.merge
 	}
-	return c.ancestor(ctx, source, oldHead)
+	// A PR may have advanced after its failed badge check. The approved final
+	// head also pins every earlier assessed revision in that same ancestry.
+	return c.ancestor(ctx, source, oldHead) || c.ancestor(ctx, oldHead, approved.head)
 }
 
 func (c *Checker) ancestor(ctx context.Context, ancestor, head string) bool {

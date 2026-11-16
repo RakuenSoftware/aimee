@@ -662,13 +662,27 @@ func TestApprovedLegacyShellBadgeFailureRequiresCompleteEvidence(t *testing.T) {
 	for _, pair := range pairs {
 		data["compare/"+pair[0]+"..."+pair[1]] = encoded(map[string]any{"status": "ahead", "base_commit": map[string]string{"sha": pair[0]}, "merge_base_commit": map[string]string{"sha": pair[0]}})
 	}
-	valid := "2026-10-17T19:41:37.1657703Z ##[error]PR #3036 carries GitHub app attribution: chatgpt-codex-connector (performed_via_github_app)\n"
+	valid := "2026-10-17T19:41:37.1657703Z ##[error]PR #3036 carries GitHub app attribution: chatgpt-codex-connector (performed_via_github_app)\n2026-10-17T19:41:37.1687348Z ##[error]Process completed with exit code 1.\n"
 	data["actions/jobs/77/logs"] = []byte(valid)
 	c := checker(t, data)
 	c.Repository = "RakuenSoftware/aimee"
 	if !c.historicalFailureOutsideRange(context.Background(), head, base, 77) {
 		t.Fatal("approved legacy evidence denied")
 	}
+	// The real #3036 failure assessed an earlier head, before its approved
+	// final head. Both directions require verified immutable ancestry.
+	forward := "compare/" + approved.head + "..." + head
+	data[forward] = []byte(`{"status":"diverged"}`)
+	reverse := "compare/" + head + "..." + approved.head
+	data[reverse] = encoded(map[string]any{"status": "ahead", "base_commit": map[string]string{"sha": head}, "merge_base_commit": map[string]string{"sha": head}})
+	if !c.historicalFailureOutsideRange(context.Background(), head, base, 77) {
+		t.Fatal("earlier approved PR revision denied")
+	}
+	delete(data, reverse)
+	if c.historicalFailureOutsideRange(context.Background(), head, base, 77) {
+		t.Fatal("unrelated revision admitted")
+	}
+	data[forward] = encoded(map[string]any{"status": "ahead", "base_commit": map[string]string{"sha": approved.head}, "merge_base_commit": map[string]string{"sha": approved.head}})
 	for _, bad := range []string{valid + valid, strings.Replace(valid, "3036", "3096", 1), valid + "2026-10-17T19:41:37.1657703Z ##[error]unknown failure\n", strings.Replace(valid, "chatgpt-codex-connector", "claude", 1)} {
 		data["actions/jobs/77/logs"] = []byte(bad)
 		if c.historicalFailureOutsideRange(context.Background(), head, base, 77) {
