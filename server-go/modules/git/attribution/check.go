@@ -195,8 +195,13 @@ func (c *Checker) approvedHistoricalIssue(ctx context.Context, raw []byte, numbe
 
 func (c *Checker) checkIssue(ctx context.Context, raw []byte, number int) error {
 	err := CheckIssue(raw, number)
-	if err != nil && c.approvedHistoricalIssue(ctx, raw, number) {
-		return nil
+	if _, pinned := approvedHistoricalPulls[number]; pinned && c.Repository == "RakuenSoftware/aimee" {
+		if c.approvedHistoricalIssue(ctx, raw, number) {
+			return nil
+		}
+		if err == nil {
+			return fmt.Errorf("PR #%d historical identity changed", number)
+		}
 	}
 	return err
 }
@@ -594,12 +599,15 @@ var approvedHistoricalCommits = map[string]struct{ name, email string }{
 func (c *Checker) checkCommit(entry commit) error {
 	original := entry.check()
 	approved, ok := approvedHistoricalCommits[entry.SHA]
-	if original == nil || !ok || c.Repository != "RakuenSoftware/aimee" || entry.Commit == nil {
+	if !ok || c.Repository != "RakuenSoftware/aimee" || entry.Commit == nil {
 		return original
 	}
 	for _, who := range []*identity{entry.Commit.Author, entry.Commit.Committer} {
 		if who == nil || who.Name == nil || who.Email == nil || *who.Name != approved.name || *who.Email != approved.email {
-			return original
+			if original != nil {
+				return original
+			}
+			return fmt.Errorf("commit %s historical identity changed", entry.SHA)
 		}
 	}
 	clean := entry
