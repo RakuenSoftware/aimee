@@ -1820,6 +1820,31 @@ jobs:
           AIMEE_BIN='./build/aimee.exe' FORCE_MODE=selfcheck \
             bash scripts/aimee-thin-client-smoke.sh
 
+  # Main still requires this context from the former Windows CMake job.
+  # Keep it backed by the shipping thin-client build and its Winsock smoke
+  # tests, without duplicating that build or retiring either check name.
+  windows-cmake:
+    name: windows-cmake
+    needs: [change-scope, windows-build]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require Windows CMake qualification
+        env:
+          WINDOWS_RESULT: ${{ needs.windows-build.result }}
+          SCOPE_RESULT: ${{ needs.change-scope.result }}
+          DOCS_ONLY: ${{ needs.change-scope.outputs.docs_only }}
+        run: |
+          if [ "$WINDOWS_RESULT" = success ]; then
+            echo "Windows CMake build and thin-client smoke tests passed"
+          elif [ "$WINDOWS_RESULT" = skipped ] && [ "$SCOPE_RESULT" = success ] && [ "$DOCS_ONLY" = true ]; then
+            echo "Windows build intentionally skipped for documentation-only changes"
+          else
+            echo "::error::Windows CMake qualification did not succeed: $WINDOWS_RESULT"
+            exit 1
+          fi
+
   macos-build:
     needs: change-scope
     # Shared native headers/build contracts also change on testing-target PRs.
