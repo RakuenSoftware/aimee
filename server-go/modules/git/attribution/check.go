@@ -414,7 +414,7 @@ func (c *Checker) historicalFailure(ctx context.Context, sha, base string, id in
 	// The old CI shell gate used an Actions error, before structured verdicts.
 	// Accept only an unambiguous app-badge rejection for an explicitly approved
 	// historical PR; prove this assessed head predates the original release cut.
-	if run.Path == ".github/workflows/ci.yml" {
+	if run.Path == ".github/workflows/ci.yml" || verdict == nil && !strings.Contains(string(raw), "attribution denied after") {
 		if verdict != nil || !c.ancestor(ctx, sha, "582fa11b4e7bc55322c770d76b6aef13ad58d0aa") {
 			return false
 		}
@@ -427,7 +427,7 @@ func (c *Checker) historicalFailure(ctx context.Context, sha, base string, id in
 		if !clean["Reject AI author and committer identities in new commits"] || !clean["Reject AI co-authorship trailers in new commits"] {
 			return false
 		}
-		count, exits, number, reason := 0, 0, 0, ""
+		count, exits, bodies, number, reason := 0, 0, 0, 0, ""
 		for _, line := range strings.Split(string(raw), "\n") {
 			if !regexp.MustCompile(`^\d{4}-\d\d-\d\dT[0-9:.]+Z ##\[error\]`).MatchString(line) {
 				continue
@@ -442,6 +442,18 @@ func (c *Checker) historicalFailure(ctx context.Context, sha, base string, id in
 			}
 			if exits != 0 {
 				return false
+			}
+			// Some old shell gates reported the badge and a body footer separately.
+			// The live body must now pass the ordinary validator in the approved
+			// historical identity check; no stale/unknown content deny is waived.
+			body := regexp.MustCompile(`^\d{4}-\d\d-\d\dT[0-9:.]+Z ##\[error\]PR #([1-9][0-9]*) body carries AI attribution\r?$`).FindStringSubmatch(line)
+			if len(body) == 2 {
+				subject, _ := strconv.Atoi(body[1])
+				if count != 1 || bodies != 0 || subject != number {
+					return false
+				}
+				bodies++
+				continue
 			}
 			count++
 			match := regexp.MustCompile(`^\d{4}-\d\d-\d\dT[0-9:.]+Z ##\[error\]PR #([1-9][0-9]*) carries GitHub app attribution: ([a-zA-Z0-9_-]+) \(performed_via_github_app\)\r?$`).FindStringSubmatch(line)
