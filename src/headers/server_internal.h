@@ -17,6 +17,8 @@ char *server_kb_required_error(const char *what);
  * (at most 4096 bytes, never splitting a UTF-8 character). Declared here, not in
  * server.h, which the vendored memory bundle pins. */
 size_t memory_task_hint_bounded_len(const char *hint);
+/* `memory read`: personal context by default, the KB on an explicit store=kb. */
+cJSON *memory_read_command(const cJSON *req);
 /* Rows one eval.candidates response may carry. Bounds both the request's
  * `limit` and the stack buffer that serves it. */
 #define EVAL_CANDIDATES_MAX_ROWS 100

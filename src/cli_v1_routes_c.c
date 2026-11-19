@@ -1638,6 +1638,14 @@ void pt_print_kb_ingest_status(const char *method, cJSON *resp)
  * command: it is consulted precisely when someone suspects trouble. */
 void pt_print_kb_status(const char *method, cJSON *resp)
 {
+   /* A standalone Server has no KB to describe; say so instead of printing
+    * nothing (the server answers status "not_configured" with a detail). */
+   if (cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(resp, "configured")))
+   {
+      const char *detail = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "detail"));
+      printf("KB: not configured%s%s\n", detail ? " -- " : "", detail ? detail : "");
+      return;
+   }
    cJSON *proj = cJSON_GetObjectItemCaseSensitive(resp, "project");
    cJSON *chunks = cJSON_GetObjectItemCaseSensitive(resp, "chunks");
    cJSON *summary = cJSON_GetObjectItemCaseSensitive(resp, "summary_status");

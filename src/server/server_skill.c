@@ -40,6 +40,31 @@ static const char *skill_req_cwd(cJSON *req, char *fallback, size_t fallback_len
    return fallback ? fallback : "";
 }
 
+/* Why a cwd was refused. A detached workspace IS registered, but its files are
+ * on the client, so the server cannot read the project's skills; saying "not
+ * inside a registered workspace" sent operators to re-register a registered
+ * directory. */
+static const char *skill_cwd_refusal(cJSON *req)
+{
+   const char *cwd = skill_req_str(req, "cwd");
+   size_t best = 0;
+   const char *provider = NULL;
+   for (int i = 0; cwd && i < config_workspace_count(); i++)
+   {
+      const char *root = config_workspaces(i);
+      size_t n = strlen(root);
+      if (n && n > best && !strncmp(cwd, root, n) && (cwd[n] == '/' || cwd[n] == '\0'))
+      {
+         best = n;
+         provider = config_workspace_providers(i);
+      }
+   }
+   if (provider && (!strcmp(provider, "detached") || !strcmp(provider, "mirror")))
+      return "this workspace is registered as client-side (detached), so the server cannot read "
+             "its project skills; run the skill command on a server-local workspace";
+   return "cwd is not inside a registered workspace";
+}
+
 static int skill_send_error(server_conn_t *conn, const char *message)
 {
    cJSON *resp = cJSON_CreateObject();
@@ -63,7 +88,7 @@ int handle_skill_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char cwd[MAX_PATH_LEN];
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
    char names[SKILL_MAX_SKILLS][SKILL_NAME_MAX];
    int n = skill_list(root, names, SKILL_MAX_SKILLS);
    cJSON *resp = jo_ok();
@@ -98,7 +123,7 @@ int handle_skill_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char cwd[MAX_PATH_LEN], err[256] = "";
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
    const char *file_path = skill_req_str(req, "file_path");
    char *content = file_path && file_path[0]
                        ? skill_support_file_load(root, name, file_path, err, sizeof(err))
@@ -121,7 +146,7 @@ int handle_skill_lint(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char cwd[MAX_PATH_LEN];
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
    int issues = 0;
    int checked = 0;
    char combined[4096] = "";
@@ -171,7 +196,7 @@ int handle_skill_eval(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char cwd[MAX_PATH_LEN], err[256] = "";
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
    skill_eval_result_t result;
    int rc = skill_eval_run(root, name, &result, err, sizeof(err));
 
@@ -292,7 +317,7 @@ int handle_skill_eval_exec(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char cwd[MAX_PATH_LEN], err[256] = "";
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
 
    double repeats_number, max_tokens_number, minimum_delta, max_case_cost, max_total_cost;
    if (skill_req_optional_number(req, "repeats", 2.0, &repeats_number) != 0 ||
@@ -379,7 +404,7 @@ int handle_skill_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return skill_send_error(conn, err[0] ? err : "skill lint failed");
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
    int rc = skill_manage_create(root, name, content, "user", err, sizeof(err));
    return rc == 0 ? skill_send_ok(conn, "create", name)
                   : skill_send_error(conn, err[0] ? err : "skill create failed");
@@ -397,7 +422,7 @@ int handle_skill_edit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return skill_send_error(conn, err[0] ? err : "skill lint failed");
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
    int rc = skill_manage_edit(root, name, content, "user", err, sizeof(err));
    return rc == 0 ? skill_send_ok(conn, "edit", name)
                   : skill_send_error(conn, err[0] ? err : "skill edit failed");
@@ -415,7 +440,7 @@ int handle_skill_patch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char cwd[MAX_PATH_LEN], err[256] = "";
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
    int rc = skill_manage_patch(root, name, old_string, new_string, cJSON_IsTrue(jall), "user", err,
                                sizeof(err));
    return rc == 0 ? skill_send_ok(conn, "patch", name)
@@ -431,7 +456,7 @@ int handle_skill_archive(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char cwd[MAX_PATH_LEN], err[256] = "";
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
    int rc = skill_manage_archive(root, name, skill_req_str(req, "absorbed_into"), err, sizeof(err));
    return rc == 0 ? skill_send_ok(conn, "archive", name)
                   : skill_send_error(conn, err[0] ? err : "skill archive failed");
@@ -447,7 +472,7 @@ int handle_skill_pin(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char cwd[MAX_PATH_LEN];
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
    int rc = skill_set_pinned(root, name, cJSON_IsTrue(jpinned));
    return rc == 0 ? skill_send_ok(conn, cJSON_IsTrue(jpinned) ? "pin" : "unpin", name)
                   : skill_send_error(conn, "skill not found");
@@ -459,7 +484,7 @@ int handle_skill_lifecycle(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char cwd[MAX_PATH_LEN], err[256] = "";
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
    cJSON *jstale = cJSON_GetObjectItemCaseSensitive(req, "stale_after_days");
    cJSON *jarchive = cJSON_GetObjectItemCaseSensitive(req, "archive_after_days");
    int stale_days = cJSON_IsNumber(jstale) ? jstale->valueint : config_skills_stale_after_days();
@@ -487,7 +512,7 @@ int handle_skill_autostub(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char cwd[MAX_PATH_LEN], err[256] = "";
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    if (!root)
-      return skill_send_error(conn, "cwd is not inside a registered workspace");
+      return skill_send_error(conn, skill_cwd_refusal(req));
    cJSON *jforce = cJSON_GetObjectItemCaseSensitive(req, "force");
    if (!config_skills_capability_autostub() && !cJSON_IsTrue(jforce))
    {

@@ -207,6 +207,11 @@ static void test_server_health_reports_absent_kb_and_sandbox(void)
    assert(strstr(out, "aimee-kb: not configured (optional)"));
    assert(!strstr(out, "did not answer"));
    assert(!strstr(out, "memory and kb search will not work"));
+   capture_printer(pt_print_kb_status, "kb.status",
+                   "{\"status\":\"not_configured\",\"configured\":false,\"detail\":\"no KB is "
+                   "connected\"}",
+                   out, sizeof out);
+   assert(strstr(out, "KB: not configured -- no KB is connected"));
 }
 
 /* `aimee primary` outside an aimee session used to send the "default" placeholder

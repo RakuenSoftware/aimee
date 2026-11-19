@@ -746,7 +746,8 @@ static void test_hygiene_owner_transport(void)
 
 static void test_read_owner_refusal(void)
 {
-   cJSON *request = cJSON_CreateObject();
+   /* The shared assembly path is explicit: personal storage is the default. */
+   cJSON *request = cJSON_Parse("{\"store\":\"kb\"}");
    review_method = "memory.assemble_context";
    review_reply =
        "{\"status\":\"error\",\"kind\":\"unavailable\",\"message\":\"retrieval failed\"}";
@@ -923,6 +924,20 @@ static void test_personal_recall_owner_envelope(void)
    personal_recall_reply = NULL;
    assert(server_user_memory_recall_json("private query", 8192, 1) == NULL);
    assert(caller_operation_calls == 4);
+
+   /* `memory read` used to ask the KB unconditionally and answered "KB memory
+    * owner unavailable" on a KB-less Server. Personal store renders the local
+    * recall envelope as context. */
+   personal_recall_reply = "{\"status\":\"ok\",\"store\":\"user\",\"recall\":{\"identity\":[{"
+                           "\"id\":7,\"text\":\"prefers concise updates\"}]}}";
+   cJSON *read_req = cJSON_Parse("{\"task_hint\":\"private query\"}");
+   cJSON *read = memory_read_command(read_req);
+   const char *context = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(read, "context"));
+   assert(context && strstr(context, "## Identity") &&
+          strstr(context, "- prefers concise updates"));
+   cJSON_Delete(read);
+   cJSON_Delete(read_req);
+   personal_recall_reply = NULL;
 }
 
 int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
