@@ -2387,6 +2387,7 @@ int main(int argc, char **argv)
             }
          }
          cli_v1_set_git_runner(cli_workspace_git_runner_start, cli_workspace_git_runner_stop);
+         cli_v1_set_delegate_source_publisher(cli_workspace_publish_delegate_source);
          int rc = cli_v1_forward(sock, &route, json_output, json_fields, response_profile, sub_argc,
                                  sub_argv);
          if (rc >= 0)

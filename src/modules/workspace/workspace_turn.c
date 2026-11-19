@@ -100,6 +100,33 @@ static int cwd_in_workspace(const char *cwd, const char *ws)
    return strncmp(cwd, ws, len) == 0 && (cwd[len] == '/' || cwd[len] == '\\' || cwd[len] == '\0');
 }
 
+/* The registered workspace that owns `cwd`: the MOST SPECIFIC root containing it.
+ * Registration order is not ownership. A session worktree or a subproject that a
+ * client registered as its own `mirror` (with the remote and head a background
+ * delegate needs) can sit inside an older, broader `detached` registration with
+ * no remote; taking the first match bound every such cwd to the broader entry,
+ * and a background delegate there was refused for having nothing to reconstruct
+ * from even though the nested registration carried everything required.
+ * Returns the registry index, or -1 when no registered root contains `cwd`. */
+static int owning_workspace_index(const char *cwd)
+{
+   int best = -1;
+   size_t best_len = 0;
+   for (int i = 0; i < config_workspace_count(); i++)
+   {
+      const char *root = config_workspaces(i);
+      if (!cwd_in_workspace(cwd, root))
+         continue;
+      size_t len = strlen(root);
+      if (best < 0 || len > best_len)
+      {
+         best = i;
+         best_len = len;
+      }
+   }
+   return best;
+}
+
 /* The mirror runner needs the workspace's remote URL for the per-host vault
  * lookup. It used to carry a workspace_id as well, purely as the broker key;
  * that went with the broker token itself. */
@@ -440,10 +467,10 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
       out[0] = '\0';
    if (!cwd || !cwd[0] || !out || out_cap == 0)
       return 0;
-   for (int i = 0; i < config_workspace_count(); i++)
    {
-      if (!cwd_in_workspace(cwd, config_workspaces(i)))
-         continue;
+      int i = owning_workspace_index(cwd);
+      if (i < 0)
+         goto not_registered;
       ws_provider_kind_t kind = config_workspace_providers(i)[0]
                                     ? ws_provider_kind_from_string(config_workspace_providers(i))
                                     : WS_PROVIDER_SHARED;
@@ -467,6 +494,7 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
       }
       return 0; /* matched, but not a mirror workspace */
    }
+not_registered:
    /* Not in any registered workspace. Worth saying: a session worktree is
     * expected to be registered, and "not registered" and "registered but
     * unresolvable" produce the SAME downstream error, which is what made this
@@ -503,10 +531,10 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached,
          return 1;
       }
    }
-   for (int i = 0; i < config_workspace_count(); i++)
    {
-      if (!cwd_in_workspace(cwd, config_workspaces(i)))
-         continue;
+      int i = owning_workspace_index(cwd);
+      if (i < 0)
+         return 0; /* cwd not in any registered workspace */
 
       /* Matched the workspace containing this turn's cwd. Only a non-shared
        * provider changes anything; shared stays on the direct-fs path. */
