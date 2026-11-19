@@ -928,10 +928,10 @@ done:
  * tail" signal. Returns AUDIT_WORM_VERIFY_GREEN (fully attested), _AMBER (chain
  * intact but head is beyond the newest checkpoint), or _RED (a break). head_seq /
  * last_ckpt_seq are filled when non-NULL. */
-int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
+/* Head and newest checkpoint, and the GREEN/AMBER/RED verdict they imply, WITHOUT
+ * rescanning the chain. Callers that have just verified the chain use it. */
+static int worm_head_status(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
 {
-   if (audit_worm_verify_chain(err, errlen) != 0)
-      return AUDIT_WORM_VERIFY_RED;
    long head = 0, ckpt = 0;
    int query_ok = 0;
    pthread_mutex_lock(&g_worm_mu);
@@ -970,6 +970,13 @@ int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_
    return (ckpt >= head) ? AUDIT_WORM_VERIFY_GREEN : AUDIT_WORM_VERIFY_AMBER;
 }
 
+int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
+{
+   if (audit_worm_verify_chain(err, errlen) != 0)
+      return AUDIT_WORM_VERIFY_RED;
+   return worm_head_status(err, errlen, head_seq, last_ckpt_seq);
+}
+
 int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
 {
    /* A newly created store has no evidence to attest yet. Admit that one state
@@ -1006,7 +1013,11 @@ int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *la
       return -1;
    }
 
-   status = audit_worm_verify(err, errlen, &head, &ckpt);
+   /* The chain was verified in full above, and nothing else writes during
+    * startup; the only new row is the checkpoint this process just derived from
+    * that verified head. Rescanning the whole chain to admit it doubled boot
+    * time on a large store (two full passes over 48 GB on the live Server). */
+   status = worm_head_status(err, errlen, &head, &ckpt);
    if (head_seq)
       *head_seq = head;
    if (last_ckpt_seq)
