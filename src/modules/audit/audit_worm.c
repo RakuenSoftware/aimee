@@ -659,8 +659,44 @@ int audit_worm_verify_chain(char *err, size_t errlen)
       pthread_mutex_unlock(&g_worm_mu);
       return -1;
    }
-   int rc = worm_verify_db(g_worm_db, err, errlen);
+   /* Scan on a separate read-only connection, outside g_worm_mu. The store is in
+    * WAL mode, so a reader sees one consistent snapshot while appends continue.
+    * Holding the mutex for the whole scan stalled every audited action and every
+    * checkpoint for the length of the chain: on the live Server (142M rows,
+    * 48 GB) that was ~7 minutes per `aimee audit verify`, with checkpoints
+    * queueing behind it. The scan itself stays complete -- the prefix is never
+    * trusted from a cache, since detecting a rewritten old row is the point. */
+   char path[4096] = "";
+   const char *name = sqlite3_db_filename(g_worm_db, "main");
+   if (name && name[0])
+      snprintf(path, sizeof path, "%s", name);
    pthread_mutex_unlock(&g_worm_mu);
+   if (!path[0])
+   {
+      /* In-memory or unnamed store: no second connection can see it. */
+      pthread_mutex_lock(&g_worm_mu);
+      int locked_rc = worm_verify_db(g_worm_db, err, errlen);
+      pthread_mutex_unlock(&g_worm_mu);
+      return locked_rc;
+   }
+   sqlite3 *reader = NULL;
+   if (sqlite3_open_v2(path, &reader, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK)
+   {
+      if (err)
+         snprintf(err, errlen, "cannot open the WORM store read-only for verification");
+      if (reader)
+         sqlite3_close(reader);
+      return -1;
+   }
+   sqlite3_busy_timeout(reader, 5000);
+   /* One read transaction, so the whole scan sees a single snapshot. */
+   int rc = sqlite3_exec(reader, "BEGIN", NULL, NULL, NULL) == SQLITE_OK
+                ? worm_verify_db(reader, err, errlen)
+                : -1;
+   if (rc != 0 && err && !err[0])
+      snprintf(err, errlen, "cannot start a read transaction for verification");
+   sqlite3_exec(reader, "COMMIT", NULL, NULL, NULL);
+   sqlite3_close(reader);
    return rc;
 }
 
