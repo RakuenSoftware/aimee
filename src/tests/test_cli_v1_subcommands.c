@@ -209,6 +209,26 @@ static void test_server_health_reports_absent_kb_and_sandbox(void)
    assert(!strstr(out, "memory and kb search will not work"));
 }
 
+/* `aimee primary` outside an aimee session used to send the "default" placeholder
+ * session and print the server's "session primary selection unavailable". It
+ * must refuse locally and say a session is needed; with one, it still routes. */
+static void test_primary_requires_a_session(void)
+{
+   unsetenv("AIMEE_SESSION_ID");
+   char *show[] = {"--show"};
+   assert(marshal_primary(1, show) == NULL);
+   assert(marshal_request_take_reported());
+   setenv("AIMEE_SESSION_ID", "sess-1", 1);
+   cJSON *req = marshal_primary(1, show);
+   assert(req);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "method")),
+                  "primary.get"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id")),
+                  "sess-1"));
+   cJSON_Delete(req);
+   unsetenv("AIMEE_SESSION_ID");
+}
+
 /* `aimee agent roles <name>` and `aimee agent personas <name>` MUTATE the agent:
  * with no csv argument they reset it to the full default set. Both were wired to
  * the agent.enable printer, so the operator's only feedback was
@@ -725,6 +745,7 @@ int main(void)
    test_memory_hygiene_explicit_scope();
    test_kb_status_warns_about_undrainable_queue();
    test_server_health_reports_absent_kb_and_sandbox();
+   test_primary_requires_a_session();
    test_config_deploy_env_is_routed();
    test_unknown_command_is_safe();
    test_known_command_lists_subcommands();

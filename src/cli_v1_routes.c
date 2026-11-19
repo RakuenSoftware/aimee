@@ -1151,6 +1151,19 @@ cJSON *marshal_primary(int argc, char **argv)
    cli_args_t opts;
    cli_args_parse(argc, argv, bools, &opts);
 
+   /* The primary is a property of one aimee session. Outside one there is
+    * nothing to read or pin, and sending the "default" placeholder made the
+    * server answer "session primary selection unavailable", which reads as an
+    * outage. Say what is missing instead. */
+   const char *session = resolve_session_env(&opts);
+   if (!strcmp(session, "default"))
+   {
+      fprintf(stderr, "aimee: primary applies to an aimee session; run it inside one "
+                      "(AIMEE_SESSION_ID is set there) or pass --session <id>\n");
+      marshal_request_note_reported();
+      return NULL;
+   }
+
    cJSON *req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
 
@@ -1163,7 +1176,7 @@ cJSON *marshal_primary(int argc, char **argv)
       cJSON_AddStringToObject(req, "method", "primary.set");
       cJSON_AddStringToObject(req, "agent", opts.positional[0]);
    }
-   cJSON_AddStringToObject(req, "session_id", resolve_session_env(&opts));
+   cJSON_AddStringToObject(req, "session_id", session);
    return req;
 }
 
