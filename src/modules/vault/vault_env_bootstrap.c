@@ -1,4 +1,5 @@
 /* vault_env_bootstrap.c — first-boot env transport into encrypted Vault. */
+#include "oauth_flow.h"
 #include "vault_env_bootstrap.h"
 #include "codex_client_version.h"
 #include "runtime_secret.h"
@@ -167,7 +168,7 @@ int vault_env_import_stream(FILE *input)
       return -1;
 
    char *record = calloc(1, ENV_STREAM_RECORD_MAX);
-   char(*imported)[ENV_NAME_MAX] = calloc(ENV_BOOTSTRAP_MAX, sizeof(*imported));
+   char (*imported)[ENV_NAME_MAX] = calloc(ENV_BOOTSTRAP_MAX, sizeof(*imported));
    if (!record || !imported)
    {
       free(record);
@@ -713,6 +714,10 @@ int vault_env_module_resource(void)
    const char *cred = cJSON_GetStringValue(cJSON_GetObjectItem(req, "credential"));
    char *secret = (char *)cJSON_GetStringValue(cJSON_GetObjectItem(req, "secret"));
    vault_status_t st = VAULT_ERR_BADARG;
+   /* Why a request failed, when that is known and safe to say. Without it every
+    * failure reached the operator as "credential storage unavailable", including
+    * the common one: a Codex refresh token the provider has rejected. */
+   char reason[160] = "";
    /* Serving and diagnostics share one selected connection snapshot. This
     * computed credential travels only on the attested private helper pipes. */
    if (op && !strcmp(op, "get") && agent && agent[0] && strlen(agent) < 64 && cred &&
@@ -733,6 +738,11 @@ int vault_env_module_resource(void)
                OPENSSL_cleanse(field->valuestring, strlen(field->valuestring));
          cJSON_Delete(json);
       }
+      else
+         snprintf(reason, sizeof reason, "%s",
+                  oauth_token_reauth_required(agent)
+                      ? "Codex refresh was rejected; re-authenticate with `aimee codex reauth`"
+                      : "no usable Codex credential is stored for this connection");
       OPENSSL_cleanse(&pair, sizeof pair);
    }
    else if (op && agent && agent[0] && strlen(agent) < 64 && cred &&
@@ -759,6 +769,8 @@ int vault_env_module_resource(void)
    cJSON_AddStringToObject(reply, "status",
                            st == VAULT_OK || st == VAULT_NO_ENTRY ? "ok" : "error");
    cJSON_AddStringToObject(reply, "value", value);
+   if (reason[0] && st != VAULT_OK && st != VAULT_NO_ENTRY)
+      cJSON_AddStringToObject(reply, "reason", reason);
    OPENSSL_cleanse(value, sizeof(value));
    char *printed = cJSON_PrintUnformatted(reply);
    cJSON *jvalue = cJSON_GetObjectItem(reply, "value");
