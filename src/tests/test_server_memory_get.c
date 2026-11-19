@@ -2,6 +2,7 @@
 #include "cJSON.h"
 #include "kb_client.h"
 #include "server.h"
+#include "server_internal.h"
 #include "integrity.h"
 #include "request_context.h"
 #include "module_commands.h"
@@ -1266,8 +1267,27 @@ static void test_protected_intake_transport(void)
    protected_reply = NULL;
 }
 
+/* The memory module refuses a recall task_hint over 4096 bytes, and the prompt
+ * hook sends the whole prompt; long prompts lost recall entirely. The hint is
+ * bounded instead, never splitting a UTF-8 character. */
+static void test_recall_hint_is_bounded(void)
+{
+   assert(memory_task_hint_bounded_len("short hint") == 10);
+   assert(memory_task_hint_bounded_len(NULL) == 0);
+   char *long_hint = malloc(9000);
+   assert(long_hint);
+   memset(long_hint, 'a', 8999);
+   long_hint[8999] = '\0';
+   assert(memory_task_hint_bounded_len(long_hint) == 4096);
+   /* A 3-byte character straddling the limit is dropped whole. */
+   memcpy(long_hint + 4094, "\xe2\x82\xac", 3);
+   assert(memory_task_hint_bounded_len(long_hint) == 4094);
+   free(long_hint);
+}
+
 int main(void)
 {
+   test_recall_hint_is_bounded();
    test_user_namespace();
    expected_time = "2020-01-01T00:00:00Z";
    cJSON *request = cJSON_Parse("{\"store\":\"kb\",\"id\":42,\"as_of\":\"2020-01-01T00:00:00Z\"}");

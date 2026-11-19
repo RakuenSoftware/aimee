@@ -2,6 +2,7 @@
 #include "server_state_internal.h"
 #include "aimee.h"
 #include "server.h"
+#include "server_internal.h"
 #include "server_error_kind.h"
 #include "headers/module_commands.h"
 #include "module_stage_adapters.h"
@@ -804,13 +805,45 @@ int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Personal recall uses the same memory module as shared recall, with the
  * process's own data grant. No KB request is needed to create its envelope. */
+/* The memory module refuses a recall whose task_hint exceeds 4096 bytes
+ * (InvalidRequest). The UserPromptSubmit hook sends the whole prompt as the hint,
+ * so every long prompt -- pasted logs, long instructions -- lost its recall for
+ * that turn ("memory recall is unavailable"), and the live Server logged the
+ * rejection every few minutes. The hint only steers relevance, so its opening
+ * is used, cut at a UTF-8 character boundary. */
+#define MEMORY_TASK_HINT_MAX 4096u
+
+size_t memory_task_hint_bounded_len(const char *hint)
+{
+   size_t n = hint ? strlen(hint) : 0;
+   if (n <= MEMORY_TASK_HINT_MAX)
+      return n;
+   n = MEMORY_TASK_HINT_MAX;
+   while (n > 0 && ((unsigned char)hint[n] & 0xC0u) == 0x80u)
+      n--; /* never split a multi-byte character */
+   return n;
+}
+
 static char *user_memory_recall_json(const char *hint, int limit_tokens, int session_start,
                                      const size_t *native_bytes)
 {
    cJSON *request = cJSON_CreateObject();
    if (!request)
       return NULL;
-   cJSON_AddStringToObject(request, "task_hint", hint ? hint : "");
+   {
+      size_t keep = memory_task_hint_bounded_len(hint);
+      char *bounded = malloc(keep + 1);
+      if (!bounded)
+      {
+         cJSON_Delete(request);
+         return NULL;
+      }
+      if (keep)
+         memcpy(bounded, hint, keep);
+      bounded[keep] = '\0';
+      cJSON_AddStringToObject(request, "task_hint", bounded);
+      free(bounded);
+   }
    cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
    if (native_bytes)
       cJSON_AddNumberToObject(request, "native_context_bytes", (double)*native_bytes);

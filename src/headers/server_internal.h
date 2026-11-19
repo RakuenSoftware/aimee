@@ -13,6 +13,10 @@ void server_health_add_kb(cJSON *resp);
 /* A typed 503 JSON error (heap) naming `what` as needing a connected KB, or NULL
  * when a KB is configured. Used by shared-knowledge providers on a KB-less Server. */
 char *server_kb_required_error(const char *what);
+/* Length of the prefix of `hint` the memory module accepts as a recall task_hint
+ * (at most 4096 bytes, never splitting a UTF-8 character). Declared here, not in
+ * server.h, which the vendored memory bundle pins. */
+size_t memory_task_hint_bounded_len(const char *hint);
 /* Rows one eval.candidates response may carry. Bounds both the request's
  * `limit` and the stack buffer that serves it. */
 #define EVAL_CANDIDATES_MAX_ROWS 100
