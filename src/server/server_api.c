@@ -12,6 +12,7 @@
 #include "server_http_internal.h" /* request capability context */
 #include "server.h"               /* server_active_project_from_cwd */
 #include "kb_client.h"
+#include "server_internal.h"
 #include "config.h"
 #include "working_profile.h" /* working_profile_autoobserve_from_feedback */
 #include "agent_config.h"
@@ -29,6 +30,9 @@
  * frees the returned string. */
 static char *rules_provider(void)
 {
+   char *absent = server_kb_required_error("rules");
+   if (absent)
+      return absent;
    return kb_client_collab_rules_list_active_json();
 }
 
@@ -36,18 +40,27 @@ static char *rules_provider(void)
  * object, or NULL when aimee-kb is unreachable. The route frees it. */
 static char *dashboard_memory_provider(void)
 {
+   char *absent = server_kb_required_error("the memory dashboard");
+   if (absent)
+      return absent;
    return kb_client_dashboard_memory_stats_json();
 }
 
 /* GET /v1/dashboard/reminders provider: reminders as a heap JSON object. */
 static char *dashboard_reminders_provider(void)
 {
+   char *absent = server_kb_required_error("reminders");
+   if (absent)
+      return absent;
    return kb_client_dashboard_reminders_json();
 }
 
 /* GET /v1/kb/status provider: kb/vector status as a heap JSON object. */
 static char *kb_status_provider(void)
 {
+   if (!kb_client_connection_configured())
+      return strdup("{\"status\":\"not_configured\",\"configured\":false,\"detail\":\"no KB is "
+                    "connected; personal memory is served by this Server\"}");
    return kb_client_status_json();
 }
 
@@ -61,24 +74,36 @@ static char *kb_agent_surfaces_provider(void)
 /* GET /v1/kb/curator provider: the curator observability block (§4). */
 static char *kb_curator_provider(void)
 {
+   char *absent = server_kb_required_error("the KB curator");
+   if (absent)
+      return absent;
    return kb_client_curator_json();
 }
 
 /* GET /v1/roadmap provider: the roadmap list as a heap JSON object. */
 static char *roadmap_provider(void)
 {
+   char *absent = server_kb_required_error("the roadmap");
+   if (absent)
+      return absent;
    return kb_client_roadmap_list_json();
 }
 
 /* GET /v1/curiosity provider: open curiosity items (all states, capped). */
 static char *curiosity_provider(void)
 {
+   char *absent = server_kb_required_error("curiosity items");
+   if (absent)
+      return absent;
    return kb_client_curiosity_list_json(NULL, 50);
 }
 
 /* GET /v1/notes provider: notes list (all tags, capped). */
 static char *notes_list_provider(void)
 {
+   char *absent = server_kb_required_error("notes");
+   if (absent)
+      return absent;
    return kb_client_note_list_json(NULL, 50);
 }
 

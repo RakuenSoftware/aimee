@@ -10,6 +10,9 @@ int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Attach the kb block to a server.health response (see server_api_status.c). */
 void server_health_add_kb(cJSON *resp);
+/* A typed 503 JSON error (heap) naming `what` as needing a connected KB, or NULL
+ * when a KB is configured. Used by shared-knowledge providers on a KB-less Server. */
+char *server_kb_required_error(const char *what);
 /* Rows one eval.candidates response may carry. Bounds both the request's
  * `limit` and the stack buffer that serves it. */
 #define EVAL_CANDIDATES_MAX_ROWS 100
