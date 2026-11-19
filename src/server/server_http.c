@@ -16,6 +16,7 @@
 #include "server_write_tier.h"
 #include "server_write_tier_db1.h"
 #include "db1_client/server_sessions.h"
+#include "server/browser_session_owner.h"
 #include "db1_client/db1.h" /* db1_store_probe — the mTLS ramp needs a live store */
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
@@ -478,18 +479,13 @@ int route_session_attach(const char *session_id, const char *body, char *resp, i
          return err_json(resp, cap, 403, "browser session owner mismatch");
       }
       db1_server_session_owner_t row;
-      if (db1_server_session_owner_get(session_id, &row) != 0)
+      int admitted = browser_session_admit_owner(session_id, actor, &row);
+      if (admitted == BROWSER_SESSION_UNAVAILABLE)
       {
-         /* Creation never updates an existing owner. A concurrent creator or
-          * lost acknowledgement is resolved only by reading the durable row. */
-         (void)db1_server_session_create(session_id, "webchat", actor);
-         if (db1_server_session_owner_get(session_id, &row) != 0)
-         {
-            cJSON_Delete(req);
-            return err_json(resp, cap, 503, "browser session admission unavailable");
-         }
+         cJSON_Delete(req);
+         return err_json(resp, cap, 503, "browser session admission unavailable");
       }
-      if (strcmp(row.principal, actor))
+      if (admitted == BROWSER_SESSION_FOREIGN)
       {
          cJSON_Delete(req);
          return err_json(resp, cap, 403, "browser session owner mismatch");

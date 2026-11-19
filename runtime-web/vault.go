@@ -87,6 +87,14 @@ func (e *vaultErr) Error() string { return e.msg }
 // an aimee-server error envelope (e.g. "vault locked"), never the raw body —
 // defense in depth so nothing unexpected reaches the browser.
 func vaultSafeErrorMessage(data []byte) string {
+	return upstreamSafeErrorMessage(data, "vault: request failed")
+}
+
+// upstreamSafeErrorMessage is vaultSafeErrorMessage for any aimee-server reply:
+// the server's own short error string when the envelope carries one, else
+// `fallback`. Browser handlers used to replace every refusal with a fixed
+// phrase ("attach refused"), which hid the one fact an operator needed.
+func upstreamSafeErrorMessage(data []byte, fallback string) string {
 	var e struct {
 		Error   any    `json:"error"`
 		Message string `json:"message"`
@@ -103,7 +111,7 @@ func vaultSafeErrorMessage(data []byte) string {
 	if e.Message != "" {
 		return e.Message
 	}
-	return "vault: request failed"
+	return fallback
 }
 
 // vaultUpstreamFailure understands aimee-server's dispatch envelope. Native
