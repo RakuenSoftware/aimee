@@ -171,6 +171,30 @@ static void ws_mirror_log_git_failure(const char *const args[], int rc, const ch
    LOG_WARN("workspace", "mirror git %s failed (rc=%d): %s", sub, rc, n ? text : "(no output)");
 }
 
+/* Mirror transfers move a whole repository. GIT_NET_TIMEOUT_MS (30 s) is sized
+ * for session-start fetches, and a first `clone --mirror` of a real repository
+ * cannot fit it: the aimee repository's 780 MiB pack timed out every time
+ * (rc=-2), so no delegate from that checkout could ever get a source tree.
+ * Transfers get a bound that still ends a stalled remote; every other mirror
+ * step keeps the short one. */
+#define WS_MIRROR_TRANSFER_TIMEOUT_MS (20 * 60 * 1000)
+
+static int ws_mirror_git_timeout_ms(const char *const args[])
+{
+   for (int i = 0; args && args[i]; i++)
+   {
+      if (!strcmp(args[i], "-C") && args[i + 1])
+      {
+         i++;
+         continue;
+      }
+      return (!strcmp(args[i], "clone") || !strcmp(args[i], "fetch"))
+                 ? WS_MIRROR_TRANSFER_TIMEOUT_MS
+                 : GIT_NET_TIMEOUT_MS;
+   }
+   return GIT_NET_TIMEOUT_MS;
+}
+
 static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, size_t out_cap)
 {
    const ws_mirror_runner_ctx_t *rctx = (const ws_mirror_runner_ctx_t *)ctx;
@@ -215,7 +239,7 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
       /* FD mode: the token rides an inherited memfd placed at
        * GIT_CRED_TOKEN_TARGET_FD, so it never lands in the child's environ. */
       rc = safe_exec_capture_cwd_env_fd_timeout(argv, NULL, envp, &cap, out_cap ? out_cap : 4096,
-                                                GIT_NET_TIMEOUT_MS, token_fd,
+                                                ws_mirror_git_timeout_ms(args), token_fd,
                                                 token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
       git_cred_inject_free_env(envp);
    }
@@ -237,7 +261,7 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
       ws_mirror_log_git_failure(args, rc, cap);
    if (out && out_cap)
       snprintf(out, out_cap, "%s%s", cap ? cap : "",
-               rc == SAFE_EXEC_TIMEOUT ? "git command timed out after 30 seconds\n" : "");
+               rc == SAFE_EXEC_TIMEOUT ? "git command timed out\n" : "");
    free(cap);
    free(transport);
    return rc;

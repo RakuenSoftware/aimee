@@ -4,6 +4,9 @@
 
 #include "util.h" /* safe_exec_capture, safe_exec_capture_env */
 
+/* Largest working-tree patch shipped for a server-side reconstruction. */
+#define WORKSPACE_CLIENT_DIFF_MAX (16u * 1024u * 1024u)
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -160,7 +163,22 @@ char *workspace_client_diff_compute(const char *root, const char *base)
       free(out);
       out = NULL;
       const char *df[] = {"git", "-C", root, "diff", "--cached", "--binary", base, NULL};
-      safe_exec_capture_env(df, envp, &patch, 16 * 1024 * 1024);
+      safe_exec_capture_env(df, envp, &patch, WORKSPACE_CLIENT_DIFF_MAX);
+      /* The capture truncates at its cap, and a truncated patch is not a smaller
+       * patch: the server cannot apply it, so the delegate's sandbox got no usable
+       * tree at all. Measured on a checkout carrying 394 MB of untracked benchmark
+       * output. Ship no patch instead -- the reconstruct is then a clean checkout
+       * at the pushed base, which the drift report names -- and say why. */
+      if (patch && strlen(patch) >= WORKSPACE_CLIENT_DIFF_MAX - 1)
+      {
+         fprintf(stderr,
+                 "aimee: %s differs from its pushed base by more than %u MiB (often untracked "
+                 "build or benchmark output); the server-side copy will be a clean checkout "
+                 "at the base without your local changes. Commit, push or ignore them.\n",
+                 root, (unsigned)(WORKSPACE_CLIENT_DIFF_MAX / (1024 * 1024)));
+         free(patch);
+         patch = NULL;
+      }
    }
    free(envp);
    unlink(idx);

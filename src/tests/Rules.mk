@@ -546,6 +546,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-webuser-runtime \
                $(TESTPREFIX)/unit-test-workspace-turn \
                $(TESTPREFIX)/unit-test-db1-agent-job-list \
+               $(TESTPREFIX)/unit-test-workspace-client-diff \
                $(TESTPREFIX)/unit-test-notes \
                $(TESTPREFIX)/unit-test-cmd-delegate \
                $(TESTPREFIX)/unit-test-delegate-plan \
@@ -7136,4 +7137,9 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OURO_RING_LIB)
 $(TESTPREFIX)/unit-test-db1-agent-job-list: $(OBJDIR)/tests/test_db1_agent_job_list.o \
     $(OBJDIR)/db1_client/delegation.o $(OBJDIR)/db1_client/transport.o \
     $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/module_json_call.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+# The working-tree patch for server-side reconstruction: whole or absent.
+$(TESTPREFIX)/unit-test-workspace-client-diff: $(OBJDIR)/tests/test_workspace_client_diff.o \
+    $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o $(OBJDIR)/tests/support/log_stub.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
