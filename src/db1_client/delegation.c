@@ -419,6 +419,21 @@ int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy)
       return -1;
    if (max > 64)
       max = 64;
+   /* Every reply slot's capacity counts toward one ring message, whose body is
+    * capped at OURO_MODULE_MESSAGE_MAX_BODY (16 MiB). Reserving 1 MiB for the
+    * prompt and for the result of every row made the list fail outright at
+    * 8 rows -- `aimee jobs list` answered "could not read agent jobs" on any
+    * Server with 8 or more delegate jobs -- even though the light query returns
+    * both columns empty. Light rows reserve nothing for them; heavy rows are
+    * clamped to what one message can carry instead of failing the whole call. */
+   const size_t heavy_cap = include_heavy ? 1048576u : 1u;
+   if (include_heavy)
+   {
+      const size_t per_row = 2u * (heavy_cap + 4u) + 14u * (4u + 96u);
+      const int fit = (int)((OURO_MODULE_MESSAGE_MAX_BODY - 8u) / per_row);
+      if (max > fit)
+         max = fit;
+   }
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", max);
    char arg1[32];
@@ -441,7 +456,7 @@ int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy)
       wire_caps[wire_row * 16u + 0u] = sizeof wire_scratch[wire_row * 5u + 0u];
       wire_values[wire_row * 16u + 1u] = out[wire_row].role;
       wire_caps[wire_row * 16u + 1u] = sizeof out[wire_row].role;
-      out[wire_row].prompt = malloc(1048576u);
+      out[wire_row].prompt = malloc(heavy_cap);
       if (!out[wire_row].prompt)
       {
          for (int wire_done = 0; wire_done < wire_row; ++wire_done)
@@ -458,14 +473,14 @@ int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy)
       }
       out[wire_row].prompt[0] = '\0';
       wire_values[wire_row * 16u + 2u] = out[wire_row].prompt;
-      wire_caps[wire_row * 16u + 2u] = 1048576u;
+      wire_caps[wire_row * 16u + 2u] = heavy_cap;
       wire_values[wire_row * 16u + 3u] = out[wire_row].agent_name;
       wire_caps[wire_row * 16u + 3u] = sizeof out[wire_row].agent_name;
       wire_values[wire_row * 16u + 4u] = out[wire_row].participant_token;
       wire_caps[wire_row * 16u + 4u] = sizeof out[wire_row].participant_token;
       wire_values[wire_row * 16u + 5u] = out[wire_row].status;
       wire_caps[wire_row * 16u + 5u] = sizeof out[wire_row].status;
-      out[wire_row].result = malloc(1048576u);
+      out[wire_row].result = malloc(heavy_cap);
       if (!out[wire_row].result)
       {
          for (int wire_done = 0; wire_done < wire_row; ++wire_done)
@@ -482,7 +497,7 @@ int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy)
       }
       out[wire_row].result[0] = '\0';
       wire_values[wire_row * 16u + 6u] = out[wire_row].result;
-      wire_caps[wire_row * 16u + 6u] = 1048576u;
+      wire_caps[wire_row * 16u + 6u] = heavy_cap;
       wire_values[wire_row * 16u + 7u] = wire_scratch[wire_row * 5u + 1u];
       wire_caps[wire_row * 16u + 7u] = sizeof wire_scratch[wire_row * 5u + 1u];
       wire_values[wire_row * 16u + 8u] = out[wire_row].lease_owner;
