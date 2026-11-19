@@ -385,7 +385,12 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
       /* The generated/persisted credential is authoritative for this child.
        * Do not leave an inherited empty/stale duplicate before it: getenv and
        * Compose are not required to choose the later duplicate. */
-      if (deploy_env_overrides(env, *e) ||
+      /* DOCKER_HOST names the private delegate runtime (compose.yaml). Managed
+       * model services are siblings of this stack and belong on the host
+       * daemon whose socket the managed composition mounts, never inside the
+       * delegate sandbox runtime. */
+      if (strncmp(*e, "DOCKER_HOST=", sizeof("DOCKER_HOST=") - 1) == 0 ||
+          deploy_env_overrides(env, *e) ||
           /* sizeof-1, not a hand-counted length: these were literals matching the
            * OLD names, and a rename silently stopped the filter matching. */
           (managed_llm &&
@@ -551,6 +556,9 @@ static int run_capture_input_mode(const char *const argv[], char **envp, const v
          dup2(inputfd[0], STDIN_FILENO);
          close(inputfd[0]);
       }
+      /* Inherited-environment calls too: managed services live on the host
+       * daemon, not the delegate runtime that DOCKER_HOST names. */
+      unsetenv("DOCKER_HOST");
       if (envp)
          execvpe("docker", (char *const *)argv, envp);
       else

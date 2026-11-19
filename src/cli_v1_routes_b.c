@@ -1775,7 +1775,29 @@ void print_server_health(cJSON *resp)
    /* The kb line is the point of running this command on a sick install; print it
     * whenever the server sent one, and say plainly when the kb is unreachable
     * rather than leaving its absence to be interpreted. */
+   /* Delegation is refused outright when no container runtime is reachable; the
+    * server knew at boot, but used to say so only in its log. */
+   cJSON *sandbox = cJSON_GetObjectItemCaseSensitive(resp, "delegate_sandbox");
+   if (cJSON_IsObject(sandbox))
+   {
+      const char *ss = json_str(sandbox, "state");
+      const char *sd = json_str(sandbox, "detail");
+      printf("delegates: %s\n", ss && ss[0] ? ss : "unknown");
+      if (sd && sd[0])
+         printf("  %s\n", sd);
+   }
+
    cJSON *kb = cJSON_GetObjectItemCaseSensitive(resp, "kb");
+   /* No KB configured is a normal standalone Server: personal memory is local,
+    * and only shared-knowledge commands need a KB. Reporting it as a KB that
+    * "did not answer" and claiming memory would not work was simply false. */
+   if (cJSON_IsObject(kb) && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(kb, "configured")))
+   {
+      printf("aimee-kb: not configured (optional)\n");
+      printf("  personal memory is served by this Server; shared-knowledge commands\n");
+      printf("  (rules, notes, `--store kb`) need a connected KB.\n");
+      return;
+   }
    if (cJSON_IsObject(kb))
    {
       const char *kbs = json_str(kb, "status");

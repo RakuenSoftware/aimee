@@ -408,6 +408,18 @@ static int handle_server_info(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
  * resolve it to NULL and report no verdict; the server always links it. */
 int server_ready_summary(char *boundary, size_t n) __attribute__((weak));
 
+/* The posture decided at boot, reported by server.health so `aimee status` says
+ * when no delegate can run. It used to live only in the log: the live 1.1.0
+ * Server answered "aimee-server: ok" while every delegation was refused. */
+static char g_delegate_sandbox_state[16] = "unknown";
+static char g_delegate_sandbox_detail[256] = "";
+
+static void delegate_sandbox_set_posture(const char *state, const char *detail)
+{
+   snprintf(g_delegate_sandbox_state, sizeof g_delegate_sandbox_state, "%s", state);
+   snprintf(g_delegate_sandbox_detail, sizeof g_delegate_sandbox_detail, "%s", detail);
+}
+
 static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)req;
@@ -433,6 +445,12 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    cJSON_AddStringToObject(resp, "capture_session_id", capture.session_id);
    cJSON_AddNumberToObject(resp, "capture_last_seq", (double)capture.last_seq);
    server_health_add_kb(resp); /* kb block — see server_api_status.c */
+   cJSON *sandbox = cJSON_AddObjectToObject(resp, "delegate_sandbox");
+   if (sandbox)
+   {
+      cJSON_AddStringToObject(sandbox, "state", g_delegate_sandbox_state);
+      cJSON_AddStringToObject(sandbox, "detail", g_delegate_sandbox_detail);
+   }
    return server_send_ok(conn, resp);
 }
 /* worktree.gc: remove abandoned session worktrees under the operator's git_root.
@@ -1962,6 +1980,7 @@ static void delegate_sandbox_log_posture(void)
       aimee_log(LOG_ERROR, "delegate-sandbox",
                 "UNAVAILABLE: the docker backend is not registered — no delegate can be given a "
                 "container, so every delegation will REFUSE to run");
+      delegate_sandbox_set_posture("unavailable", "the docker delegate backend is not registered");
       return;
    }
 
@@ -1984,6 +2003,9 @@ static void delegate_sandbox_log_posture(void)
                 "UNAVAILABLE: the docker backend is registered, but `%s version` failed (rc=%d) — "
                 "no daemon reachable, so every delegation will REFUSE to run",
                 bin, rc);
+      delegate_sandbox_set_posture("unavailable",
+                                   "no container runtime is reachable (`docker version` failed); "
+                                   "every delegation is refused");
       free(ver);
       return;
    }
@@ -1992,6 +2014,12 @@ static void delegate_sandbox_log_posture(void)
       char *nl = strchr(ver, '\n');
       if (nl)
          *nl = '\0';
+   }
+   {
+      char detail[160];
+      snprintf(detail, sizeof detail, "per-delegate containers on docker %s",
+               ver && ver[0] ? ver : "(unknown version)");
+      delegate_sandbox_set_posture("armed", detail);
    }
    aimee_log(LOG_INFO, "delegate-sandbox",
              "ARMED: delegate file/exec binds to a per-delegate container (docker server %s), "

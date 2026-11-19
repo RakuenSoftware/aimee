@@ -190,6 +190,25 @@ static void capture_printer(void (*printer)(const char *, cJSON *), const char *
    cJSON_Delete(resp);
 }
 
+/* A standalone Server with no KB configured is normal: memory is local. `aimee
+ * status` used to say the KB "did not answer" and that memory would not work,
+ * while memory worked. It also never mentioned that every delegation was being
+ * refused for lack of a container runtime, which the server knew at boot. */
+static void test_server_health_reports_absent_kb_and_sandbox(void)
+{
+   char out[4096];
+   capture_printer(pt_print_server_health, "server.health",
+                   "{\"status\":\"ok\",\"state\":\"ok\",\"ready\":true,"
+                   "\"delegate_sandbox\":{\"state\":\"unavailable\",\"detail\":\"no container "
+                   "runtime is reachable\"},\"kb\":{\"status\":\"disabled\",\"configured\":false}}",
+                   out, sizeof out);
+   assert(strstr(out, "delegates: unavailable"));
+   assert(strstr(out, "no container runtime is reachable"));
+   assert(strstr(out, "aimee-kb: not configured (optional)"));
+   assert(!strstr(out, "did not answer"));
+   assert(!strstr(out, "memory and kb search will not work"));
+}
+
 /* `aimee agent roles <name>` and `aimee agent personas <name>` MUTATE the agent:
  * with no csv argument they reset it to the full default set. Both were wired to
  * the agent.enable printer, so the operator's only feedback was
@@ -705,6 +724,7 @@ int main(void)
    test_memory_validity_arguments();
    test_memory_hygiene_explicit_scope();
    test_kb_status_warns_about_undrainable_queue();
+   test_server_health_reports_absent_kb_and_sandbox();
    test_config_deploy_env_is_routed();
    test_unknown_command_is_safe();
    test_known_command_lists_subcommands();

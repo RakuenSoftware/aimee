@@ -14,7 +14,11 @@ services:
       AIMEE_RUNTIME_WEB_ENABLED: '0'
       AIMEE_KB_MTLS_PORT: '8745'
       AIMEE_KB_MTLS_HOST: ${AIMEE_KB_HOST:-localhost}
-    depends_on:
+      # A KB runs no delegates and has no private delegate runtime.
+      DOCKER_HOST: ''
+      AIMEE_DELEGATE_RUNTIME_PATHS: ''
+    # !override: the Server's dependency on its delegate runtime is not the KB's.
+    depends_on: !override
       aimee-store-db: {condition: service_started}
       aimee-memory-init: {condition: service_completed_successfully}
     ports: !override
