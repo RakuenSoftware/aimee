@@ -2642,8 +2642,8 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "ebda094e4295b62247153522603e7919ac474860a56941a7975912bba2902afb",
-      "boundary_review": "PR #3098: delegate private container runtime startup reporting only (no memory symbol, policy or fallback added); the memory-symbol finding set is unchanged.",
+      "sha256": "fd54f3a669aa3c316d44a48b1348bcdfb1923f61578539562c5187280ee20a19",
+      "boundary_review": "Renames the server.health delegate_sandbox posture key from state to posture so the body keeps one top-level state (the store probe); no memory ownership, route or storage change.",
       "source_revisions": [
         {
           "disposition": "host-transport",
@@ -2671,6 +2671,16 @@
           ],
           "sha256": "ff8c717816d020c151afc58d60915da28b2585dfd953db6aa65316a21230a8ee",
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+        },
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "kb_client_memory_scope_context_clear",
+            "server_module_memory_data"
+          ],
+          "sha256": "ebda094e4295b62247153522603e7919ac474860a56941a7975912bba2902afb",
+          "boundary_review": "PR #3098: delegate private container runtime startup reporting only (no memory symbol, policy or fallback added); the memory-symbol finding set is unchanged.",
           "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
       ],

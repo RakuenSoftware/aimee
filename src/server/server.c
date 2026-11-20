@@ -445,10 +445,13 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    cJSON_AddStringToObject(resp, "capture_session_id", capture.session_id);
    cJSON_AddNumberToObject(resp, "capture_last_seq", (double)capture.last_seq);
    server_health_add_kb(resp); /* kb block — see server_api_status.c */
+   /* "posture", never "state": the top-level "state" is the store probe, and
+    * live rigs and operator scripts match that key in the raw body. A second
+    * "state" here made them read "armed" and wait forever for "ok". */
    cJSON *sandbox = cJSON_AddObjectToObject(resp, "delegate_sandbox");
    if (sandbox)
    {
-      cJSON_AddStringToObject(sandbox, "state", g_delegate_sandbox_state);
+      cJSON_AddStringToObject(sandbox, "posture", g_delegate_sandbox_state);
       cJSON_AddStringToObject(sandbox, "detail", g_delegate_sandbox_detail);
    }
    return server_send_ok(conn, resp);

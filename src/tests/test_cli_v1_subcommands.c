@@ -199,7 +199,7 @@ static void test_server_health_reports_absent_kb_and_sandbox(void)
    char out[4096];
    capture_printer(pt_print_server_health, "server.health",
                    "{\"status\":\"ok\",\"state\":\"ok\",\"ready\":true,"
-                   "\"delegate_sandbox\":{\"state\":\"unavailable\",\"detail\":\"no container "
+                   "\"delegate_sandbox\":{\"posture\":\"unavailable\",\"detail\":\"no container "
                    "runtime is reachable\"},\"kb\":{\"status\":\"disabled\",\"configured\":false}}",
                    out, sizeof out);
    assert(strstr(out, "delegates: unavailable"));

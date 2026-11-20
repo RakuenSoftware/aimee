@@ -1780,7 +1780,7 @@ void print_server_health(cJSON *resp)
    cJSON *sandbox = cJSON_GetObjectItemCaseSensitive(resp, "delegate_sandbox");
    if (cJSON_IsObject(sandbox))
    {
-      const char *ss = json_str(sandbox, "state");
+      const char *ss = json_str(sandbox, "posture");
       const char *sd = json_str(sandbox, "detail");
       printf("delegates: %s\n", ss && ss[0] ? ss : "unknown");
       if (sd && sd[0])
