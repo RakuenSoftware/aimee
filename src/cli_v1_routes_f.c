@@ -340,3 +340,20 @@ void pt_print_eval_candidates_update(const char *method, cJSON *resp)
    if (dir && dir[0])
       printf("  suite: %s\n", dir);
 }
+
+static int (*delegate_source_publish)(void);
+
+void cli_v1_set_delegate_source_publisher(int (*publish)(void))
+{
+   delegate_source_publish = publish;
+}
+
+/* A delegate runs on the server; publish this checkout first so the server can
+ * rebuild it (cli_workspace_publish_delegate_source). A failure is reported
+ * there and the request still goes out: the server's refusal names the cause. */
+void cli_v1_publish_delegate_source_for(const char *method)
+{
+   if (delegate_source_publish && method && cli_v1_remote_endpoint_is_network() &&
+       (strcmp(method, "delegate") == 0 || strcmp(method, "delegate.launch") == 0))
+      (void)delegate_source_publish();
+}

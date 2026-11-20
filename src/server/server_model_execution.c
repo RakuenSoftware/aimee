@@ -113,7 +113,7 @@ int server_model_execute_prepared(const agent_t *agent, aimee_request_t *request
       return SERVER_MODEL_CONNECTION_UNAVAILABLE;
    }
    aimee_wire_t wire = (driver->name && !strcmp(driver->name, "anthropic")) ? AIMEE_WIRE_ANTHROPIC
-                       : strstr(url, "/responses") ? AIMEE_WIRE_RESPONSES
+                       : strstr(url, "/responses")                          ? AIMEE_WIRE_RESPONSES
                                                    : AIMEE_WIRE_OPENAI_CHAT;
    if (options && options->connection &&
        options->connection(agent, wire, url, sizeof url, headers, sizeof headers))

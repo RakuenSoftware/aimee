@@ -319,7 +319,22 @@ class Stack:
                         command('docker','network','disconnect',network,identity)
         return command('docker', 'compose', *self.compose_args(), *args, env=self.env)
 
+    def pull_delegate_runtime(self):
+        # The Server's private delegate runtime is a published image, not one this
+        # tree builds, and the stack starts with --pull never. A KB runs no delegates.
+        if self.role != 'server':
+            return
+        for attempt in range(1, 6):
+            try:
+                self.compose('pull', '--quiet', 'aimee-delegate-runtime')
+                return
+            except Exception:
+                if attempt == 5:
+                    raise
+                time.sleep(attempt * 5)
+
     def start(self):
+        self.pull_delegate_runtime()
         command('python3', str(ROOT / 'scripts/compose-vault-init.py'),
                 *self.compose_args(), 'up', env=self.env)
         self.compose('up', '-d', '--no-build', '--pull', 'never')

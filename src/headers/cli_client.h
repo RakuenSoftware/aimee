@@ -224,6 +224,8 @@ void cli_workspace_reverse_channel_stop(void);
 int cli_workspace_publish_delegate_source(void);
 /* Install the publisher cli_v1_forward runs before a delegate is dispatched. */
 void cli_v1_set_delegate_source_publisher(int (*publish)(void));
+/* Run that publisher when `method` dispatches a delegate to a network server. */
+void cli_v1_publish_delegate_source_for(const char *method);
 
 /* Return the path to an already-running compatible server, or NULL if none
  * is available. Unlike cli_ensure_server(), this does not auto-start. */

@@ -168,7 +168,7 @@ int vault_env_import_stream(FILE *input)
       return -1;
 
    char *record = calloc(1, ENV_STREAM_RECORD_MAX);
-   char (*imported)[ENV_NAME_MAX] = calloc(ENV_BOOTSTRAP_MAX, sizeof(*imported));
+   char(*imported)[ENV_NAME_MAX] = calloc(ENV_BOOTSTRAP_MAX, sizeof(*imported));
    if (!record || !imported)
    {
       free(record);

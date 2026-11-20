@@ -2192,13 +2192,6 @@ void cli_v1_set_git_runner(int (*start)(const char *), void (*stop)(void))
    git_runner_stop = stop;
 }
 
-static int (*delegate_source_publish)(void);
-
-void cli_v1_set_delegate_source_publisher(int (*publish)(void))
-{
-   delegate_source_publish = publish;
-}
-
 int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int json_output,
                    const char *json_fields, const char *response_profile, int argc, char **argv)
 {
@@ -2347,12 +2340,7 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
       cJSON_Delete(projects);
       free(worktree_root);
    }
-   /* A delegate runs on the server; publish this checkout first so the server can
-    * rebuild it (cli_workspace_publish_delegate_source). A failure is reported
-    * there and the request still goes out: the server's refusal names the cause. */
-   if (delegate_source_publish && cli_v1_remote_endpoint_is_network() &&
-       (strcmp(route->method, "delegate") == 0 || strcmp(route->method, "delegate.launch") == 0))
-      (void)delegate_source_publish();
+   cli_v1_publish_delegate_source_for(route->method);
    int git_runner = 0;
    const char *git_tool = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "tool"));
    if (git_tool && strncmp(git_tool, "git_", 4) == 0 && git_runner_start && git_runner_stop &&

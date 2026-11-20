@@ -2642,8 +2642,8 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "ff8c717816d020c151afc58d60915da28b2585dfd953db6aa65316a21230a8ee",
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+      "sha256": "ebda094e4295b62247153522603e7919ac474860a56941a7975912bba2902afb",
+      "boundary_review": "PR #3098: delegate private container runtime startup reporting only (no memory symbol, policy or fallback added); the memory-symbol finding set is unchanged.",
       "source_revisions": [
         {
           "disposition": "host-transport",
@@ -2662,6 +2662,16 @@
           ],
           "sha256": "6149faa1bd02d7583679f19b2198d0585b095fb144775f8093ecf227e7da6da3",
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+        },
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "kb_client_memory_scope_context_clear",
+            "server_module_memory_data"
+          ],
+          "sha256": "ff8c717816d020c151afc58d60915da28b2585dfd953db6aa65316a21230a8ee",
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
       ],
       "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
@@ -2673,7 +2683,19 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "1c4cba0637c22fafacd2d79f9b7919b49e7b3203e7711ea8867ba13a0fbde2b7"
+      "sha256": "755c9ff46e1f8e18efb79b7f88ffedc7f3ea3115c64915071a6766687e8cd03c",
+      "source_revisions": [
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "kb_client_memory_recall_shared_json",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_set"
+          ],
+          "sha256": "1c4cba0637c22fafacd2d79f9b7919b49e7b3203e7711ea8867ba13a0fbde2b7"
+        }
+      ],
+      "boundary_review": "PR #3098: a KB-less Server answers the KB-only memory dashboard with a typed kb_required error instead of an outage; personal memory routing, policy and symbols are unchanged."
     },
     "src/server/server_dispatch_defs_data.h": {
       "disposition": "protocol-catalog",
@@ -2881,8 +2903,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "9f992e9ceff227b308bb72893e95334429e7ea96623437f66fa1f1fb14799586",
-      "boundary_review": "2026-11-13 typed facts on the Server: reviewed the new transport-only operations and the reply pass-through condition. This is source-boundary analysis, not independent release approval.",
+      "sha256": "e5ce6e546adedf7b9d967500b671905b6e56b4a46e96df603b9239397aa7c3dd",
+      "boundary_review": "PR #3098: `memory read` on a Server assembles context from the existing personal recall host adapter (server_user_memory_recall_json) instead of always asking a KB; `--store kb` keeps the KB path. The recall task_hint is clamped to the module's 4096-byte limit. Policy stays in the memory module; no C memory policy or fallback store is introduced.",
       "source_revisions": [
         {
           "disposition": "host-transport",
@@ -2919,6 +2941,20 @@
           ],
           "sha256": "9645f234a3e02571d38c9c52d919e5e9185b73cce62dd716184a3a2615a2d5c6",
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+        },
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "aimee_memory_opaque_fields_contract_v1",
+            "aimee_memory_protected_intake_web_contract_v1",
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_set"
+          ],
+          "sha256": "9f992e9ceff227b308bb72893e95334429e7ea96623437f66fa1f1fb14799586",
+          "boundary_review": "2026-11-13 typed facts on the Server: reviewed the new transport-only operations and the reply pass-through condition. This is source-boundary analysis, not independent release approval.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions.",
+          "boundary_change": "2026-11-13: memory_user_typed_command forwards user-facts, user-search-graph and user-entity-edges through the existing user_memory_owner_command transport with the same verified account context, and accepts their ok replies like user-search. It adds no memory policy; the memory module answers from the account's own typed facts."
         }
       ],
       "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions.",
@@ -3277,8 +3313,8 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "6fd1344decc89aaadd274c5b93d8a9a8ba4cee00ffcc4bb41508bb1910c44607",
-      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
+      "sha256": "ffe60db33e953063ecd50b90aff1bc2a18818c41e81a98d421d1199c0d64ec87",
+      "boundary_review": "PR #3098: dispatch fixtures for KB-only commands answering kb_required on a KB-less Server; test-only, no memory policy.",
       "source_revisions": [
         {
           "disposition": "host-fixture",
@@ -3321,6 +3357,16 @@
           ],
           "sha256": "5da4b5992212821d3507441ffe618df4c0a471be0c327e4247fd69bfa704e0f2",
           "boundary_review": "PR #3091 CI fixture closure: reviewed the added dispatch-only memory.protected-intake marker using the existing stub_handler pattern, and the asserting, fail-closed OSV-discovery seam for an unexercised module-launch path. Existing memory data/scope/stat fixtures and dispatch authorization assertions are unchanged. The full prior reviewed row is retained in source_revisions; this does not approve a C memory implementation or grant source authority."
+        },
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "kb_client_memory_scope_context_clear",
+            "memory_stats",
+            "server_module_memory_data"
+          ],
+          "sha256": "6fd1344decc89aaadd274c5b93d8a9a8ba4cee00ffcc4bb41508bb1910c44607",
+          "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced."
         }
       ]
     },
@@ -3380,8 +3426,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "376d3aabef1b31122299bb2edfaa86be14ae2d66dff1f78275070a0cf4788155",
-      "boundary_review": "PR #3091 CI fixture repair: add the current caller-context personal-recall transport seam, assert its exact memory.runtime/personal-recall route and all four calls, then forward to the existing owner-envelope fixture. Existing assertions and memory ownership symbols are retained; no authenticated caller or memory policy is fabricated.",
+      "sha256": "57ea18d0676b622fefdfd4b91f8537a547f47403a0850d340608b7fbf83c4353",
+      "boundary_review": "PR #3098: fixtures for personal `memory read` routing and the task_hint clamp; test-only.",
       "source_revisions": [
         {
           "disposition": "host-fixture",
@@ -3404,6 +3450,18 @@
           ],
           "sha256": "e91b40d93bd93ccbcf1dafe2e0d7a3558ceb6fc029b34752a27fd72ad6a2dea6",
           "boundary_review": "2026-10-26 local extraction: preserve native_applicability_json and native_region_json as opaque UTF-8 strings through User/Shared web adapters. Private owner validates bounds and meaning; no public temporal or ontology policy added. Strong capability marker prevents pairing a new private frontend with a host that drops these fields. Actual User/KB adapter tests preserve coordinates beyond binary64 range; ownership symbols unchanged. This is local source-boundary review, not deployment approval. 2026-10-26 local protected-intake transport review: optional human-only verified-context raw intake hook, fixed bounded preallocated buffers/full-capacity cleansing, opaque safe reply transport and retained web capability marker. Actual Vault/native custody, scope, admission and semantic policy remain outside this generic web adapter; no public memory engine or model/MCP raw-value route added. No independent deployment or package promotion is implied.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+        },
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "kb_client_memory_audit_note",
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_set"
+          ],
+          "sha256": "376d3aabef1b31122299bb2edfaa86be14ae2d66dff1f78275070a0cf4788155",
+          "boundary_review": "PR #3091 CI fixture repair: add the current caller-context personal-recall transport seam, assert its exact memory.runtime/personal-recall route and all four calls, then forward to the existing owner-envelope fixture. Existing assertions and memory ownership symbols are retained; no authenticated caller or memory policy is fabricated.",
           "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
       ],
@@ -3428,7 +3486,7 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "874f8d1148f504a5dca6b453cf1045edea85dad92a7a77fbe04f130e19103093",
+      "sha256": "16b7faa7abed5cb69a4178b23a8f1b2991c32868ac395f26480f628c9f6bd88e",
       "reason": "Reviewed 2026-10-18: the existing attested private Vault helper returns the selected Codex token, account and source lineage together using serving's refresh-aware resolver. The computed response remains pipe-only. AIMEE_MEMORY_BACKEND_TOKEN import/custody, grants and the Go memory owner are unchanged. This records source-boundary reasoning, not independent reviewer approval.",
       "evidence": [
         "src/tests/test_agent.c",
@@ -3448,9 +3506,23 @@
             "server-go/modules/providers/inspect_test.go",
             "docs/validation/deployment-repair-1.0.2-2026-10-17.md"
           ]
+        },
+        {
+          "disposition": "credential-custody",
+          "symbols": [
+            "AIMEE_MEMORY_BACKEND_TOKEN"
+          ],
+          "sha256": "874f8d1148f504a5dca6b453cf1045edea85dad92a7a77fbe04f130e19103093",
+          "reason": "Reviewed 2026-10-18: the existing attested private Vault helper returns the selected Codex token, account and source lineage together using serving's refresh-aware resolver. The computed response remains pipe-only. AIMEE_MEMORY_BACKEND_TOKEN import/custody, grants and the Go memory owner are unchanged. This records source-boundary reasoning, not independent reviewer approval.",
+          "evidence": [
+            "src/tests/test_agent.c",
+            "server-go/modules/providers/inspect_test.go",
+            "docs/validation/deployment-repair-1.0.2-2026-10-17.md"
+          ],
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
         }
       ],
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced."
+      "boundary_review": "PR #3098: credential-resolution failures now report their reason; no memory symbol, policy or fallback changed."
     },
     "src/config_client.c": {
       "disposition": "credential-custody",
@@ -3674,12 +3746,12 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "0e80fe6a0c45af26b8cf96240f9edcf2074c9764f90944ca12c80d8ea3e4722f",
+      "sha256": "6a3994b9e880c551771bd75f5ab96fafc63d87323e67eed19764e4b106470786",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "45de473d3055768e9a038d94e9be42d08f08f0f78925b2b4fb00739ec92e8a44"
+        "api/openapi-server-v1.yaml": "0a1547becc23d320059a1ffad4f682bcaae6e5022552df5dc154909393a8549f"
       },
-      "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced.",
+      "boundary_review": "PR #3098: /memory/health description only — the 1.1 memory module answers a typed disabled error and AIMEE_MEMORY_HEALTH_ENABLED is no longer read. Regenerated with the unchanged generator; the generated memory-symbol finding set is unchanged.",
       "source_revisions": [
         {
           "disposition": "protocol-catalog",
@@ -3719,6 +3791,19 @@
             "api/openapi-server-v1.yaml": "3565020e223e6f50cb5b16d822875f9d7cd552c3b619c09f63dc93d7b5e0d4ac"
           },
           "boundary_review": "PR #3091 CI repair: document existing generic console forwarding and user-source terminal/source-only routes, then regenerate using the unchanged generator. Optional module owners retain policy and the generated memory-symbol finding set is unchanged."
+        },
+        {
+          "disposition": "protocol-catalog",
+          "symbols": [
+            "AIMEE_MEMORY_HEALTH_ENABLED",
+            "memory_stats"
+          ],
+          "sha256": "0e80fe6a0c45af26b8cf96240f9edcf2074c9764f90944ca12c80d8ea3e4722f",
+          "inputs": {
+            "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
+            "api/openapi-server-v1.yaml": "45de473d3055768e9a038d94e9be42d08f08f0f78925b2b4fb00739ec92e8a44"
+          },
+          "boundary_review": "Retire obsolete SQL subject-erasure command, HTTP coordinator, storage executors and fixture. Preserve stored payloads/history and retained native retirement; no replacement destructive workflow is introduced."
         }
       ]
     },
