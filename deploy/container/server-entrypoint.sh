@@ -579,7 +579,11 @@ webchat_start
 # unless 'aimee' is actually a member in /etc/group. Without this the docker backend
 # is INERT and delegates silently run on the HOST (see the delegate-sandbox posture
 # log). Root here; the runuser calls below then pick the group up.
-for _dsock in /var/run/docker.sock /run/docker.sock; do
+# A private delegate runtime (compose.yaml's aimee-delegate-runtime) is reached
+# through DOCKER_HOST rather than the default socket path.
+_dhost_sock=
+case "${DOCKER_HOST:-}" in unix://*) _dhost_sock=${DOCKER_HOST#unix://} ;; esac
+for _dsock in $_dhost_sock /var/run/docker.sock /run/docker.sock; do
     [ -S "$_dsock" ] || continue
     _dgid=$(stat -c %g "$_dsock" 2>/dev/null) || continue
     { [ -n "$_dgid" ] && [ "$_dgid" != 0 ]; } || continue
@@ -592,8 +596,11 @@ for _dsock in /var/run/docker.sock /run/docker.sock; do
         usermod -aG "$_dgrp" aimee 2>/dev/null || true
     fi
     log "delegate sandbox: granted 'aimee' the docker socket group ($_dgrp/$_dgid)"
-    break
+    # Every present socket, not just the first: the managed composition mounts the
+    # host socket (model services) beside the private delegate runtime.
+    _dsock_found=${_dsock_found:-$_dsock}
 done
+_dsock=${_dsock_found:-}
 
 # Delegate sandbox host-path translation.
 #
@@ -614,7 +621,11 @@ done
 # neither of which belongs in an image. Skip entries whose source equals its
 # destination (a plain host bind such as the docker socket needs no translation).
 # Any failure leaves the variable unset, which is exactly the previous behaviour.
-if [ -z "${AIMEE_SANDBOX_HOST_MOUNTS:-}" ] && [ -S "${_dsock:-/var/run/docker.sock}" ]; then
+# A private runtime that mounts this container's volumes at the same paths needs
+# no map, and cannot inspect this container (it did not start it).
+if [ "${AIMEE_DELEGATE_RUNTIME_PATHS:-}" = shared ]; then
+    log "delegate sandbox: private runtime shares this container's paths; no host-path map needed"
+elif [ -z "${AIMEE_SANDBOX_HOST_MOUNTS:-}" ] && [ -S "${_dsock:-/var/run/docker.sock}" ]; then
     _self=$(hostname 2>/dev/null || true)
     if [ -n "$_self" ]; then
         _map=$(docker inspect "$_self" \

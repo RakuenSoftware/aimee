@@ -234,8 +234,25 @@ static int docker_host_path_for_container(const char *container, const char *con
    return rc;
 }
 
+/* The delegate runtime is a private sibling daemon that mounts aimee's home and
+ * workspace volumes at the SAME paths as this container (compose.yaml's
+ * aimee-delegate-runtime). Its namespace then needs no translation, and it cannot
+ * inspect this container anyway: it is not the daemon that started it. Declared
+ * explicitly by the deployment, never inferred, because getting it wrong mounts
+ * empty directories where the workspace should be. */
+static int delegate_runtime_shares_paths(void)
+{
+   const char *mode = getenv("AIMEE_DELEGATE_RUNTIME_PATHS");
+   return mode && !strcmp(mode, "shared");
+}
+
 static int docker_host_path_for_self(const char *container_path, char *out, size_t outsz)
 {
+   if (delegate_runtime_shares_paths())
+   {
+      int n = snprintf(out, outsz, "%s", container_path);
+      return n < 0 || (size_t)n >= outsz ? -1 : 1;
+   }
    char self[128];
    if (gethostname(self, sizeof(self)) != 0)
       self[0] = '\0';
@@ -677,6 +694,8 @@ static int docker_discover_repo(const char *real, char *repo, size_t repo_cap, c
 static void docker_mount_table(char *out, size_t cap)
 {
    out[0] = '\0';
+   if (delegate_runtime_shares_paths())
+      return; /* identical paths on both sides: nothing to translate */
    const char *map = getenv("AIMEE_SANDBOX_HOST_MOUNTS");
    if (!map || !map[0])
       return;

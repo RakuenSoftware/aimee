@@ -100,6 +100,33 @@ static int cwd_in_workspace(const char *cwd, const char *ws)
    return strncmp(cwd, ws, len) == 0 && (cwd[len] == '/' || cwd[len] == '\\' || cwd[len] == '\0');
 }
 
+/* The registered workspace that owns `cwd`: the MOST SPECIFIC root containing it.
+ * Registration order is not ownership. A session worktree or a subproject that a
+ * client registered as its own `mirror` (with the remote and head a background
+ * delegate needs) can sit inside an older, broader `detached` registration with
+ * no remote; taking the first match bound every such cwd to the broader entry,
+ * and a background delegate there was refused for having nothing to reconstruct
+ * from even though the nested registration carried everything required.
+ * Returns the registry index, or -1 when no registered root contains `cwd`. */
+static int owning_workspace_index(const char *cwd)
+{
+   int best = -1;
+   size_t best_len = 0;
+   for (int i = 0; i < config_workspace_count(); i++)
+   {
+      const char *root = config_workspaces(i);
+      if (!cwd_in_workspace(cwd, root))
+         continue;
+      size_t len = strlen(root);
+      if (best < 0 || len > best_len)
+      {
+         best = i;
+         best_len = len;
+      }
+   }
+   return best;
+}
+
 /* The mirror runner needs the workspace's remote URL for the per-host vault
  * lookup. It used to carry a workspace_id as well, purely as the broker key;
  * that went with the broker token itself. */
@@ -142,6 +169,30 @@ static void ws_mirror_log_git_failure(const char *const args[], int rc, const ch
    }
    text[n] = '\0';
    LOG_WARN("workspace", "mirror git %s failed (rc=%d): %s", sub, rc, n ? text : "(no output)");
+}
+
+/* Mirror transfers move a whole repository. GIT_NET_TIMEOUT_MS (30 s) is sized
+ * for session-start fetches, and a first `clone --mirror` of a real repository
+ * cannot fit it: the aimee repository's 780 MiB pack timed out every time
+ * (rc=-2), so no delegate from that checkout could ever get a source tree.
+ * Transfers get a bound that still ends a stalled remote; every other mirror
+ * step keeps the short one. */
+#define WS_MIRROR_TRANSFER_TIMEOUT_MS (20 * 60 * 1000)
+
+static int ws_mirror_git_timeout_ms(const char *const args[])
+{
+   for (int i = 0; args && args[i]; i++)
+   {
+      if (!strcmp(args[i], "-C") && args[i + 1])
+      {
+         i++;
+         continue;
+      }
+      return (!strcmp(args[i], "clone") || !strcmp(args[i], "fetch"))
+                 ? WS_MIRROR_TRANSFER_TIMEOUT_MS
+                 : GIT_NET_TIMEOUT_MS;
+   }
+   return GIT_NET_TIMEOUT_MS;
 }
 
 static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, size_t out_cap)
@@ -188,7 +239,7 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
       /* FD mode: the token rides an inherited memfd placed at
        * GIT_CRED_TOKEN_TARGET_FD, so it never lands in the child's environ. */
       rc = safe_exec_capture_cwd_env_fd_timeout(argv, NULL, envp, &cap, out_cap ? out_cap : 4096,
-                                                GIT_NET_TIMEOUT_MS, token_fd,
+                                                ws_mirror_git_timeout_ms(args), token_fd,
                                                 token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
       git_cred_inject_free_env(envp);
    }
@@ -210,7 +261,7 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
       ws_mirror_log_git_failure(args, rc, cap);
    if (out && out_cap)
       snprintf(out, out_cap, "%s%s", cap ? cap : "",
-               rc == SAFE_EXEC_TIMEOUT ? "git command timed out after 30 seconds\n" : "");
+               rc == SAFE_EXEC_TIMEOUT ? "git command timed out\n" : "");
    free(cap);
    free(transport);
    return rc;
@@ -440,10 +491,10 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
       out[0] = '\0';
    if (!cwd || !cwd[0] || !out || out_cap == 0)
       return 0;
-   for (int i = 0; i < config_workspace_count(); i++)
    {
-      if (!cwd_in_workspace(cwd, config_workspaces(i)))
-         continue;
+      int i = owning_workspace_index(cwd);
+      if (i < 0)
+         goto not_registered;
       ws_provider_kind_t kind = config_workspace_providers(i)[0]
                                     ? ws_provider_kind_from_string(config_workspace_providers(i))
                                     : WS_PROVIDER_SHARED;
@@ -467,6 +518,7 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
       }
       return 0; /* matched, but not a mirror workspace */
    }
+not_registered:
    /* Not in any registered workspace. Worth saying: a session worktree is
     * expected to be registered, and "not registered" and "registered but
     * unresolvable" produce the SAME downstream error, which is what made this
@@ -503,10 +555,10 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached,
          return 1;
       }
    }
-   for (int i = 0; i < config_workspace_count(); i++)
    {
-      if (!cwd_in_workspace(cwd, config_workspaces(i)))
-         continue;
+      int i = owning_workspace_index(cwd);
+      if (i < 0)
+         return 0; /* cwd not in any registered workspace */
 
       /* Matched the workspace containing this turn's cwd. Only a non-shared
        * provider changes anything; shared stays on the direct-fs path. */

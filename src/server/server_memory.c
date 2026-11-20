@@ -2,6 +2,7 @@
 #include "server_state_internal.h"
 #include "aimee.h"
 #include "server.h"
+#include "server_internal.h"
 #include "server_error_kind.h"
 #include "headers/module_commands.h"
 #include "module_stage_adapters.h"
@@ -794,23 +795,149 @@ int handle_memory_evidence(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, memory_evidence_command(req));
 }
 
+/* Render one recall section the way the session-start hook does. */
+static void memory_read_section(cJSON *recall, const char *key, const char *title, char **text,
+                                size_t *len, size_t *cap)
+{
+   const cJSON *arr = cJSON_GetObjectItemCaseSensitive(recall, key);
+   if (!cJSON_IsArray(arr) || !cJSON_GetArraySize(arr))
+      return;
+   size_t need = strlen(title) + 8;
+   const cJSON *it = NULL;
+   cJSON_ArrayForEach(it, arr)
+   {
+      const char *t = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "title"));
+      const char *d = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "description"));
+      if (!t)
+         t = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "text"));
+      need += (t ? strlen(t) : 0) + (d ? strlen(d) : 0) + 8;
+   }
+   if (*len + need + 1 > *cap)
+   {
+      size_t grown = (*len + need + 1) * 2;
+      char *next = realloc(*text, grown);
+      if (!next)
+         return;
+      *text = next;
+      *cap = grown;
+   }
+   *len += (size_t)snprintf(*text + *len, *cap - *len, "## %s\n", title);
+   cJSON_ArrayForEach(it, arr)
+   {
+      const char *t = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "title"));
+      const char *d = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "description"));
+      if (!t)
+         t = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "text"));
+      if (!t && !d)
+         continue;
+      *len += (size_t)snprintf(*text + *len, *cap - *len, "- %s%s%s\n", t ? t : "",
+                               d && d[0] ? ": " : "", d && d[0] ? d : "");
+   }
+   *len += (size_t)snprintf(*text + *len, *cap - *len, "\n");
+}
+
+/* `aimee memory read` assembles the current memory context. It always asked the
+ * KB, so on a standalone Server (no KB, a supported deployment) it answered "KB
+ * memory owner unavailable" while personal memory worked. Personal storage is
+ * the default for ordinary memory commands; `--store kb` keeps the KB path. */
+static cJSON *memory_read_personal(const cJSON *req)
+{
+   const char *hint = jo_cstr(req, "task_hint");
+   if (!hint[0])
+      hint = jo_cstr(req, "query");
+   char *raw = server_user_memory_recall_json(hint, 8192, 1);
+   cJSON *envelope = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   cJSON *recall = envelope ? cJSON_GetObjectItemCaseSensitive(envelope, "recall") : NULL;
+   if (!cJSON_IsObject(recall))
+   {
+      cJSON_Delete(envelope);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "personal memory recall unavailable",
+                                    NULL);
+   }
+   static const char *const sections[][2] = {{"always_on_rules", "Always-On Rules"},
+                                             {"identity", "Identity"},
+                                             {"preferences", "Preferences"},
+                                             {"active_context", "Active Context"},
+                                             {"open_commitments", "Open Commitments"},
+                                             {"reminders", "Reminders"},
+                                             {"directives", "Directives"}};
+   size_t cap = 1024, len = 0;
+   char *text = malloc(cap);
+   if (!text)
+   {
+      cJSON_Delete(envelope);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "out of memory", NULL);
+   }
+   text[0] = '\0';
+   for (size_t i = 0; i < sizeof sections / sizeof sections[0]; i++)
+      memory_read_section(recall, sections[i][0], sections[i][1], &text, &len, &cap);
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "context", text);
+   cJSON_AddStringToObject(resp, "store", "user");
+   free(text);
+   cJSON_Delete(envelope);
+   return resp;
+}
+
+cJSON *memory_read_command(const cJSON *req)
+{
+   int selection = server_memory_store_selection(req);
+   if (selection < 0)
+      return memory_bad_store();
+   if (!selection)
+      return memory_read_personal(req);
+   return kb_memory_owner_command("memory.assemble_context", req, MEMORY_AUTHORITY_MODEL, "context",
+                                  cJSON_String);
+}
+
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   return send_and_free(conn,
-                        kb_memory_owner_command("memory.assemble_context", req,
-                                                MEMORY_AUTHORITY_MODEL, "context", cJSON_String));
+   return send_and_free(conn, memory_read_command(req));
 }
 
 /* Personal recall uses the same memory module as shared recall, with the
  * process's own data grant. No KB request is needed to create its envelope. */
+/* The memory module refuses a recall whose task_hint exceeds 4096 bytes
+ * (InvalidRequest). The UserPromptSubmit hook sends the whole prompt as the hint,
+ * so every long prompt -- pasted logs, long instructions -- lost its recall for
+ * that turn ("memory recall is unavailable"), and the live Server logged the
+ * rejection every few minutes. The hint only steers relevance, so its opening
+ * is used, cut at a UTF-8 character boundary. */
+#define MEMORY_TASK_HINT_MAX 4096u
+
+size_t memory_task_hint_bounded_len(const char *hint)
+{
+   size_t n = hint ? strlen(hint) : 0;
+   if (n <= MEMORY_TASK_HINT_MAX)
+      return n;
+   n = MEMORY_TASK_HINT_MAX;
+   while (n > 0 && ((unsigned char)hint[n] & 0xC0u) == 0x80u)
+      n--; /* never split a multi-byte character */
+   return n;
+}
+
 static char *user_memory_recall_json(const char *hint, int limit_tokens, int session_start,
                                      const size_t *native_bytes)
 {
    cJSON *request = cJSON_CreateObject();
    if (!request)
       return NULL;
-   cJSON_AddStringToObject(request, "task_hint", hint ? hint : "");
+   {
+      size_t keep = memory_task_hint_bounded_len(hint);
+      char *bounded = malloc(keep + 1);
+      if (!bounded)
+      {
+         cJSON_Delete(request);
+         return NULL;
+      }
+      if (keep)
+         memcpy(bounded, hint, keep);
+      bounded[keep] = '\0';
+      cJSON_AddStringToObject(request, "task_hint", bounded);
+      free(bounded);
+   }
    cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
    if (native_bytes)
       cJSON_AddNumberToObject(request, "native_context_bytes", (double)*native_bytes);

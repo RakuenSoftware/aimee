@@ -9,6 +9,7 @@ __attribute__((used, retain)) const unsigned aims_server_original_turn_lowerhex3
 #include "agent_config.h"
 #include "presence.h"
 #include "db1_client/server_sessions.h"
+#include "server/browser_session_owner.h"
 #include "db1_client/primary_sessions.h"
 #include "cJSON.h"
 #include <openssl/rand.h>
@@ -379,10 +380,7 @@ static int chat_ir_begin_internal(compute_ctx_t *c, const char *session,
       replies = field;
    }
    db1_server_session_owner_t row;
-   int found = db1_server_session_owner_get(session, &row);
-   if (found == 0 && strcmp(row.principal, c->vault_principal))
-      return -1;
-   if (found != 0 && db1_server_session_create(session, "webchat", c->vault_principal) != 0)
+   if (browser_session_admit_owner(session, c->vault_principal, &row) != BROWSER_SESSION_OWNED)
       return -1;
    snprintf(c->ir_session, sizeof(c->ir_session), "%s", session);
    /* Async admission already minted this host identity before publishing the

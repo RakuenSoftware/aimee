@@ -2340,6 +2340,7 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
       cJSON_Delete(projects);
       free(worktree_root);
    }
+   cli_v1_publish_delegate_source_for(route->method);
    int git_runner = 0;
    const char *git_tool = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "tool"));
    if (git_tool && strncmp(git_tool, "git_", 4) == 0 && git_runner_start && git_runner_stop &&

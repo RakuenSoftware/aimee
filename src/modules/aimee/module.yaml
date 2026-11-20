@@ -151,6 +151,7 @@
     "server-go/modules/aimee/families/runtime_caches_test.go",
     "server-go/modules/aimee/families/runtime_session_cache_test.go",
     "server-go/modules/aimee/families/runtime_caches_utf8_test.go",
+    "server-go/modules/aimee/families/session_create_claim_test.go",
     "server-go/modules/aimee/families/session_exploration_live_test.go",
     "server-go/modules/aimee/families/session_ir_declined_tool_history_test.go",
     "server-go/modules/aimee/families/session_ir_history_live_test.go",

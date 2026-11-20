@@ -659,8 +659,44 @@ int audit_worm_verify_chain(char *err, size_t errlen)
       pthread_mutex_unlock(&g_worm_mu);
       return -1;
    }
-   int rc = worm_verify_db(g_worm_db, err, errlen);
+   /* Scan on a separate read-only connection, outside g_worm_mu. The store is in
+    * WAL mode, so a reader sees one consistent snapshot while appends continue.
+    * Holding the mutex for the whole scan stalled every audited action and every
+    * checkpoint for the length of the chain: on the live Server (142M rows,
+    * 48 GB) that was ~7 minutes per `aimee audit verify`, with checkpoints
+    * queueing behind it. The scan itself stays complete -- the prefix is never
+    * trusted from a cache, since detecting a rewritten old row is the point. */
+   char path[4096] = "";
+   const char *name = sqlite3_db_filename(g_worm_db, "main");
+   if (name && name[0])
+      snprintf(path, sizeof path, "%s", name);
    pthread_mutex_unlock(&g_worm_mu);
+   if (!path[0])
+   {
+      /* In-memory or unnamed store: no second connection can see it. */
+      pthread_mutex_lock(&g_worm_mu);
+      int locked_rc = worm_verify_db(g_worm_db, err, errlen);
+      pthread_mutex_unlock(&g_worm_mu);
+      return locked_rc;
+   }
+   sqlite3 *reader = NULL;
+   if (sqlite3_open_v2(path, &reader, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK)
+   {
+      if (err)
+         snprintf(err, errlen, "cannot open the WORM store read-only for verification");
+      if (reader)
+         sqlite3_close(reader);
+      return -1;
+   }
+   sqlite3_busy_timeout(reader, 5000);
+   /* One read transaction, so the whole scan sees a single snapshot. */
+   int rc = sqlite3_exec(reader, "BEGIN", NULL, NULL, NULL) == SQLITE_OK
+                ? worm_verify_db(reader, err, errlen)
+                : -1;
+   if (rc != 0 && err && !err[0])
+      snprintf(err, errlen, "cannot start a read transaction for verification");
+   sqlite3_exec(reader, "COMMIT", NULL, NULL, NULL);
+   sqlite3_close(reader);
    return rc;
 }
 
@@ -892,10 +928,10 @@ done:
  * tail" signal. Returns AUDIT_WORM_VERIFY_GREEN (fully attested), _AMBER (chain
  * intact but head is beyond the newest checkpoint), or _RED (a break). head_seq /
  * last_ckpt_seq are filled when non-NULL. */
-int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
+/* Head and newest checkpoint, and the GREEN/AMBER/RED verdict they imply, WITHOUT
+ * rescanning the chain. Callers that have just verified the chain use it. */
+static int worm_head_status(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
 {
-   if (audit_worm_verify_chain(err, errlen) != 0)
-      return AUDIT_WORM_VERIFY_RED;
    long head = 0, ckpt = 0;
    int query_ok = 0;
    pthread_mutex_lock(&g_worm_mu);
@@ -934,6 +970,13 @@ int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_
    return (ckpt >= head) ? AUDIT_WORM_VERIFY_GREEN : AUDIT_WORM_VERIFY_AMBER;
 }
 
+int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
+{
+   if (audit_worm_verify_chain(err, errlen) != 0)
+      return AUDIT_WORM_VERIFY_RED;
+   return worm_head_status(err, errlen, head_seq, last_ckpt_seq);
+}
+
 int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
 {
    /* A newly created store has no evidence to attest yet. Admit that one state
@@ -970,7 +1013,11 @@ int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *la
       return -1;
    }
 
-   status = audit_worm_verify(err, errlen, &head, &ckpt);
+   /* The chain was verified in full above, and nothing else writes during
+    * startup; the only new row is the checkpoint this process just derived from
+    * that verified head. Rescanning the whole chain to admit it doubled boot
+    * time on a large store (two full passes over 48 GB on the live Server). */
+   status = worm_head_status(err, errlen, &head, &ckpt);
    if (head_seq)
       *head_seq = head;
    if (last_ckpt_seq)

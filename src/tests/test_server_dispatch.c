@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include "server_http_internal.h"
 #include "aimee.h"
 #include "primary_session_adapter.h"
 #include "db1_client/db1_module_api.h"
@@ -2884,7 +2885,14 @@ static void test_health_kb_verdict_states(void)
    server_health_add_kb(standalone);
    assert(strcmp(kb_status_of(standalone), "disabled") == 0);
    cJSON_Delete(standalone);
+   /* Shared-knowledge surfaces on that Server name the cause with a typed 503,
+    * instead of the "rules backend unavailable" 502 that read as an outage. */
+   char *absent = server_kb_required_error("rules");
+   assert(absent && strstr(absent, "rules needs a connected KB"));
+   assert(server_http_declared_status(absent) == 503);
+   free(absent);
    g_kb_configured = 1;
+   assert(server_kb_required_error("rules") == NULL);
    /* 1. Nothing answered — the only case that may say unreachable. */
    kb_health_stub_reset();
    cJSON *resp = cJSON_CreateObject();
