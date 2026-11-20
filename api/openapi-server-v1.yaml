@@ -3722,8 +3722,9 @@ paths:
     post:
       summary: Aggregate the authenticated principal's receipt-backed retrieval health
       description: >-
-        Optional collection requires AIMEE_MEMORY_HEALTH_ENABLED=1 on the serving
-        owner. Scans at most 256 principal-owned requests through a verified local
+        The 1.1 memory module keeps no retrieval health journal and answers with
+        a typed `disabled` error; AIMEE_MEMORY_HEALTH_ENABLED is no longer read.
+        The collection described below is the retired 1.0 behaviour. It scanned at most 256 principal-owned requests through a verified local
         ledger head, reconciles attempts into bounded private PostgreSQL state,
         and reports one exact project/workspace/purpose/query-class population.
         Windows use prepared-at timestamps with stages reconciled through the

@@ -895,7 +895,7 @@ ENV_DESC = {
     "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED": ("Memory", "Enable the async cognify pipeline."),
     "AIMEE_MEMORY_COREF_MODE": ("Memory", "Coreference-resolution mode."),
     "AIMEE_MEMORY_DECOMPOSE_HEURISTIC": ("Memory", "Override the heuristic sub-query expansion stage during recall (0 disables it)."),
-    "AIMEE_MEMORY_HEALTH_ENABLED": ("Memory", "Set to 1 to opt into bounded receipt health collection and optional serving metadata. Default off; disabling it preserves required provider receipts."),
+    "AIMEE_MEMORY_HEALTH_ENABLED": ("Memory", "Retired with the 1.0 memory implementation and no longer read. The 1.1 memory module keeps no retrieval health journal, so `memory health` always answers that collection is disabled; required provider receipts are unchanged."),
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_INSERTS": ("Memory", "Inserts before a maintenance cycle triggers."),
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_SECS": ("Memory", "Seconds before a maintenance cycle triggers."),
     "AIMEE_MEMORY_PAGERANK_RELATIONS": ("Memory", "Relation types included in memory PageRank."),
