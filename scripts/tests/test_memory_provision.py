@@ -91,13 +91,15 @@ class Policy(unittest.TestCase):
     def test_changed_accounts_and_provider_are_reported(self):
         desired = module.desired_policy('server', self.RECORDED, 'bob', HEALTH)
         self.assertEqual(desired, {'accounts': ['aimee', 'bob'], 'shared_scopes': [],
-                                   'embedding_provider_identity_digest': 'sha256:new', 'typed_facts': None})
+                                   'embedding_provider_identity_digest': 'sha256:new', 'typed_facts': None,
+                                   'retrieval_health': None})
         self.assertEqual(module.policy_changes(self.RECORDED, desired), ['accounts', 'embedding provider'])
 
     def test_first_provisioning_without_an_embedder_has_no_provider(self):
         desired = module.desired_policy('server', None, None, None)
         self.assertEqual(desired, {'accounts': ['aimee'], 'shared_scopes': [],
-                                   'embedding_provider_identity_digest': None, 'typed_facts': None})
+                                   'embedding_provider_identity_digest': None, 'typed_facts': None,
+                                   'retrieval_health': None})
 
     def test_kb_serves_global_and_each_declared_scope(self):
         self.assertEqual(module.shared_scopes('server', 'project:apollo'), [])
@@ -139,9 +141,32 @@ class Policy(unittest.TestCase):
             with self.assertRaises(module.Refused):
                 module.recorded_policy(inputs)
             (inputs / 'OPERATOR_POLICY_SAFE.json').write_text(json.dumps(self.RECORDED))
-            self.assertEqual(module.recorded_policy(inputs), dict(self.RECORDED, typed_facts=None))
+            self.assertEqual(module.recorded_policy(inputs), dict(self.RECORDED, typed_facts=None,
+                                                                  retrieval_health=None))
             (inputs / 'TYPED_FACTS.json').write_text(json.dumps({'model': 'm', 'upstream': 'http://127.0.0.1:9/v1'}))
             self.assertEqual(module.recorded_policy(inputs)['typed_facts']['model'], 'm')
+            (inputs / 'RETRIEVAL_HEALTH.json').write_text(json.dumps({'enabled': True}))
+            self.assertEqual(module.recorded_policy(inputs)['retrieval_health'], {'enabled': True})
+
+    def test_retrieval_health_is_an_opt_in_server_policy(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('AIMEE_MEMORY_HEALTH_ENABLED', None)
+            os.environ.pop('AIMEE_MEMORY_HEALTH_SAMPLE_PPM', None)
+            self.assertIsNone(module.retrieval_health('server'))
+            os.environ['AIMEE_MEMORY_HEALTH_ENABLED'] = '1'
+            self.assertEqual(module.retrieval_health('server'), {'enabled': True})
+            # A KB keeps no provider receipts of a user's turns.
+            self.assertIsNone(module.retrieval_health('kb'))
+            os.environ['AIMEE_MEMORY_HEALTH_SAMPLE_PPM'] = '250000'
+            self.assertEqual(module.retrieval_health('server'), {'enabled': True, 'sample_ppm': 250000})
+            for bad in ('0', '1000001', 'half'):
+                os.environ['AIMEE_MEMORY_HEALTH_SAMPLE_PPM'] = bad
+                with self.assertRaises(module.Refused):
+                    module.retrieval_health('server')
+            os.environ['AIMEE_MEMORY_HEALTH_SAMPLE_PPM'] = ''
+            recorded = dict(self.RECORDED, typed_facts=None, retrieval_health=None)
+            desired = module.desired_policy('server', recorded, None, None)
+            self.assertEqual(module.policy_changes(recorded, desired), ['retrieval health'])
 
     def test_an_instance_with_a_synthesis_model_selects_typed_facts(self):
         env = {'SYNTHESIS_ENDPOINT': 'https://aimee-llm:8761/v1', 'SYNTHESIS_MODEL': 'gemma-4-E4B',

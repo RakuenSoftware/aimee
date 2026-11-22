@@ -47,6 +47,11 @@ services:
       # `off` creates only the mount points; the instance then runs without
       # memory and reports missing_module: memory.
       AIMEE_MEMORY_PROVISION: ${AIMEE_MEMORY_PROVISION:-on}
+      # Server only, off by default: the optional retrieval health collector
+      # behind `aimee memory health`. 1 turns it on; the sample rate is parts per
+      # million of whole invocations (unset keeps every invocation).
+      AIMEE_MEMORY_HEALTH_ENABLED: ${AIMEE_MEMORY_HEALTH_ENABLED:-0}
+      AIMEE_MEMORY_HEALTH_SAMPLE_PPM: ${AIMEE_MEMORY_HEALTH_SAMPLE_PPM:-}
       # KB only: with a synthesis model the KB derives typed facts from its
       # shared memory, through the managed sidecar identity its own client uses.
       # A Server never processes shared memory, so these change nothing there.

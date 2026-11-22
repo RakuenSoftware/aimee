@@ -269,6 +269,7 @@ def recorded_policy(inputs: Path) -> dict | None:
         return None
     policy = json.loads(report.read_text())
     policy['typed_facts'] = recorded_typed_facts(inputs)
+    policy['retrieval_health'] = recorded_retrieval_health(inputs)
     return policy
 
 
@@ -300,7 +301,27 @@ def desired_policy(role: str, recorded: dict | None, requested_accounts: str | N
     else:
         digest = recorded.get('embedding_provider_identity_digest') if recorded else None
     return {'accounts': names, 'shared_scopes': scopes, 'embedding_provider_identity_digest': digest,
-            'typed_facts': typed_facts(role)}
+            'typed_facts': typed_facts(role), 'retrieval_health': retrieval_health(role)}
+
+
+def retrieval_health(role: str) -> dict | None:
+    """The optional retrieval health collector, as in 1.0: off unless the operator
+    sets AIMEE_MEMORY_HEALTH_ENABLED=1 on a Server. AIMEE_MEMORY_HEALTH_SAMPLE_PPM
+    (1-1000000) samples whole invocations; unset means every invocation."""
+    if role != 'server' or os.environ.get('AIMEE_MEMORY_HEALTH_ENABLED', '') != '1':
+        return None
+    selection = {'enabled': True}
+    raw = os.environ.get('AIMEE_MEMORY_HEALTH_SAMPLE_PPM', '')
+    if raw:
+        if not raw.isdigit() or not 1 <= int(raw) <= 1000000:
+            raise Refused('AIMEE_MEMORY_HEALTH_SAMPLE_PPM must be a whole number from 1 to 1000000')
+        selection['sample_ppm'] = int(raw)
+    return selection
+
+
+def recorded_retrieval_health(inputs: Path) -> dict | None:
+    path = inputs / 'RETRIEVAL_HEALTH.json'
+    return json.loads(path.read_text()) if path.is_file() else None
 
 
 # The client identity a managed KB issues itself for the aimee-llm sidecar.
@@ -359,6 +380,8 @@ def policy_changes(recorded: dict, desired: dict) -> list[str]:
         changes.append('embedding provider')
     if recorded.get('typed_facts') != desired.get('typed_facts'):
         changes.append('typed facts')
+    if recorded.get('retrieval_health') != desired.get('retrieval_health'):
+        changes.append('retrieval health')
     return changes
 
 
@@ -411,6 +434,20 @@ def write_inputs(role: str, inputs: Path, desired: dict, health: dict | None, no
         as_runtime_user(*argv)
         record = inputs / 'TYPED_FACTS.json'
         record.write_text(json.dumps(selection, indent=2) + '\n')
+        record.chmod(0o600)
+        owned(record)
+    collector = desired.get('retrieval_health')
+    if collector is not None:
+        # The memory installation picks the journal directory; the inputs carry
+        # only the operator's opt-in and sample rate.
+        frontend = inputs / 'frontend.json'
+        configured = json.loads(frontend.read_text())
+        configured.setdefault('legacy', {})['retrieval_health'] = collector
+        frontend.write_text(json.dumps(configured, indent=2) + '\n')
+        frontend.chmod(0o600)
+        owned(frontend)
+        record = inputs / 'RETRIEVAL_HEALTH.json'
+        record.write_text(json.dumps(collector, indent=2) + '\n')
         record.chmod(0o600)
         owned(record)
 

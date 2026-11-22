@@ -453,7 +453,7 @@ The binaries read 266 `AIMEE_*` environment variables (scanned from native acces
 | `AIMEE_MEMORY_BACKEND` | Current in-process owner accepts `native` (default) or `aimee-native`. Retired/unknown engines fail startup. Independent memory modules use process composition. |
 | `AIMEE_MEMORY_BACKEND_TOKEN` | Legacy bootstrap secret name. Existing Vault entries are retained for operator-controlled migration; the retired memory-backend egress route cannot resolve them. |
 | `AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED` | Enable the async cognify pipeline. |
-| `AIMEE_MEMORY_HEALTH_ENABLED` | Retired with the 1.0 memory implementation and no longer read. The 1.1 memory module keeps no retrieval health journal, so `memory health` always answers that collection is disabled; required provider receipts are unchanged. |
+| `AIMEE_MEMORY_HEALTH_ENABLED` | Server only, off by default. `1` on the `aimee-memory-init` service enables the optional retrieval health collector behind `aimee memory health`: each report imports this user's verified provider receipts into a bounded private journal (24 h, 256 attempts per scope) and prints aggregate concentration, stage and coverage figures. Changing it re-prepares the memory installation at the next start. When off, `memory health` answers that collection is disabled; required provider receipts are unchanged either way. |
 | `AIMEE_NO_CACHE` | Disable the memory-assembly cache. |
 
 ### Delegates & backends
