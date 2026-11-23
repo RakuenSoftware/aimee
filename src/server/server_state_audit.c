@@ -113,12 +113,15 @@ int handle_memory_receipt_forget(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 }
 
 /* The public body cannot choose a principal, ledger or completeness assertion.
- * This adapter transports only a verified, principal-bound local snapshot. */
+ * This adapter transports only a verified, principal-bound local snapshot. The
+ * module binds health_principal to the authenticated caller, so every call
+ * carries that caller's context; without it the module sees the server's own
+ * identity and refuses. */
 static cJSON *memory_health_command(cJSON *request)
 {
    cJSON *response = NULL;
-   int rc =
-       aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 5000, &response);
+   int rc = aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", request, 5000,
+                                                                   &response);
    cJSON_Delete(request);
    if (rc != 1)
    {
