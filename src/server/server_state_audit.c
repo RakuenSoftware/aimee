@@ -137,8 +137,13 @@ int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const request_context_t *context = request_context_get();
    if (!context || !context->principal[0])
       return server_send_error(conn, "authenticated health scope required", NULL);
+   /* The memory owner knows the caller by account, the same name the caller
+    * context carries (user_memory_owner_command_as); the WORM ledger below is
+    * keyed by the transport principal. */
+   const char *account = server_request_account();
+   const char *health_principal = account && account[0] ? account : context->principal;
    cJSON *query = cJSON_CreateObject();
-   cJSON_AddStringToObject(query, "health_principal", context->principal);
+   cJSON_AddStringToObject(query, "health_principal", health_principal);
    const char *fields[] = {"window", "project", "workspace", "purpose", "query_class", "stage"};
    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
    {
@@ -207,7 +212,7 @@ int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       }
       cJSON *input = cJSON_CreateObject();
       cJSON_AddStringToObject(input, "operation", "health-import");
-      cJSON_AddStringToObject(input, "health_principal", context->principal);
+      cJSON_AddStringToObject(input, "health_principal", health_principal);
       cJSON_AddStringToObject(input, "receipt_request_id", id);
       cJSON_AddStringToObject(input, "dispatch_owner", owner);
       cJSON_AddTrueToObject(input, "chain_intact");
