@@ -599,8 +599,8 @@ static void test_health_verified_gate_and_request_rows(void)
    snprintf(body, sizeof body, HEALTH_AT, "req-b");
    assert(audit_worm_append("host", "alice", "memory.provider.prepared", "attempt-b", "record",
                             body) == 0);
-   assert(audit_worm_append("host", "alice", "memory.provider.acknowledged", "attempt-a",
-                            "record", "{}") == 0);
+   assert(audit_worm_append("host", "alice", "memory.provider.acknowledged", "attempt-a", "record",
+                            "{}") == 0);
    snprintf(body, sizeof body, HEALTH_AT, "req-a");
    assert(audit_worm_append("host", "bob", "memory.provider.prepared", "attempt-a", "record",
                             body) == 0);
@@ -626,9 +626,9 @@ static void test_health_verified_gate_and_request_rows(void)
    assert(rows);
    const cJSON *a = cJSON_GetObjectItemCaseSensitive(rows, "req-a");
    assert(cJSON_GetArraySize(a) == 2);
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
-                      cJSON_GetArrayItem(a, 1), "action")),
-                  "memory.provider.acknowledged"));
+   assert(!strcmp(
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(a, 1), "action")),
+       "memory.provider.acknowledged"));
    assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(rows, "req-b")) == 1);
    assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(rows, "req-c")));
    const cJSON *missing = cJSON_GetObjectItemCaseSensitive(rows, "req-missing");

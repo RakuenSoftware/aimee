@@ -180,10 +180,10 @@ int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int verified = audit_worm_verified(error, sizeof error, &head, &checkpoint);
    int truncated = 0;
    const char *scan_from = jo_str(plan, "scan_from", from);
-   cJSON *requests = verified == AUDIT_WORM_VERIFY_RED
-                         ? NULL
-                         : audit_worm_memory_requests(context->principal, scan_from, until, head,
-                                                      &truncated);
+   cJSON *requests =
+       verified == AUDIT_WORM_VERIFY_RED
+           ? NULL
+           : audit_worm_memory_requests(context->principal, scan_from, until, head, &truncated);
    cJSON *request_rows =
        requests ? audit_worm_memory_request_rows(context->principal, scan_from, requests, head)
                 : NULL;
