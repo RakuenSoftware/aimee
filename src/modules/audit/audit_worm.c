@@ -1017,6 +1017,11 @@ int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *la
          *head_seq = 0;
       if (last_ckpt_seq)
          *last_ckpt_seq = 0;
+      /* An empty chain is intact; every later row is appended by this process
+       * on the chain it maintains, exactly as after a full startup verify. */
+      pthread_mutex_lock(&g_worm_mu);
+      g_worm_verified = 1;
+      pthread_mutex_unlock(&g_worm_mu);
       return 0;
    }
    if (count < 0)

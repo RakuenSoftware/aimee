@@ -649,6 +649,27 @@ static void test_health_verified_gate_and_request_rows(void)
    puts("  test_health_verified_gate_and_request_rows: ok");
 }
 
+/* A fresh store is admitted at startup without a rescan; that admission is the
+ * verification receipts and health rely on for the rest of the process. */
+static void test_fresh_store_startup_admits_verified_gate(void)
+{
+   char path[512], err[256];
+   snprintf(path, sizeof path, "%s/fresh-gate.db", g_dir);
+   assert(audit_worm_init_at(path) == 0);
+   long head = -1, checkpoint = -1;
+   assert(audit_worm_verified(err, sizeof err, &head, &checkpoint) == AUDIT_WORM_VERIFY_RED);
+   assert(audit_worm_startup_verify(err, sizeof err, &head, &checkpoint) == 0);
+   assert(audit_worm_append("host", "alice", "memory.provider.prepared", "attempt-a", "record",
+                            "{}") == 0);
+   assert(audit_worm_verified(err, sizeof err, &head, &checkpoint) != AUDIT_WORM_VERIFY_RED);
+   assert(head == audit_worm_count());
+   audit_worm_close();
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_verified(err, sizeof err, &head, &checkpoint) == AUDIT_WORM_VERIFY_RED);
+   audit_worm_close();
+   puts("  test_fresh_store_startup_admits_verified_gate: ok");
+}
+
 /* Reproduce the production symptom: an allocated table page contains zeros.
  * Do not rehash, truncate, or silently admit the unreadable ledger. */
 static void test_zeroed_table_page_rejects_startup(void)
@@ -939,6 +960,7 @@ int main(int argc, char **argv)
    test_restored_history_verification();
    test_health_snapshot_scope_and_bounds();
    test_health_verified_gate_and_request_rows();
+   test_fresh_store_startup_admits_verified_gate();
    test_dispatch_owner_crash();
    test_cross_engine_vector();
    test_metric_snapshot();
