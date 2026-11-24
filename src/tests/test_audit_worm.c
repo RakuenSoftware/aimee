@@ -584,6 +584,71 @@ static void test_health_snapshot_scope_and_bounds(void)
    puts("  test_health_snapshot_scope_and_bounds: ok");
 }
 
+/* Health reads: the ledger must have passed a full verification, which is
+ * recorded rather than redone, and per-request rows come from one bounded read. */
+static void test_health_verified_gate_and_request_rows(void)
+{
+   char path[512], err[256];
+   snprintf(path, sizeof path, "%s/health-rows.db", g_dir);
+   assert(audit_worm_init_at(path) == 0);
+#define HEALTH_AT "{\"at\":\"2026-09-26T10:00:00Z\",\"binding\":{\"request_id\":\"%s\"}}"
+   char body[256];
+   snprintf(body, sizeof body, HEALTH_AT, "req-a");
+   assert(audit_worm_append("host", "alice", "memory.provider.prepared", "attempt-a", "record",
+                            body) == 0);
+   snprintf(body, sizeof body, HEALTH_AT, "req-b");
+   assert(audit_worm_append("host", "alice", "memory.provider.prepared", "attempt-b", "record",
+                            body) == 0);
+   assert(audit_worm_append("host", "alice", "memory.provider.acknowledged", "attempt-a",
+                            "record", "{}") == 0);
+   snprintf(body, sizeof body, HEALTH_AT, "req-a");
+   assert(audit_worm_append("host", "bob", "memory.provider.prepared", "attempt-a", "record",
+                            body) == 0);
+   snprintf(body, sizeof body, HEALTH_AT, "req-c");
+   assert(audit_worm_append("host", "alice", "memory.provider.prepared", "attempt-c", "record",
+                            body) == 0);
+   for (int i = 0; i < 64; i++)
+      assert(audit_worm_append("host", "alice", "memory.provider.stage", "attempt-c", "record",
+                               "{}") == 0);
+   long head = 0, checkpoint = 0;
+   assert(audit_worm_verified(err, sizeof err, &head, &checkpoint) == AUDIT_WORM_VERIFY_RED);
+   assert(strstr(err, "has not passed"));
+   assert(audit_worm_verify(err, sizeof err, NULL, NULL) != AUDIT_WORM_VERIFY_RED);
+   assert(audit_worm_verified(err, sizeof err, &head, &checkpoint) != AUDIT_WORM_VERIFY_RED);
+   assert(head == audit_worm_count());
+
+   cJSON *ids = cJSON_CreateArray();
+   cJSON_AddItemToArray(ids, cJSON_CreateString("req-a"));
+   cJSON_AddItemToArray(ids, cJSON_CreateString("req-b"));
+   cJSON_AddItemToArray(ids, cJSON_CreateString("req-c"));
+   cJSON_AddItemToArray(ids, cJSON_CreateString("req-missing"));
+   cJSON *rows = audit_worm_memory_request_rows("alice", "2026-09-26T09:00:00Z", ids, head);
+   assert(rows);
+   const cJSON *a = cJSON_GetObjectItemCaseSensitive(rows, "req-a");
+   assert(cJSON_GetArraySize(a) == 2);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                      cJSON_GetArrayItem(a, 1), "action")),
+                  "memory.provider.acknowledged"));
+   assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(rows, "req-b")) == 1);
+   assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(rows, "req-c")));
+   const cJSON *missing = cJSON_GetObjectItemCaseSensitive(rows, "req-missing");
+   assert(cJSON_IsArray(missing) && cJSON_GetArraySize(missing) == 0);
+   cJSON_Delete(rows);
+   /* Rows are bounded to the window: a start after every append reads nothing. */
+   rows = audit_worm_memory_request_rows("alice", "2999-01-01T00:00:00Z", ids, head);
+   assert(rows && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(rows, "req-a")) == 0);
+   cJSON_Delete(rows);
+   assert(!audit_worm_memory_request_rows("alice", "not a time", ids, head));
+   cJSON_Delete(ids);
+
+   /* Closing forgets the verification: a reopened store is unverified. */
+   audit_worm_close();
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_verified(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   audit_worm_close();
+   puts("  test_health_verified_gate_and_request_rows: ok");
+}
+
 /* Reproduce the production symptom: an allocated table page contains zeros.
  * Do not rehash, truncate, or silently admit the unreadable ledger. */
 static void test_zeroed_table_page_rejects_startup(void)
@@ -873,6 +938,7 @@ int main(int argc, char **argv)
    }
    test_restored_history_verification();
    test_health_snapshot_scope_and_bounds();
+   test_health_verified_gate_and_request_rows();
    test_dispatch_owner_crash();
    test_cross_engine_vector();
    test_metric_snapshot();

@@ -89,6 +89,11 @@ extern "C"
     * into err on RED and fills head_seq / last_ckpt_seq when non-NULL. */
    int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq);
 
+   /* No rescan: RED unless a full audit_worm_verify() in this process passed and
+    * none has failed since; otherwise the GREEN/AMBER head status. For callers
+    * that need the ledger verified, not verified again (health, receipts). */
+   int audit_worm_verified(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq);
+
    /* Startup admission shared by aimee-server and aimee-kb-worm. Verify the
     * existing chain and checkpoint MACs before the process accepts work, reject
     * any RED store, and checkpoint an intact non-empty head so the admitted
@@ -128,6 +133,13 @@ extern "C"
                                                  long head);
    struct cJSON *audit_worm_memory_requests(const char *principal, const char *from,
                                             const char *until, long head, int *truncated);
+
+   /* Every recorded memory.provider.* row of each request id in request_ids, as
+    * {request_id: [rows]} in seq order, read from the window starting at `from`
+    * in two bounded passes. A request over 64 rows or 192 KiB maps to null, so
+    * an omitted stage is never mistaken for one that did not happen. */
+   struct cJSON *audit_worm_memory_request_rows(const char *principal, const char *from,
+                                                const struct cJSON *request_ids, long head);
 
    /* Number of rows currently in the store (test/introspection). -1 on error. */
    long audit_worm_count(void);
