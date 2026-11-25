@@ -559,13 +559,44 @@ static void worktree_session_key_old(const char *sid, char *out, size_t cap)
    session_worktree_key_legacy(sid, out, cap);
 }
 
+/* 1 when the checkout at git_root has the session's own branch checked out.
+ *
+ * The Server reconstructs a client that works inside its session worktree as a
+ * standalone clone on that same branch (workspace_mirror_reconstruct_branch).
+ * That checkout already is the session's isolated tree, and Git refuses to
+ * create a second worktree for a branch that is checked out, so a nested
+ * session worktree can never be made there. Reads .git/HEAD directly; only a
+ * main checkout (a .git directory) can qualify. */
+static int worktree_root_is_session_branch(const char *git_root, const char *branch)
+{
+   char head_path[MAX_PATH_LEN];
+   int n = snprintf(head_path, sizeof(head_path), "%s/.git/HEAD", git_root);
+   if (n < 0 || (size_t)n >= sizeof(head_path))
+      return 0;
+   FILE *f = fopen(head_path, "r");
+   if (!f)
+      return 0;
+   char head[256];
+   char *line = fgets(head, sizeof(head), f);
+   fclose(f);
+   if (!line)
+      return 0;
+   head[strcspn(head, "\r\n")] = '\0';
+   static const char prefix[] = "ref: refs/heads/";
+   return strncmp(head, prefix, sizeof(prefix) - 1) == 0 &&
+          strcmp(head + sizeof(prefix) - 1, branch) == 0;
+}
+
 /* Compute the expected aimee-managed worktree path for a git repo and session.
  * For git_root="/root/dev/aimee" and session "abc123...", produces
  * "/root/dev/aimee/.aimee/worktrees/<key>/main" where <key> is the session
  * key (see worktree_session_key).
  * If work_name is non-NULL (e.g. "task01"), produces
  * "/root/dev/aimee/.aimee/worktrees/<key>/task01" to avoid collisions
- * when multiple delegates run in the same session. */
+ * when multiple delegates run in the same session.
+ * When git_root itself has the session branch checked out (a Server
+ * reconstruction of a client's session worktree), the session's tree is
+ * git_root, and that is returned. */
 int worktree_sibling_path(const char *git_root, const char *sid, const char *work_name,
                           char *wt_buf, size_t wt_len)
 {
@@ -576,7 +607,14 @@ int worktree_sibling_path(const char *git_root, const char *sid, const char *wor
    session_worktree_key(sid, short_id, sizeof(short_id));
 
    if (work_name && work_name[0])
+   {
       snprintf(wt_buf, wt_len, "%s/.aimee/worktrees/%s/%s", git_root, short_id, work_name);
+      return 0;
+   }
+   char branch[128];
+   snprintf(branch, sizeof(branch), "aimee/session/%s", short_id);
+   if (worktree_root_is_session_branch(git_root, branch))
+      snprintf(wt_buf, wt_len, "%s", git_root);
    else
       snprintf(wt_buf, wt_len, "%s/.aimee/worktrees/%s/main", git_root, short_id);
    return 0;
@@ -1113,6 +1151,10 @@ static int worktree_create_sibling_at_ref_unlocked(const char *git_root, const c
    char wt_path[MAX_PATH_LEN];
    if (worktree_sibling_path(git_root, sid, work_name, wt_path, sizeof(wt_path)) != 0)
       return -1;
+   /* The checkout is already on this session's branch: it is the session tree.
+    * Nothing to create, and it is not a managed worktree to register. */
+   if (strcmp(wt_path, git_root) == 0)
+      return 0;
 
    /* Create branch name from session ID (and optional work name) */
    char short_id[WORKTREE_SID_KEY_LEN + 1];
@@ -1281,7 +1323,14 @@ static int worktree_create_sibling_at_ref_unlocked(const char *git_root, const c
       return 0;
    }
 
-   /* Hard failure: the caller must abort rather than share a checkout. */
+   /* Hard failure: the caller must abort rather than share a checkout. Git's
+    * reason follows its "Preparing worktree" line; keep it on the log line. */
+   for (char *p = out; p && *p; p++)
+      if (*p == '\n' || *p == '\r')
+         *p = ' ';
+   for (char *p = out2; p && *p; p++)
+      if (*p == '\n' || *p == '\r')
+         *p = ' ';
    LOG_ERROR("workspace", "failed to create worktree '%s' (base=%s): %s; branch-attach retry: %s",
              wt_path, base_branch, out ? out : "unknown", out2 ? out2 : "unknown");
    fprintf(stderr, "aimee: failed to create worktree at %s: %s\n", wt_path, out ? out : "unknown");
@@ -1422,7 +1471,8 @@ int worktree_create_sibling_from_anchor(const char *git_root, const char *sid,
    if (rc == 0 && base_ref[0] && anchor_dir && anchor_dir[0])
    {
       char wt_path[MAX_PATH_LEN];
-      if (worktree_sibling_path(git_root, sid, work_name, wt_path, sizeof(wt_path)) == 0)
+      if (worktree_sibling_path(git_root, sid, work_name, wt_path, sizeof(wt_path)) == 0 &&
+          strcmp(wt_path, git_root) != 0)
          worktree_apply_anchor_wip(anchor_dir, wt_path);
    }
    return rc;
@@ -1508,6 +1558,9 @@ int worktree_create_sibling_on_branch(const char *git_root, const char *sid, con
 void worktree_cleanup_path(const char *git_root, const char *wt_path)
 {
    if (!git_root || !wt_path || !wt_path[0])
+      return;
+   /* Never the checkout itself (a session-branch checkout is its own tree). */
+   if (strcmp(wt_path, git_root) == 0)
       return;
 
    struct stat st;
@@ -2039,6 +2092,9 @@ int session_isolation_target(const char *cwd, const char *sid, char *target, siz
 
    char wt_path[MAX_PATH_LEN];
    if (worktree_sibling_path(gr, sid, NULL, wt_path, sizeof(wt_path)) != 0)
+      return 0;
+   /* The checkout is on this session's branch: already isolated. */
+   if (strcmp(wt_path, gr) == 0)
       return 0;
 
    if (is_aimee_worktree_path(cwd))

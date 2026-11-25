@@ -253,6 +253,69 @@ static void test_jobs_aux(void)
    assert(!field(field(captured, "job"), "result"));
    assert(!field(field(captured, "job"), "legacy_result"));
 
+   /* A failed delegate's diagnostic can be ~1 MiB, and jobs.logs carries it
+    * twice. The reply must still fit the HTTP relay, keeping both ends. */
+   {
+      size_t big = 1024u * 1024u;
+      char *huge = malloc(big + 1);
+      assert(huge);
+      memset(huge, 'x', big);
+      memcpy(huge, "HEAD-OF-DIAGNOSTIC", 18);
+      memcpy(huge + big - 18, "TAIL-OF-DIAGNOSTIC", 18);
+      huge[big] = '\0';
+      reset("failed");
+      observation_rc = 1;
+      job_status = "failed";
+      legacy = huge;
+      int (*handlers[])(server_ctx_t *, server_conn_t *, cJSON *) = {handle_jobs_logs,
+                                                                     handle_jobs_status};
+      for (size_t h = 0; h < 2; h++)
+      {
+         assert(handlers[h](NULL, NULL, req) == 0);
+         char *reply = cJSON_PrintUnformatted(captured);
+         assert(reply && strlen(reply) < (size_t)SHTTP_RESP_MAX);
+         free(reply);
+         const char *diag = string(field(captured, "job"), "diagnostic");
+         assert(diag && strstr(diag, "HEAD-OF-DIAGNOSTIC") && strstr(diag, "TAIL-OF-DIAGNOSTIC"));
+         assert(strstr(diag, "bytes elided"));
+         assert(cJSON_GetNumberValue(field(field(captured, "job"), "diagnostic_bytes")) ==
+                (double)big);
+      }
+      legacy = "host refused launch before provider";
+      free(huge);
+   }
+
+   /* The live failure: a short diagnostic but a 15-turn transcript, which
+    * events and history each carry in full. Drop the transcript, keep the
+    * diagnostic whole, and say what was dropped -- for every job reply. */
+   {
+      reset("failed");
+      observation_rc = 0;
+      job_status = "failed";
+      legacy = "no-progress circuit breaker tripped after 29 successful calls";
+      static char chunk[16 * 1024];
+      memset(chunk, 'r', sizeof chunk - 1);
+      for (int i = 0; i < 40; i++)
+         append_text("current-turn", "webuser:owner", chunk);
+      int (*handlers[])(server_ctx_t *, server_conn_t *, cJSON *) = {handle_jobs_logs,
+                                                                     handle_jobs_status};
+      for (size_t h = 0; h < 3; h++)
+      {
+         if (h < 2)
+            assert(handlers[h](NULL, NULL, req) == 0);
+         else
+            poll(1);
+         char *reply = cJSON_PrintUnformatted(captured);
+         assert(reply && strlen(reply) < (size_t)SHTTP_RESP_MAX);
+         free(reply);
+         const cJSON *view = h < 2 ? field(captured, "job") : captured;
+         assert(!strcmp(string(view, "diagnostic"), legacy));
+         assert(!field(view, "events") &&
+                cJSON_GetNumberValue(field(view, "events_omitted")) == 40);
+      }
+      legacy = "host refused launch before provider";
+   }
+
    for (int rc = -1; rc >= -2; rc--)
    {
       reset("completed");

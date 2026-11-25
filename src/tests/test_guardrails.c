@@ -780,6 +780,53 @@ static void test_session_isolation_idempotent_when_worktree_exists(void)
    session_isolation_cleanup(tmpdir);
 }
 
+/* The Server reconstructs a client working inside its session worktree as a
+ * standalone clone with that session's branch checked out. That checkout is
+ * already the session tree: Git refuses a second worktree for the branch, and
+ * live 1.1.1 failed every hook and git operation for such sessions trying. */
+static void test_session_isolation_session_branch_checkout_is_its_own_tree(void)
+{
+   char tmpdir[MAX_PATH_LEN];
+   session_isolation_make_repo(tmpdir, sizeof(tmpdir));
+   char repo[MAX_PATH_LEN];
+   snprintf(repo, sizeof(repo), "%s/aimee", tmpdir);
+   const char *sid = "5a206631-e7fa-a11a-7eaf-3791";
+   char skey[SESSION_WORKTREE_KEY_MAX], branch[160];
+   session_worktree_key(sid, skey, sizeof(skey));
+   snprintf(branch, sizeof(branch), "aimee/session/%s", skey);
+   char cmd[MAX_PATH_LEN + 256];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -qB '%s' 2>/dev/null", repo, branch);
+   assert(system(cmd) == 0);
+
+   char path[MAX_PATH_LEN];
+   assert(worktree_sibling_path(repo, sid, NULL, path, sizeof(path)) == 0);
+   assert(strcmp(path, repo) == 0);
+   /* A named work unit still gets its own worktree under the checkout. */
+   assert(worktree_sibling_path(repo, sid, "task01", path, sizeof(path)) == 0);
+   assert(strstr(path, "/.aimee/worktrees/") != NULL);
+
+   char target[MAX_PATH_LEN];
+   assert(session_isolation_target(repo, sid, target, sizeof(target), 1) == 0);
+   assert(target[0] == '\0');
+   assert(worktree_create_sibling(repo, sid, NULL) == 0);
+   char nested[MAX_PATH_LEN];
+   snprintf(nested, sizeof(nested), "%s/.aimee/worktrees/%s/main", repo, skey);
+   struct stat st;
+   assert(stat(nested, &st) != 0);
+   /* Cleanup must never touch the checkout itself. */
+   worktree_cleanup(repo, sid, NULL);
+   snprintf(path, sizeof(path), "%s/.git", repo);
+   assert(stat(path, &st) == 0 && S_ISDIR(st.st_mode));
+
+   /* Any other branch keeps the ordinary nested worktree path. */
+   snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -q main 2>/dev/null", repo);
+   assert(system(cmd) == 0);
+   assert(worktree_sibling_path(repo, sid, NULL, path, sizeof(path)) == 0);
+   assert(strcmp(path, nested) == 0);
+
+   session_isolation_cleanup(tmpdir);
+}
+
 static void test_session_isolation_missing_no_create_returns_zero(void)
 {
    char tmpdir[MAX_PATH_LEN];
@@ -3541,6 +3588,7 @@ int main(void)
    test_session_isolation_creates_new_worktree_from_existing_worktree();
    test_session_isolation_skips_when_not_a_git_repo();
    test_session_isolation_idempotent_when_worktree_exists();
+   test_session_isolation_session_branch_checkout_is_its_own_tree();
    test_session_isolation_missing_no_create_returns_zero();
    test_session_isolation_empty_sid_rejected();
    test_worktree_for_cwd_edge_cases();
