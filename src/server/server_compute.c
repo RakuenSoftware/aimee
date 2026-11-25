@@ -757,10 +757,8 @@ static void delegate_worker_run(void *arg)
    const char *via_name = cJSON_IsString(jvia) ? jvia->valuestring : NULL;
    const char *participant = cJSON_IsString(jparticipant) ? jparticipant->valuestring : NULL;
    cJSON *jacp_cmd = cJSON_GetObjectItemCaseSensitive(req, "acp_command");
-   cJSON *jacp_args = cJSON_GetObjectItemCaseSensitive(req, "acp_args");
    const char *acp_command =
        (cJSON_IsString(jacp_cmd) && jacp_cmd->valuestring[0]) ? jacp_cmd->valuestring : NULL;
-   const char *acp_args = cJSON_IsString(jacp_args) ? jacp_args->valuestring : NULL;
    const char *provider_override = cJSON_IsString(jprovider) ? jprovider->valuestring : NULL;
    const char *model_override = cJSON_IsString(jmodel) ? jmodel->valuestring : NULL;
    /* delegate_routing bandit: sampled at the route step below (gated, best-effort)
@@ -778,6 +776,20 @@ static void delegate_worker_run(void *arg)
    {
       delegation_compute_error(cctx, "delegate requires a 'persona' (e.g. engineer, qa, security, "
                                      "reviewer, architect)");
+      compute_ctx_free(cctx);
+      return;
+   }
+   /* `--acp <command>` names a program on the client. A Server runs only its
+    * registered models and never a command a client supplies, so the inline
+    * agent could only fail later, after a job and a workspace were made for it
+    * ("canonical native execution owner unavailable for configured adapter").
+    * Refuse it here, saying what to do instead. */
+   if (acp_command)
+   {
+      delegation_compute_error(cctx,
+                               "--acp is not supported by an aimee Server: it names a command on "
+                               "the client, and a Server runs only its registered models. Use "
+                               "--via <model> (see `aimee model list`)");
       compute_ctx_free(cctx);
       return;
    }
@@ -964,21 +976,6 @@ static void delegate_worker_run(void *arg)
       db1_agent_job_free(&prior);
       via_name = participant_agent;
    }
-   /* Inline --acp <cmd>: synthesize an ephemeral kind:acp agent and route to it
-    * by name, exactly like --via. The external ACP agent runs its own model, so
-    * aimee's capability inference does not apply (caps/context are external). */
-   char inline_acp_name[MAX_AGENT_NAME] = "";
-   if (acp_command)
-   {
-      if (delegate_add_inline_acp_agent(&acfg, acp_command, acp_args, role, inline_acp_name,
-                                        sizeof(inline_acp_name)) != 0)
-      {
-         delegation_compute_error(cctx, "failed to register inline --acp delegate agent");
-         goto delegate_fail;
-      }
-      via_name = inline_acp_name;
-   }
-
    /* Native CLI delegates follow the same scoped admission, durable capture
     * and workspace policy as every other delegate. */
    unsigned required_caps = cJSON_IsNumber(jreq_caps) ? (unsigned)jreq_caps->valuedouble : 0;
@@ -1004,27 +1001,17 @@ static void delegate_worker_run(void *arg)
       int drop_deprecated = !(via_name && via_name[0]) &&
                             !(provider_override && provider_override[0]) &&
                             !(model_override && model_override[0]);
-      if (acp_command)
-      {
-         /* External ACP agent: its capabilities are out of aimee's registry, so
-          * skip inference and route purely by the synthesized agent's name. */
-         required_caps = 0;
-         min_context = 0;
-      }
-      else
-      {
-         delegate_infer_capability_requirements(prompt, force_tools, &inferred_caps,
-                                                &inferred_min_context);
-         required_caps |= inferred_caps;
-         if (inferred_min_context > min_context)
-            min_context = inferred_min_context;
-      }
+      delegate_infer_capability_requirements(prompt, force_tools, &inferred_caps,
+                                             &inferred_min_context);
+      required_caps |= inferred_caps;
+      if (inferred_min_context > min_context)
+         min_context = inferred_min_context;
       /* Both learning arms operate on the same qualified pool. Premium means
        * demonstrated task competence, never the most expensive configured tier. */
       acfg.route_input_tokens =
           (int)((delegate_request_text_bytes(&cctx->delegate_request) + 3) / 4);
       acfg.route_output_tokens = max_tokens > 0 ? max_tokens : 4096;
-      if (!acp_command && tier_override < 0 && !(via_name && via_name[0]) &&
+      if (tier_override < 0 && !(via_name && via_name[0]) &&
           !(provider_override && provider_override[0]) && !(model_override && model_override[0]) &&
           !acfg.default_delegate[0] && config_bandit_live_decision_enabled())
       {
