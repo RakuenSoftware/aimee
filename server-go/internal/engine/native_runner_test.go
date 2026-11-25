@@ -659,8 +659,12 @@ func (slowHealthySeatAgents) Delegate(ctx context.Context, request DelegateReque
 		return DelegateResult{Output: canonical.TextResponse(chairmanApprovalFor(request))}, nil
 	}
 	if strings.HasSuffix(request.DurableSlot, "seat:0") {
+		// Longer than any equal phase slice of the 1000ms budget (500ms for
+		// two phases, 333ms for three) so slicing would cancel it, while
+		// leaving 400ms for discussion and the chairman under -race on a
+		// loaded runner; 70ms of 120ms left 50ms and flaked in CI.
 		select {
-		case <-time.After(70 * time.Millisecond):
+		case <-time.After(600 * time.Millisecond):
 		case <-ctx.Done():
 			return DelegateResult{}, ctx.Err()
 		}
@@ -897,7 +901,7 @@ func TestConfiguredRoundtableHonorsMinimumWhenASeatIsUnavailable(t *testing.T) {
 
 func TestConfiguredRoundtableUsesOverallDeadlineWithoutCancellingSlowHealthySeat(t *testing.T) {
 	dir := t.TempDir()
-	body := `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"minimax","persona":"qa"}],"min_successful":1,"discussion":true,"chairman":"codex","chairman_enabled":true,"deadline_ms":120}`
+	body := `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"minimax","persona":"qa"}],"min_successful":1,"discussion":true,"chairman":"codex","chairman_enabled":true,"deadline_ms":1000}`
 	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -917,7 +921,7 @@ func TestConfiguredRoundtableUsesOverallDeadlineWithoutCancellingSlowHealthySeat
 	if err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(started); elapsed >= time.Second {
+	if elapsed := time.Since(started); elapsed >= 2*time.Second {
 		t.Fatalf("roundtable did not bound the slow seat: %s", elapsed)
 	}
 	if result.Status != StepAdvanced || result.Roundtable == nil || !result.Roundtable.Approved || result.Roundtable.Degraded || result.Roundtable.DeadlineHit {
