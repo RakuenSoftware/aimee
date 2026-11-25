@@ -19,6 +19,7 @@
 #include "aimee_home.h"
 #include <aimee/audit/audit_worm.h>
 #include <aimee/audit/audit_worm_chain.h>
+#include "audit_worm_sql.h"
 #include "cJSON.h"
 #include "dstr.h"
 #include "headers/aimee_sha256.h" /* aimee_sha256_raw */
@@ -1004,6 +1005,20 @@ int audit_worm_verified(char *err, size_t errlen, long *head_seq, long *last_ckp
    return worm_head_status(err, errlen, head_seq, last_ckpt_seq);
 }
 
+/* Built at startup, after the chain is admitted, so a damaged store still fails
+ * with its verification error; on a large existing ledger the first build is one
+ * more pass while nothing else writes. A failed build only loses speed: lookups
+ * stay exact without it. */
+static void worm_ensure_lookup_indexes(void)
+{
+   char *emsg = NULL;
+   pthread_mutex_lock(&g_worm_mu);
+   if (g_worm_db && sqlite3_exec(g_worm_db, WORM_LOOKUP_INDEX_SQL, NULL, NULL, &emsg) != SQLITE_OK)
+      fprintf(stderr, "audit_worm: receipt lookup index failed: %s\n", emsg ? emsg : "(nil)");
+   sqlite3_free(emsg);
+   pthread_mutex_unlock(&g_worm_mu);
+}
+
 int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
 {
    /* A newly created store has no evidence to attest yet. Admit that one state
@@ -1022,6 +1037,7 @@ int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *la
       pthread_mutex_lock(&g_worm_mu);
       g_worm_verified = 1;
       pthread_mutex_unlock(&g_worm_mu);
+      worm_ensure_lookup_indexes();
       return 0;
    }
    if (count < 0)
@@ -1049,6 +1065,7 @@ int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *la
     * startup; the only new row is the checkpoint this process just derived from
     * that verified head. Rescanning the whole chain to admit it doubled boot
     * time on a large store (two full passes over 48 GB on the live Server). */
+   worm_ensure_lookup_indexes();
    status = worm_head_status(err, errlen, &head, &ckpt);
    if (head_seq)
       *head_seq = head;
@@ -1319,14 +1336,7 @@ cJSON *audit_worm_read_request_through(const char *principal, const char *reques
    worm_reader_t reader = {0};
    if (worm_reader_open(&reader) != 0)
       goto fail;
-   const char *sql = "SELECT seq,event_id,action,subject,detail,row_hash FROM audit_event "
-                     "WHERE seq<=?3 AND actor_role='host' AND actor_principal=?1 AND action LIKE "
-                     "'memory.provider.%' "
-                     "AND subject IN (SELECT subject FROM audit_event WHERE actor_role='host' AND "
-                     "actor_principal=?1 "
-                     "AND action='memory.provider.prepared' AND json_valid(detail) "
-                     "AND json_extract(detail,'$.binding.request_id')=?2) ORDER BY seq LIMIT 65";
-   if (sqlite3_prepare_v2(reader.db, sql, -1, &q, NULL) != SQLITE_OK)
+   if (sqlite3_prepare_v2(reader.db, WORM_READ_REQUEST_SQL, -1, &q, NULL) != SQLITE_OK)
       goto fail;
    sqlite3_bind_text(q, 1, principal, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(q, 2, request_id, -1, SQLITE_TRANSIENT);
@@ -1431,14 +1441,7 @@ cJSON *audit_worm_memory_requests(const char *principal, const char *from, const
    long first = worm_seq_from(reader.db, from, head);
    if (first < 0)
       goto fail;
-   const char *sql = "SELECT json_extract(detail,'$.binding.request_id') FROM audit_event "
-                     "WHERE seq>=?5 AND seq<=?4 AND actor_role='host' AND actor_principal=?1 "
-                     "AND action='memory.provider.prepared' AND json_valid(detail) "
-                     "AND julianday(json_extract(detail,'$.at'))>=julianday(?2)-1.0/86400 "
-                     "AND julianday(json_extract(detail,'$.at'))<=julianday(?3)+1.0/86400 "
-                     "GROUP BY json_extract(detail,'$.binding.request_id') ORDER BY min(seq) "
-                     "DESC LIMIT 257";
-   if (sqlite3_prepare_v2(reader.db, sql, -1, &q, NULL) != SQLITE_OK)
+   if (sqlite3_prepare_v2(reader.db, WORM_HEALTH_REQUESTS_SQL, -1, &q, NULL) != SQLITE_OK)
       goto fail;
    sqlite3_bind_text(q, 1, principal, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(q, 2, from, -1, SQLITE_TRANSIENT);
@@ -1501,12 +1504,7 @@ cJSON *audit_worm_memory_request_rows(const char *principal, const char *from,
    long first = worm_seq_from(reader.db, from, head);
    if (first < 0)
       goto fail;
-   if (sqlite3_prepare_v2(reader.db,
-                          "SELECT subject, json_extract(detail,'$.binding.request_id') "
-                          "FROM audit_event WHERE seq>=?2 AND seq<=?3 AND actor_role='host' "
-                          "AND actor_principal=?1 AND action='memory.provider.prepared' "
-                          "AND json_valid(detail)",
-                          -1, &q, NULL) != SQLITE_OK)
+   if (sqlite3_prepare_v2(reader.db, WORM_HEALTH_ATTEMPTS_SQL, -1, &q, NULL) != SQLITE_OK)
       goto fail;
    sqlite3_bind_text(q, 1, principal, -1, SQLITE_TRANSIENT);
    sqlite3_bind_int64(q, 2, first);
@@ -1523,11 +1521,7 @@ cJSON *audit_worm_memory_request_rows(const char *principal, const char *from,
       goto fail;
    sqlite3_finalize(q);
    q = NULL;
-   if (sqlite3_prepare_v2(reader.db,
-                          "SELECT seq,event_id,action,subject,detail,row_hash FROM audit_event "
-                          "WHERE seq>=?2 AND seq<=?3 AND actor_role='host' AND actor_principal=?1 "
-                          "AND action LIKE 'memory.provider.%' ORDER BY seq",
-                          -1, &q, NULL) != SQLITE_OK)
+   if (sqlite3_prepare_v2(reader.db, WORM_HEALTH_ROWS_SQL, -1, &q, NULL) != SQLITE_OK)
       goto fail;
    sqlite3_bind_text(q, 1, principal, -1, SQLITE_TRANSIENT);
    sqlite3_bind_int64(q, 2, first);

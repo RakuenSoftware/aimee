@@ -24,6 +24,11 @@
 /* Controlled owner fixture: the production admission remains 500 ms. */
 static int g_receipt_order, g_receipt_source_changed, g_receipt_change_during_owner;
 static int g_receipt_order_plans;
+/* Receipt-inspection owner stub: the producer's interpretation is the memory
+ * module's (aims-db); this checks only what the host hands it and does with the
+ * replay actions it returns. */
+static int g_replay_owner, g_replay_inspections;
+static const char *g_replay_attempt = "00112233445566778899aabbccddeeff";
 static struct timespec g_receipt_admitted;
 int __real_audit_worm_dispatch_owner(char owner[33]);
 int __wrap_audit_worm_dispatch_owner(char owner[33])
@@ -334,6 +339,91 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
       }
       else
          assert(!"unexpected local-last operation");
+      assert(*result);
+      return 1;
+   }
+   if (g_replay_owner && operation)
+   {
+      if (!strcmp(operation, "provider-receipt-plan"))
+      {
+         assert(!strcmp(
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "receipt_retention")),
+             "replayable"));
+         const char *request_id =
+             g_replay_owner == 2 ? "other-provider-request" : "replayable-provider-request";
+         char reply[1024];
+         snprintf(reply, sizeof reply,
+                  "{\"status\":\"ok\",\"attempt_id\":\"%s\",\"at\":\"2026-11-25T00:00:00Z\","
+                  "\"requires_durable_acceptance\":true,\"replay_store\":true,"
+                  "\"prepared_detail\":\"{\\\"binding\\\":{\\\"request_id\\\":\\\"%s\\\"}}\","
+                  "\"admitted_detail\":\"{}\"}",
+                  g_replay_owner == 2 ? "ffeeddccbbaa99887766554433221100" : g_replay_attempt,
+                  request_id);
+         *result = cJSON_Parse(reply);
+      }
+      else if (!strcmp(operation, "provider-receipt-started"))
+         *result = cJSON_Parse("{\"status\":\"ok\",\"observation_detail\":"
+                               "\"{\\\"at\\\":\\\"2026-11-25T00:00:01Z\\\"}\"}");
+      else if (!strcmp(operation, "provider-receipt-inspect"))
+      {
+         ++g_replay_inspections;
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "chain_intact")));
+         assert(!strcmp(
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "receipt_request_id")),
+             "replayable-provider-request"));
+         /* Exactly this request's stages, in order: no other request's rows. */
+         const cJSON *events = cJSON_GetObjectItemCaseSensitive(request, "ledger_events");
+         const char *stages[] = {"memory.provider.prepared", "memory.provider.dispatch_admitted",
+                                 "memory.provider.dispatch_started"};
+         if (!cJSON_GetArraySize(events))
+         {
+            /* Another principal's lookup: nothing of this request reaches it. */
+            *result = cJSON_Parse("{\"status\":\"ok\",\"receipts\":[],\"replay_actions\":[]}");
+            return 1;
+         }
+         assert(cJSON_GetArraySize(events) == 3);
+         for (int i = 0; i < 3; i++)
+         {
+            const cJSON *event = cJSON_GetArrayItem(events, i);
+            assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "action")),
+                           stages[i]));
+            assert(
+                !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "attempt_id")),
+                        g_replay_attempt));
+         }
+         const cJSON *inputs = cJSON_GetObjectItemCaseSensitive(request, "replay_inputs");
+         const cJSON *deleted = cJSON_GetObjectItemCaseSensitive(request, "replay_deleted");
+         int forget = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "forget_replay"));
+         int payload = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "include_payload"));
+         char reply[512];
+         if (!inputs && !deleted)
+            snprintf(reply, sizeof reply,
+                     "{\"status\":\"ok\",\"replay_actions\":[{\"attempt_id\":\"%s\","
+                     "\"action\":\"%s\"}]}",
+                     g_replay_attempt,
+                     forget    ? "delete"
+                     : payload ? "read"
+                               : "none");
+         else if (forget)
+         {
+            assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(deleted, g_replay_attempt)));
+            snprintf(reply, sizeof reply,
+                     "{\"status\":\"ok\",\"receipts\":[{\"replay\":\"unavailable_erased\"}]}");
+         }
+         else
+         {
+            const char *encoded =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(inputs, g_replay_attempt));
+            snprintf(reply, sizeof reply,
+                     "{\"status\":\"ok\",\"receipts\":[{\"replay\":\"%s\","
+                     "\"payload_base64\":\"%s\"}]}",
+                     encoded && *encoded ? "available_exact_payload" : "unavailable",
+                     encoded ? encoded : "");
+         }
+         *result = cJSON_Parse(reply);
+      }
+      else
+         assert(!"unexpected receipt-inspection owner command");
       assert(*result);
       return 1;
    }
@@ -2189,6 +2279,8 @@ static void test_replayable_provider_receipt(void)
    char path[1200];
    snprintf(path, sizeof path, "%s/receipt.db", directory);
    assert(audit_worm_init_at(path) == 0);
+   g_replay_owner = 1;
+   g_replay_inspections = 0;
    request_context_t context = {0};
    context.memory_receipt_required = 1;
    strcpy(context.request_id, "replayable-provider-request");
@@ -2198,39 +2290,60 @@ static void test_replayable_provider_receipt(void)
    char attempt[33];
    assert(ingress_preinject_prepare_attempt(body, sizeof body, "openai_chat", "test", "model",
                                             attempt) == 0);
+   assert(!strcmp(attempt, g_replay_attempt));
    assert(ingress_preinject_started_attempt(attempt) == 0);
    assert(ingress_preinject_started_attempt(attempt) == 0);
    assert(audit_worm_count() == 3);
+   /* Another request by the same principal must not reach this receipt. */
+   g_replay_owner = 2;
+   request_context_t other = context;
+   strcpy(other.request_id, "other-provider-request");
+   request_context_set(&other);
+   char other_attempt[33];
+   assert(ingress_preinject_prepare_attempt(body, sizeof body, "openai_chat", "test", "model",
+                                            other_attempt) == 0);
+   assert(audit_worm_count() == 5);
+   g_replay_owner = 1;
+   request_context_set(&context);
    /* Receipts need a ledger that has passed a full verification, as at startup;
     * they do not re-verify it themselves. */
    assert(!ingress_preinject_receipt_options(context.request_id, 0, 1));
+   assert(g_replay_inspections == 0);
    char verify_error[256];
    assert(audit_worm_verify(verify_error, sizeof verify_error, NULL, NULL) !=
           AUDIT_WORM_VERIFY_RED);
    cJSON *result = ingress_preinject_receipt_options(context.request_id, 0, 1);
    cJSON *receipt = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "receipts"), 0);
-   assert(receipt);
+   assert(receipt && g_replay_inspections == 2);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "replay")),
                   "available_exact_payload"));
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "payload_base64")),
                   "YQBi"));
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "state")),
-                  "outcome_unknown"));
    cJSON_Delete(result);
    char secret[64];
    assert(vault_service_get_server_wrap("uid:1001", "memory-receipts", attempt, secret,
                                         sizeof secret) == VAULT_NO_ENTRY);
+   assert(vault_service_get_server_wrap(context.principal, "memory-receipts", attempt, secret,
+                                        sizeof secret) == VAULT_OK);
+   /* The stored payload belongs to its principal: another caller sees no receipt rows. */
+   request_context_t stranger = context;
+   strcpy(stranger.principal, "uid:1001");
+   request_context_set(&stranger);
+   result = ingress_preinject_receipt_options(context.request_id, 0, 1);
+   assert(result && !cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(result, "receipts")));
+   cJSON_Delete(result);
+   request_context_set(&context);
+   g_replay_inspections = 0;
    result = ingress_preinject_receipt_options(context.request_id, 1, 0);
    receipt = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "receipts"), 0);
-   assert(receipt &&
+   assert(receipt && g_replay_inspections == 2 &&
           !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "replay")),
                   "unavailable_erased"));
-   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
-       cJSON_GetObjectItemCaseSensitive(receipt, "evidence"), "chain_included")));
    cJSON_Delete(result);
    assert(vault_service_get_server_wrap(context.principal, "memory-receipts", attempt, secret,
                                         sizeof secret) == VAULT_NO_ENTRY);
-   assert(audit_worm_count() == 3);
+   assert(audit_worm_count() == 5);
+   g_replay_owner = 0;
    audit_worm_close();
    request_context_clear();
    unsetenv("AIMEE_MEMORY_RECEIPT_RETENTION");
@@ -2242,8 +2355,7 @@ static void test_replayable_provider_receipt(void)
    else
       unsetenv("AIMEE_HOME");
    platform_test_rmrf(directory);
-   puts("encrypted replay roundtrip, principal isolation and payload removal preserve receipt "
-        "inclusion");
+   puts("encrypted replay roundtrip, request and principal isolation and payload removal");
 }
 
 static void test_durable_provider_attempt(void)
@@ -2506,6 +2618,7 @@ int main(int argc, char **argv)
    test_refresh_preserves_fork_ownership();
    test_local_verification_follows_blocking_source_owners();
    test_receipt_admission_follows_blocking_owner();
+   test_replayable_provider_receipt();
    return 0;
 #endif
    if (argc == 2 && !strcmp(argv[1], "--local-last-only"))

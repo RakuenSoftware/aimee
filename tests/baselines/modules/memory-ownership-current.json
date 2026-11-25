@@ -3141,8 +3141,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "bcd160f0f6a7c0dee3aa730da7ea1b9b7dc252edc9e58ecdbe1f0a4d1b4be7b7",
-      "boundary_review": "Receipt test verifies the WORM ledger before inspection, as startup does, and asserts an unverified ledger is refused; test-only, no memory symbol, policy or fallback added.",
+      "sha256": "6d2b609de41b308285109bda321f53fda95c4cea137859ffc849fb6065fd1932",
+      "boundary_review": "Replay receipt test moves to the receipt-order binary CI runs, with a test-only owner stub that asserts the ledger rows, replay inputs and deletions the host hands the memory owner; the owner's interpretation stays tested in aims-db. No memory symbol, policy, route or fallback added.",
       "current_source_revisions": [
         {
           "previous_sha256": "ed7fa4135cc00af89aebaaeec072ca10f07141121101fe0620930c799c471c0e",
@@ -3201,6 +3201,18 @@
           "sha256": "9f08cf07018b67d43668147d1368b34dc6414f7e508137a8108893edb431b52e",
           "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
           "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+        },
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "AIMEE_MEMORY_RECEIPT_RETENTION",
+            "kb_client_memory_assemble_typed_context_requirements_json",
+            "kb_client_memory_scope_context_apply",
+            "kb_client_memory_scope_context_clear",
+            "kb_client_memory_scope_context_set"
+          ],
+          "sha256": "bcd160f0f6a7c0dee3aa730da7ea1b9b7dc252edc9e58ecdbe1f0a4d1b4be7b7",
+          "boundary_review": "Receipt test verifies the WORM ledger before inspection, as startup does, and asserts an unverified ledger is refused; test-only, no memory symbol, policy or fallback added."
         }
       ]
     },
