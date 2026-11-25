@@ -107,6 +107,30 @@ func TestBundledSynthesisProbeRequiresFinalText(t *testing.T) {
 	}
 }
 
+// MiniMax lists "MiniMax-M3" and serves "minimax-m3"; the probe called that
+// configuration unavailable while its execution succeeded.
+func TestProbeMatchesCatalogIgnoringCaseAndReportsSpelling(t *testing.T) {
+	for _, tc := range []struct {
+		model, listedAs string
+		available       bool
+	}{
+		{"MiniMax-M3", "", true},
+		{"minimax-m3", "MiniMax-M3", true},
+		{"M3", "", false},
+	} {
+		m, _, _ := manager(t)
+		p := connection("minimax", "fixture-key")
+		p["provider"], p["endpoint"], p["auth_type"] = "anthropic", "https://api.minimax.io/anthropic", "x-api-key"
+		call(t, m, "provider.save_connection", p)
+		call(t, m, "model.add", object{"args": []string{"mini", "unused", tc.model, "--registration", "minimax"}})
+		m.SetEgress(&fixtureNetwork{replies: []egress.HTTPResponse{response(200, `{"data":[{"id":"MiniMax-M3.1-Flash"},{"id":"MiniMax-M3"}]}`)}})
+		out := call(t, m, "model.probe", object{"args": []string{"mini", "--no-run"}})
+		if boolean(out, "model_available", !tc.available) != tc.available || str(out, "model_listed_as") != tc.listedAs {
+			t.Fatal(tc.model, out)
+		}
+	}
+}
+
 func TestAnthropicProbeUsesVersionedMessagesRoute(t *testing.T) {
 	for _, endpoint := range []string{"https://api.minimax.io/anthropic", "https://api.minimax.io/anthropic/", "https://api.minimax.io/anthropic/v1", "https://api.minimax.io/anthropic/v1/messages"} {
 		t.Run(endpoint, func(t *testing.T) {
