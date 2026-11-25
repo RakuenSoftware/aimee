@@ -29,8 +29,17 @@ func (r VaultResources) Credential(ctx context.Context, op, agent, cred, secret 
 	var result struct {
 		Status string `json:"status"`
 		Value  string `json:"value"`
+		Reason string `json:"reason"`
 	}
-	if json.Unmarshal(reply, &result) != nil || result.Status != "ok" {
+	if json.Unmarshal(reply, &result) != nil {
+		return "", errors.New("credential storage unavailable")
+	}
+	if result.Status != "ok" {
+		// The owner names a known cause (e.g. Codex needs re-authentication);
+		// reporting storage as unavailable sent operators to the wrong place.
+		if result.Reason != "" {
+			return "", errors.New(result.Reason)
+		}
 		return "", errors.New("credential storage unavailable")
 	}
 	return result.Value, nil

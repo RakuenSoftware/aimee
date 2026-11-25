@@ -117,6 +117,23 @@ static void kb_health_add_lines(cJSON *kbo, const char *key, const char *joined)
    }
 }
 
+/* A standalone Server has no KB, and that is a supported deployment: personal
+ * memory is local. Shared-knowledge surfaces then have nothing to read, and
+ * saying "rules backend unavailable" (HTTP 502) read as an outage. Answer with a
+ * typed 503 that names the cause instead; route_json_provider honours the
+ * declared status. NULL when a KB is configured, so the provider proceeds. */
+char *server_kb_required_error(const char *what)
+{
+   if (kb_client_connection_configured())
+      return NULL;
+   char buf[256];
+   snprintf(buf, sizeof buf,
+            "{\"error\":\"%s needs a connected KB, and this Server has none configured\","
+            "\"code\":\"kb_not_configured\",\"http_status\":503}",
+            what);
+   return strdup(buf);
+}
+
 void server_health_add_kb(cJSON *resp)
 {
    if (!resp)

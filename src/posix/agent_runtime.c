@@ -895,7 +895,10 @@ native_provider_http:
    if (agent_resolve_auth_headers(agent, auth_header, sizeof auth_header, extra_headers,
                                   sizeof extra_headers) != 0)
    {
-      snprintf(out->error, sizeof(out->error), "auth resolution failed");
+      /* The resolver names the remedy when it knows one (e.g. Codex needs
+       * re-authentication); a generic phrase sent operators hunting blind. */
+      const char *why = agent_request_auth_error();
+      snprintf(out->error, sizeof(out->error), "%s", why ? why : "auth resolution failed");
       free(assembled_sys);
       aimee_message_free(&assembled_context);
       free(task_instructions);

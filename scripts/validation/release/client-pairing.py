@@ -47,6 +47,7 @@ def main():
     private = args.output.parent.parent / ('private/client-pairing-' + stack.project)
     private.mkdir(mode=0o700, parents=True)
     try:
+        stack.pull_delegate_runtime()
         matrix.command('python3', str(ROOT / 'scripts/compose-vault-init.py'),
             *stack.compose_args(), 'up', env=stack.env)
         for _, reservation in reservations:

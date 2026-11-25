@@ -19,6 +19,7 @@
 #include "aimee_home.h"
 #include <aimee/audit/audit_worm.h>
 #include <aimee/audit/audit_worm_chain.h>
+#include "audit_worm_sql.h"
 #include "cJSON.h"
 #include "dstr.h"
 #include "headers/aimee_sha256.h" /* aimee_sha256_raw */
@@ -31,6 +32,10 @@ static sqlite3 *g_worm_db = NULL;
 static int g_dispatch_lock = -1;
 static pid_t g_dispatch_pid;
 static char g_dispatch_owner[33];
+/* The last full chain verification in this process (at startup, or an explicit
+ * audit verify). Reads that only need to know the ledger has been verified
+ * consult this instead of rescanning the whole chain. Guarded by g_worm_mu. */
+static int g_worm_verified;
 
 /* Tables + append-only WORM triggers. DB-level triggers stop bugs/casual edits;
  * they are NOT the adversarial guarantee (a process with file write access can
@@ -659,8 +664,44 @@ int audit_worm_verify_chain(char *err, size_t errlen)
       pthread_mutex_unlock(&g_worm_mu);
       return -1;
    }
-   int rc = worm_verify_db(g_worm_db, err, errlen);
+   /* Scan on a separate read-only connection, outside g_worm_mu. The store is in
+    * WAL mode, so a reader sees one consistent snapshot while appends continue.
+    * Holding the mutex for the whole scan stalled every audited action and every
+    * checkpoint for the length of the chain: on the live Server (142M rows,
+    * 48 GB) that was ~7 minutes per `aimee audit verify`, with checkpoints
+    * queueing behind it. The scan itself stays complete -- the prefix is never
+    * trusted from a cache, since detecting a rewritten old row is the point. */
+   char path[4096] = "";
+   const char *name = sqlite3_db_filename(g_worm_db, "main");
+   if (name && name[0])
+      snprintf(path, sizeof path, "%s", name);
    pthread_mutex_unlock(&g_worm_mu);
+   if (!path[0])
+   {
+      /* In-memory or unnamed store: no second connection can see it. */
+      pthread_mutex_lock(&g_worm_mu);
+      int locked_rc = worm_verify_db(g_worm_db, err, errlen);
+      pthread_mutex_unlock(&g_worm_mu);
+      return locked_rc;
+   }
+   sqlite3 *reader = NULL;
+   if (sqlite3_open_v2(path, &reader, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK)
+   {
+      if (err)
+         snprintf(err, errlen, "cannot open the WORM store read-only for verification");
+      if (reader)
+         sqlite3_close(reader);
+      return -1;
+   }
+   sqlite3_busy_timeout(reader, 5000);
+   /* One read transaction, so the whole scan sees a single snapshot. */
+   int rc = sqlite3_exec(reader, "BEGIN", NULL, NULL, NULL) == SQLITE_OK
+                ? worm_verify_db(reader, err, errlen)
+                : -1;
+   if (rc != 0 && err && !err[0])
+      snprintf(err, errlen, "cannot start a read transaction for verification");
+   sqlite3_exec(reader, "COMMIT", NULL, NULL, NULL);
+   sqlite3_close(reader);
    return rc;
 }
 
@@ -892,18 +933,21 @@ done:
  * tail" signal. Returns AUDIT_WORM_VERIFY_GREEN (fully attested), _AMBER (chain
  * intact but head is beyond the newest checkpoint), or _RED (a break). head_seq /
  * last_ckpt_seq are filled when non-NULL. */
-int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
+/* Head and newest checkpoint, and the GREEN/AMBER/RED verdict they imply, WITHOUT
+ * rescanning the chain. Callers that have just verified the chain use it. */
+static int worm_head_status(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
 {
-   if (audit_worm_verify_chain(err, errlen) != 0)
-      return AUDIT_WORM_VERIFY_RED;
    long head = 0, ckpt = 0;
    int query_ok = 0;
    pthread_mutex_lock(&g_worm_mu);
    sqlite3_stmt *q = NULL;
    if (sqlite3_prepare_v2(g_worm_db,
-                          "SELECT COALESCE(MAX(seq),0),"
-                          " COALESCE(MAX(CASE WHEN action='chain.checkpoint' THEN seq END),0)"
-                          " FROM audit_event",
+                          /* seq is the rowid: the max is one lookup, and the
+                           * newest checkpoint is found walking back from the head
+                           * instead of aggregating every row. */
+                          "SELECT COALESCE((SELECT MAX(seq) FROM audit_event),0),"
+                          " COALESCE((SELECT seq FROM audit_event WHERE action='chain.checkpoint'"
+                          " ORDER BY seq DESC LIMIT 1),0)",
                           -1, &q, NULL) == SQLITE_OK &&
        sqlite3_step(q) == SQLITE_ROW)
    {
@@ -934,6 +978,47 @@ int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_
    return (ckpt >= head) ? AUDIT_WORM_VERIFY_GREEN : AUDIT_WORM_VERIFY_AMBER;
 }
 
+int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
+{
+   int intact = audit_worm_verify_chain(err, errlen) == 0;
+   pthread_mutex_lock(&g_worm_mu);
+   g_worm_verified = intact;
+   pthread_mutex_unlock(&g_worm_mu);
+   if (!intact)
+      return AUDIT_WORM_VERIFY_RED;
+   return worm_head_status(err, errlen, head_seq, last_ckpt_seq);
+}
+
+int audit_worm_verified(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   pthread_mutex_lock(&g_worm_mu);
+   int verified = g_worm_db && g_worm_verified;
+   pthread_mutex_unlock(&g_worm_mu);
+   if (!verified)
+   {
+      if (err && errlen)
+         snprintf(err, errlen, "the WORM ledger has not passed a full verification");
+      return AUDIT_WORM_VERIFY_RED;
+   }
+   return worm_head_status(err, errlen, head_seq, last_ckpt_seq);
+}
+
+/* Built at startup, after the chain is admitted, so a damaged store still fails
+ * with its verification error; on a large existing ledger the first build is one
+ * more pass while nothing else writes. A failed build only loses speed: lookups
+ * stay exact without it. */
+static void worm_ensure_lookup_indexes(void)
+{
+   char *emsg = NULL;
+   pthread_mutex_lock(&g_worm_mu);
+   if (g_worm_db && sqlite3_exec(g_worm_db, WORM_LOOKUP_INDEX_SQL, NULL, NULL, &emsg) != SQLITE_OK)
+      fprintf(stderr, "audit_worm: receipt lookup index failed: %s\n", emsg ? emsg : "(nil)");
+   sqlite3_free(emsg);
+   pthread_mutex_unlock(&g_worm_mu);
+}
+
 int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
 {
    /* A newly created store has no evidence to attest yet. Admit that one state
@@ -947,6 +1032,12 @@ int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *la
          *head_seq = 0;
       if (last_ckpt_seq)
          *last_ckpt_seq = 0;
+      /* An empty chain is intact; every later row is appended by this process
+       * on the chain it maintains, exactly as after a full startup verify. */
+      pthread_mutex_lock(&g_worm_mu);
+      g_worm_verified = 1;
+      pthread_mutex_unlock(&g_worm_mu);
+      worm_ensure_lookup_indexes();
       return 0;
    }
    if (count < 0)
@@ -970,7 +1061,12 @@ int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *la
       return -1;
    }
 
-   status = audit_worm_verify(err, errlen, &head, &ckpt);
+   /* The chain was verified in full above, and nothing else writes during
+    * startup; the only new row is the checkpoint this process just derived from
+    * that verified head. Rescanning the whole chain to admit it doubled boot
+    * time on a large store (two full passes over 48 GB on the live Server). */
+   worm_ensure_lookup_indexes();
+   status = worm_head_status(err, errlen, &head, &ckpt);
    if (head_seq)
       *head_seq = head;
    if (last_ckpt_seq)
@@ -1118,6 +1214,7 @@ void audit_worm_close(void)
       close(g_dispatch_lock);
    g_dispatch_lock = -1;
    g_dispatch_owner[0] = '\0';
+   g_worm_verified = 0;
    if (g_worm_db)
    {
       sqlite3_close(g_worm_db);
@@ -1172,6 +1269,57 @@ done:
    return rc;
 }
 
+/* A read-only connection for a bounded read, so a scan never holds g_worm_mu and
+ * stalls appends (the store is WAL: the reader sees one consistent snapshot). An
+ * unnamed in-memory store has no second connection; its shared handle is used
+ * with g_worm_mu held instead. */
+typedef struct
+{
+   sqlite3 *db;
+   int locked;
+} worm_reader_t;
+
+static int worm_reader_open(worm_reader_t *reader)
+{
+   reader->db = NULL;
+   reader->locked = 0;
+   char path[4096] = "";
+   pthread_mutex_lock(&g_worm_mu);
+   if (!g_worm_db && worm_open_locked_default() != 0)
+   {
+      pthread_mutex_unlock(&g_worm_mu);
+      return -1;
+   }
+   const char *name = sqlite3_db_filename(g_worm_db, "main");
+   if (!name || !name[0])
+   {
+      reader->db = g_worm_db;
+      reader->locked = 1;
+      return 0;
+   }
+   snprintf(path, sizeof path, "%s", name);
+   pthread_mutex_unlock(&g_worm_mu);
+   if (sqlite3_open_v2(path, &reader->db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK)
+   {
+      if (reader->db)
+         sqlite3_close(reader->db);
+      reader->db = NULL;
+      return -1;
+   }
+   sqlite3_busy_timeout(reader->db, 5000);
+   return 0;
+}
+
+static void worm_reader_close(worm_reader_t *reader)
+{
+   if (reader->locked)
+      pthread_mutex_unlock(&g_worm_mu);
+   else if (reader->db)
+      sqlite3_close(reader->db);
+   reader->db = NULL;
+   reader->locked = 0;
+}
+
 /* Exact principal + request binding, including every recorded stage for the
  * matching attempts. Fail on truncation: an omitted admission cannot imply an
  * unsent attempt. Raw detail interpretation belongs to the producer's Go owner. */
@@ -1185,17 +1333,10 @@ cJSON *audit_worm_read_request_through(const char *principal, const char *reques
    int rc = SQLITE_ERROR;
    size_t bytes = 0;
    int rows = 0;
-   pthread_mutex_lock(&g_worm_mu);
-   if (!g_worm_db && worm_open_locked_default() != 0)
+   worm_reader_t reader = {0};
+   if (worm_reader_open(&reader) != 0)
       goto fail;
-   const char *sql = "SELECT seq,event_id,action,subject,detail,row_hash FROM audit_event "
-                     "WHERE seq<=?3 AND actor_role='host' AND actor_principal=?1 AND action LIKE "
-                     "'memory.provider.%' "
-                     "AND subject IN (SELECT subject FROM audit_event WHERE actor_role='host' AND "
-                     "actor_principal=?1 "
-                     "AND action='memory.provider.prepared' AND json_valid(detail) "
-                     "AND json_extract(detail,'$.binding.request_id')=?2) ORDER BY seq LIMIT 65";
-   if (sqlite3_prepare_v2(g_worm_db, sql, -1, &q, NULL) != SQLITE_OK)
+   if (sqlite3_prepare_v2(reader.db, WORM_READ_REQUEST_SQL, -1, &q, NULL) != SQLITE_OK)
       goto fail;
    sqlite3_bind_text(q, 1, principal, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(q, 2, request_id, -1, SQLITE_TRANSIENT);
@@ -1220,11 +1361,11 @@ cJSON *audit_worm_read_request_through(const char *principal, const char *reques
    if (rc != SQLITE_DONE)
       goto fail;
    sqlite3_finalize(q);
-   pthread_mutex_unlock(&g_worm_mu);
+   worm_reader_close(&reader);
    return out;
 fail:
    sqlite3_finalize(q);
-   pthread_mutex_unlock(&g_worm_mu);
+   worm_reader_close(&reader);
    cJSON_Delete(out);
    return NULL;
 }
@@ -1233,6 +1374,53 @@ fail:
 cJSON *audit_worm_read_request(const char *principal, const char *request_id)
 {
    return audit_worm_read_request_through(principal, request_id, LONG_MAX);
+}
+
+/* The first seq at or after `from`, less an hour of slack for clock steps. seq is
+ * the rowid and rows are appended in time order, so a binary search costs a few
+ * dozen rowid lookups where a ts filter would scan the whole ledger. Returns
+ * head + 1 when no row is that new and -1 for an unreadable time. */
+static long worm_seq_from(sqlite3 *db, const char *from, long head)
+{
+   sqlite3_stmt *q = NULL;
+   long lo = 1, hi = head + 1;
+   if (sqlite3_prepare_v2(db, "SELECT julianday(?1)", -1, &q, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(q, 1, from, -1, SQLITE_TRANSIENT);
+   int valid = sqlite3_step(q) == SQLITE_ROW && sqlite3_column_type(q, 0) != SQLITE_NULL;
+   sqlite3_finalize(q);
+   if (!valid)
+      return -1;
+   if (sqlite3_prepare_v2(db,
+                          "SELECT seq, julianday(ts) >= julianday(?1) - 1.0/24 FROM audit_event "
+                          "WHERE seq >= ?2 ORDER BY seq LIMIT 1",
+                          -1, &q, NULL) != SQLITE_OK)
+      return -1;
+   while (lo < hi)
+   {
+      long mid = lo + (hi - lo) / 2;
+      sqlite3_reset(q);
+      sqlite3_bind_text(q, 1, from, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64(q, 2, mid);
+      int rc = sqlite3_step(q);
+      if (rc == SQLITE_DONE)
+      {
+         hi = mid;
+         continue;
+      }
+      if (rc != SQLITE_ROW)
+      {
+         sqlite3_finalize(q);
+         return -1;
+      }
+      long seq = (long)sqlite3_column_int64(q, 0);
+      if (seq > head || sqlite3_column_int(q, 1))
+         hi = mid;
+      else
+         lo = seq + 1;
+   }
+   sqlite3_finalize(q);
+   return lo;
 }
 
 cJSON *audit_worm_memory_requests(const char *principal, const char *from, const char *until,
@@ -1244,22 +1432,22 @@ cJSON *audit_worm_memory_requests(const char *principal, const char *from, const
    cJSON *out = cJSON_CreateArray();
    sqlite3_stmt *q = NULL;
    int rc = SQLITE_ERROR;
-   pthread_mutex_lock(&g_worm_mu);
-   if (!g_worm_db && worm_open_locked_default() != 0)
+   worm_reader_t reader;
+   if (worm_reader_open(&reader) != 0)
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
+   long first = worm_seq_from(reader.db, from, head);
+   if (first < 0)
       goto fail;
-   const char *sql = "SELECT json_extract(detail,'$.binding.request_id') FROM audit_event "
-                     "WHERE seq<=?4 AND actor_role='host' AND actor_principal=?1 "
-                     "AND action='memory.provider.prepared' AND json_valid(detail) "
-                     "AND julianday(json_extract(detail,'$.at'))>=julianday(?2)-1.0/86400 "
-                     "AND julianday(json_extract(detail,'$.at'))<=julianday(?3)+1.0/86400 "
-                     "GROUP BY json_extract(detail,'$.binding.request_id') ORDER BY min(seq) "
-                     "DESC LIMIT 257";
-   if (sqlite3_prepare_v2(g_worm_db, sql, -1, &q, NULL) != SQLITE_OK)
+   if (sqlite3_prepare_v2(reader.db, WORM_HEALTH_REQUESTS_SQL, -1, &q, NULL) != SQLITE_OK)
       goto fail;
    sqlite3_bind_text(q, 1, principal, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(q, 2, from, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(q, 3, until, -1, SQLITE_TRANSIENT);
    sqlite3_bind_int64(q, 4, head);
+   sqlite3_bind_int64(q, 5, first);
    while ((rc = sqlite3_step(q)) == SQLITE_ROW)
    {
       if (cJSON_GetArraySize(out) == 256)
@@ -1275,11 +1463,110 @@ cJSON *audit_worm_memory_requests(const char *principal, const char *from, const
    if (rc != SQLITE_DONE && !*truncated)
       goto fail;
    sqlite3_finalize(q);
-   pthread_mutex_unlock(&g_worm_mu);
+   worm_reader_close(&reader);
    return out;
 fail:
    sqlite3_finalize(q);
-   pthread_mutex_unlock(&g_worm_mu);
+   worm_reader_close(&reader);
+   cJSON_Delete(out);
+   return NULL;
+}
+
+/* Two passes over the same bounded window: the attempts (subjects) prepared for
+ * each selected request, then every memory.provider.* row of those attempts.
+ * Per request the limits match audit_worm_read_request_through. */
+cJSON *audit_worm_memory_request_rows(const char *principal, const char *from,
+                                      const cJSON *request_ids, long head)
+{
+   int count = cJSON_GetArraySize(request_ids);
+   if (!principal || !*principal || !from || !cJSON_IsArray(request_ids) || count > 256 ||
+       head <= 0)
+      return NULL;
+   cJSON *out = cJSON_CreateObject(), *wanted = cJSON_CreateObject(),
+         *attempts = cJSON_CreateObject();
+   int rows[256] = {0};
+   size_t bytes[256] = {0};
+   sqlite3_stmt *q = NULL;
+   int rc = SQLITE_ERROR;
+   worm_reader_t reader = {0};
+   if (!out || !wanted || !attempts)
+      goto fail;
+   for (int i = 0; i < count; i++)
+   {
+      const char *id = cJSON_GetStringValue(cJSON_GetArrayItem(request_ids, i));
+      if (!id || !*id || cJSON_GetObjectItemCaseSensitive(wanted, id))
+         goto fail;
+      cJSON_AddNumberToObject(wanted, id, i);
+      cJSON_AddItemToObject(out, id, cJSON_CreateArray());
+   }
+   if (worm_reader_open(&reader) != 0)
+      goto fail;
+   long first = worm_seq_from(reader.db, from, head);
+   if (first < 0)
+      goto fail;
+   if (sqlite3_prepare_v2(reader.db, WORM_HEALTH_ATTEMPTS_SQL, -1, &q, NULL) != SQLITE_OK)
+      goto fail;
+   sqlite3_bind_text(q, 1, principal, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int64(q, 2, first);
+   sqlite3_bind_int64(q, 3, head);
+   while ((rc = sqlite3_step(q)) == SQLITE_ROW)
+   {
+      const char *subject = (const char *)sqlite3_column_text(q, 0);
+      const char *id = (const char *)sqlite3_column_text(q, 1);
+      const cJSON *index = id ? cJSON_GetObjectItemCaseSensitive(wanted, id) : NULL;
+      if (subject && index && !cJSON_GetObjectItemCaseSensitive(attempts, subject))
+         cJSON_AddNumberToObject(attempts, subject, index->valuedouble);
+   }
+   if (rc != SQLITE_DONE)
+      goto fail;
+   sqlite3_finalize(q);
+   q = NULL;
+   if (sqlite3_prepare_v2(reader.db, WORM_HEALTH_ROWS_SQL, -1, &q, NULL) != SQLITE_OK)
+      goto fail;
+   sqlite3_bind_text(q, 1, principal, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int64(q, 2, first);
+   sqlite3_bind_int64(q, 3, head);
+   while ((rc = sqlite3_step(q)) == SQLITE_ROW)
+   {
+      const char *subject = (const char *)sqlite3_column_text(q, 3);
+      const cJSON *index = subject ? cJSON_GetObjectItemCaseSensitive(attempts, subject) : NULL;
+      if (!index)
+         continue;
+      int i = (int)index->valuedouble;
+      const char *id = cJSON_GetStringValue(cJSON_GetArrayItem(request_ids, i));
+      cJSON *list = cJSON_GetObjectItemCaseSensitive(out, id);
+      if (!cJSON_IsArray(list))
+         continue; /* already over its limit */
+      bytes[i] += (size_t)sqlite3_column_bytes(q, 4);
+      if (++rows[i] > 64 || bytes[i] > 196608)
+      {
+         cJSON_ReplaceItemInObjectCaseSensitive(out, id, cJSON_CreateNull());
+         continue;
+      }
+      cJSON *row = cJSON_CreateObject();
+      char seq[32];
+      snprintf(seq, sizeof seq, "%lld", (long long)sqlite3_column_int64(q, 0));
+      cJSON_AddStringToObject(row, "sequence", seq);
+      const char *names[] = {"event_id", "action", "attempt_id", "detail", "row_hash"};
+      for (int c = 0; c < 5; c++)
+      {
+         const char *v = (const char *)sqlite3_column_text(q, c + 1);
+         cJSON_AddStringToObject(row, names[c], v ? v : "");
+      }
+      cJSON_AddItemToArray(list, row);
+   }
+   if (rc != SQLITE_DONE)
+      goto fail;
+   sqlite3_finalize(q);
+   worm_reader_close(&reader);
+   cJSON_Delete(wanted);
+   cJSON_Delete(attempts);
+   return out;
+fail:
+   sqlite3_finalize(q);
+   worm_reader_close(&reader);
+   cJSON_Delete(wanted);
+   cJSON_Delete(attempts);
    cJSON_Delete(out);
    return NULL;
 }

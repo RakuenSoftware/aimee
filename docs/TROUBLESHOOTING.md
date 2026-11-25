@@ -53,6 +53,17 @@ git -C <path> status
 git -C <path> worktree remove <path>
 ```
 
+## Server startup is slow, or slower once after an upgrade
+
+At every start the server verifies the whole audit (WORM) ledger before it serves requests, so
+startup time grows with the ledger: about 7 minutes for a 48 GB, 143M-row ledger. The first start
+after upgrading to a release with receipt lookup indexes also builds two small indexes over the
+ledger's memory-provider rows, which takes one more pass over the ledger. Later starts skip it.
+
+If the index build fails, for example on a full disk, the server logs
+`audit_worm: receipt lookup index failed` and starts anyway. Receipt inspection still returns exact
+results without the indexes, but each lookup then reads the whole ledger. Free space and restart.
+
 ## KB is unavailable
 
 Check `AIMEE_KB_API_URL`, service bearer, TLS, KB health, PostgreSQL readiness, extensions, disk, and

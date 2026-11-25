@@ -23,7 +23,7 @@
       "files": [
         {
           "path": "docs/gen/configuration.md",
-          "sha256": "41c6b697e43934fef60a53c79a43f099d1f99dcdfa522c6c9d86713d93b4976e"
+          "sha256": "9930c0c06320f91ebd38f5a0d79b67371fd9ef0d7739960368c32071243508a0"
         }
       ]
     },
@@ -567,7 +567,7 @@
         },
         {
           "path": "src/headers/cli_client.h",
-          "sha256": "8f99fb932d68ccccd3ad2aeae96eaf249f6c1d64219088dc0f0a3363115f828a"
+          "sha256": "30280e310cd58b80239565efbc81a0ad7cf383106596844353d9a2699ca2c1f8"
         },
         {
           "path": "src/headers/cli_code_audit.h",
@@ -1515,7 +1515,7 @@
         },
         {
           "path": "src/headers/server_internal.h",
-          "sha256": "6d11ac3a31a1bd0a175bafe2205b9ffbd0221e248c7b78b8020260043fafcaf8"
+          "sha256": "d5ed8d48c3dabb3b0d0390dc53a61fb2e557399e7148c5dd50ab0afa27c5c82f"
         },
         {
           "path": "src/headers/server_kb_heartbeat.h",
@@ -1843,7 +1843,7 @@
         },
         {
           "path": "src/modules/audit/include/aimee/audit/audit_worm.h",
-          "sha256": "dd1f36d63e59467a2beae0be747dacde1257d4bb4043245be39a65b8fde7f0d8"
+          "sha256": "ae3100b8ca90bd503b044a0fccd1e4cdf96d3d6f0740b3fb06cf7e837f05e421"
         },
         {
           "path": "src/modules/audit/include/aimee/audit/audit_worm_chain.h",
@@ -2156,7 +2156,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "358d2c13231b68cd81eedcbd3dd302b414e26b27c4a823d4ec51a646e00bdb95",
+      "sha256": "28049e2e32732bd768728af38e33b87de466fca46177437562dc615c8a404b5c",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

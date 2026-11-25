@@ -825,6 +825,25 @@ func TestHandleChatAttachProxiesV1(t *testing.T) {
 	}
 }
 
+// A refused attach must tell the browser why. It used to answer every refusal
+// with 502 "attach refused", which is how a pre-upgrade tab's owner mismatch
+// went unseen while its agent picker sat disabled.
+func TestHandleChatAttachForwardsServerRefusal(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/sessions/web1/attach", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"error":"browser session owner mismatch"}`)
+	})
+	s := &server{cfg: startFakeV1(t, mux)}
+	rr := httptest.NewRecorder()
+	s.handleChatAttach(rr, asUser(httptest.NewRequest(http.MethodPost, "/api/chat/attach", strings.NewReader(`{"sid":"web1"}`)), "alice"))
+	waitFakeV1(t)
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "browser session owner mismatch") {
+		t.Fatalf("refusal not forwarded: code=%d body=%q", rr.Code, rr.Body.String())
+	}
+}
+
 func TestHandleChatAttachRequiresSid(t *testing.T) {
 	s := &server{cfg: &config{}}
 	rr := httptest.NewRecorder()

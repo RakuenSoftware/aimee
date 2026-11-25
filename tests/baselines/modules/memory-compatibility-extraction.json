@@ -84,8 +84,8 @@
     {
       "target": "unit-test-ingress-preinject",
       "source": "src/tests/test_ingress_preinject.c",
-      "sha256": "9f08cf07018b67d43668147d1368b34dc6414f7e508137a8108893edb431b52e",
-      "assert_calls": 326,
+      "sha256": "6d2b609de41b308285109bda321f53fda95c4cea137859ffc849fb6065fd1932",
+      "assert_calls": 332,
       "test_functions": [
         "test_task_context_mode_and_first_turn_gate",
         "test_recall_unavailable_is_counted_apart_from_empty",
@@ -243,18 +243,65 @@
             "sha256": "6734b11c39689d0900caef61d6dea57abae1ecd9001152e584c055c8060c4878",
             "meaning": "Exact pre-merge source is retained in Git; current fixture follows current canonical/ring interfaces and explicit retired API exclusions."
           }
+        },
+        {
+          "target": "unit-test-ingress-preinject",
+          "source": "src/tests/test_ingress_preinject.c",
+          "sha256": "bcd160f0f6a7c0dee3aa730da7ea1b9b7dc252edc9e58ecdbe1f0a4d1b4be7b7",
+          "assert_calls": 328,
+          "test_functions": [
+            "test_task_context_mode_and_first_turn_gate",
+            "test_recall_unavailable_is_counted_apart_from_empty",
+            "test_unavailable_task_context_retries_after_recovery",
+            "test_apply",
+            "test_append",
+            "test_budgeted_build_uses_memory_previews",
+            "test_default_temporal_context_injection",
+            "test_native_task_requirements_transport_and_turn_isolation",
+            "test_turn_id_mint_and_thread_local",
+            "test_compress_code_fold",
+            "test_fact_command_failures",
+            "test_go_owner_unavailable",
+            "test_go_assembly_full_ids_and_integrity",
+            "test_scope_cleanup_on_failed_event_id",
+            "test_small_budget_does_not_retrieve_or_claim",
+            "test_evidence_matches_accepted_envelope",
+            "test_fact_evidence_after_integrity_and_packing",
+            "test_typed_evidence_after_integrity_and_packing",
+            "test_required_assembly_refusal_reaches_dispatch",
+            "test_configured_test_history_at_provider_fence",
+            "test_native_source_request_handoff",
+            "test_default_primary_grade_only_context",
+            "test_source_revalidation_at_provider_fence",
+            "test_preview_sources_at_provider_fence",
+            "test_unversioned_provider_body_receipt",
+            "test_replayable_provider_receipt",
+            "test_durable_provider_attempt",
+            "test_native_private_source_transport",
+            "test_send_guard_completion_retries",
+            "test_ingress_host_session_binding",
+            "test_execution_grade_plan_scheduling"
+          ],
+          "source_update": "Additive null-context timeout transport test stub; original test source bytes and all assertions retained. Explicit compatible-fixture test qualified separately.",
+          "merge_review": "Retain the added execution-grade plan-scheduling regression and existing native-source transport assertions; remove only a retired config-render helper.",
+          "retired_test_functions_in_this_revision": [],
+          "pre_merge_reference": {
+            "commit": "01b6cd29b41d061bbf535c868ff07c47b8d4d0fd",
+            "path": "src/tests/test_ingress_preinject.c",
+            "sha256": "6734b11c39689d0900caef61d6dea57abae1ecd9001152e584c055c8060c4878",
+            "meaning": "Exact pre-merge source is retained in Git; current fixture follows current canonical/ring interfaces and explicit retired API exclusions."
+          },
+          "format_review": "clang-format 19 only; assertion count and exact test-function sequence unchanged."
         }
       ],
-      "source_update": "Additive null-context timeout transport test stub; original test source bytes and all assertions retained. Explicit compatible-fixture test qualified separately.",
-      "merge_review": "Retain the added execution-grade plan-scheduling regression and existing native-source transport assertions; remove only a retired config-render helper.",
+      "source_update": "test_replayable_provider_receipt now runs in the receipt-order binary CI runs, against a test-only owner stub that asserts the exact ledger rows, replay inputs and deletions the host sends; it adds request and principal isolation cases (+4 assertions in that function). The function stays in this compatibility binary's sequence too.",
       "retired_test_functions_in_this_revision": [],
       "pre_merge_reference": {
         "commit": "01b6cd29b41d061bbf535c868ff07c47b8d4d0fd",
         "path": "src/tests/test_ingress_preinject.c",
         "sha256": "6734b11c39689d0900caef61d6dea57abae1ecd9001152e584c055c8060c4878",
         "meaning": "Exact pre-merge source is retained in Git; current fixture follows current canonical/ring interfaces and explicit retired API exclusions."
-      },
-      "format_review": "clang-format 19 only; assertion count and exact test-function sequence unchanged."
+      }
     },
     {
       "target": "unit-test-ir-module-plan",
