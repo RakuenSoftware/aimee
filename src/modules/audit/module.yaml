@@ -46,6 +46,7 @@
     "server-go/modules/audit/action_test.go"
   ],
   "private_headers": [
+    "src/modules/audit/audit_worm_sql.h",
     "src/modules/audit/obs_bus_call.h"
   ]
 }

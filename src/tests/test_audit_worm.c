@@ -15,6 +15,7 @@
 #include <sys/statvfs.h>
 
 #include <aimee/audit/audit_worm.h>
+#include "../modules/audit/audit_worm_sql.h"
 #include "cJSON.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
@@ -670,6 +671,79 @@ static void test_fresh_store_startup_admits_verified_gate(void)
    puts("  test_fresh_store_startup_admits_verified_gate: ok");
 }
 
+/* Receipt inspection has no time window: its lookup must reach the request's
+ * rows through the startup-built indexes, never by scanning the ledger. */
+static void plan_text(sqlite3 *db, const char *statement, char *out, size_t cap)
+{
+   char sql[2048];
+   snprintf(sql, sizeof sql, "EXPLAIN QUERY PLAN %s", statement);
+   sqlite3_stmt *q = NULL;
+   assert(sqlite3_prepare_v2(db, sql, -1, &q, NULL) == SQLITE_OK);
+   out[0] = '\0';
+   while (sqlite3_step(q) == SQLITE_ROW)
+   {
+      const char *line = (const char *)sqlite3_column_text(q, 3);
+      size_t used = strlen(out);
+      snprintf(out + used, cap - used, "%s\n", line ? line : "");
+   }
+   sqlite3_finalize(q);
+}
+
+static void test_receipt_lookup_uses_indexes(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/receipt-lookup.db", g_dir);
+   assert(audit_worm_init_at(path) == 0);
+   for (int i = 0; i < 50; i++)
+      assert(audit_worm_append("system", "fixture", "test.filler", "fixture", "ok", "{}") == 0);
+   assert(audit_worm_append("host", "alice", "memory.provider.prepared", "attempt-a", "record",
+                            "{\"binding\":{\"request_id\":\"req-1\"}}") == 0);
+   assert(audit_worm_append("host", "alice", "memory.provider.prepared", "attempt-b", "record",
+                            "{\"binding\":{\"request_id\":\"req-2\"}}") == 0);
+   char err[256];
+   assert(audit_worm_startup_verify(err, sizeof err, NULL, NULL) == 0);
+   /* Appends after the build: a malformed detail must not fail through the index. */
+   assert(audit_worm_append("host", "alice", "memory.provider.dispatch_started", "attempt-a",
+                            "record", "{}") == 0);
+   assert(audit_worm_append("host", "alice", "memory.provider.prepared", "attempt-c", "record",
+                            "not json") == 0);
+   cJSON *rows = audit_worm_read_request("alice", "req-1");
+   assert(rows && cJSON_GetArraySize(rows) == 2);
+   assert(!strcmp(cJSON_GetStringValue(
+                      cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 1), "action")),
+                  "memory.provider.dispatch_started"));
+   cJSON_Delete(rows);
+   rows = audit_worm_read_request("bob", "req-1");
+   assert(rows && cJSON_GetArraySize(rows) == 0);
+   cJSON_Delete(rows);
+   audit_worm_close();
+
+   sqlite3 *raw = NULL;
+   assert(sqlite3_open_v2(path, &raw, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK);
+   char plan[2048];
+   plan_text(raw, WORM_READ_REQUEST_SQL, plan, sizeof plan);
+   if (!strstr(plan, "audit_event_memory_request") || !strstr(plan, "audit_event_memory_attempt"))
+   {
+      fprintf(stderr, "receipt lookup plan:\n%s", plan);
+      assert(!"receipt lookup does not use its indexes");
+   }
+   /* Health stays on its seq window rather than the principal's whole history. */
+   const char *health[] = {WORM_HEALTH_REQUESTS_SQL, WORM_HEALTH_ATTEMPTS_SQL,
+                           WORM_HEALTH_ROWS_SQL};
+   for (size_t i = 0; i < sizeof health / sizeof health[0]; i++)
+   {
+      plan_text(raw, health[i], plan, sizeof plan);
+      if (!strstr(plan, "USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)") ||
+          strstr(plan, "USING INDEX"))
+      {
+         fprintf(stderr, "health window plan:\n%s", plan);
+         assert(!"health window read leaves its seq range");
+      }
+   }
+   sqlite3_close(raw);
+   puts("  test_receipt_lookup_uses_indexes: ok");
+}
+
 /* Reproduce the production symptom: an allocated table page contains zeros.
  * Do not rehash, truncate, or silently admit the unreadable ledger. */
 static void test_zeroed_table_page_rejects_startup(void)
@@ -961,6 +1035,7 @@ int main(int argc, char **argv)
    test_health_snapshot_scope_and_bounds();
    test_health_verified_gate_and_request_rows();
    test_fresh_store_startup_admits_verified_gate();
+   test_receipt_lookup_uses_indexes();
    test_dispatch_owner_crash();
    test_cross_engine_vector();
    test_metric_snapshot();
