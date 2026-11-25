@@ -157,6 +157,7 @@
     "server-go/modules/aimee/families/session_ir_history_live_test.go",
     "server-go/modules/aimee/families/session_ir_running_history_test.go",
     "server-go/modules/aimee/families/session_ir_rejected_admission_test.go",
+    "server-go/modules/aimee/families/sum_cast_test.go",
     "server-go/modules/aimee/families/session_ir_live_test.go",
     "server-go/modules/aimee/families/session_ir_test.go",
     "server-go/modules/aimee/families/session_ir_delayed_terminal_order_test.go",
