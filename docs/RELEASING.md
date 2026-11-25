@@ -2,8 +2,8 @@
 
 A release happens when a human approves one. Merging to `main` proposes a version and stops.
 The latest published application release is
-[1.0.2](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.2); `testing` holds the next
-one, **1.1.0**.
+[1.1.0](https://github.com/RakuenSoftware/aimee/releases/tag/v1.1.0); `testing` holds the next
+one, **1.1.1**.
 
 The automatic 0.2.196 publication exposed why a promotion merge needs a separate release decision.
 It remains marked prerelease. The later **0.3.0 was an intended public release**, published on
@@ -32,7 +32,7 @@ Nothing before `tag` has an effect, so rejecting leaves no tag and no artifacts.
 because another release can land while a run sits in the queue.
 
 Synthesis promotion reads `dependencies/synthesis-images.lock.json`: immutable digests,
-content tags and the source commit that produced them. Both 1.1.0 synthesis artifacts
+content tags and the source commit that produced them. Both 1.1 synthesis artifacts
 are the b10219 images exercised by release validation. CI verifies the source-derived
 tag and its registry digest before promotion; missing or moved manifests fail closed.
 The later SIGCHLD wrapper change and Dockerfile comment edits are queued for the next
@@ -121,12 +121,13 @@ Two consequences for a release:
 
 A tag may exist without a successful release. The [0.2.196 entry](https://github.com/RakuenSoftware/aimee/releases/tag/v0.2.196)
 is a prerelease; [0.3.0](https://github.com/RakuenSoftware/aimee/releases/tag/v0.3.0) is an intended
-public release. Published 0.4 releases continue through 0.4.6, and 1.0 releases through 1.0.2.
+public release. Published 0.4 releases continue through 0.4.6, 1.0 releases through 1.0.2, and
+1.1 releases begin with 1.1.0.
 
 Read the release entry, draft/prerelease flags and artifact status to establish what shipped.
 Run `scripts/next-release-version.sh /tmp/aimee-next-version.txt` with freshly fetched tags to
 inspect the next proposal. It writes an output file and creates no tag or release. In the current
-1.1 series with no `v1.1.*` tag, it proposes 1.1.0; a later tag changes that answer.
+1.1 series, with `v1.1.0` as the highest tag, it proposes 1.1.1; a later tag changes that answer.
 
 Independent core/module repository tags and the separate native-memory plugin release do not set
 the application version. See [repository extraction](core/repository-extraction.md).
