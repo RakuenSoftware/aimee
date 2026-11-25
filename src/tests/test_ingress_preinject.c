@@ -2201,6 +2201,12 @@ static void test_replayable_provider_receipt(void)
    assert(ingress_preinject_started_attempt(attempt) == 0);
    assert(ingress_preinject_started_attempt(attempt) == 0);
    assert(audit_worm_count() == 3);
+   /* Receipts need a ledger that has passed a full verification, as at startup;
+    * they do not re-verify it themselves. */
+   assert(!ingress_preinject_receipt_options(context.request_id, 0, 1));
+   char verify_error[256];
+   assert(audit_worm_verify(verify_error, sizeof verify_error, NULL, NULL) !=
+          AUDIT_WORM_VERIFY_RED);
    cJSON *result = ingress_preinject_receipt_options(context.request_id, 0, 1);
    cJSON *receipt = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "receipts"), 0);
    assert(receipt);

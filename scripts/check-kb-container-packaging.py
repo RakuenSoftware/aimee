@@ -165,7 +165,9 @@ def role_volumes(volumes: list, role: str) -> list:
         if isinstance(value, dict):
             return {key: rename(item) for key, item in value.items()}
         return value
-    return [rename(volume) for volume in volumes]
+    # A KB runs no delegates, so it does not restate the delegate runtime socket.
+    return [rename(volume) for volume in volumes
+            if not (isinstance(volume, str) and volume.startswith('aimee-delegate-runtime-socket:'))]
 
 
 def memory_failures(role: str, app: dict, init: dict, model: dict) -> list[str]:
@@ -205,12 +207,35 @@ def memory_failures(role: str, app: dict, init: dict, model: dict) -> list[str]:
     return failures
 
 
+DELEGATE_RUNTIME_SOCKET = 'unix:///run/aimee-delegate-runtime/docker.sock'
+
+
+def delegate_runtime_failures(runtime: dict, base: dict) -> list[str]:
+    """The delegate runtime is a private daemon only aimee-server reaches."""
+    failures = []
+    if runtime.get('ports') or runtime.get('network_mode'):
+        failures.append('delegate runtime must publish no ports and keep its own network')
+    if runtime.get('networks') != ['delegate-runtime'] or 'delegate-runtime' not in base.get('networks', {}):
+        failures.append('delegate runtime must stay on its private delegate-runtime network')
+    hosts = [str(arg) for arg in runtime.get('command', []) if str(arg).startswith(('--host', '-H'))]
+    if hosts != ['--host=' + DELEGATE_RUNTIME_SOCKET]:
+        failures.append('delegate runtime must listen only on its private socket, never TCP')
+    for volume in runtime.get('volumes', []):
+        if any(secret in str(volume) for secret in ('aimee-store-tls', 'aimee-model-tls', 'aimee-embedding-tls',
+                                                    'aimee-synthesis-tls', 'aimee-postgres', 'aimee-memory:')):
+            failures.append('delegate runtime must not receive store, model or memory artifact mounts')
+    return failures
+
+
 def composition_failures(base: dict, kb: dict, managed: dict) -> list[str]:
     failures = []
     services = base.get('services', {})
-    if set(services) != {'aimee-server', 'aimee-store-db', 'aimee-embedder', 'aimee-llm', 'aimee-memory-init'}:
-        failures.append('standard composition must install only Server, PostgreSQL, model services and one-shot memory provisioning')
+    if set(services) != {'aimee-server', 'aimee-store-db', 'aimee-embedder', 'aimee-llm', 'aimee-memory-init',
+                         'aimee-delegate-runtime'}:
+        failures.append('standard composition must install only Server, PostgreSQL, model services, one-shot memory '
+                        'provisioning and the private delegate runtime')
         return failures
+    failures += delegate_runtime_failures(services['aimee-delegate-runtime'], base)
     app, pg = services['aimee-server'], services['aimee-store-db']
     failures += memory_failures('server', app, services['aimee-memory-init'], base)
     env = app.get('environment', {})
@@ -366,6 +391,12 @@ def plant_test(root: Path) -> int:
         ('KB adds a custody mount', lambda b,k,m: k['services']['aimee-kb']['volumes'].append('other:/var/lib/other')),
         ('KB keeps Server memory path', lambda b,k,m: k['services']['aimee-kb'].update(volumes=copy.deepcopy(b['services']['aimee-server']['volumes']))),
         ('KB provisions as Server', lambda b,k,m: k['services']['aimee-memory-init'].update(environment={'AIMEE_INSTANCE_ROLE': 'server'})),
+        ('delegate runtime publishes a port', lambda b,k,m: b['services']['aimee-delegate-runtime'].update(ports=['2375:2375'])),
+        ('delegate runtime listens on TCP', lambda b,k,m: b['services']['aimee-delegate-runtime']['command'].append('--host=tcp://0.0.0.0:2375')),
+        ('delegate runtime joins the store network', lambda b,k,m: b['services']['aimee-delegate-runtime'].update(networks=['delegate-runtime', 'store'])),
+        ('delegate runtime sees the database', lambda b,k,m: b['services']['aimee-delegate-runtime']['volumes'].append('aimee-postgres-encrypted:/pg')),
+        ('delegate runtime gets model keys', lambda b,k,m: b['services']['aimee-delegate-runtime']['volumes'].append('aimee-model-tls:/run/m')),
+        ('KB adds the delegate socket', lambda b,k,m: k['services']['aimee-kb']['volumes'].append('aimee-delegate-runtime-socket:/run/aimee-delegate-runtime')),
     ]
     for name, mutate in plants:
         b,k,m = copy.deepcopy((base,kb,managed)); mutate(b,k,m)

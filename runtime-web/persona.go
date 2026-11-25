@@ -180,7 +180,7 @@ func (s *server) handleChatPersona(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if st != http.StatusOK {
-			writeJSONError(w, st, "could not load persona selection")
+			writeJSONError(w, st, upstreamSafeErrorMessage(data, "could not load persona selection"))
 			return
 		}
 		w.Write(data)
@@ -204,7 +204,7 @@ func (s *server) handleChatPersona(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if st != http.StatusOK {
-			writeJSONError(w, http.StatusBadGateway, "failed to set persona")
+			writeJSONError(w, browserUpstreamStatus(st), upstreamSafeErrorMessage(data, "failed to set persona"))
 			return
 		}
 		w.Write(data)
@@ -244,7 +244,7 @@ func (s *server) handleChatPrimary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if st != http.StatusOK {
-			writeJSONError(w, st, "could not load primary agent selection")
+			writeJSONError(w, st, upstreamSafeErrorMessage(data, "could not load primary agent selection"))
 			return
 		}
 		w.Write(data)
@@ -264,7 +264,7 @@ func (s *server) handleChatPrimary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if st != http.StatusOK {
-			writeJSONError(w, http.StatusBadGateway, "failed to set the primary agent")
+			writeJSONError(w, browserUpstreamStatus(st), upstreamSafeErrorMessage(data, "failed to set the primary agent"))
 			return
 		}
 		w.Write(data)

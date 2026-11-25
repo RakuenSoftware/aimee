@@ -938,6 +938,121 @@ static int rc_ship_client_diff(const char *endpoint, const char *bearer, const c
    return rc;
 }
 
+/* Make the caller's checkout reconstructible on the server before a delegate is
+ * dispatched from it.
+ *
+ * A delegate runs on the server, often after the dispatching client has exited,
+ * so it can only be given a container when the server can rebuild the tree: the
+ * registry must hold the repository's remote and a base commit, and the client's
+ * unpushed commits and uncommitted edits must already be shipped as the mirror
+ * patch. `aimee workspace add` (and the index hooks) register client trees as
+ * plain `detached` with none of that, so every `aimee delegate` from such a tree
+ * was refused with "cannot acquire the registered background source" and no
+ * hint of what was missing.
+ *
+ * The registration is keyed by the checkout's own top level, so a session
+ * worktree inside a broader registered repository is published as itself (the
+ * server resolves a cwd to its most specific registered root). A root already
+ * registered as `detached` keeps that provider and only gains the coordinates,
+ * because index re-ingest walks detached workspaces; anything else is
+ * registered as `mirror`, the mode the MCP bridge uses for the same purpose.
+ *
+ * Returns 1 when the source was published, 0 when there is nothing to do
+ * (no remote endpoint, not a Git checkout), -1 when publishing failed — with
+ * the reason printed, since the delegate that follows will be refused. */
+int cli_workspace_publish_delegate_source(void)
+{
+#if defined(_WIN32) || defined(_WIN64)
+   return 0;
+#else
+   if (!cli_v1_has_remote_endpoint())
+      return 0;
+   char cwd[CLI_TUI_PATH_MAX];
+   if (!getcwd(cwd, sizeof(cwd)) || cwd[0] != '/')
+      return 0;
+   char root[CLI_TUI_PATH_MAX];
+   {
+      const char *argv[] = {"git", "-C", cwd, "rev-parse", "--show-toplevel", NULL};
+      char *out = NULL;
+      if (safe_exec_capture(argv, &out, CLI_TUI_PATH_MAX) != 0 || !out)
+      {
+         free(out);
+         return 0; /* not a Git checkout: the server decides from its registry */
+      }
+      rc_chomp(out);
+      int ok = realpath(out, root) != NULL;
+      free(out);
+      if (!ok)
+         return 0;
+   }
+   char remote[512] = "", head[128] = "", branch[256] = "", upstream[256] = "";
+   if (!rc_mirror_coords(root, remote, sizeof(remote), head, sizeof(head), branch, sizeof(branch),
+                         upstream, sizeof(upstream)))
+   {
+      fprintf(stderr,
+              "aimee: %s cannot be reconstructed on the server (it needs an `origin` remote and a "
+              "commit that remote already has), so a delegate from here has no source tree\n",
+              root);
+      return -1;
+   }
+   char *endpoint = cli_v1_client_endpoint();
+   if (!endpoint)
+      return 0;
+   char *bearer = cli_v1_client_bearer();
+
+   /* Keep an exact `detached` registration detached; otherwise register a mirror. */
+   const char *provider = "mirror";
+   {
+      int status = 0;
+      cJSON *list =
+          cli_http_request(endpoint, "GET", "/v1/workspaces", NULL, bearer, 15000, &status);
+      const cJSON *rows = list ? cJSON_GetObjectItemCaseSensitive(list, "workspaces") : NULL;
+      const cJSON *row = NULL;
+      cJSON_ArrayForEach(row, rows)
+      {
+         const char *path = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "path"));
+         const char *prov = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "provider"));
+         if (path && prov && strcmp(path, root) == 0 && strcmp(prov, "detached") == 0)
+            provider = "detached";
+      }
+      cJSON_Delete(list);
+   }
+
+   cJSON *reg = cJSON_CreateObject();
+   cJSON_AddStringToObject(reg, "root", root);
+   cJSON_AddStringToObject(reg, "provider", provider);
+   cJSON_AddStringToObject(reg, "remote", remote);
+   cJSON_AddStringToObject(reg, "head", head);
+   cJSON_AddBoolToObject(reg, "scan", 0);
+   char *body = cJSON_PrintUnformatted(reg);
+   cJSON_Delete(reg);
+   int status = 0;
+   cJSON *resp =
+       body ? cli_http_request(endpoint, "POST", "/v1/workspaces", body, bearer, 60000, &status)
+            : NULL;
+   free(body);
+   const cJSON *msg = resp ? cJSON_GetObjectItemCaseSensitive(resp, "message") : NULL;
+   const cJSON *err = resp ? cJSON_GetObjectItemCaseSensitive(resp, "error") : NULL;
+   int already = (cJSON_IsString(msg) && strstr(msg->valuestring, "already registered")) ||
+                 (cJSON_IsString(err) && strstr(err->valuestring, "already registered"));
+   int registered = (status >= 200 && status < 300) || already;
+   if (!registered)
+      fprintf(stderr,
+              "aimee: could not register %s for server-side reconstruction (HTTP %d%s%s); the "
+              "delegate will have no source tree\n",
+              root, status, cJSON_IsString(err) ? ": " : "",
+              cJSON_IsString(err) ? err->valuestring : "");
+   cJSON_Delete(resp);
+
+   int rc = -1;
+   if (registered)
+      rc = rc_ship_client_diff(endpoint, bearer, root, head, branch, upstream) == 0 ? 1 : -1;
+   free(endpoint);
+   free(bearer);
+   return rc;
+#endif
+}
+
 int cli_workspace_reverse_channel_start(void)
 {
    if (g_rc_active || !cli_v1_has_remote_endpoint())

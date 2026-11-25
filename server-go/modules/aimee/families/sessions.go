@@ -126,6 +126,16 @@ const (
 	serverSessionCreateSQL = `INSERT INTO server_sessions (id, client_type, principal)
 	                          VALUES ($1, $2, $3)`
 
+	// A browser tab created before sessions carried an owner was stored with an
+	// empty principal (client_type 'chat', or 'webchat'). The attached browser
+	// actor is the only party that can ever own it again, and without an owner
+	// every later owner check refuses it: attach, preference reads and turns all
+	// failed for every pre-upgrade tab. Only an ownerless browser row is claimed;
+	// an owned row, or any other client's row, is never rewritten.
+	serverSessionClaimLegacyBrowserSQL = `UPDATE server_sessions SET principal = $2
+	                                       WHERE id = $1 AND principal = ''
+	                                         AND client_type IN ('chat', 'webchat')`
+
 	serverSessionGetSQL = `SELECT ` + serverSessionColumns +
 		` FROM server_sessions WHERE id = $1`
 
@@ -330,6 +340,15 @@ func boundedMax(field string) (int, bool) {
 func serverSessionCreate(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	if f[0] == "" {
 		return store.StatusInvalid, nil, nil
+	}
+	if f[1] == "webchat" && f[2] != "" {
+		tag, err := q.Exec(ctx, serverSessionClaimLegacyBrowserSQL, f[0], f[2])
+		if err != nil {
+			return 0, nil, err
+		}
+		if tag.RowsAffected() == 1 {
+			return store.StatusOK, nil, nil
+		}
 	}
 	if _, err := q.Exec(ctx, serverSessionCreateSQL, f[0], f[1], f[2]); err != nil {
 		return 0, nil, err

@@ -25,6 +25,19 @@ in `server-go/modules/delegates`. The network-capable package proxy lives in
 hands canonical filesystem facts or an already-accepted Unix fd to that binary. It cannot request a
 network mode, provide an allowlist, resolve a destination, dial a socket, or override a refusal.
 
+## Container runtime
+
+The standard composition ([compose.yaml](../compose.yaml)) runs delegate containers on a private
+runtime, `aimee-delegate-runtime`: a Docker-in-Docker daemon whose socket only aimee-server mounts.
+The host daemon, which runs the aimee stack itself, is never handed to aimee-server for delegates,
+and no delegate ever sees a Docker socket. The runtime mounts aimee-server's home and workspace
+volumes at the same paths, declared by `AIMEE_DELEGATE_RUNTIME_PATHS=shared`, so bind sources need
+no translation. It is privileged because Docker-in-Docker requires it, and it sits on its own
+network used only to pull delegate images.
+
+`aimee status` reports the posture decided at boot (`delegates: armed` or `unavailable` with the
+reason). With no reachable runtime every delegation is refused rather than run on the host.
+
 ## Source authority
 
 The server resolves the workspace and canonical worktree before launch. Absolute paths are accepted

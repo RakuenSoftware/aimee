@@ -47,6 +47,11 @@ services:
       # `off` creates only the mount points; the instance then runs without
       # memory and reports missing_module: memory.
       AIMEE_MEMORY_PROVISION: ${AIMEE_MEMORY_PROVISION:-on}
+      # Server only, off by default: the optional retrieval health collector
+      # behind `aimee memory health`. 1 turns it on; the sample rate is parts per
+      # million of whole invocations (unset keeps every invocation).
+      AIMEE_MEMORY_HEALTH_ENABLED: ${AIMEE_MEMORY_HEALTH_ENABLED:-0}
+      AIMEE_MEMORY_HEALTH_SAMPLE_PPM: ${AIMEE_MEMORY_HEALTH_SAMPLE_PPM:-}
       # KB only: with a synthesis model the KB derives typed facts from its
       # shared memory, through the managed sidecar identity its own client uses.
       # A Server never processes shared memory, so these change nothing there.
@@ -69,6 +74,8 @@ services:
         condition: service_started
       aimee-memory-init:
         condition: service_completed_successfully
+      aimee-delegate-runtime:
+        condition: service_healthy
     ulimits:
       stack: 67108864
       memlock: 1073741824
@@ -84,6 +91,10 @@ services:
       AIMEE_MODULE_ROUNDTABLE: ${AIMEE_MODULE_ROUNDTABLE:-1}
       AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}
       AIMEE_WORKSPACES_DIR: /var/lib/aimee-workspaces
+      # Delegates run in containers created on the private runtime below, never
+      # on the host daemon. It mounts this service's volumes at the same paths.
+      DOCKER_HOST: unix:///run/aimee-delegate-runtime/docker.sock
+      AIMEE_DELEGATE_RUNTIME_PATHS: shared
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-bekko-a25m}
       EMBEDDER_URL: ${EMBEDDER_URL:-https://aimee-embedder:8762}
       EMBEDDER_DIMS: ${EMBEDDER_DIMS:-384}
@@ -96,6 +107,7 @@ services:
     volumes:
       - aimee-server-home:/var/lib/aimee
       - aimee-server-workspaces:/var/lib/aimee-workspaces
+      - aimee-delegate-runtime-socket:/run/aimee-delegate-runtime
       - aimee-store-tls:/run/aimee-store-tls:ro
       - aimee-model-tls:/run/aimee-model-tls
       - aimee-embedding-tls:/run/aimee-model-tls/embedding/server
@@ -113,6 +125,32 @@ services:
       timeout: 7s
       start_period: 120s
       retries: 10
+
+  # Private container runtime for delegate sandboxes. Only aimee-server reaches
+  # its socket; delegates never do (they get --network none and only the
+  # aimee-http.sock bind). It is a separate daemon so a delegate escape cannot
+  # reach the host's Docker, which runs this stack. Bind sources resolve because
+  # it mounts aimee-server's home and workspaces at identical paths
+  # (AIMEE_DELEGATE_RUNTIME_PATHS=shared). Privileged: Docker-in-Docker needs it.
+  aimee-delegate-runtime:
+    restart: unless-stopped
+    image: ${AIMEE_DELEGATE_RUNTIME_IMAGE:-docker:27.5.1-dind}
+    privileged: true
+    # Socket only (no TCP listener), owned by gid 1000 so the unprivileged
+    # 'aimee' user in aimee-server can use it without a host group.
+    command: [dockerd, --host=unix:///run/aimee-delegate-runtime/docker.sock, --group=1000]
+    networks: [delegate-runtime]
+    volumes:
+      - aimee-delegate-runtime-socket:/run/aimee-delegate-runtime
+      - aimee-delegate-runtime-data:/var/lib/docker
+      - aimee-server-home:/var/lib/aimee
+      - aimee-server-workspaces:/var/lib/aimee-workspaces
+    healthcheck:
+      test: [CMD, docker, --host=unix:///run/aimee-delegate-runtime/docker.sock, version]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
 
   aimee-embedder:
     restart: unless-stopped
@@ -148,6 +186,8 @@ volumes:
   aimee-store-tls:
   aimee-server-home:
   aimee-server-workspaces:
+  aimee-delegate-runtime-socket:
+  aimee-delegate-runtime-data:
   aimee-memory:
   aimee-model-tls:
     driver_opts:
@@ -165,3 +205,5 @@ networks:
     internal: true
   models:
     internal: true
+  # Image pulls for delegate containers; nothing else is attached to it.
+  delegate-runtime:

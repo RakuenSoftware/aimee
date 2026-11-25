@@ -1085,7 +1085,8 @@ cJSON *ingress_preinject_receipt_options(const char *request_id, int forget, int
    if (!context || !context->principal[0] || !request_id || !*request_id ||
        strlen(request_id) > 256 || audit_worm_dispatch_owner(owner) != 0)
       return NULL;
-   int verified = audit_worm_verify(err, sizeof err, &head, &checkpoint);
+   /* Needs a verified ledger, not a fresh full rescan per receipt. */
+   int verified = audit_worm_verified(err, sizeof err, &head, &checkpoint);
    if (verified == AUDIT_WORM_VERIFY_RED)
       return NULL;
    cJSON *rows = audit_worm_read_request(context->principal, request_id);

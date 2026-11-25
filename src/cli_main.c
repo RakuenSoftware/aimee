@@ -810,7 +810,13 @@ static int unsupported_client_command(const char *cmd, const char *subcmd, int j
    else if (have_subs > 0)
       snprintf(msg, sizeof(msg), "'%s' needs a subcommand; try: %s", name, subs);
    else
-      snprintf(msg, sizeof(msg), "command '%s' has no /v1 route", name);
+      /* A command the client knows but the connected server does not route.
+       * Several families are served only by a KB (e.g. `repo trust`), so on a
+       * standalone Server this is the expected answer, not a routing defect. */
+      snprintf(msg, sizeof(msg),
+               "'%s' is not served by the connected server (no /v1 route); some commands "
+               "are served only by a KB instance",
+               name);
 
    if (json_output)
    {
@@ -2387,6 +2393,7 @@ int main(int argc, char **argv)
             }
          }
          cli_v1_set_git_runner(cli_workspace_git_runner_start, cli_workspace_git_runner_stop);
+         cli_v1_set_delegate_source_publisher(cli_workspace_publish_delegate_source);
          int rc = cli_v1_forward(sock, &route, json_output, json_fields, response_profile, sub_argc,
                                  sub_argv);
          if (rc >= 0)

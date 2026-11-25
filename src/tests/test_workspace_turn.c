@@ -336,6 +336,23 @@ static void test_owned_mirror_callback_lease(const char *temporary)
    assert(rc < 0 && !scope && !workspace_turn_active_cwd());
    rc = config_workspace_remove(client);
    assert(!rc);
+   /* Ownership is the most specific root, not registration order: a broader
+    * detached registration with nothing to reconstruct from, registered first,
+    * must not shadow a nested checkout registered with its remote and head. */
+   {
+      char parent[MAX_PATH_LEN];
+      snprintf(parent, sizeof parent, "%s", client);
+      char *slash = strrchr(parent, '/');
+      assert(slash && slash != parent);
+      *slash = '\0';
+      rc = config_workspace_add(parent, "detached", NULL, NULL);
+      assert(!rc);
+      test_background_source_scope(client, source, recorded_head, "mirror", temporary);
+      rc = workspace_turn_scope_begin_background(parent, &scope);
+      assert(rc < 0 && !scope); /* the broader root itself is still not reconstructible */
+      rc = config_workspace_remove(parent);
+      assert(!rc);
+   }
    puts("  owned mirror callbacks: cross-thread/nested restore and replaced-inode refusal pass");
 }
 

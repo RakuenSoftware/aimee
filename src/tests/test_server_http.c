@@ -507,6 +507,8 @@ static int primary_store_fixture;
 static int cancel_store_calls, cancel_store_status;
 static int attach_store_fixture, attach_store_calls, attach_store_creates;
 static char attach_store_actor[160], attach_store_owner[160];
+/* A pre-upgrade browser row: present, but stored with an empty principal. */
+static int attach_store_legacy;
 static ouro_module_call_result_t attach_store_reply(const uint8_t *wire, uint32_t request_len,
                                                     void *body, uint32_t cap, uint32_t *length)
 {
@@ -533,6 +535,7 @@ static ouro_module_call_result_t attach_store_reply(const uint8_t *wire, uint32_
       assert(!attach_store_owner[0]); /* CREATE never rewrites an owner. */
       snprintf(attach_store_owner, sizeof attach_store_owner, "%s",
                attach_store_fixture == 3 ? "webuser:foreign" : attach_store_actor);
+      attach_store_legacy = 0;
       if (attach_store_fixture == 4)
          status = AIMEE_DB1_STATUS_INVALID; /* Same-actor concurrent INSERT. */
       if (attach_store_fixture == 5)
@@ -543,7 +546,7 @@ static ouro_module_call_result_t attach_store_reply(const uint8_t *wire, uint32_
       assert(op == AIMEE_DB1_OP_SERVER_SESSION_GET && count == 1);
       if (attach_store_fixture == 6 && attach_store_owner[0])
          return OURO_MODULE_CALL_TRANSPORT;
-      if (!attach_store_owner[0])
+      if (!attach_store_owner[0] && !attach_store_legacy)
          status = AIMEE_DB1_STATUS_MISSING;
       else
          values = 10;
@@ -844,6 +847,21 @@ static void test_browser_attach_admits_exact_durable_owner(void)
       }
       presence_shutdown();
    }
+   /* A tab created before sessions carried an owner exists with an empty
+    * principal. It used to be refused as an owner mismatch forever, which left
+    * every pre-upgrade browser tab unable to pick an agent or start a turn; the
+    * attested browser actor now claims it, exactly once. */
+   presence_init();
+   attach_store_fixture = 1;
+   attach_store_calls = attach_store_creates = 0;
+   attach_store_owner[0] = 0;
+   attach_store_legacy = 1;
+   assert(route_session_attach("legacy-admission", "{\"surface\":\"webchat\"}", response,
+                               sizeof response) == 200);
+   assert(attach_store_creates == 1 && !attach_store_legacy);
+   assert(!strcmp(attach_store_owner, owner.vault_principal));
+   assert(presence_attachment_count("legacy-admission") == 1);
+   presence_shutdown();
    presence_init();
    attach_store_fixture = 1;
    attach_store_calls = attach_store_creates = 0;

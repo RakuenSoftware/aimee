@@ -113,12 +113,15 @@ int handle_memory_receipt_forget(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 }
 
 /* The public body cannot choose a principal, ledger or completeness assertion.
- * This adapter transports only a verified, principal-bound local snapshot. */
+ * This adapter transports only a verified, principal-bound local snapshot. The
+ * module binds health_principal to the authenticated caller, so every call
+ * carries that caller's context; without it the module sees the server's own
+ * identity and refuses. */
 static cJSON *memory_health_command(cJSON *request)
 {
    cJSON *response = NULL;
-   int rc =
-       aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 5000, &response);
+   int rc = aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", request, 5000,
+                                                                   &response);
    cJSON_Delete(request);
    if (rc != 1)
    {
@@ -134,8 +137,13 @@ int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const request_context_t *context = request_context_get();
    if (!context || !context->principal[0])
       return server_send_error(conn, "authenticated health scope required", NULL);
+   /* The memory owner knows the caller by account, the same name the caller
+    * context carries (user_memory_owner_command_as); the WORM ledger below is
+    * keyed by the transport principal. */
+   const char *account = server_request_account();
+   const char *health_principal = account && account[0] ? account : context->principal;
    cJSON *query = cJSON_CreateObject();
-   cJSON_AddStringToObject(query, "health_principal", context->principal);
+   cJSON_AddStringToObject(query, "health_principal", health_principal);
    const char *fields[] = {"window", "project", "workspace", "purpose", "query_class", "stage"};
    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
    {
@@ -166,15 +174,22 @@ int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *from = jo_str(plan, "from", ""), *until = jo_str(plan, "until", "");
    char owner[33], error[256];
    long head = 0, checkpoint = 0;
-   int verified = audit_worm_verify(error, sizeof error, &head, &checkpoint);
+   /* A health report needs the ledger verified, not verified again: the full
+    * chain check runs at startup and on `aimee audit verify`, and rescanning a
+    * large ledger here took minutes per call on the live Server. */
+   int verified = audit_worm_verified(error, sizeof error, &head, &checkpoint);
    int truncated = 0;
+   const char *scan_from = jo_str(plan, "scan_from", from);
    cJSON *requests =
        verified == AUDIT_WORM_VERIFY_RED
            ? NULL
-           : audit_worm_memory_requests(context->principal, jo_str(plan, "scan_from", from), until,
-                                        head, &truncated);
-   if (!requests || audit_worm_dispatch_owner(owner) != 0)
+           : audit_worm_memory_requests(context->principal, scan_from, until, head, &truncated);
+   cJSON *request_rows =
+       requests ? audit_worm_memory_request_rows(context->principal, scan_from, requests, head)
+                : NULL;
+   if (!requests || !request_rows || audit_worm_dispatch_owner(owner) != 0)
    {
+      cJSON_Delete(request_rows);
       cJSON_Delete(requests);
       cJSON_Delete(plan);
       cJSON_Delete(query);
@@ -196,15 +211,16 @@ int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          break;
       }
       const char *id = cJSON_GetStringValue(cJSON_GetArrayItem(requests, i));
-      cJSON *rows = audit_worm_read_request_through(context->principal, id, head);
-      if (!rows)
+      cJSON *rows = id ? cJSON_DetachItemFromObjectCaseSensitive(request_rows, id) : NULL;
+      if (!cJSON_IsArray(rows))
       {
+         cJSON_Delete(rows);
          failed++;
          continue;
       }
       cJSON *input = cJSON_CreateObject();
       cJSON_AddStringToObject(input, "operation", "health-import");
-      cJSON_AddStringToObject(input, "health_principal", context->principal);
+      cJSON_AddStringToObject(input, "health_principal", health_principal);
       cJSON_AddStringToObject(input, "receipt_request_id", id);
       cJSON_AddStringToObject(input, "dispatch_owner", owner);
       cJSON_AddTrueToObject(input, "chain_intact");
@@ -234,6 +250,7 @@ int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       snprintf(sequence, sizeof sequence, "%ld", head);
       cJSON_AddStringToObject(collection, "verified_through_sequence", sequence);
    }
+   cJSON_Delete(request_rows);
    cJSON_Delete(requests);
    return result ? send_and_free(conn, result)
                  : server_send_error(conn, "health owner unavailable", NULL);

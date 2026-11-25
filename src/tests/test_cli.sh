@@ -148,6 +148,10 @@ check_output "unknown command --json" "\"message\"" $AIMEE --json foobarbaz
 # for maintainers and must survive.
 check_output "wrong subcommand names the subcommand" "is not a subcommand of" \
     $AIMEE economizer status
+# A known command the connected server does not route (KB-only families such as
+# `repo trust` on a standalone Server) says so, keeping the routing diagnostic.
+check_output "unrouted command says the server does not serve it" \
+    "is not served by the connected server (no /v1 route)" $AIMEE repo trust
 
 # --- {id}-bearing routes with the id missing ---
 # `workspace get` with no path used to answer "'workspace.get' has no /v1 route",

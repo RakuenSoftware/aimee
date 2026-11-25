@@ -45,7 +45,7 @@ func (s *server) handleChatAttach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st != http.StatusOK {
-		writeJSONError(w, http.StatusBadGateway, "attach refused")
+		writeJSONError(w, browserUpstreamStatus(st), upstreamSafeErrorMessage(data, "attach refused"))
 		return
 	}
 	w.Write(data)
@@ -155,4 +155,14 @@ func (s *server) handleChatSessionEvents(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+}
+
+// browserUpstreamStatus keeps a server refusal's meaning for the browser: a 4xx
+// (bad request, owner mismatch, conflict) is the caller's to see as-is, while
+// anything else from upstream is a gateway failure.
+func browserUpstreamStatus(st int) int {
+	if st >= 400 && st < 500 {
+		return st
+	}
+	return http.StatusBadGateway
 }

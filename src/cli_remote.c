@@ -268,6 +268,7 @@ static int remote_enroll_client_cert(int quiet)
    EVP_PKEY_CTX *kctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
    EVP_PKEY *key = NULL;
    X509_REQ *req = NULL;
+   X509_NAME *name = NULL;
    BIO *kb = NULL, *rb = NULL;
    char *key_pem = NULL, *csr_pem = NULL;
    int rc = -1;
@@ -276,12 +277,16 @@ static int remote_enroll_client_cert(int quiet)
        EVP_PKEY_keygen(kctx, &key) != 1 || !(req = X509_REQ_new()) ||
        X509_REQ_set_version(req, 0) != 1)
       goto done;
-   X509_NAME *name = X509_REQ_get_subject_name(req);
+   /* Built and set rather than edited in place: OpenSSL 4 returns the request's
+    * subject as const, so writing through X509_REQ_get_subject_name() no longer
+    * compiles. X509_REQ_set_subject_name copies, so the local name is freed. */
+   name = X509_NAME_new();
    if (!name ||
        X509_NAME_add_entry_by_NID(name, NID_commonName, MBSTRING_ASC, (const unsigned char *)cn, -1,
                                   -1, 0) != 1 ||
-       X509_REQ_set_pubkey(req, key) != 1 || X509_REQ_sign(req, key, EVP_sha256()) <= 0 ||
-       !(kb = BIO_new(BIO_s_mem())) || !(rb = BIO_new(BIO_s_mem())) ||
+       X509_REQ_set_subject_name(req, name) != 1 || X509_REQ_set_pubkey(req, key) != 1 ||
+       X509_REQ_sign(req, key, EVP_sha256()) <= 0 || !(kb = BIO_new(BIO_s_mem())) ||
+       !(rb = BIO_new(BIO_s_mem())) ||
        PEM_write_bio_PrivateKey(kb, key, NULL, NULL, 0, NULL, NULL) != 1 ||
        PEM_write_bio_X509_REQ(rb, req) != 1)
       goto done;
@@ -354,6 +359,7 @@ done:
    free(csr_pem);
    BIO_free(kb);
    BIO_free(rb);
+   X509_NAME_free(name);
    X509_REQ_free(req);
    EVP_PKEY_free(key);
    EVP_PKEY_CTX_free(kctx);

@@ -84,8 +84,8 @@
     {
       "target": "unit-test-ingress-preinject",
       "source": "src/tests/test_ingress_preinject.c",
-      "sha256": "9f08cf07018b67d43668147d1368b34dc6414f7e508137a8108893edb431b52e",
-      "assert_calls": 326,
+      "sha256": "bcd160f0f6a7c0dee3aa730da7ea1b9b7dc252edc9e58ecdbe1f0a4d1b4be7b7",
+      "assert_calls": 328,
       "test_functions": [
         "test_task_context_mode_and_first_turn_gate",
         "test_recall_unavailable_is_counted_apart_from_empty",
