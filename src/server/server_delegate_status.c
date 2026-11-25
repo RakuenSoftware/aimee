@@ -9,6 +9,101 @@
 #include <aimee/ir/session_event.h>
 #include <stdlib.h>
 #include "cJSON.h"
+#include "server_http_internal.h" /* SHTTP_RESP_MAX */
+#include "server_job_reply.h"
+
+/* A job reply must fit the HTTP relay (SHTTP_RESP_MAX). A delegate's prompt and
+ * result can each reach 1 MiB, so `aimee jobs show` on a remote CLI answered
+ * "rpc response exceeds the 262144-byte relay limit" for exactly the failed jobs
+ * an operator needs to read. Leave room for the envelope and JSON escaping. */
+#define JOB_REPLY_BUDGET ((size_t)SHTTP_RESP_MAX - 16u * 1024u)
+
+/* Back n up to the start of a UTF-8 sequence so a cut never splits a character. */
+static size_t utf8_floor(const char *s, size_t n)
+{
+   while (n > 0 && ((unsigned char)s[n] & 0xC0u) == 0x80u)
+      n--;
+   return n;
+}
+
+/* Shorten obj[key] to about cap bytes, keeping its head and its tail (where a
+ * failure reason usually is), and record the original size. */
+static void job_text_bound(cJSON *obj, const char *key, size_t cap)
+{
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+   if (!cJSON_IsString(item) || !item->valuestring)
+      return;
+   const char *s = item->valuestring;
+   size_t len = strlen(s);
+   if (len <= cap)
+      return;
+   size_t head = utf8_floor(s, cap / 4);
+   size_t tail_start = len - (cap - cap / 4);
+   while (tail_start < len && ((unsigned char)s[tail_start] & 0xC0u) == 0x80u)
+      tail_start++;
+   char marker[160];
+   int mlen = snprintf(marker, sizeof marker,
+                       "\n[... %zu bytes elided to fit the reply; %zu bytes in full ...]\n",
+                       tail_start - head, len);
+   size_t out_len = head + (size_t)mlen + (len - tail_start);
+   char *out = malloc(out_len + 1);
+   if (!out)
+      return;
+   memcpy(out, s, head);
+   memcpy(out + head, marker, (size_t)mlen);
+   memcpy(out + head + (size_t)mlen, s + tail_start, len - tail_start);
+   out[out_len] = '\0';
+   char flag[64];
+   snprintf(flag, sizeof flag, "%s_bytes", key);
+   if (!cJSON_GetObjectItemCaseSensitive(obj, flag))
+      cJSON_AddNumberToObject(obj, flag, (double)len);
+   cJSON_ReplaceItemInObjectCaseSensitive(obj, key, cJSON_CreateString(out));
+   free(out);
+}
+
+static size_t job_reply_size(const cJSON *resp)
+{
+   char *wire = cJSON_PrintUnformatted(resp);
+   size_t n = wire ? strlen(wire) : (size_t)-1;
+   free(wire);
+   return n;
+}
+
+/* Drop obj[key] (a transcript array or the last output) and record how many
+ * entries it held. */
+static void job_array_omit(cJSON *obj, const char *key)
+{
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+   if (!item)
+      return;
+   int count = cJSON_IsArray(item) ? cJSON_GetArraySize(item) : 1;
+   cJSON_DeleteItemFromObjectCaseSensitive(obj, key);
+   char flag[64];
+   snprintf(flag, sizeof flag, "%s_omitted", key);
+   cJSON_AddNumberToObject(obj, flag, count);
+}
+
+void server_job_reply_fit(cJSON *resp)
+{
+   static const char *texts[] = {"prompt", "result", "diagnostic", "legacy_result", "log"};
+   /* The transcript last: events and history repeat each other, and outputs
+    * still carry the answer once both are gone. */
+   static const char *arrays[] = {"events", "history", "outputs", "output"};
+   if (!resp || job_reply_size(resp) <= JOB_REPLY_BUDGET)
+      return;
+   cJSON *job = cJSON_GetObjectItemCaseSensitive(resp, "job");
+   cJSON *targets[] = {resp, cJSON_IsObject(job) ? job : NULL};
+   for (size_t cap = JOB_REPLY_BUDGET / 4; cap >= 1024 && job_reply_size(resp) > JOB_REPLY_BUDGET;
+        cap /= 2)
+      for (size_t t = 0; t < 2; t++)
+         for (size_t i = 0; targets[t] && i < sizeof texts / sizeof *texts; i++)
+            job_text_bound(targets[t], texts[i], cap);
+   for (size_t i = 0; i < sizeof arrays / sizeof *arrays && job_reply_size(resp) > JOB_REPLY_BUDGET;
+        i++)
+      for (size_t t = 0; t < 2; t++)
+         if (targets[t])
+            job_array_omit(targets[t], arrays[i]);
+}
 
 /* Read a model observation only from the authenticated canonical log owner.
  * Polling never rewrites durable terminal state or treats a display as history. */
@@ -228,12 +323,20 @@ int handle_delegate_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
             return server_send_error(conn, "failed to allocate delegate status response", NULL);
          }
          delegate_status_populate_job(job_obj, item->valueint, cJSON_IsTrue(jfull));
+         server_job_reply_fit(job_obj);
          cJSON_AddItemToArray(jobs, job_obj);
       }
+      /* Each job fits alone; several together may not. Their transcripts go
+       * first, then the last outputs. */
+      static const char *arrays[] = {"events", "history", "outputs", "output"};
+      for (size_t i = 0;
+           i < sizeof arrays / sizeof *arrays && job_reply_size(resp) > JOB_REPLY_BUDGET; i++)
+         cJSON_ArrayForEach(item, jobs) job_array_omit(item, arrays[i]);
    }
    else
    {
       delegate_status_populate_job(resp, jid->valueint, cJSON_IsTrue(jfull));
+      server_job_reply_fit(resp);
    }
 
    return server_send_ok(conn, resp);

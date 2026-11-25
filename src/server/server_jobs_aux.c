@@ -7,6 +7,7 @@
 #include <aimee/delegates/delegate_role.h>
 #include "server.h"
 #include "json_fluent.h" /* jo_ok */
+#include "server_job_reply.h"
 #include "cJSON.h"
 #include <stdlib.h>
 #include <string.h>
@@ -172,6 +173,7 @@ int handle_jobs_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (cJSON_IsString(projected_status))
          cJSON_ReplaceItemInObject(resp, "job_status", cJSON_Duplicate(projected_status, 1));
       db1_agent_job_free(&job);
+      server_job_reply_fit(resp);
    }
 
    return server_send_ok(conn, resp);
@@ -214,6 +216,7 @@ int handle_jobs_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          }
       }
       db1_agent_job_free(&job);
+      server_job_reply_fit(resp);
    }
 
    return server_send_ok(conn, resp);

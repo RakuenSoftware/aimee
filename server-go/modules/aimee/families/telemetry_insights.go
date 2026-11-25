@@ -35,8 +35,8 @@ const (
 	insightsTopSessionsSQL = `SELECT ta.session_id,
 	                                 COALESCE(MAX(ss.title), ''),
 	                                 COALESCE(MAX(ta.model), ''),
-	                                 COALESCE(SUM(ta.prompt_tokens), 0),
-	                                 COALESCE(SUM(ta.completion_tokens), 0),
+	                                 COALESCE(SUM(ta.prompt_tokens)::bigint, 0),
+	                                 COALESCE(SUM(ta.completion_tokens)::bigint, 0),
 	                                 COALESCE(SUM(ta.estimated_cost_usd), 0),
 	                                 COALESCE(to_char(MIN(ta.created_at) AT TIME ZONE 'utc',
 	                                          'YYYY-MM-DD HH24:MI:SS'), '')

@@ -112,9 +112,9 @@ const (
 	agentLogMetricsByRoleSQL = `SELECT al.role, COUNT(*),
 	                                   COUNT(*) FILTER (WHERE al.success),
 	                                   COALESCE(AVG(al.latency_ms), 0),
-	                                   COALESCE(SUM(al.prompt_tokens + al.completion_tokens), 0),
-	                                   COALESCE(SUM(ta.cache_write_tokens), 0),
-	                                   COALESCE(SUM(ta.cache_read_tokens), 0),
+	                                   COALESCE(SUM(al.prompt_tokens + al.completion_tokens)::bigint, 0),
+	                                   COALESCE(SUM(ta.cache_write_tokens)::bigint, 0),
+	                                   COALESCE(SUM(ta.cache_read_tokens)::bigint, 0),
 	                                   COALESCE(SUM(ta.estimated_cost_usd), 0)
 	                              FROM agent_log al
 	                              LEFT JOIN token_audit ta ON ta.agent_log_id = al.id
@@ -123,12 +123,12 @@ const (
 	                             LIMIT $1`
 
 	agentLogAgentStatsSQL = `SELECT al.agent_name, COUNT(*),
-	                                COALESCE(SUM(al.prompt_tokens), 0),
-	                                COALESCE(SUM(al.completion_tokens), 0),
+	                                COALESCE(SUM(al.prompt_tokens)::bigint, 0),
+	                                COALESCE(SUM(al.completion_tokens)::bigint, 0),
 	                                COALESCE(AVG(al.latency_ms), 0),
 	                                COALESCE(AVG(CASE WHEN al.success THEN 1.0 ELSE 0.0 END), 0),
-	                                COALESCE(SUM(ta.cache_write_tokens), 0),
-	                                COALESCE(SUM(ta.cache_read_tokens), 0),
+	                                COALESCE(SUM(ta.cache_write_tokens)::bigint, 0),
+	                                COALESCE(SUM(ta.cache_read_tokens)::bigint, 0),
 	                                COALESCE(SUM(ta.estimated_cost_usd), 0)
 	                           FROM agent_log al
 	                           LEFT JOIN token_audit ta ON ta.agent_log_id = al.id

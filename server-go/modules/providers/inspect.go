@@ -173,13 +173,24 @@ func (m *Manager) inspect(ctx context.Context, req Request) (object, error) {
 	if fetchErr != nil {
 		responseStatus = -1
 	}
-	available := false
+	// A catalog entry that differs only in case is the same model: MiniMax lists
+	// "MiniMax-M3" and serves "minimax-m3", and the probe reported such a
+	// configuration as unavailable while its execution succeeded. Report the
+	// catalog's spelling so a provider that does care can be matched exactly.
+	available, listedAs := false, ""
 	for _, id := range ids {
 		if id == str(model, "model") {
-			available = true
+			available, listedAs = true, ""
+			break
+		}
+		if strings.EqualFold(id, str(model, "model")) {
+			available, listedAs = true, id
 		}
 	}
 	result := object{"status": "ok", "name": str(model, "name"), "provider": str(provider, "provider"), "endpoint": str(provider, "endpoint"), "model": str(model, "model"), "models_status": responseStatus, "model_available": available, "slots_probe_skipped": true, "slots_source": "config", "slots": number(model, "max_parallel"), "context_window": number(model, "context_window"), "execution_tested": false}
+	if listedAs != "" {
+		result["model_listed_as"] = listedAs
+	}
 	if skipModels {
 		result["models_probe_skipped"] = true
 		result["models_status"] = 0
