@@ -180,19 +180,21 @@ static cJSON *mcph_source_unavailable(struct mcp_call *c)
 }
 /* Say why a selected source tool produced no receipt: the model only ever sees
  * the fixed reply, and the owner renderer logs nothing. */
+const char *agent_tool_source_last_refusal(void);
 static void served_memory_refusal_log(const struct mcp_call *c, int selected, int stage)
 {
    const request_context_t *rc = request_context_get();
+   const char *attach = stage == 2 ? agent_tool_source_last_refusal() : NULL;
    aimee_log(LOG_WARN, "memory-tool",
-             "%s produced no source receipt (mode=%d stage=%s context=%s request_id=%s "
+             "%s produced no source receipt (mode=%d stage=%s%s%s context=%s request_id=%s "
              "principal=%s refused=%d%s%s model_execution=%d)",
              c->tool ? c->tool : "?", selected,
              stage == 0   ? "mode"
              : stage == 1 ? "render"
                           : "attach",
-             rc ? "set" : "none", rc && rc->request_id[0] ? "set" : "empty",
-             rc && rc->principal[0] ? "set" : "empty", rc ? rc->context_refused : 0,
-             rc && rc->context_refused ? " kind=" : "",
+             attach ? ": " : "", attach ? attach : "", rc ? "set" : "none",
+             rc && rc->request_id[0] ? "set" : "empty", rc && rc->principal[0] ? "set" : "empty",
+             rc ? rc->context_refused : 0, rc && rc->context_refused ? " kind=" : "",
              rc && rc->context_refused ? rc->context_refusal_kind : "",
              rc ? rc->model_execution : 0);
 }

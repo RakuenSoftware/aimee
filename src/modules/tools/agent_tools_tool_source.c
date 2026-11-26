@@ -5,6 +5,12 @@
 
 /* Generic per-result custody, independent of memory policy or native grants. */
 static __thread agent_tool_source_scope_t *g_tool_source_scope;
+static __thread const char *g_tool_source_refusal;
+/* Why the last attach on this thread refused, for the caller's diagnostic. */
+const char *agent_tool_source_last_refusal(void)
+{
+   return g_tool_source_refusal;
+}
 int aimee_tool_source_visible_valid(const cJSON *source, const char *visible)
 {
    if (!visible || !aimee_ir_tool_source_shape_valid(source))
@@ -28,11 +34,20 @@ int agent_tool_source_scope_begin(agent_tool_source_scope_t *scope)
 int agent_tool_source_attach(const cJSON *source, const char *visible)
 {
    agent_tool_source_scope_t *scope = g_tool_source_scope;
-   if (!scope)
-      return -1;
-   if (scope->failed || scope->tool_source || !aimee_tool_source_visible_valid(source, visible))
+   /* Name the refusal: the caller can only report that no receipt arrived. */
+   const char *refused = !scope               ? "no source scope on this thread"
+                         : scope->failed      ? "scope already failed"
+                         : scope->tool_source ? "a second source in one tool call"
+                         : !visible           ? "no visible output"
+                         : !aimee_ir_tool_source_shape_valid(source) ? "receipt shape invalid"
+                         : !aimee_tool_source_visible_valid(source, visible)
+                             ? "visible output does not match the receipt digest"
+                             : NULL;
+   g_tool_source_refusal = refused;
+   if (refused)
    {
-      scope->failed = 1;
+      if (scope)
+         scope->failed = 1;
       return -1;
    }
    scope->tool_source = cJSON_Duplicate(source, 1);

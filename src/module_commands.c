@@ -1229,13 +1229,55 @@ int aimee_module_commands_dispatch_internal_context_timeout(const char *method, 
                                                      0);
 }
 
+/* The memory owner's source renderer reaches its module through this call and
+ * reports nothing itself, so a failed memory_serve read as a bare "custody
+ * unavailable". Log how each memory.runtime call ended -- elapsed time against
+ * its budget, the dispatch result, and an owner error's kind and message (owner
+ * diagnostics, never memory content) -- so the refusing step is named. */
+static void memory_runtime_dispatch_log(const char *method, const cJSON *args, int rc,
+                                        int timeout_ms, long elapsed_ms, const cJSON *result)
+{
+   if (!method || strcmp(method, "memory.runtime"))
+      return;
+   const char *operation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation"));
+   const char *raw = cJSON_IsRaw(result) ? result->valuestring : NULL;
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status"));
+   if (rc == 1 && status && strcmp(status, "error"))
+   {
+      if (operation && !strcmp(operation, "memory-query"))
+         aimee_log(LOG_INFO, "memory-tool", "memory.runtime memory-query %s in %ldms (budget %dms)",
+                   status, elapsed_ms, timeout_ms);
+   }
+   else
+   {
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "kind"));
+      const char *message =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "message"));
+      aimee_log(LOG_WARN, "memory-tool",
+                "memory.runtime %s failed: dispatch=%d status=%s kind=%s message=%.200s after "
+                "%ldms (budget %dms)",
+                operation ? operation : "?", rc, status ? status : "none", kind ? kind : "none",
+                message ? message : "", elapsed_ms, timeout_ms);
+   }
+   cJSON_Delete(reply);
+}
+
 int aimee_module_commands_dispatch_internal_raw_context_timeout(const char *method,
                                                                 const cJSON *args,
                                                                 const cJSON *context,
                                                                 int timeout_ms, cJSON **result)
 {
-   return commands_dispatch_internal_context_timeout(method, args, context, timeout_ms, result, 1,
-                                                     0);
+   struct timespec start, end;
+   clock_gettime(CLOCK_MONOTONIC, &start);
+   int rc =
+       commands_dispatch_internal_context_timeout(method, args, context, timeout_ms, result, 1, 0);
+   clock_gettime(CLOCK_MONOTONIC, &end);
+   long elapsed_ms =
+       (long)(end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
+   memory_runtime_dispatch_log(method, args, rc, timeout_ms, elapsed_ms, result ? *result : NULL);
+   return rc;
 }
 
 __attribute__((used, externally_visible, retain)) int
