@@ -3,6 +3,9 @@
  * (was server_mcp_call_table.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
 #include "server_mcp_internal.h"
+#include "server_tool_source_unavailable.h"
+#include "request_context.h"
+#include "log.h"
 #include "server.h"
 #include "server_mcp_memory_gate.h"  /* capability grading for `mutate` / `memory_maintain` */
 #include <aimee/tools/agent_tools.h> /* the native surface this table registers into */
@@ -167,11 +170,31 @@ extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
 extern int aimee_module_tool_source_render(const char *, const cJSON *, cJSON **)
     __attribute__((weak));
 #pragma weak agent_tool_source_attach
+static void served_memory_refusal_log(const struct mcp_call *c, int selected, int stage);
+/* Reached directly from mcp_tool_lookup when deployment policy marks the tool
+ * unavailable (mode < 0); the served path logs its own stage and replies below. */
 static cJSON *mcph_source_unavailable(struct mcp_call *c)
 {
-   (void)c;
-   return text_content("{\"status\":\"error\",\"kind\":\"source_custody_unavailable\",\"message\":"
-                       "\"selected tool output requires an owner-issued source receipt\"}");
+   served_memory_refusal_log(c, -1, 0);
+   return text_content(AIMEE_TOOL_SOURCE_UNAVAILABLE_RESULT);
+}
+/* Say why a selected source tool produced no receipt: the model only ever sees
+ * the fixed reply, and the owner renderer logs nothing. */
+static void served_memory_refusal_log(const struct mcp_call *c, int selected, int stage)
+{
+   const request_context_t *rc = request_context_get();
+   aimee_log(LOG_WARN, "memory-tool",
+             "%s produced no source receipt (mode=%d stage=%s context=%s request_id=%s "
+             "principal=%s refused=%d%s%s model_execution=%d)",
+             c->tool ? c->tool : "?", selected,
+             stage == 0   ? "mode"
+             : stage == 1 ? "render"
+                          : "attach",
+             rc ? "set" : "none", rc && rc->request_id[0] ? "set" : "empty",
+             rc && rc->principal[0] ? "set" : "empty", rc ? rc->context_refused : 0,
+             rc && rc->context_refused ? " kind=" : "",
+             rc && rc->context_refused ? rc->context_refusal_kind : "",
+             rc ? rc->model_execution : 0);
 }
 static cJSON *mcph_served_memory(struct mcp_call *c, int card)
 {
@@ -184,8 +207,9 @@ static cJSON *mcph_served_memory(struct mcp_call *c, int card)
       if (selected < 0 || !aimee_module_tool_source_render ||
           aimee_module_tool_source_render(c->tool, c->jargs, &reply) != 1)
       {
+         served_memory_refusal_log(c, selected, selected < 0 ? 0 : 1);
          cJSON_Delete(reply);
-         return mcph_source_unavailable(c);
+         return text_content(AIMEE_TOOL_SOURCE_UNAVAILABLE_RESULT);
       }
    }
    else
@@ -199,7 +223,9 @@ static cJSON *mcph_served_memory(struct mcp_call *c, int card)
           agent_tool_source_attach(source, output->valuestring) == 0)
          content = text_content(output->valuestring);
       cJSON_Delete(reply);
-      return content ? content : mcph_source_unavailable(c);
+      if (!content)
+         served_memory_refusal_log(c, selected, 2);
+      return content ? content : text_content(AIMEE_TOOL_SOURCE_UNAVAILABLE_RESULT);
    }
    /* No native receipt-selected deployment: retain the legacy owner response. */
    char *raw = reply ? cJSON_PrintUnformatted(reply) : NULL;
