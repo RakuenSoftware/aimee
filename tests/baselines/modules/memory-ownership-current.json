@@ -2655,8 +2655,8 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "fd54f3a669aa3c316d44a48b1348bcdfb1923f61578539562c5187280ee20a19",
-      "boundary_review": "Renames the server.health delegate_sandbox posture key from state to posture so the body keeps one top-level state (the store probe); no memory ownership, route or storage change.",
+      "sha256": "2ff7d8d274d019743f4ce7414d5656b8d20537ae0d57a5d99d3b1b3d3e4d6192",
+      "boundary_review": "2026-11-27: reviewed the exact source delta. The untrusted-hook identity warning is logged once per session and client in the server's lifetime instead of on every hook. Hook identity verification, modes and refusals are unchanged; no memory symbol, route, policy or fallback added.",
       "source_revisions": [
         {
           "disposition": "host-transport",
@@ -2695,6 +2695,15 @@
           "sha256": "ebda094e4295b62247153522603e7919ac474860a56941a7975912bba2902afb",
           "boundary_review": "PR #3098: delegate private container runtime startup reporting only (no memory symbol, policy or fallback added); the memory-symbol finding set is unchanged.",
           "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+        },
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "kb_client_memory_scope_context_clear",
+            "server_module_memory_data"
+          ],
+          "sha256": "fd54f3a669aa3c316d44a48b1348bcdfb1923f61578539562c5187280ee20a19",
+          "boundary_review": "Renames the server.health delegate_sandbox posture key from state to posture so the body keeps one top-level state (the store probe); no memory ownership, route or storage change."
         }
       ],
       "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."

@@ -752,9 +752,10 @@ int db1_agent_job_canonical_observation(int job_id, const char *authenticated_ac
    ouro_module_call_result_t call;
    for (;;)
    {
-      call = obs_bus_module_call(AIMEE_DB1_EVENT_DELEGATION, AIMEE_DB1_STAGE_DELEGATION, 0,
-                                 deadline, request, (uint32_t)request_len, response, capacity,
-                                 &length, NULL, NULL);
+      call =
+          obs_bus_module_call_expect(AIMEE_DB1_EVENT_DELEGATION, AIMEE_DB1_STAGE_DELEGATION, 0,
+                                     deadline, request, (uint32_t)request_len, response, capacity,
+                                     &length, NULL, NULL, OURO_MODULE_CALL_RESPONSE_TOO_LARGE);
       if (call != OURO_MODULE_CALL_RESPONSE_TOO_LARGE || length <= capacity ||
           length > OURO_MODULE_MESSAGE_MAX_BODY)
          break;
@@ -764,6 +765,12 @@ int db1_agent_job_canonical_observation(int job_id, const char *authenticated_ac
       response = grown;
       capacity = length;
    }
+   /* The first, small buffer expects "too large" and grows; a reply this
+    * loop could not grow to is a real failure, and says so. */
+   if (call == OURO_MODULE_CALL_RESPONSE_TOO_LARGE)
+      aimee_log(LOG_WARN, "db1.delegation",
+                "reply of %u bytes exceeds what this read can hold (capacity %u)", (unsigned)length,
+                (unsigned)capacity);
    free(request);
    int result = -1;
    if (call == OURO_MODULE_CALL_OK && length >= 8 && length <= capacity)

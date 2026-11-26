@@ -155,6 +155,35 @@ extern "C"
                        void *response_body, uint32_t response_capacity, uint32_t *response_len,
                        ouro_module_cancelled_fn cancelled, void *cancel_context);
 
+   /* obs_bus_module_call for a caller that treats one non-OK outcome as an
+    * ordinary answer: a long poll whose deadline means "nothing arrived", or a
+    * read that grows its buffer when told the reply is larger. That outcome is
+    * not logged as a failure or counted against the module; every other
+    * failure is. Weak, so a unit binary that stubs obs_bus_module_call needs
+    * no second stub: obs_bus_module_call_expect falls back to the logged call. */
+   ouro_module_call_result_t obs_bus_module_call_expecting(
+       uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+       const void *request_body, uint32_t request_len, void *response_body,
+       uint32_t response_capacity, uint32_t *response_len, ouro_module_cancelled_fn cancelled,
+       void *cancel_context, ouro_module_call_result_t expected) __attribute__((weak));
+
+   static inline ouro_module_call_result_t
+   obs_bus_module_call_expect(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id,
+                              uint64_t deadline_ns, const void *request_body, uint32_t request_len,
+                              void *response_body, uint32_t response_capacity,
+                              uint32_t *response_len, ouro_module_cancelled_fn cancelled,
+                              void *cancel_context, ouro_module_call_result_t expected)
+   {
+      return obs_bus_module_call_expecting
+                 ? obs_bus_module_call_expecting(event_kind, stage_id, trace_id, deadline_ns,
+                                                 request_body, request_len, response_body,
+                                                 response_capacity, response_len, cancelled,
+                                                 cancel_context, expected)
+                 : obs_bus_module_call(event_kind, stage_id, trace_id, deadline_ns, request_body,
+                                       request_len, response_body, response_capacity, response_len,
+                                       cancelled, cancel_context);
+   }
+
    /* In-process daemon-owned stage over the SAME bus/AMOD runtime. No HTTP,
     * signal handler or caller identity from JSON. Stage table/user_data remain
     * immutable until stop; stop cancels and joins workers while the bus lives. */
