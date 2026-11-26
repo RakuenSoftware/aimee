@@ -1882,17 +1882,22 @@ static void delegate_worker_run(void *arg)
          kb_client_bandit_close("delegate_routing_v2", dr_decision_id, dr_arm_id, reward);
    }
 
-   /* Reconcile delegate sibling-worktree edits via PR or supervisor review. */
-   if (delegate_worktree_path[0] && delegate_git_root[0] && !delegate_allows_writes &&
-       delegate_worktree_has_changes(delegate_worktree_path))
+   /* A read-only run's worktree changes are discarded, and the worktree is
+    * removed even when dirty. It starts with the client's own uncommitted files
+    * carried in, so "has changes" does not mean the delegate wrote anything:
+    * the old warning blamed the delegate, claimed a discard that never
+    * happened, and left the worktree on disk. */
+   if (delegate_worktree_path[0] && delegate_git_root[0] && !delegate_allows_writes)
    {
-      aimee_log(LOG_WARN, "delegate",
-                "delegate %s produced changes for a read-only prompt; discarding worktree changes",
-                deleg_id);
+      if (delegate_worktree_has_changes(delegate_worktree_path))
+         aimee_log(LOG_INFO, "delegate",
+                   "delegate %s: read-only run; discarding its worktree's uncommitted files "
+                   "(the client's carried changes or the delegate's)",
+                   deleg_id);
+      (void)worktree_discard(delegate_git_root, deleg_id, delegate_work_name);
    }
-
-   /* Clean up delegate worktree if we created one. */
-   if (delegate_worktree_path[0] && delegate_git_root[0])
+   /* Clean up a writing delegate's worktree; one holding work is kept. */
+   else if (delegate_worktree_path[0] && delegate_git_root[0])
       worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
 
    /* Release the credential lease so siblings can pick it up. If the

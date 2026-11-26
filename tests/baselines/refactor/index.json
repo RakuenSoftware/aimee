@@ -2151,12 +2151,12 @@
         },
         {
           "path": "src/modules/workspace/include/aimee/workspace/workspace.h",
-          "sha256": "694ff7d8a25156dbedcf9262e083e2c9a15c1b1d1edf7e881b89b5ecd198883a"
+          "sha256": "a4d409adb2fec80360bff00fa8907ba63c33441dcd23a3b9bc5b9875287ad464"
         }
       ]
     },
     "public-symbols": {
-      "sha256": "e1bb8dc0a3685fde9639ef1a417f42da06457c2f9f20d58d6a28e974539d232d",
+      "sha256": "2ea4b011b5e3c21d6f579c3121070b96d0061d06598286142683009d0aeea1d1",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
