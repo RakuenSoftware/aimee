@@ -1159,6 +1159,38 @@ int aimee_module_commands_dispatch_internal_caller(const char *method, const cJS
  * unavailable". Log how each memory.runtime call ended -- elapsed time against
  * its budget, the dispatch result, and an owner error's kind and message (owner
  * diagnostics, never memory content) -- so the refusing step is named. */
+/* A refusal that reflects how this deployment is configured -- e.g. no
+ * documentary grade source adapter -- repeats on every delegate start. Warn the
+ * first time each (operation, dispatch result, kind, message) is seen in this
+ * process and log repeats at DEBUG, so a new kind of failure still stands out.
+ * The table is small; when full, every failure warns rather than hide one. */
+static int memory_runtime_failure_first(const char *operation, int rc, const char *kind,
+                                        const char *message)
+{
+   enum
+   {
+      SLOTS = 64
+   };
+   static char seen[SLOTS][256];
+   static int used;
+   static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+   char key[256];
+   snprintf(key, sizeof key, "%s|%d|%s|%.160s", operation ? operation : "", rc, kind ? kind : "",
+            message ? message : "");
+   int first = 1;
+   pthread_mutex_lock(&lock);
+   for (int i = 0; i < used; i++)
+      if (!strcmp(seen[i], key))
+      {
+         first = 0;
+         break;
+      }
+   if (first && used < SLOTS)
+      snprintf(seen[used++], sizeof seen[0], "%s", key);
+   pthread_mutex_unlock(&lock);
+   return first;
+}
+
 static void memory_runtime_dispatch_log(const char *method, const cJSON *args, const cJSON *context,
                                         int rc, int timeout_ms, long elapsed_ms,
                                         const cJSON *result, int raw_result)
@@ -1194,7 +1226,8 @@ static void memory_runtime_dispatch_log(const char *method, const cJSON *args, c
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(status_owner, "kind"));
       const char *message =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(status_owner, "message"));
-      aimee_log(LOG_WARN, "memory-tool",
+      aimee_log(memory_runtime_failure_first(operation, rc, kind, message) ? LOG_WARN : LOG_DEBUG,
+                "memory-tool",
                 "memory.runtime %s failed: dispatch=%d status=%s kind=%s message=%.200s after "
                 "%ldms (budget %dms, subject=%s authenticated=%d user_authority=%d)",
                 operation ? operation : "?", rc, status ? status : "none", kind ? kind : "none",
