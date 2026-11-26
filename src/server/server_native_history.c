@@ -458,12 +458,19 @@ static int required_call_hash(const aimee_block_t *call, char digest[65], size_t
 }
 /* A namespace is part of canonical tool identity. Never classify an unrelated
  * business tool merely because its local name resembles a selected host tool. */
-/* The host's fixed reply when a source tool issued no receipt. It is written by
- * the host and carries no memory evidence, so it needs no receipt to be resent;
- * refusing it ended the whole run on the first failed memory_serve call. */
+/* A source tool's result that carries no memory needs no receipt to be resent:
+ * the host's fixed reply when no receipt was issued, and any error result
+ * (tool_is_error is set only by the host's dispatcher -- argument validation,
+ * refusal, transport -- never by the owner's receipted output or the model).
+ * Refusing these ended the whole run on the first failed memory_serve call,
+ * including a call the model merely sent without a required argument. */
 static int required_result_is_host_refusal(const aimee_block_t *block)
 {
-   return block->type == AIMEE_BLK_TOOL_RESULT && cJSON_IsString(block->tool_result) &&
+   if (block->type != AIMEE_BLK_TOOL_RESULT)
+      return 0;
+   if (block->tool_is_error)
+      return 1;
+   return cJSON_IsString(block->tool_result) &&
           !strcmp(block->tool_result->valuestring, AIMEE_TOOL_SOURCE_UNAVAILABLE_RESULT);
 }
 static int required_tool_mode(const aimee_block_t *block)
