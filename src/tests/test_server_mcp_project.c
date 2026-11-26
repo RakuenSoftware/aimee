@@ -13,6 +13,12 @@ static cJSON *observed;
 static int resolver_calls, handler_calls, resolver_result;
 static int index_calls, index_count = -1;
 static int borrowed_response;
+static const char *expected_tool = "index_investigate";
+/* Deployment policy: memory_serve output is receipt-served. */
+int aimee_module_tool_source_mode(const char *tool)
+{
+   return tool && !strcmp(tool, "memory_serve") ? 1 : 0;
+}
 
 const char *run_cmd_get_cwd(void)
 {
@@ -55,7 +61,7 @@ cJSON *text_content(const char *text)
 static cJSON *native_handler(struct mcp_call *call)
 {
    assert(call && !call->ctx && !call->conn && !call->structured);
-   assert(!strcmp(call->tool, "index_investigate") && !strcmp(call->sid, "canonical-session"));
+   assert(!strcmp(call->tool, expected_tool) && !strcmp(call->sid, "canonical-session"));
    assert(call->jargs != original);
    handler_calls++;
    cJSON_Delete(observed);
@@ -72,7 +78,9 @@ static cJSON *native_handler(struct mcp_call *call)
 }
 mcp_tool_handler_fn mcp_tool_lookup(const char *tool)
 {
-   return tool && !strcmp(tool, "index_investigate") ? native_handler : NULL;
+   return tool && (!strcmp(tool, "index_investigate") || !strcmp(tool, "memory_serve"))
+              ? native_handler
+              : NULL;
 }
 static void invoke(const char *json)
 {
@@ -80,7 +88,7 @@ static void invoke(const char *json)
    assert(args);
    char *before = cJSON_PrintUnformatted(args);
    original = args;
-   cJSON *reply = server_mcp_native_call("index_investigate", args, "canonical-session");
+   cJSON *reply = server_mcp_native_call(expected_tool, args, "canonical-session");
    assert(cJSON_IsString(reply) && !strcmp(reply->valuestring, "native-result"));
    char *after = cJSON_PrintUnformatted(args);
    assert(!strcmp(before, after));
@@ -180,6 +188,22 @@ int main(void)
    server_mcp_inject_active_project(args, "/must-not-resolve-explicit-project");
    assert(resolver_calls == 3);
    cJSON_Delete(args);
+
+   /* A personal receipt-served read never gets the ambient project: the owner
+    * refused every live delegate memory_serve that carried one. A shared read
+    * and a model-supplied project are unchanged. */
+   expected_cwd = "/held/registered-worktree";
+   host_cwd = expected_cwd;
+   expected_tool = "memory_serve";
+   int before = resolver_calls;
+   invoke("{\"store\":\"user\",\"task\":\"x\"}");
+   assert(!cJSON_HasObjectItem(observed, "project") && resolver_calls == before);
+   invoke("{\"store\":\"kb\",\"task\":\"x\"}");
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(observed, "project")));
+   invoke("{\"store\":\"user\",\"project\":\"model-chosen\"}");
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(observed, "project")),
+                  "model-chosen"));
+   expected_tool = "index_investigate";
    cJSON_Delete(observed);
    puts(
        "MCP native/HTTP project preparation: host cwd, immutable inputs and explicit scope passed");
