@@ -2,6 +2,7 @@
 #include "server_mcp_internal.h"
 #include "aimee.h"
 #include "commands.h"
+#include <string.h>
 
 void server_mcp_inject_active_project(cJSON *args, const char *cwd)
 {
@@ -11,6 +12,21 @@ void server_mcp_inject_active_project(cJSON *args, const char *cwd)
    char project[MAX_PATH_LEN] = "";
    if (server_active_project_from_cwd(cwd, project, sizeof project) == 0 && project[0])
       cJSON_AddStringToObject(args, "project", project);
+}
+
+extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
+
+/* Personal memory has no project dimension: the owner refuses a personal serve
+ * that names a project ("Personal native serving cannot select another
+ * collection, generation or authority"). The ambient project is host scoping,
+ * not the model's request, so it is not added to a receipt-served personal
+ * read. A project the model supplies itself is passed through unchanged. */
+static int personal_source_read(const char *tool, const cJSON *args)
+{
+   if (!aimee_module_tool_source_mode || !tool || aimee_module_tool_source_mode(tool) == 0)
+      return 0;
+   const char *store = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "store"));
+   return store && !strcmp(store, "user");
 }
 
 /* Native calls bypass the HTTP transport preparation. Resolve only from the
@@ -26,7 +42,8 @@ cJSON *server_mcp_native_call(const char *tool, cJSON *args, const char *sid)
    cJSON *prepared = cJSON_Duplicate(args, 1);
    if (!prepared)
       return text_content("error: cannot retain native tool arguments");
-   server_mcp_inject_active_project(prepared, run_cmd_get_cwd());
+   if (!personal_source_read(tool, prepared))
+      server_mcp_inject_active_project(prepared, run_cmd_get_cwd());
    struct mcp_call c = {
        .ctx = NULL, .conn = NULL, .jargs = prepared, .sid = sid, .tool = tool, .structured = NULL};
    cJSON *raw = fn(&c);

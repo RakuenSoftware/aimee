@@ -459,13 +459,24 @@ cJSON *agent_build_seeded_request_ir(const agent_t *agent, const aimee_request_t
 {
    aimee_request_t ir = {0}, projected = {0};
    cJSON *rendered = NULL;
+   /* Each stage can refuse; the caller reports only "failed to build request",
+    * so name the stage here or a refused history is indistinguishable from a
+    * bad tool catalog or an unrenderable wire. */
+   const char *stage = "prepare";
    if (agent_prepare_seeded_request_ir(agent, seed, messages, catalog, host_context, max_tokens,
                                        temperature, wire, is_delegate, &ir) ||
-       agent_accept_retained_tool_sources(messages, &ir) ||
-       aimee_ir_request_project_model(&ir, &projected) ||
-       aimee_backend_preserve_host_extensions(&ir, &projected, wire))
+       (stage = "retained tool sources", agent_accept_retained_tool_sources(messages, &ir)) ||
+       (stage = "model projection", aimee_ir_request_project_model(&ir, &projected)) ||
+       (stage = "host extensions", aimee_backend_preserve_host_extensions(&ir, &projected, wire)))
+   {
+      aimee_log(LOG_WARN, "agent", "request build refused at %s (agent %s)", stage,
+                agent && agent->name[0] ? agent->name : "?");
       goto done;
+   }
    rendered = agent_render_request_ir(agent, seed ? seed : &ir, &projected, wire, host_profile, 0);
+   if (!rendered)
+      aimee_log(LOG_WARN, "agent", "request build refused at wire render (agent %s)",
+                agent && agent->name[0] ? agent->name : "?");
    if (rendered && dispatch_catalog)
    {
       aimee_request_free(dispatch_catalog);

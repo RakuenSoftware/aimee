@@ -6780,7 +6780,8 @@ $(TESTPREFIX)/unit-test-server-native-owned-guard: $(OBJDIR)/tests/test_server_n
 
 $(TESTPREFIX)/unit-test-server-native-history: $(OBJDIR)/tests/test_server_native_history.o \
     $(OBJDIR)/server/server_native_history.o $(OBJDIR)/modules/ir/session_event.o \
-    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
+    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/aimee_sha256.o \
+    $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto
 $(TESTPREFIX)/unit-test-server-unknown-effect-policy: $(OBJDIR)/tests/test_server_unknown_effect_policy.o \
     $(OBJDIR)/server/server_unknown_effect_policy.o $(OBJDIR)/server/server_session_control.o \
