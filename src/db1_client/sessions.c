@@ -50,8 +50,10 @@
 static db1_family_t family = {"db1.sessions", "sessions", AIMEE_DB1_EVENT_SESSIONS,
                               AIMEE_DB1_STAGE_SESSIONS, DB1_SESSIONS_CALL_TIMEOUT_MS, 0};
 
-/* Source-complete canonical reads/imports may span bounded store pages. Other
- * session operations retain their ordinary budget. The Go family still clamps
+/* Source-complete canonical reads/imports may span bounded store pages, and a
+ * history save writes a whole transcript: a long delegate's checkpoint missed
+ * the ordinary 2 s budget and failed the finished run. Other session
+ * operations retain their ordinary budget. The Go family still clamps
  * work to this invocation deadline. Keep aligned with
  * CanonicalHistoryTimeout. */
 #define DB1_SESSIONS_HISTORY_TIMEOUT_MS 30000
@@ -73,6 +75,8 @@ static uint64_t sessions_call_timeout_ms(uint32_t op)
    case AIMEE_DB1_OP_SESSION_TOOL_SOURCE_APPEND:
    case AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_BEGIN:
    case AIMEE_DB1_OP_SESSION_INPUT_ATTACHMENT_HISTORY_SAVE:
+   case AIMEE_DB1_OP_SESSION_IR_HISTORY_SAVE:
+   case AIMEE_DB1_OP_SESSION_TOOL_SOURCE_HISTORY_SAVE:
    case AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_BEGIN_DELIVERY:
    case AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_GET:
    case AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_PAGE:
@@ -468,7 +472,7 @@ int db1_session_tool_source_history_save(const char *session_id, const char *che
 {
  if (!session_id || !checkpoint || !scope || !actor || !active_turn || !messages_json) return -1;
  const char *fields[]={session_id,checkpoint,scope,actor,active_turn,messages_json};
- return write_result(db1_call(&family,AIMEE_DB1_OP_SESSION_TOOL_SOURCE_HISTORY_SAVE,fields,6,NULL,NULL,0,NULL));
+ return write_result(db1_call(&history_family,AIMEE_DB1_OP_SESSION_TOOL_SOURCE_HISTORY_SAVE,fields,6,NULL,NULL,0,NULL));
 }
 
 int db1_session_ir_history_save(const char *session_id, const char *checkpoint, const char *scope,
@@ -477,7 +481,7 @@ int db1_session_ir_history_save(const char *session_id, const char *checkpoint, 
    if (!session_id || !checkpoint || !scope || !actor || !messages_json)
       return -1;
    const char *fields[] = {session_id, checkpoint, scope, actor, messages_json};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_IR_HISTORY_SAVE, fields, 5,
+   return write_result(db1_call(&history_family, AIMEE_DB1_OP_SESSION_IR_HISTORY_SAVE, fields, 5,
                                   NULL, NULL, 0, NULL));
 }
 

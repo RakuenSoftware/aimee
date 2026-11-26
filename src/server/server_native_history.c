@@ -1,5 +1,6 @@
 #include "server_native_history.h"
 #include "db1_client/primary_sessions.h"
+#include "server_tool_source_unavailable.h"
 #include <aimee/ir/session_event.h>
 #include <stdlib.h>
 #include <string.h>
@@ -457,6 +458,14 @@ static int required_call_hash(const aimee_block_t *call, char digest[65], size_t
 }
 /* A namespace is part of canonical tool identity. Never classify an unrelated
  * business tool merely because its local name resembles a selected host tool. */
+/* The host's fixed reply when a source tool issued no receipt. It is written by
+ * the host and carries no memory evidence, so it needs no receipt to be resent;
+ * refusing it ended the whole run on the first failed memory_serve call. */
+static int required_result_is_host_refusal(const aimee_block_t *block)
+{
+   return block->type == AIMEE_BLK_TOOL_RESULT && cJSON_IsString(block->tool_result) &&
+          !strcmp(block->tool_result->valuestring, AIMEE_TOOL_SOURCE_UNAVAILABLE_RESULT);
+}
 static int required_tool_mode(const aimee_block_t *block)
 {
    if (!aimee_module_tool_source_mode || !block->tool_name)
@@ -620,7 +629,8 @@ static int required_tool_sources_preserved(const aimee_request_t *canonical,
             slot->pending = 0;
             if (v && block->tool_source)
                continue; /* Owner checks, not this classifier, decide trust. */
-            if (v && slot->required)
+            int host_refusal = !block->tool_source && required_result_is_host_refusal(block);
+            if (v && slot->required && !host_refusal)
             {
                failed = 1;
                break;
@@ -641,9 +651,10 @@ static int required_tool_sources_preserved(const aimee_request_t *canonical,
                   failed = 1;
                   break;
                }
-               key.flags = slot->required ? 1u : 2u;
+               int required = slot->required && !host_refusal;
+               key.flags = required ? 1u : 2u;
                results[result_count++] = key;
-               slot->any_required |= slot->required;
+               slot->any_required |= required;
             }
             else
             {

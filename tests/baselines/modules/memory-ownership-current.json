@@ -3721,11 +3721,21 @@
       "symbols": [
         "AIMEE_MEMORY_EVENT_COMMAND"
       ],
-      "sha256": "87773dafd8c42f18896174d796c515e988ba00000c40af3dd64d85be1437a560",
+      "sha256": "1a622d090331129a8912948f5bfbe1e47d2cfec21bf873c8383e0a6aea7974e6",
       "reason": "Host Vault intake converts freeform ordinary memory command data before its first bus frame. Native memory admission, source/projection proofs, scope authority and response ownership remain with the selected Native owner; signed internal source operations are excluded. The screen DTO reports host redaction when the selected owner permits only the already protected text; it grants no custody capability. Native memory-query arguments are protected before the selected owner constructs their source-bearing result and receipt; signed downstream projection/source operations remain excluded.",
       "evidence": [
         "src/tests/test_vault_content_privacy.c"
-      ]
+      ],
+      "source_revisions": [
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "AIMEE_MEMORY_EVENT_COMMAND"
+          ],
+          "sha256": "87773dafd8c42f18896174d796c515e988ba00000c40af3dd64d85be1437a560"
+        }
+      ],
+      "boundary_review": "2026-11-26: reviewed the exact source delta. memory.runtime dispatches log elapsed time against their budget, the dispatch result, the owner error's kind and message, and the context principal and authority flags the memory bridge mints for (identities and owner diagnostics, never memory content). Dispatch, framing, routing and results are unchanged; no memory symbol, policy or fallback added."
     }
   },
   "generated_files": {

@@ -1431,8 +1431,11 @@ static void delegate_worker_run(void *arg)
             cJSON_AddStringToObject(assembly, "workspace", history_workspace);
          cJSON_AddItemToObject(assembly, "execution_test_grades", projection);
          cJSON *rendered = NULL;
-         if (aimee_module_commands_dispatch_internal_timeout("memory.runtime", assembly, 500,
-                                                             &rendered) == 1)
+         /* With the caller's verified context, as ordinary ingress assembly
+          * sends it. Without one the memory bridge has no subject to mint a
+          * capability for, and every delegate's assembly was refused. */
+         if (aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", assembly, 500,
+                                                                    &rendered) == 1)
          {
             const char *block =
                 cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(rendered, "envelope"));

@@ -655,7 +655,7 @@ var Sessions = store.Family{
 		opServerSessionPrimaryGet:           {Name: "server_session_primary_get", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionPrimaryGet},
 		opServerSessionPrimarySet:           {Name: "server_session_primary_set", Args: 3, Tx: true, HostOnly: true, Run: sessionPrimarySet},
 		opSessionIRPage:                     {Name: "session_ir_page", Args: 4, Run: sessionIRPage},
-		opSessionIRHistorySave:              {Name: "session_ir_history_save", Args: 5, Tx: true, Run: sessionIRHistorySave},
+		opSessionIRHistorySave:              {Name: "session_ir_history_save", Timeout: store.CanonicalHistoryTimeout, Args: 5, Tx: true, Run: sessionIRHistorySave},
 		opSessionIRHistoryLoad:              {Name: "session_ir_history_load", Timeout: store.CanonicalHistoryTimeout, Tx: true, Args: 4, Run: sessionIRHistoryLoad},
 		opSessionIRRunningHistoryLoad:       {Name: "session_ir_running_history_load", Timeout: store.CanonicalHistoryTimeout, Tx: true, Args: 3, Run: sessionIRRunningHistoryLoad},
 		opSessionHarnessGet:                 {Name: "session_harness_get", Args: 3, Cells: 1, Run: sessionHarnessGet},

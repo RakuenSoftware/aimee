@@ -1,4 +1,5 @@
 #include "server_native_history.h"
+#include "server/server_tool_source_unavailable.h"
 #include <aimee/ir/session_event.h>
 #include <assert.h>
 #include <stdio.h>
@@ -18,8 +19,52 @@ static const char message[] =
     "The host lost this tool's completion result. Its effects are unknown; interruption does not "
     "prove that it failed or was cancelled. Do not repeat an effect without explicit user "
     "authorization.";
+/* Host deployment policy: memory_serve output needs an owner receipt. */
+int aimee_module_tool_source_mode(const char *tool)
+{
+   return tool && !strcmp(tool, "memory_serve") ? 1 : 0;
+}
+static int served_history_preserved(const char *result)
+{
+   cJSON *content = cJSON_CreateString(result);
+   char *escaped = cJSON_PrintUnformatted(content);
+   cJSON_Delete(content);
+   char wire[4096];
+   snprintf(wire, sizeof wire,
+            "{\"version\":1,\"model\":\"m\",\"source_wire\":\"unspecified\",\"cache_policy\":"
+            "\"native\",\"system\":[],\"tools\":[],\"tool_choice\":{\"mode\":\"unset\"},\"stream\":"
+            "false,\"stop_sequences\":[],\"messages\":[{\"role\":\"user\",\"blocks\":[{\"type\":"
+            "\"text\",\"text\":\"task\"}]},"
+            "{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"m1\","
+            "\"name\":\"memory_serve\",\"input\":{\"store\":\"user\",\"view\":\"briefing\"}}]},"
+            "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"m1\","
+            "\"content\":%s,\"is_error\":false}]}]}",
+            escaped);
+   free(escaped);
+   cJSON *json = cJSON_Parse(wire);
+   aimee_request_t canonical = {0}, retained = {0};
+   assert(json && !aimee_ir_request_parse(json, &canonical) &&
+          !aimee_ir_request_parse(json, &retained));
+   int rc = server_native_history_tool_sources_preserved(&canonical, &retained);
+   aimee_request_free(&canonical);
+   aimee_request_free(&retained);
+   cJSON_Delete(json);
+   return rc;
+}
+/* A source tool that issued no receipt answers with the host's fixed refusal.
+ * That reply carries no memory, so the next request may resend it; refusing
+ * it ended live delegates with "failed to build request". Real memory output
+ * without a receipt is still refused. */
+static void test_host_refusal_needs_no_receipt(void)
+{
+   assert(served_history_preserved(AIMEE_TOOL_SOURCE_UNAVAILABLE_RESULT) == 0);
+   assert(served_history_preserved("{\"selected_records\":[\"stored memory text\"]}") == -1);
+   assert(served_history_preserved(AIMEE_TOOL_SOURCE_UNAVAILABLE_RESULT " ") == -1);
+   puts("host source refusal resends without a receipt; memory output does not");
+}
 int main(void)
 {
+   test_host_refusal_needs_no_receipt();
    const char *raw =
        "{\"messages\":[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":"
        "\"call\",\"name\":\"bash\",\"input\":{\"exact\":123.123456789012345678901234567890}}]},{"
