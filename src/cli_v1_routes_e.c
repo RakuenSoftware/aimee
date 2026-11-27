@@ -1243,6 +1243,12 @@ int cli_index_bootstrap_detached(const char *root)
          return -1;
       snprintf(self, sizeof(self), "%s", cli);
    }
+   /* Only re-run the aimee client itself. Any other host of this code (a test
+    * driver, an embedding program) would be re-executed with `index scan`
+    * arguments it does not understand; those upload in the foreground. */
+   const char *self_name = strrchr(self, '/');
+   if (strcmp(self_name ? self_name + 1 : self, "aimee") != 0)
+      return -1;
    const char *home = getenv("HOME");
    if (!home || !home[0])
       return -1;

@@ -231,8 +231,14 @@ static char *local_code(const char *route, const void *body_v, int *status)
       }
       if (reply && !code_reply_refused(reply))
       {
-         cJSON_ReplaceItemInObjectCaseSensitive(reply, "files", cJSON_CreateNumber(n));
-         cJSON_ReplaceItemInObjectCaseSensitive(reply, "inspected", cJSON_CreateNumber(n));
+         /* Replace, or add when the store's reply lacks the key: a failed
+          * replace does not take ownership and leaked the new number. */
+         const char *counts[] = {"files", "inspected"};
+         for (unsigned k = 0; k < sizeof(counts) / sizeof(counts[0]); k++)
+         {
+            cJSON_DeleteItemFromObjectCaseSensitive(reply, counts[k]);
+            cJSON_AddNumberToObject(reply, counts[k], n);
+         }
          cJSON_AddNumberToObject(reply, "embeddings_reused", cJSON_GetArraySize(known));
       }
       cJSON_Delete(known);
