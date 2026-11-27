@@ -3722,8 +3722,19 @@
         "AIMEE_MEMORY_EVENT_EMBED",
         "AIMEE_MEMORY_STAGE_EMBED"
       ],
-      "sha256": "0950fbc021a6e42b917b1909c80ca52e8f403b0cb3aa819394da16728472f1d3",
-      "reason": "Generic identity-checked query/document embedding requests only; selected Native provider owns all model execution. Repository snapshots, SQL publication and code ranking belong to runtime business state."
+      "sha256": "b27d38c866f3257f5fb7c9e81e2dca8a9363e32fe11ee23d80786237de0e92b3",
+      "reason": "Generic identity-checked query/document embedding requests only; selected Native provider owns all model execution. Repository snapshots, SQL publication and code ranking belong to runtime business state.",
+      "source_revisions": [
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "AIMEE_MEMORY_EVENT_EMBED",
+            "AIMEE_MEMORY_STAGE_EMBED"
+          ],
+          "sha256": "0950fbc021a6e42b917b1909c80ca52e8f403b0cb3aa819394da16728472f1d3"
+        }
+      ],
+      "boundary_review": "2026-11-27: reviewed the exact source delta. Adds server_code_index_serving_id (the existing serving-id embed call, returning the identity string) and server_code_index_reuse_embedding (writes a vector the repository store already holds, with its serving identity and the existing policy string, onto an extracted file). Code-index scans reuse a stored vector only for identical path, content fingerprint and serving identity. No memory symbol, store, policy or fallback added; the embedding call path and its identity verification are unchanged."
     },
     "src/module_commands.c": {
       "disposition": "host-transport",

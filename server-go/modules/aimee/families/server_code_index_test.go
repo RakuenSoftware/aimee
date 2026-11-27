@@ -2,6 +2,7 @@ package families
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -113,6 +114,25 @@ func TestRuntimeCodeIndexRetainedPublicationPostgres(t *testing.T) {
 	mismatch := call(codeIndexRequest{Route: "/v1/code/hybrid?project=fixture&query=indirect", Embedding: []float64{1, 0}, EmbeddingServing: "other-space", EmbeddingPolicy: codeGenerationPolicy})
 	if len(mismatch["hits"].([]any)) != 0 {
 		t.Fatal("foreign vector space used")
+	}
+	// A later scan reuses the stored vector for an unchanged file, under the same
+	// embedder identity only, and never for changed content.
+	lookup := func(serving string, files ...codeFile) map[string]any {
+		return call(codeIndexRequest{Route: "/v1/code/embeddings", Project: "fixture", EmbeddingServing: serving, Files: files})["embeddings"].(map[string]any)
+	}
+	print := func(content string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(content))) }
+	same := codeFile{Path: "engine.c", Fingerprint: print(file.Content)}
+	if got := lookup(file.EmbeddingServing, same); len(got) != 1 || len(got["engine.c"].([]any)) != 2 {
+		t.Fatalf("unchanged file's vector not reused: %v", got)
+	}
+	if got := lookup("other-space", same); len(got) != 0 {
+		t.Fatal("vector reused across embedder identities")
+	}
+	if got := lookup(file.EmbeddingServing, codeFile{Path: "engine.c", Fingerprint: print("changed")}); len(got) != 0 {
+		t.Fatal("vector reused for changed content")
+	}
+	if got := lookup(file.EmbeddingServing, codeFile{Path: "other.c", Fingerprint: print(file.Content)}); len(got) != 0 {
+		t.Fatal("vector reused for another path")
 	}
 	call(scan("begin", "abandoned"))
 	call(scan("stage", "abandoned", changed))

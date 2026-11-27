@@ -1364,17 +1364,11 @@ static int cli_ws_ingest_root(const char *remote, const char *bearer, const char
    s.base = project_name;
    s.abs_root = abs_root;
    static atomic_ullong sequence = 0;
-   /* Random suffix: two clients starting in the same second both had sequence
-    * 1 and so the same scan id, which the store refuses as reuse. */
-   unsigned char raw[8];
-   char nonce[17] = "";
-   if (platform_random_bytes(raw, sizeof(raw)) == 0)
-      for (size_t i = 0; i < sizeof(raw); i++)
-         snprintf(nonce + 2 * i, 3, "%02x", raw[i]);
-   else
-      snprintf(nonce, sizeof(nonce), "%d", (int)getpid());
-   snprintf(s.scan_id, sizeof(s.scan_id), "thin-%llu-%llu-%s", (unsigned long long)time(NULL),
-            (unsigned long long)atomic_fetch_add(&sequence, 1) + 1, nonce);
+   /* The process id makes the id unique across processes started in the same
+    * second: before, each had sequence 1 and so the same id, which the store
+    * refuses as a reused scan. */
+   snprintf(s.scan_id, sizeof(s.scan_id), "thin-%llu-%llu-%ld", (unsigned long long)time(NULL),
+            (unsigned long long)atomic_fetch_add(&sequence, 1) + 1, (long)getpid());
 
    int begin = cli_ws_ingest_phase(remote, bearer, s.base, abs_root, "begin", s.scan_id, 0, NULL);
    if (begin == 2)

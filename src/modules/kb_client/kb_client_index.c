@@ -5,8 +5,9 @@
 #include "cJSON.h"
 #include "json_int64.h"
 #include "log.h"
-#include "platform_random.h"
-#include <unistd.h>
+#ifdef AIMEE_POSIX
+#include <unistd.h> /* getpid: scan ids */
+#endif
 
 #include <stdio.h>
 #include <stdatomic.h>
@@ -381,13 +382,11 @@ static int kb_client_index_scan_v1(const char *name, const char *root, int force
       kb_scan_push_ctx_t s;
       memset(&s, 0, sizeof(s));
       static atomic_ullong sequence = 0;
-      /* Random suffix: two processes starting in the same second both had
-       * sequence 1 and so the same scan id, which the store refuses as reuse. */
-      char nonce[17] = "";
-      if (platform_random_hex(nonce, 16) != 0)
-         snprintf(nonce, sizeof(nonce), "%d", (int)getpid());
-      snprintf(s.scan_id, sizeof(s.scan_id), "client-%llu-%llu-%s", (unsigned long long)time(NULL),
-               (unsigned long long)atomic_fetch_add(&sequence, 1) + 1, nonce);
+      /* The process id makes the id unique across processes started in the same
+       * second: before, each had sequence 1 and so the same id, which the store
+       * refuses as a reused scan. */
+      snprintf(s.scan_id, sizeof(s.scan_id), "client-%llu-%llu-%ld", (unsigned long long)time(NULL),
+               (unsigned long long)atomic_fetch_add(&sequence, 1) + 1, (long)getpid());
       s.name = name;
       s.root = root;
       s.force = force;

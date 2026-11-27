@@ -235,7 +235,7 @@
         },
         {
           "path": "server-go/modules/aimee/families/schema_server_code_scan_progress.sql",
-          "sha256": "b934057a757b9ac96d7676abab4ebd3a98bd679b9a969668f1485bceddf75373"
+          "sha256": "1a48cbf61f17254ee0bcb2ae27c7a5d972e67d83a86cc49b467982e28ac4986e"
         },
         {
           "path": "server-go/modules/aimee/families/schema_session_cache.sql",

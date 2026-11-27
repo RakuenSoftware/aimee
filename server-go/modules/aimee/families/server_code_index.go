@@ -41,6 +41,8 @@ type codeFile struct {
 	Embedding        []float64        `json:"embedding,omitempty"`
 	EmbeddingServing string           `json:"embedding_serving,omitempty"`
 	EmbeddingPolicy  string           `json:"embedding_policy,omitempty"`
+	// Fingerprint is sent only to /v1/code/embeddings; staging computes its own.
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 type codeIndexRequest struct {
 	FilePath         string     `json:"file_path"`

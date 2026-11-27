@@ -49,6 +49,27 @@ int server_code_index_embedding_available(void)
    cJSON_Delete(reply);
    return available;
 }
+char *server_code_index_serving_id(void)
+{
+   const char *endpoint = config_embedder_command_current(NULL);
+   if (!endpoint || !endpoint[0])
+      return NULL;
+   cJSON *reply = embed_call(endpoint, "serving-id", NULL, NULL);
+   const cJSON *identity = cJSON_GetObjectItemCaseSensitive(reply, "serving_id");
+   char *out = valid_reply(reply) && cJSON_IsString(identity) && identity->valuestring[0] &&
+                       strlen(identity->valuestring) <= 160
+                   ? strdup(identity->valuestring)
+                   : NULL;
+   cJSON_Delete(reply);
+   return out;
+}
+void server_code_index_reuse_embedding(cJSON *file, const cJSON *vector, const char *serving)
+{
+   cJSON_AddItemToObject(file, "embedding", cJSON_Duplicate(vector, 1));
+   cJSON_AddStringToObject(file, "embedding_serving", serving);
+   cJSON_AddStringToObject(file, "embedding_policy",
+                           "runtime-code-path-prefix8192-bytes-cosine/v1");
+}
 static void embed(const char *text, const char *input, cJSON *out)
 {
    const char *configured = config_embedder_command_current(NULL);
