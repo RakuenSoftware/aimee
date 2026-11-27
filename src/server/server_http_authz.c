@@ -32,6 +32,7 @@
 #include "server.h" /* CAP_* / CAPS_* */
 #include "server_write_tier.h"
 #include "server_write_tier_db1.h" /* the db1-backed verify/consume wrappers */
+#include "server_http_identity.h"  /* server_http_session_bearer_unbind */
 #include <aimee/core/connection/auth.h>
 
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
@@ -243,6 +244,26 @@ int server_http_retired_global_would_allow(int fd, int is_tcp, const char *beare
    return server_http_route_allowed(is_tcp, bearer, method, path, remote_writes);
 }
 
+int server_http_presented_device_token(const char *presented, char *out, size_t out_n)
+{
+   if (!out || out_n == 0)
+      return 0;
+   out[0] = '\0';
+   if (!presented || !presented[0])
+      return 0;
+   /* Unbind into a buffer that holds any presented value whole: a longer
+    * credential truncated to 64 characters must not pass as a device token. */
+   char base[4097], sid[33];
+   if (strlen(presented) >= sizeof(base))
+      return 0;
+   (void)server_http_session_bearer_unbind(presented, base, sizeof(base), sid, sizeof(sid));
+   int ok = strlen(base) == 64 && out_n > 64;
+   if (ok)
+      memcpy(out, base, 65);
+   OPENSSL_cleanse(base, sizeof(base));
+   return ok;
+}
+
 int server_http_resolve_write_tier(int is_tcp, const char *buf, const char *method,
                                    const char *path, const char *request_id,
                                    server_identity_token_claims_t *claims, int *identity_present)
@@ -267,15 +288,22 @@ int server_http_resolve_write_tier(int is_tcp, const char *buf, const char *meth
       const char *credential = bearer ? bearer : auth_value;
       while (*credential == ' ')
          credential++;
+      /* A session-scoped gateway appends `.aimee-session.<sid>` to an opaque
+       * bearer; that dot is not a JWS separator. Judge the credential without it,
+       * or every gateway request is logged as a refused identity token. */
+      char unbound[KB_IDENTITY_TOKEN_WIRE_MAX + 1] = "", bound_sid[33];
+      (void)server_http_session_bearer_unbind(credential, unbound, sizeof(unbound), bound_sid,
+                                              sizeof(bound_sid));
       /* Only a compact JWS can be an identity token. The legacy shared bearer is
        * an opaque string, so this leaves it alone instead of reporting every
        * legacy read as a malformed token. */
-      if (strchr(credential, '.'))
+      if (strchr(unbound, '.'))
       {
-         identity_len = strnlen(credential, sizeof(identity) - 1);
-         memcpy(identity, credential, identity_len);
+         identity_len = strnlen(unbound, sizeof(identity) - 1);
+         memcpy(identity, unbound, identity_len);
          identity[identity_len] = '\0';
       }
+      OPENSSL_cleanse(unbound, sizeof(unbound));
    }
    server_write_tier_outcome_t outcome = SERVER_WRITE_TIER_ABSENT;
    int tier = server_write_tier_verify_for_request(identity_len ? identity : NULL, identity_len,

@@ -2554,6 +2554,29 @@ int main(void)
       assert(server_http_authorize(0, "secret", NULL, NULL, 1) == 0);
    }
 
+   /* --- An enrolled device token is looked up by digest. `aimee launch
+    *     --gateway` sends it session-bound, and the lookup must see the token
+    *     itself: the live 1.1.4 Server refused every gateway request from an
+    *     enrolled client with 401 because the bound form is not 64 chars. --- */
+   {
+      const char *dev = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+      char got[65];
+      assert(server_http_presented_device_token(dev, got, sizeof(got)) == 1);
+      assert(strcmp(got, dev) == 0);
+      char bound[160];
+      snprintf(bound, sizeof(bound), "%s.aimee-session.fedcba9876543210fedcba9876543210", dev);
+      assert(server_http_presented_device_token(bound, got, sizeof(got)) == 1);
+      assert(strcmp(got, dev) == 0);
+      /* Not a device token: wrong length, malformed binding, absent. */
+      assert(server_http_presented_device_token("short", got, sizeof(got)) == 0 && !got[0]);
+      snprintf(bound, sizeof(bound), "%s.aimee-session.NOTHEX", dev);
+      assert(server_http_presented_device_token(bound, got, sizeof(got)) == 0 && !got[0]);
+      assert(server_http_presented_device_token(NULL, got, sizeof(got)) == 0 && !got[0]);
+      /* A longer credential is not cut down to a device-token length. */
+      snprintf(bound, sizeof(bound), "%sXYZ", dev);
+      assert(server_http_presented_device_token(bound, got, sizeof(got)) == 0 && !got[0]);
+   }
+
    /* --- API primaries are operator/random Vault credentials, never a published
     *     value with hidden special capabilities. Enrollment remains additive. --- */
    {
