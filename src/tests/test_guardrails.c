@@ -847,8 +847,19 @@ static void test_worktree_discard_removes_dirty_delegate_worktree(void)
    struct stat st;
    worktree_cleanup(repo, sid, "readonly");
    assert(stat(wt, &st) == 0); /* cleanup protects a dirty worktree */
+   /* A second worktree of the same session shares its key directory. */
+   assert(worktree_create_sibling_from_ref(repo, sid, "other", "main") == 0);
+   char other[MAX_PATH_LEN];
+   assert(worktree_sibling_path(repo, sid, "other", other, sizeof(other)) == 0);
+   char keydir[MAX_PATH_LEN];
+   snprintf(keydir, sizeof(keydir), "%s", wt);
+   *strrchr(keydir, '/') = '\0';
    assert(worktree_discard(repo, sid, "readonly") == 0);
    assert(stat(wt, &st) != 0);
+   assert(stat(keydir, &st) == 0);       /* still holds "other" */
+   worktree_cleanup(repo, sid, "other"); /* clean: removed */
+   assert(stat(other, &st) != 0);
+   assert(stat(keydir, &st) != 0); /* no empty husk left behind */
    snprintf(cmd, sizeof(cmd),
             "git -C '%s' worktree list --porcelain | grep -c '^worktree ' | grep -qx 1", repo);
    assert(system(cmd) == 0);
