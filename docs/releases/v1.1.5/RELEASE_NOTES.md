@@ -15,7 +15,7 @@ for a long time or never finish, and lets Claude Code use the Server's Anthropic
 
 - **Code index discovery no longer stalls the session.** In a repository the Server had not
   indexed, `aimee index investigate` (and MCP initialize) uploaded the whole tree before
-  answering, which could take a very long time for a large repository. The first index now runs
+  answering, which could take a long time for a large repository. The first index now runs
   as one background job per repository, and discovery answers at once that the index is being
   built.
 - **Concurrent sessions no longer cancel each other's scans.** Starting a scan used to supersede
