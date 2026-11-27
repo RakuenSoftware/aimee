@@ -467,6 +467,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-index-investigate-status \
                $(TESTPREFIX)/unit-test-kb-client-index \
                $(TESTPREFIX)/unit-test-kb-client-index-remote \
+               $(TESTPREFIX)/unit-test-server-code-index-reuse \
                $(TESTPREFIX)/unit-test-kb-client-docs \
                $(TESTPREFIX)/unit-test-kb-client-search \
                $(TESTPREFIX)/unit-test-mcp-memory-answer \
@@ -2150,6 +2151,10 @@ $(TESTPREFIX)/unit-test-server-error-kind: $(OBJDIR)/tests/test_server_error_kin
 
 $(TESTPREFIX)/unit-test-kb-client-index: $(OBJDIR)/tests/test_kb_client_index.o \
 	                                 $(OBJDIR)/modules/kb_client/kb_client_index_parse.o \
+	                                 $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-code-index-reuse: $(OBJDIR)/tests/test_server_code_index_reuse.o \
 	                                 $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -4087,6 +4092,7 @@ $(TESTPREFIX)/unit-test-kb-audit-worm: $(OBJDIR)/tests/test_kb_audit_worm.o \
 $(OBJDIR)/tests/test_kb_audit_worm.o \
 $(OBJDIR)/tests/test_kb_audit_worm_pg.o \
 $(OBJDIR)/tests/test_code_project_lifecycle.o: C_FLAGS += -Imodules/kb/include
+$(OBJDIR)/tests/test_server_code_index_reuse.o: C_FLAGS += -Imodules/kb/include -Idb1_client -I.
 
 $(TESTPREFIX)/unit-test-decision-log: $(OBJDIR)/tests/test_decision_log.o \
                                $(TEST_DATA_OBJS_MOCK)

@@ -58,11 +58,14 @@ void *kb_client_index_scan_format_response(int kb_rc, const kb_client_index_scan
    if (kb_rc != 0)
    {
       const char *msg = "knowledge service unavailable";
-      if (res && strcmp(res->reason, "error") == 0 && res->message[0])
+      int busy = res && strcmp(res->reason, "busy") == 0;
+      if (res && (busy || strcmp(res->reason, "error") == 0) && res->message[0])
          msg = res->message;
       resp = cJSON_CreateObject();
       cJSON_AddStringToObject(resp, "status", "error");
       cJSON_AddStringToObject(resp, "message", msg);
+      if (busy)
+         cJSON_AddStringToObject(resp, "reason", "busy");
       return resp;
    }
 

@@ -15,6 +15,7 @@ import ssl
 import subprocess
 import tempfile
 import threading
+import time
 
 
 class RemoteHandler(http.server.BaseHTTPRequestHandler):
@@ -459,6 +460,16 @@ def network_mcp_bootstrap_check(binary: pathlib.Path) -> None:
                     assert "fixture catalog denied" in frames[1]["error"]["message"]
                 else:
                     assert frames[1] == {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}}
+                if mode in ("unindexed", "tool-failure"):
+                    # The first upload runs as a detached background job so MCP
+                    # initialize is not held for it. Wait for that job to seal
+                    # before checking it, and before the next mode, so a late
+                    # upload cannot land in another mode's calls.
+                    deadline = time.monotonic() + 20
+                    while time.monotonic() < deadline and not any(
+                            path == "/v1/index/ingest" and (body or {}).get("phase") == "seal"
+                            for path, body in list(server.calls)):
+                        time.sleep(0.1)
                 ingest = [body for path, body in server.calls if path == "/v1/index/ingest"]
                 if mode in ("unindexed", "tool-failure"):
                     assert [r["phase"] for r in ingest] == ["begin", "stage", "seal"], ingest

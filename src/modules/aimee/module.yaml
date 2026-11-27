@@ -276,6 +276,7 @@
     "server-go/modules/aimee/families/schema_original_input_deliveries.sql",
     "server-go/modules/aimee/families/schema_original_input_plans.sql",
     "server-go/modules/aimee/families/schema_session_cache.sql",
-    "server-go/modules/aimee/families/schema_server_code_index.sql"
+    "server-go/modules/aimee/families/schema_server_code_index.sql",
+    "server-go/modules/aimee/families/schema_server_code_scan_progress.sql"
   ]
 }

@@ -4,6 +4,7 @@
 #include "server_code_index.h"
 #include "server_code_index_embedding.h"
 #include "code_span.h"
+#include "aimee_sha256.h"
 #include "db1_client/runtime_code_index.h"
 #include "aimee.h"
 #include "index.h"
@@ -25,7 +26,7 @@ static atomic_int scan_stop;
 static pthread_mutex_t scan_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t scan_wake = PTHREAD_COND_INITIALIZER;
 
-static cJSON *extract_file(const cJSON *file)
+static cJSON *extract_file(const cJSON *file, const cJSON *known, const char *serving)
 {
    const cJSON *path_j = cJSON_GetObjectItemCaseSensitive(file, "rel_path");
    const cJSON *content_j = cJSON_GetObjectItemCaseSensitive(file, "content");
@@ -74,11 +75,71 @@ static cJSON *extract_file(const cJSON *file)
          cJSON_AddItemToArray(array, cJSON_CreateString(identity));
       free(imports[i]);
    }
-   server_code_index_embed_file(path, content, out);
+   /* An unchanged file keeps the vector stored for it under this embedder
+    * identity; only new or changed content is embedded. */
+   const cJSON *vector = known && serving ? cJSON_GetObjectItemCaseSensitive(known, path) : NULL;
+   if (cJSON_IsArray(vector) && cJSON_GetArraySize(vector) > 0)
+      server_code_index_reuse_embedding(out, vector, serving);
+   else
+      server_code_index_embed_file(path, content, out);
    return out;
 }
 
-static cJSON *call_code(const char *route, const cJSON *body, const cJSON *file)
+/* Ask the store for vectors it already holds for this batch's unchanged files
+ * (same path, content and embedder identity). Embedding is the slow part of a
+ * scan (seconds per file on a CPU embedder) and most of a rescan is unchanged,
+ * so one lookup per batch replaces most of that work. NULL (embed everything)
+ * when the embedder identity or the store is unavailable. */
+static cJSON *known_embeddings(const char *route, const cJSON *body, const cJSON *files,
+                               char **serving_out)
+{
+   *serving_out = NULL;
+   if (strcmp(route, "/v1/code/scan") != 0 || aimee_kb_index_observer_required())
+      return NULL;
+   char *serving = server_code_index_serving_id();
+   if (!serving)
+      return NULL;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "route", "/v1/code/embeddings");
+   const char *project = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "project"));
+   cJSON_AddStringToObject(request, "project", project ? project : "");
+   cJSON_AddStringToObject(request, "embedding_serving", serving);
+   cJSON *wanted = cJSON_AddArrayToObject(request, "files");
+   const cJSON *file;
+   cJSON_ArrayForEach(file, files)
+   {
+      const char *path = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(file, "rel_path"));
+      const char *content = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(file, "content"));
+      char fingerprint[65];
+      if (!path || !content || aimee_sha256_hex(content, strlen(content), fingerprint) != 0)
+         continue;
+      cJSON *entry = cJSON_CreateObject();
+      cJSON_AddStringToObject(entry, "rel_path", path);
+      cJSON_AddStringToObject(entry, "fingerprint", fingerprint);
+      cJSON_AddItemToArray(wanted, entry);
+   }
+   char *encoded = cJSON_PrintUnformatted(request);
+   cJSON_Delete(request);
+   char *response = encoded ? db1_runtime_code_index(encoded) : NULL;
+   free(encoded);
+   cJSON *reply = response ? cJSON_Parse(response) : NULL;
+   free(response);
+   cJSON *known = reply ? cJSON_DetachItemFromObjectCaseSensitive(reply, "embeddings") : NULL;
+   cJSON_Delete(reply);
+   if (!cJSON_IsObject(known))
+   {
+      LOG_INFO("code-index", "embedding reuse unavailable for '%s'; embedding every file",
+               project ? project : "?");
+      cJSON_Delete(known);
+      free(serving);
+      return NULL;
+   }
+   *serving_out = serving;
+   return known;
+}
+
+static cJSON *call_code(const char *route, const cJSON *body, const cJSON *file, const cJSON *known,
+                        const char *serving)
 {
    if (aimee_kb_index_observer_required())
       return NULL; /* independent legacy user-code owner is not source-qualified */
@@ -105,7 +166,7 @@ static cJSON *call_code(const char *route, const cJSON *body, const cJSON *file)
    if (file)
    {
       cJSON *files = cJSON_AddArrayToObject(index, "files");
-      cJSON_AddItemToArray(files, extract_file(file));
+      cJSON_AddItemToArray(files, extract_file(file, known, serving));
    }
    if (!file)
       server_code_index_embed_query(route, index);
@@ -118,6 +179,15 @@ static cJSON *call_code(const char *route, const cJSON *body, const cJSON *file)
    return reply;
 }
 
+/* A structured refusal from the store ({"status":"error","code":...}): a scan
+ * another client holds, or one that was taken over. Not a store failure. */
+static int code_reply_refused(const cJSON *reply)
+{
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status"));
+   return status && strcmp(status, "error") == 0 &&
+          cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "code"));
+}
+
 static cJSON *local_code_span(const char *project, const char *path, int start, int end, int max)
 {
    cJSON *body = cJSON_CreateObject();
@@ -126,7 +196,7 @@ static cJSON *local_code_span(const char *project, const char *path, int start, 
    cJSON_AddNumberToObject(body, "line_start", start);
    cJSON_AddNumberToObject(body, "line_end", end);
    cJSON_AddNumberToObject(body, "max_lines", max);
-   cJSON *reply = call_code("/v1/code/span", body, NULL);
+   cJSON *reply = call_code("/v1/code/span", body, NULL, NULL, NULL);
    cJSON_Delete(body);
    if (!reply)
    {
@@ -149,25 +219,54 @@ static char *local_code(const char *route, const void *body_v, int *status)
    int n = cJSON_IsArray(files) ? cJSON_GetArraySize(files) : 0;
    if (n)
    {
+      char *serving = NULL;
+      cJSON *known = known_embeddings(route, body, files, &serving);
       /* One file per frame keeps extraction metadata within the bus limit. */
       for (int i = 0; i < n; ++i)
       {
          cJSON_Delete(reply);
-         reply = call_code(route, body, cJSON_GetArrayItem(files, i));
-         if (!reply)
+         reply = call_code(route, body, cJSON_GetArrayItem(files, i), known, serving);
+         if (!reply || code_reply_refused(reply))
             break;
       }
-      if (reply)
+      if (reply && !code_reply_refused(reply))
       {
-         cJSON_ReplaceItemInObjectCaseSensitive(reply, "files", cJSON_CreateNumber(n));
-         cJSON_ReplaceItemInObjectCaseSensitive(reply, "inspected", cJSON_CreateNumber(n));
+         /* Replace, or add when the store's reply lacks the key: a failed
+          * replace does not take ownership and leaked the new number. */
+         const char *counts[] = {"files", "inspected"};
+         for (unsigned k = 0; k < sizeof(counts) / sizeof(counts[0]); k++)
+         {
+            cJSON_DeleteItemFromObjectCaseSensitive(reply, counts[k]);
+            cJSON_AddNumberToObject(reply, counts[k], n);
+         }
+         cJSON_AddNumberToObject(reply, "embeddings_reused", cJSON_GetArraySize(known));
       }
+      cJSON_Delete(known);
+      free(serving);
    }
    else
-      reply = call_code(route, body, NULL);
+      reply = call_code(route, body, NULL, NULL, NULL);
+   const char *phase = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "phase"));
+   const char *project = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "project"));
    *status = reply ? 200 : 503;
+   if (reply && code_reply_refused(reply))
+   {
+      /* Concurrent scans of one project: expected, and the client acts on it.
+       * Say which scan and why here, where the operator looks. */
+      const char *code = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "code"));
+      const char *why = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "error"));
+      LOG_INFO("code-index", "%s %s of '%s' refused: %s (%s)", route, phase ? phase : "-",
+               project ? project : "?", code ? code : "error", why ? why : "");
+      *status = 409;
+   }
    if (!reply)
    {
+      /* The store failed outright; its own log line (module stderr) has the
+       * cause. Without this the 503 reached the client with nothing logged here. */
+      LOG_WARN("code-index",
+               "%s %s of '%s' failed: the store did not answer (see the store "
+               "module log)",
+               route, phase ? phase : "-", project ? project : "?");
       reply = cJSON_CreateObject();
       cJSON_AddStringToObject(reply, "status", "error");
       cJSON_AddStringToObject(reply, "error", "local code index unavailable or request invalid");
@@ -184,7 +283,7 @@ int gp_local_index_delete(const char *ref)
       return 0;
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "project", ref);
-   cJSON *reply = call_code("/v1/code/project/delete", body, NULL);
+   cJSON *reply = call_code("/v1/code/project/delete", body, NULL, NULL, NULL);
    cJSON_Delete(body);
    int rc = reply ? 0 : -1;
    cJSON_Delete(reply);
@@ -206,7 +305,7 @@ static int vectors_ready(const char *project)
 {
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "project", project);
-   cJSON *reply = call_code("/v1/code/project-stats", body, NULL);
+   cJSON *reply = call_code("/v1/code/project-stats", body, NULL, NULL, NULL);
    cJSON_Delete(body);
    const cJSON *files = cJSON_GetObjectItemCaseSensitive(reply, "files");
    const cJSON *embeddings = cJSON_GetObjectItemCaseSensitive(reply, "embeddings");

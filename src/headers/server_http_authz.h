@@ -49,6 +49,14 @@ extern "C"
                                               int mtls_authenticated, const char *method,
                                               const char *path);
 
+   /* The enrolled device token a client presented, without the
+    * `.aimee-session.<32 hex>` binding a session-scoped gateway appends. Device
+    * tokens are 64 characters and are looked up by digest, so the bound form
+    * must be reduced first or every session-scoped request from an enrolled
+    * device is refused. Returns 1 and copies the token when it has the device
+    * token length, else 0 with out emptied. */
+   int server_http_presented_device_token(const char *presented, char *out, size_t out_n);
+
 #ifdef __cplusplus
 }
 #endif
