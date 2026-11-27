@@ -827,6 +827,42 @@ static void test_session_isolation_session_branch_checkout_is_its_own_tree(void)
    session_isolation_cleanup(tmpdir);
 }
 
+/* A read-only delegate's worktree carries the client's uncommitted files, so it
+ * is dirty even when the delegate wrote nothing. worktree_cleanup keeps a dirty
+ * worktree (it protects work); worktree_discard removes it, keeps its branch and
+ * never touches the checkout. Live 1.1.3 left one behind per read-only run. */
+static void test_worktree_discard_removes_dirty_delegate_worktree(void)
+{
+   char tmpdir[MAX_PATH_LEN];
+   session_isolation_make_repo(tmpdir, sizeof(tmpdir));
+   char repo[MAX_PATH_LEN];
+   snprintf(repo, sizeof(repo), "%s/aimee", tmpdir);
+   const char *sid = "deleg-833-1795736034121397692-1";
+   assert(worktree_create_sibling_from_ref(repo, sid, "readonly", "main") == 0);
+   char wt[MAX_PATH_LEN];
+   assert(worktree_sibling_path(repo, sid, "readonly", wt, sizeof(wt)) == 0);
+   char cmd[MAX_PATH_LEN + 128];
+   snprintf(cmd, sizeof(cmd), "echo carried > '%s/client-wip.txt'", wt);
+   assert(system(cmd) == 0);
+   struct stat st;
+   worktree_cleanup(repo, sid, "readonly");
+   assert(stat(wt, &st) == 0); /* cleanup protects a dirty worktree */
+   assert(worktree_discard(repo, sid, "readonly") == 0);
+   assert(stat(wt, &st) != 0);
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' worktree list --porcelain | grep -c '^worktree ' | grep -qx 1", repo);
+   assert(system(cmd) == 0);
+   char skey[SESSION_WORKTREE_KEY_MAX];
+   session_worktree_key(sid, skey, sizeof(skey));
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' rev-parse -q --verify 'aimee/session/%s/readonly' >/dev/null", repo, skey);
+   assert(system(cmd) == 0);                             /* the branch is kept */
+   assert(worktree_discard(repo, sid, "readonly") == 0); /* already absent */
+   snprintf(cmd, sizeof(cmd), "%s/.git", repo);
+   assert(stat(cmd, &st) == 0 && S_ISDIR(st.st_mode));
+   session_isolation_cleanup(tmpdir);
+}
+
 static void test_session_isolation_missing_no_create_returns_zero(void)
 {
    char tmpdir[MAX_PATH_LEN];
@@ -3589,6 +3625,7 @@ int main(void)
    test_session_isolation_skips_when_not_a_git_repo();
    test_session_isolation_idempotent_when_worktree_exists();
    test_session_isolation_session_branch_checkout_is_its_own_tree();
+   test_worktree_discard_removes_dirty_delegate_worktree();
    test_session_isolation_missing_no_create_returns_zero();
    test_session_isolation_empty_sid_rejected();
    test_worktree_for_cwd_edge_cases();

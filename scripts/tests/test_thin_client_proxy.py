@@ -528,6 +528,25 @@ class ThinClientProxyTest(unittest.TestCase):
         last = [request for path, request in self.peer.control_requests if path == "/v1/hooks/pre"][-1]
         self.assertNotIn("client_non_git_workspace", last)
 
+    def test_git_session_regains_hook_identity_after_server_restart(self):
+        # Renewal used to require non-Git work, so a session in a repository ran
+        # every hook untrusted from a server restart until the session ended.
+        self.start_peer()
+        self.peer.require_worktree = False
+        repo = self.root / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        result = self.run_hook(repo, "Read", file_path=str(repo / "README.md"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.peer.hook_starts, 1)
+        self.peer.hook_token = None  # the restarted server forgot every hook identity
+        result = self.run_hook(repo, "Read", file_path=str(repo / "README.md"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.peer.hook_starts, 2)
+        last = [request for path, request in self.peer.control_requests if path == "/v1/hooks/pre"][-1]
+        self.assertNotIn("client_non_git_workspace", last)
+        self.assertEqual(last["hook_token"], self.peer.hook_token)
+
     def test_worktree_disabled_skips_launch_and_session_start_provisioning(self):
         self.start_peer()
         self.peer.require_worktree = False

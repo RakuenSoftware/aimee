@@ -34,9 +34,9 @@ static uint64_t monotonic_ns(void)
    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 
-int ws_runner_bus_call(uint32_t event_kind, uint32_t stage_id, const void *request,
-                       uint32_t request_len, void *response, uint32_t response_capacity,
-                       uint32_t *response_len, uint64_t timeout_ms)
+static int runner_bus_call(uint32_t event_kind, uint32_t stage_id, const void *request,
+                           uint32_t request_len, void *response, uint32_t response_capacity,
+                           uint32_t *response_len, uint64_t timeout_ms, int long_poll)
 {
    uint64_t now = monotonic_ns();
    if (!now)
@@ -44,9 +44,24 @@ int ws_runner_bus_call(uint32_t event_kind, uint32_t stage_id, const void *reque
    uint64_t trace = atomic_fetch_add_explicit(&g_trace, 1, memory_order_relaxed);
    if (trace == 0)
       trace = atomic_fetch_add_explicit(&g_trace, 1, memory_order_relaxed);
-   return (int)obs_bus_module_call(event_kind, stage_id, trace, now + timeout_ms * 1000000ULL,
-                                   request, request_len, response, response_capacity, response_len,
-                                   NULL, NULL);
+   uint64_t deadline = now + timeout_ms * 1000000ULL;
+   /* A long poll's deadline is its "nothing arrived" answer, not a failure:
+    * logged as one, an idle detached workspace wrote a WARN every poll. */
+   return long_poll ? (int)obs_bus_module_call_expect(event_kind, stage_id, trace, deadline,
+                                                      request, request_len, response,
+                                                      response_capacity, response_len, NULL, NULL,
+                                                      OURO_MODULE_CALL_DEADLINE_EXCEEDED)
+                    : (int)obs_bus_module_call(event_kind, stage_id, trace, deadline, request,
+                                               request_len, response, response_capacity,
+                                               response_len, NULL, NULL);
+}
+
+int ws_runner_bus_call(uint32_t event_kind, uint32_t stage_id, const void *request,
+                       uint32_t request_len, void *response, uint32_t response_capacity,
+                       uint32_t *response_len, uint64_t timeout_ms)
+{
+   return runner_bus_call(event_kind, stage_id, request, request_len, response, response_capacity,
+                          response_len, timeout_ms, 0);
 }
 
 /* Ask the module a register / forget / resolve question. On resolve, `out_id`
@@ -166,9 +181,9 @@ int ws_runner_io(unsigned op, const char *id, const char *payload, size_t payloa
       return -1;
    }
    uint32_t response_len = 0;
-   int rc =
-       ws_runner_bus_call(AIMEE_WORKSPACE_EVENT_RUNNER_IO, AIMEE_WORKSPACE_STAGE_RUNNER_IO, request,
-                          (uint32_t)request_len, response, response_cap, &response_len, timeout_ms);
+   int rc = runner_bus_call(AIMEE_WORKSPACE_EVENT_RUNNER_IO, AIMEE_WORKSPACE_STAGE_RUNNER_IO,
+                            request, (uint32_t)request_len, response, response_cap, &response_len,
+                            timeout_ms, op == AIMEE_WS_IO_OP_POLL);
    free(request);
    if (rc != 0)
    {

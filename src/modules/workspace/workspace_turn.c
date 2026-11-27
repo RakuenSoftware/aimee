@@ -148,6 +148,7 @@ typedef struct
 static void ws_mirror_log_git_failure(const char *const args[], int rc, const char *output)
 {
    const char *sub = "?";
+   int is_ancestor = 0;
    for (int i = 0; args[i]; i++)
    {
       if (strcmp(args[i], "-C") == 0 && args[i + 1])
@@ -155,9 +156,15 @@ static void ws_mirror_log_git_failure(const char *const args[], int rc, const ch
          i++;
          continue;
       }
-      sub = args[i];
-      break;
+      if (!strcmp(sub, "?"))
+         sub = args[i];
+      if (!strcmp(args[i], "--is-ancestor"))
+         is_ancestor = 1;
    }
+   /* `merge-base --is-ancestor` exits 1 to answer "no": the drift check asks it
+    * on every turn, and logging that answer as a failure buried real ones. */
+   if (is_ancestor && rc == 1 && !strcmp(sub, "merge-base"))
+      return;
    char text[400];
    size_t n = 0;
    for (const char *p = output ? output : ""; *p && n + 1 < sizeof(text); p++)
