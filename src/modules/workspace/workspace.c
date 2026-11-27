@@ -1547,6 +1547,27 @@ int worktree_create_sibling_on_branch(const char *git_root, const char *sid, con
    return worktree_create_sibling_from_anchor(git_root, sid, work_name, anchor_dir);
 }
 
+/* Drop the <session key>/ directory a removed worktree lived in once it is empty,
+ * so .aimee/worktrees does not collect one empty husk per delegate run. Only a
+ * directory exactly one level below a .aimee/worktrees store; rmdir succeeds only
+ * when no other worktree of the session remains in it. */
+static void worktree_drop_empty_parent(const char *wt_path)
+{
+   char parent[MAX_PATH_LEN];
+   if (!wt_path || snprintf(parent, sizeof(parent), "%s", wt_path) >= (int)sizeof(parent))
+      return;
+   char *slash = strrchr(parent, '/');
+   if (!slash || slash == parent)
+      return;
+   *slash = '\0';
+   char *key = strrchr(parent, '/');
+   static const char store[] = "/.aimee/worktrees";
+   size_t sl = sizeof(store) - 1;
+   if (!key || !key[1] || (size_t)(key - parent) < sl || strncmp(key - sl, store, sl) != 0)
+      return;
+   (void)rmdir(parent);
+}
+
 /* Remove the worktree AT wt_path if it is clean; warn and keep it if it holds
  * uncommitted changes or unpushed commits. Never destroys work.
  *
@@ -1600,6 +1621,7 @@ void worktree_cleanup_path(const char *git_root, const char *wt_path)
    {
       fprintf(stderr, "aimee: removed clean worktree %s\n", wt_path);
       worktree_registry_remove(git_root, wt_path);
+      worktree_drop_empty_parent(wt_path);
    }
    else
       fprintf(stderr, "aimee: failed to remove worktree %s: %s\n", wt_path, out ? out : "unknown");
@@ -1629,7 +1651,10 @@ int worktree_discard(const char *git_root, const char *sid, const char *work_nam
    int rc;
    char *out = run_cmd(cmd, &rc);
    if (rc == 0)
+   {
       worktree_registry_remove(git_root, wt_path);
+      worktree_drop_empty_parent(wt_path);
+   }
    else
       LOG_WARN("workspace", "could not discard worktree %s: %s", wt_path, out ? out : "unknown");
    free(out);
@@ -1681,17 +1706,8 @@ void worktree_reclaim_legacy(const char *git_root, const char *sid, const char *
       return; /* nothing stranded */
 
    LOG_INFO("workspace", "reclaiming pre-rekey worktree '%s' for session '%s'", old_path, sid);
+   /* Removal also drops the now-empty <old_key>/ parent. */
    worktree_cleanup_path(git_root, old_path);
-
-   /* Drop the now-empty <old_key>/ parent so the worktrees dir does not
-    * accumulate husks. rmdir only succeeds when it is genuinely empty. */
-   if (stat(old_path, &st) != 0)
-   {
-      char parent[MAX_PATH_LEN];
-      if (snprintf(parent, sizeof(parent), "%s/.aimee/worktrees/%s", git_root, old_key) <
-          (int)sizeof(parent))
-         (void)rmdir(parent);
-   }
 }
 
 static char *worktree_status_porcelain(const char *wt_path)

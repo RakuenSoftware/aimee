@@ -24,6 +24,7 @@
 #include "server.h"
 #include "server_http.h"
 #include "server_http_identity.h" /* server_http_bearer_matches */
+#include "server_http_authz.h"    /* server_http_presented_device_token */
 #include <aimee/core/connection/auth.h>
 
 /* Additional bearers accepted alongside the primary. HTTP connections and
@@ -126,16 +127,20 @@ int server_http_authorize_enrolled_request(int is_tcp, const char *bearer_cfg,
     * operator/wizard bearers retain their existing Vault-backed path. */
    if (result == 401 && is_tcp)
    {
+      /* A session-scoped gateway (`aimee launch --gateway`) sends the device
+       * token with a `.aimee-session.<sid>` binding; reduce it before the digest
+       * lookup, as the Vault bearer comparison already does. */
       const char *tokens[] = {aimee_core_bearer_token(auth_header), api_key_header};
       for (size_t i = 0; i < 2 && result != 0; i++)
       {
-         const char *token = tokens[i];
-         if (!token || strlen(token) != 64)
+         char token[65];
+         if (!server_http_presented_device_token(tokens[i], token, sizeof(token)))
             continue;
          char digest[65], reply[256];
-         if (bearer_sha256(token, digest) != 0 ||
-             db1_remote_client_manage("", "authorize", digest, "", (int64_t)time(NULL), reply,
-                                      sizeof(reply)) != 0)
+         int sha = bearer_sha256(token, digest);
+         OPENSSL_cleanse(token, sizeof(token));
+         if (sha != 0 || db1_remote_client_manage("", "authorize", digest, "", (int64_t)time(NULL),
+                                                  reply, sizeof(reply)) != 0)
             return 503;
          cJSON *json = cJSON_Parse(reply);
          cJSON *code = json ? cJSON_GetObjectItemCaseSensitive(json, "code") : NULL;
