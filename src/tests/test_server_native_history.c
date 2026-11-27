@@ -24,7 +24,7 @@ int aimee_module_tool_source_mode(const char *tool)
 {
    return tool && !strcmp(tool, "memory_serve") ? 1 : 0;
 }
-static int served_history_preserved(const char *result)
+static int served_history_preserved_error(const char *result, int is_error)
 {
    cJSON *content = cJSON_CreateString(result);
    char *escaped = cJSON_PrintUnformatted(content);
@@ -38,8 +38,8 @@ static int served_history_preserved(const char *result)
             "{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"m1\","
             "\"name\":\"memory_serve\",\"input\":{\"store\":\"user\",\"view\":\"briefing\"}}]},"
             "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"m1\","
-            "\"content\":%s,\"is_error\":false}]}]}",
-            escaped);
+            "\"content\":%s,\"is_error\":%s}]}]}",
+            escaped, is_error ? "true" : "false");
    free(escaped);
    cJSON *json = cJSON_Parse(wire);
    aimee_request_t canonical = {0}, retained = {0};
@@ -51,6 +51,10 @@ static int served_history_preserved(const char *result)
    cJSON_Delete(json);
    return rc;
 }
+static int served_history_preserved(const char *result)
+{
+   return served_history_preserved_error(result, 0);
+}
 /* A source tool that issued no receipt answers with the host's fixed refusal.
  * That reply carries no memory, so the next request may resend it; refusing
  * it ended live delegates with "failed to build request". Real memory output
@@ -60,6 +64,12 @@ static void test_host_refusal_needs_no_receipt(void)
    assert(served_history_preserved(AIMEE_TOOL_SOURCE_UNAVAILABLE_RESULT) == 0);
    assert(served_history_preserved("{\"selected_records\":[\"stored memory text\"]}") == -1);
    assert(served_history_preserved(AIMEE_TOOL_SOURCE_UNAVAILABLE_RESULT " ") == -1);
+   /* A host error result -- here the dispatcher's argument validation, as a live
+    * delegate's memory_serve without "view" got -- carries no memory either. */
+   assert(served_history_preserved_error("error: validation failed: missing required field 'view'",
+                                         1) == 0);
+   assert(served_history_preserved_error("error: validation failed: missing required field 'view'",
+                                         0) == -1);
    puts("host source refusal resends without a receipt; memory output does not");
 }
 int main(void)

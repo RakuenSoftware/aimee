@@ -1677,11 +1677,42 @@ static void module_caller_cleanup(void *unused)
    (void)unused;
    atomic_fetch_sub(&g.module_callers, 1);
 }
+static ouro_module_call_result_t
+module_call_logged(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+                   const void *request_body, uint32_t request_len, void *response_body,
+                   uint32_t response_capacity, uint32_t *response_len,
+                   ouro_module_cancelled_fn cancelled, void *cancel_context, int has_expected,
+                   ouro_module_call_result_t expected);
+
 ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
                     uint32_t response_capacity, uint32_t *response_len,
                     ouro_module_cancelled_fn cancelled, void *cancel_context)
+{
+   return module_call_logged(event_kind, stage_id, trace_id, deadline_ns, request_body, request_len,
+                             response_body, response_capacity, response_len, cancelled,
+                             cancel_context, 0, OURO_MODULE_CALL_OK);
+}
+
+ouro_module_call_result_t
+obs_bus_module_call_expecting(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id,
+                              uint64_t deadline_ns, const void *request_body, uint32_t request_len,
+                              void *response_body, uint32_t response_capacity,
+                              uint32_t *response_len, ouro_module_cancelled_fn cancelled,
+                              void *cancel_context, ouro_module_call_result_t expected)
+{
+   return module_call_logged(event_kind, stage_id, trace_id, deadline_ns, request_body, request_len,
+                             response_body, response_capacity, response_len, cancelled,
+                             cancel_context, 1, expected);
+}
+
+static ouro_module_call_result_t
+module_call_logged(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+                   const void *request_body, uint32_t request_len, void *response_body,
+                   uint32_t response_capacity, uint32_t *response_len,
+                   ouro_module_cancelled_fn cancelled, void *cancel_context, int has_expected,
+                   ouro_module_call_result_t expected)
 {
    if (response_len)
       *response_len = 0;
@@ -1702,8 +1733,11 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
                                        request_body, request_len, response_body, response_capacity,
                                        response_len, module_call_cancelled, &state);
    pthread_cleanup_pop(1);
-   record_outcome(event_kind, result);
-   if (result != OURO_MODULE_CALL_OK)
+   /* An expected outcome is the module answering as designed: neither a
+    * logged failure nor a mark against the module's health. */
+   int answered = has_expected && result == expected;
+   record_outcome(event_kind, answered ? OURO_MODULE_CALL_OK : result);
+   if (result != OURO_MODULE_CALL_OK && !answered)
       obs_bus_log_module_call_failure(event_kind, stage_id, result);
    return result;
 }

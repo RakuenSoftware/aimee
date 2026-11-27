@@ -914,6 +914,36 @@ static void server_hook_principal(const server_conn_t *conn, char *out, size_t c
                (unsigned)conn->peer_uid);
 }
 
+/* An untrusted session sends the same verdict on every hook: one session ran
+ * 470 identical warnings in six hours. Warn the first time per session and
+ * client in this server's lifetime (identities are process-local, so a
+ * restart warns again). A small table; when full it keeps warning rather than
+ * hide a new session. */
+static int hook_identity_warn_first(const char *sid, const char *client)
+{
+   enum
+   {
+      SLOTS = 128
+   };
+   static char seen[SLOTS][160];
+   static int used;
+   static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+   char key[160];
+   snprintf(key, sizeof key, "%s|%s", sid ? sid : "", client ? client : "");
+   int first = 1;
+   pthread_mutex_lock(&lock);
+   for (int i = 0; i < used; i++)
+      if (!strcmp(seen[i], key))
+      {
+         first = 0;
+         break;
+      }
+   if (first && used < SLOTS)
+      snprintf(seen[used++], sizeof seen[0], "%s", key);
+   pthread_mutex_unlock(&lock);
+   return first;
+}
+
 /* 1 = trusted, 0 = continue without identity-derived privileges, -1 = hardened
  * refusal. AIMEE_HOOK_IDENTITY_MODE is intentionally server-only operational
  * policy: observe and enforce both refuse attribution, while hardened refuses
@@ -935,8 +965,11 @@ static int server_hook_identity(server_conn_t *conn, cJSON *req, const char *sid
       return 1;
    }
    const char *mode = getenv("AIMEE_HOOK_IDENTITY_MODE");
-   LOG_WARN("hook_identity", "untrusted hook session=%s client=%s mode=%s", sid, client,
-            mode && mode[0] ? mode : "enforce");
+   if (hook_identity_warn_first(sid, client))
+      LOG_WARN("hook_identity",
+               "untrusted hook session=%s client=%s mode=%s (logged once per session; the client "
+               "renews its identity on its next hook)",
+               sid, client, mode && mode[0] ? mode : "enforce");
    return mode && !strcmp(mode, "hardened") ? -1 : 0;
 }
 

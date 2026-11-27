@@ -75,6 +75,9 @@ void worktree_cleanup_path(const char *git_root, const char *wt_path);
 void worktree_reclaim_legacy(const char *git_root, const char *sid, const char *work_name);
 
 void worktree_cleanup(const char *git_root, const char *sid, const char *work_name);
+/* Force-remove a delegate's managed worktree whose changes are discarded by
+ * policy; never the checkout, never outside .aimee/worktrees; keeps the branch. */
+int worktree_discard(const char *git_root, const char *sid, const char *work_name);
 int worktree_apply_changes_to_parent(const char *src_wt, const char *dst_wt);
 int worktree_apply_delegate_changes_to_parent(const char *delegate_wt, const char *parent_wt,
                                               char *err, size_t err_len);

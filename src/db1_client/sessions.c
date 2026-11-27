@@ -264,9 +264,11 @@ static int primary_read(uint32_t op, const char *const *fields, uint32_t count,
    ouro_module_call_result_t rc;
    for (;;)
    {
-      rc = obs_bus_module_call(AIMEE_DB1_EVENT_SESSIONS, AIMEE_DB1_STAGE_SESSIONS, 0, deadline,
+      rc = obs_bus_module_call_expect(
+          AIMEE_DB1_EVENT_SESSIONS, AIMEE_DB1_STAGE_SESSIONS, 0, deadline,
                               owned.request, (uint32_t)request_len, owned.response, capacity, &length,
-                              NULL, NULL);
+                              NULL, NULL,
+          OURO_MODULE_CALL_RESPONSE_TOO_LARGE);
       if (rc != OURO_MODULE_CALL_RESPONSE_TOO_LARGE || length <= capacity ||
           length > OURO_MODULE_MESSAGE_MAX_BODY)
          break;
@@ -276,6 +278,12 @@ static int primary_read(uint32_t op, const char *const *fields, uint32_t count,
       owned.response = grown;
       capacity = length;
    }
+   /* The first, small buffer expects "too large" and grows; a reply this
+    * loop could not grow to is a real failure, and says so. */
+   if (rc == OURO_MODULE_CALL_RESPONSE_TOO_LARGE)
+      aimee_log(LOG_WARN, "db1.sessions",
+                "reply of %u bytes exceeds what this read can hold (capacity %u)",
+                (unsigned)length, (unsigned)capacity);
    free(owned.request);
    owned.request = NULL;
    char **cells = NULL;

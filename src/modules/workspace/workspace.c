@@ -1606,6 +1606,36 @@ void worktree_cleanup_path(const char *git_root, const char *wt_path)
    free(out);
 }
 
+/* Remove a delegate's managed worktree even when it holds uncommitted files.
+ * Only for a run whose changes are discarded by policy (a read-only prompt):
+ * worktree_cleanup keeps a dirty worktree to protect work, which left every
+ * read-only delegate's worktree on disk once the client's own uncommitted files
+ * had been carried into it. Never the checkout itself, never a path outside the
+ * managed .aimee/worktrees store, and the branch is kept (it may be one the
+ * operator named). Returns 0 when removed or already absent. */
+int worktree_discard(const char *git_root, const char *sid, const char *work_name)
+{
+   if (!git_root || !git_root[0] || !sid || !sid[0])
+      return -1;
+   char wt_path[MAX_PATH_LEN];
+   if (worktree_sibling_path(git_root, sid, work_name, wt_path, sizeof(wt_path)) != 0 ||
+       strcmp(wt_path, git_root) == 0 || !is_aimee_worktree_path(wt_path))
+      return -1;
+   struct stat st;
+   if (stat(wt_path, &st) != 0)
+      return 0;
+   char cmd[MAX_PATH_LEN * 2 + 64];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' worktree remove --force '%s' 2>&1", git_root, wt_path);
+   int rc;
+   char *out = run_cmd(cmd, &rc);
+   if (rc == 0)
+      worktree_registry_remove(git_root, wt_path);
+   else
+      LOG_WARN("workspace", "could not discard worktree %s: %s", wt_path, out ? out : "unknown");
+   free(out);
+   return rc == 0 ? 0 : -1;
+}
+
 /* Clean up a session's worktree. Removes if clean, warns if dirty.
  * If work_name is non-NULL, targets the work-specific worktree. */
 void worktree_cleanup(const char *git_root, const char *sid, const char *work_name)

@@ -2655,8 +2655,8 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "fd54f3a669aa3c316d44a48b1348bcdfb1923f61578539562c5187280ee20a19",
-      "boundary_review": "Renames the server.health delegate_sandbox posture key from state to posture so the body keeps one top-level state (the store probe); no memory ownership, route or storage change.",
+      "sha256": "2ff7d8d274d019743f4ce7414d5656b8d20537ae0d57a5d99d3b1b3d3e4d6192",
+      "boundary_review": "2026-11-27: reviewed the exact source delta. The untrusted-hook identity warning is logged once per session and client in the server's lifetime instead of on every hook. Hook identity verification, modes and refusals are unchanged; no memory symbol, route, policy or fallback added.",
       "source_revisions": [
         {
           "disposition": "host-transport",
@@ -2695,6 +2695,15 @@
           "sha256": "ebda094e4295b62247153522603e7919ac474860a56941a7975912bba2902afb",
           "boundary_review": "PR #3098: delegate private container runtime startup reporting only (no memory symbol, policy or fallback added); the memory-symbol finding set is unchanged.",
           "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
+        },
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "kb_client_memory_scope_context_clear",
+            "server_module_memory_data"
+          ],
+          "sha256": "fd54f3a669aa3c316d44a48b1348bcdfb1923f61578539562c5187280ee20a19",
+          "boundary_review": "Renames the server.health delegate_sandbox posture key from state to posture so the body keeps one top-level state (the store probe); no memory ownership, route or storage change."
         }
       ],
       "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
@@ -3721,7 +3730,7 @@
       "symbols": [
         "AIMEE_MEMORY_EVENT_COMMAND"
       ],
-      "sha256": "1a622d090331129a8912948f5bfbe1e47d2cfec21bf873c8383e0a6aea7974e6",
+      "sha256": "f0664d24413d2ec4688db65afae190b5db33be12bc46456bc7bd0d863f535e2e",
       "reason": "Host Vault intake converts freeform ordinary memory command data before its first bus frame. Native memory admission, source/projection proofs, scope authority and response ownership remain with the selected Native owner; signed internal source operations are excluded. The screen DTO reports host redaction when the selected owner permits only the already protected text; it grants no custody capability. Native memory-query arguments are protected before the selected owner constructs their source-bearing result and receipt; signed downstream projection/source operations remain excluded.",
       "evidence": [
         "src/tests/test_vault_content_privacy.c"
@@ -3733,9 +3742,17 @@
             "AIMEE_MEMORY_EVENT_COMMAND"
           ],
           "sha256": "87773dafd8c42f18896174d796c515e988ba00000c40af3dd64d85be1437a560"
+        },
+        {
+          "disposition": "host-transport",
+          "symbols": [
+            "AIMEE_MEMORY_EVENT_COMMAND"
+          ],
+          "sha256": "1a622d090331129a8912948f5bfbe1e47d2cfec21bf873c8383e0a6aea7974e6",
+          "boundary_review": "2026-11-26: reviewed the exact source delta. memory.runtime dispatches log elapsed time against their budget, the dispatch result, the owner error's kind and message, and the context principal and authority flags the memory bridge mints for (identities and owner diagnostics, never memory content). Dispatch, framing, routing and results are unchanged; no memory symbol, policy or fallback added."
         }
       ],
-      "boundary_review": "2026-11-26: reviewed the exact source delta. memory.runtime dispatches log elapsed time against their budget, the dispatch result, the owner error's kind and message, and the context principal and authority flags the memory bridge mints for (identities and owner diagnostics, never memory content). Dispatch, framing, routing and results are unchanged; no memory symbol, policy or fallback added."
+      "boundary_review": "2026-11-27: reviewed the exact source delta. A memory.runtime failure is logged as a warning the first time each (operation, dispatch result, owner kind, message) is seen in the process and at debug afterwards, so a deployment-fixed refusal does not warn on every delegate start. Dispatch, framing, routing and results are unchanged; no memory symbol, policy or fallback added."
     }
   },
   "generated_files": {

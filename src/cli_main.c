@@ -1224,15 +1224,16 @@ static int handle_hooks(int argc, char **argv, int json_output)
    }
 
    cJSON *resp = cli_v1_dispatch(req, 5000);
-   /* Hook identities are process-local on the server. A restart (or a resumed
-    * client that missed SessionStart) must not turn ordinary document work back
-    * into a worktree error. Renew once through the authenticated lifecycle route
-    * and retry the same preflight; never trust or forward a caller-supplied token. */
+   /* Hook identities are process-local on the server. After a restart (or for a
+    * resumed client that missed SessionStart) every hook would otherwise run
+    * untrusted for the rest of the session: renewal was limited to non-Git
+    * work, so sessions in a repository never regained their identity. Renew
+    * once through the authenticated lifecycle route and retry the same
+    * preflight; never trust or forward a caller-supplied token. */
    const char *identity =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "hook_identity"));
-   if (resp && identity && strcmp(identity, "untrusted") == 0 &&
-       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "client_non_git_workspace")) && sid &&
-       sid[0] && hook_client && hook_client[0])
+   if (resp && identity && strcmp(identity, "untrusted") == 0 && sid && sid[0] && hook_client &&
+       hook_client[0])
    {
       cJSON *start = cJSON_CreateObject();
       cJSON_AddStringToObject(start, "method", "hooks.session_start");

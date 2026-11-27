@@ -1855,7 +1855,7 @@
         },
         {
           "path": "src/modules/audit/include/aimee/audit/obs_bus.h",
-          "sha256": "fbb17e7648eeff1c3ad1e75a9ba2aef4a810077937db76b76bead298eba11377"
+          "sha256": "1250476da2afeab6e549be11bc6bec5a3a3d4302cc60f830f263aeac2587b915"
         },
         {
           "path": "src/modules/benchmarks/include/aimee/benchmarks/module_api.h",
@@ -2151,12 +2151,12 @@
         },
         {
           "path": "src/modules/workspace/include/aimee/workspace/workspace.h",
-          "sha256": "694ff7d8a25156dbedcf9262e083e2c9a15c1b1d1edf7e881b89b5ecd198883a"
+          "sha256": "a4d409adb2fec80360bff00fa8907ba63c33441dcd23a3b9bc5b9875287ad464"
         }
       ]
     },
     "public-symbols": {
-      "sha256": "28049e2e32732bd768728af38e33b87de466fca46177437562dc615c8a404b5c",
+      "sha256": "2ea4b011b5e3c21d6f579c3121070b96d0061d06598286142683009d0aeea1d1",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
