@@ -195,11 +195,11 @@ jobs:
         uses: ./.github/actions/install-audit-sqlite
       - name: Install script test dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential pkg-config libssl-dev zlib1g-dev python3-yaml openssh-client
-      # The thin-client proxy suite is the only script test that needs a built
-      # client, and `build` runs it with real Codex required, so it is skipped
-      # here and this job builds nothing.
+      # The thin-client proxy and index-scan suites need a built client; `build`
+      # runs them (the proxy suite with real Codex required), so they are
+      # skipped here and this job builds nothing.
       - name: Run every discovered script regression test
-        run: make -C src script-tests SCRIPT_TESTS_SKIP=test_thin_client_proxy.py
+        run: make -C src script-tests SCRIPT_TESTS_SKIP="test_thin_client_proxy.py test_thin_client_index_scan.py"
 
   # Keep the workflow itself unfiltered: GitHub leaves required checks pending
   # when an entire workflow is skipped by a path filter. Job-level skips report
@@ -573,6 +573,8 @@ jobs:
         env:
           AIMEE_TEST_REQUIRE_CODEX: '1'
         run: python3 scripts/tests/test_thin_client_proxy.py -v
+      - name: Thin-client code index upload (batch failure, concurrent scan, background first index)
+        run: python3 scripts/tests/test_thin_client_index_scan.py -v
       - name: Native Codex canonical adoption, isolated launch and restart
         run: |
           make -C src -j2 build/obj/tests/unit-test-cli-codex

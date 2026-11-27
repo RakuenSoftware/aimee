@@ -1175,3 +1175,151 @@ cJSON *marshal_action_receipt(int argc, char **argv)
    }
    return req;
 }
+
+#if defined(AIMEE_POSIX)
+#include "platform_path.h"
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+/* Keep the thin-client push path aligned with the local/canonical scanners.
+ * Hidden-root projects are deliberately excluded from index reads and startup
+ * cleanup so temporary .aimee/.claude worktrees cannot pollute the shared code
+ * graph.  Accepting one here used to report a successful upload whose symbols
+ * were immediately invisible to list/find/callers. */
+static int cli_ws_root_has_hidden_component(const char *path)
+{
+   if (!path)
+      return 0;
+   const char *p = path;
+   while (*p == '/')
+      p++;
+   const char *start = p;
+   for (;;)
+   {
+      if (*p == '/' || *p == '\0')
+      {
+         if (p > start && start[0] == '.')
+            return 1;
+         if (*p == '\0')
+            return 0;
+         start = ++p;
+      }
+      else
+      {
+         p++;
+      }
+   }
+}
+
+int cli_ws_reject_hidden_root(const char *abs_root)
+{
+   if (!cli_ws_root_has_hidden_component(abs_root))
+      return 0;
+   fprintf(stderr,
+           "aimee: refusing to index hidden root: %s\n"
+           "  Index the non-hidden canonical checkout instead. Temporary .aimee/.claude\n"
+           "  worktrees are intentionally excluded from the shared code index.\n",
+           abs_root);
+   return 1;
+}
+
+/* Start `aimee index scan <root>` as a detached background job for a repository
+ * that has never been indexed, and say so. One job per repository on this host:
+ * the job holds a lock on its log file, and a second session finds it held.
+ * Returns 0 when a job was started or is already running (the caller reports the
+ * index as unavailable for now), -1 when no job could be started. */
+int cli_index_bootstrap_detached(const char *root)
+{
+   char self[4096] = "";
+   ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);
+   if (n > 0)
+      self[n] = '\0';
+   else
+   {
+      const char *cli = getenv("AIMEE_CLI_PATH");
+      if (!cli || cli[0] != '/' || strlen(cli) >= sizeof(self))
+         return -1;
+      snprintf(self, sizeof(self), "%s", cli);
+   }
+   /* Only re-run the aimee client itself. Any other host of this code (a test
+    * driver, an embedding program) would be re-executed with `index scan`
+    * arguments it does not understand; those upload in the foreground. */
+   const char *self_name = strrchr(self, '/');
+   if (strcmp(self_name ? self_name + 1 : self, "aimee") != 0)
+      return -1;
+   const char *home = getenv("HOME");
+   if (!home || !home[0])
+      return -1;
+   char dir[4096], log_path[4200];
+   if (snprintf(dir, sizeof(dir), "%s/.cache/aimee", home) >= (int)sizeof(dir) ||
+       platform_mkdir_p(dir, 0700) != 0)
+      return -1;
+   /* Name the log after the repository path so each repository has one job. */
+   unsigned long long h = 1469598103934665603ULL;
+   for (const unsigned char *c = (const unsigned char *)root; *c; c++)
+      h = (h ^ *c) * 1099511628211ULL;
+   const char *base = strrchr(root, '/');
+   base = base && base[1] ? base + 1 : root;
+   if (snprintf(log_path, sizeof(log_path), "%s/index-%.64s-%016llx.log", dir, base, h) >=
+       (int)sizeof(log_path))
+      return -1;
+   int fd = open(log_path, O_WRONLY | O_CREAT | O_CLOEXEC, 0600);
+   if (fd < 0)
+      return -1;
+   if (flock(fd, LOCK_EX | LOCK_NB) != 0)
+   {
+      close(fd);
+      fprintf(stderr,
+              "aimee: %s is being indexed for the first time in the background (log: %s); "
+              "index results are unavailable until it finishes. Continue with ordinary "
+              "repository tools meanwhile.\n",
+              root, log_path);
+      return 0;
+   }
+   if (ftruncate(fd, 0) != 0)
+   {
+      close(fd);
+      return -1;
+   }
+   pid_t child = fork();
+   if (child < 0)
+   {
+      close(fd);
+      return -1;
+   }
+   if (child == 0)
+   {
+      /* Detach fully (new session, reparented to init) so the job outlives the
+       * calling tool and never becomes this process's zombie. The lock lives on
+       * the shared open file and is held until the job exits. */
+      if (setsid() < 0 || fork() != 0)
+         _exit(0);
+      int null_fd = open("/dev/null", O_RDONLY);
+      if (null_fd >= 0)
+         dup2(null_fd, STDIN_FILENO);
+      dup2(fd, STDOUT_FILENO);
+      dup2(fd, STDERR_FILENO);
+      char *const argv[] = {self, "index", "scan", (char *)root, NULL};
+      execv(self, argv);
+      _exit(127);
+   }
+   close(fd);
+   (void)waitpid(child, NULL, 0);
+   fprintf(stderr,
+           "aimee: %s is not indexed yet; indexing it now in the background (log: %s). Index "
+           "results are unavailable until it finishes. Continue with ordinary repository "
+           "tools meanwhile.\n",
+           root, log_path);
+   return 0;
+}
+#else
+
+int cli_index_bootstrap_detached(const char *root)
+{
+   (void)root;
+   return -1; /* no detached job on this platform: callers upload in the foreground */
+}
+
+#endif

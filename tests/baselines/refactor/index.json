@@ -234,6 +234,10 @@
           "sha256": "c656672c5a3045dbd8a4091d03d8c323228b2e93fe792a272214457eb86bc1be"
         },
         {
+          "path": "server-go/modules/aimee/families/schema_server_code_scan_progress.sql",
+          "sha256": "1a48cbf61f17254ee0bcb2ae27c7a5d972e67d83a86cc49b467982e28ac4986e"
+        },
+        {
           "path": "server-go/modules/aimee/families/schema_session_cache.sql",
           "sha256": "dcc34ce702c27c99f7af74364878b877f65bd2a6fea54222a516b4e24124412f"
         },
@@ -647,7 +651,7 @@
         },
         {
           "path": "src/headers/cli_v1_routes_internal.h",
-          "sha256": "bd40aa2ec523b6cb549324890f74cd9ce62f8e80d4b44f847b04c0051f427fef"
+          "sha256": "33aa8686e0c32db6860674b3a5ce1ab33b7b3a47d092c05a406365c23bc3b39e"
         },
         {
           "path": "src/headers/client_config.h",
@@ -2156,7 +2160,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "9c6c43746705ae11256d874e92e14b7e73fea6c6c4fd143e2179a16620694a27",
+      "sha256": "cf00675f9159a20d210599e1cd4e0706444d4846ace074890b033b79053288a5",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

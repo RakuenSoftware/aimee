@@ -2,6 +2,7 @@ package families
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -40,9 +41,11 @@ func TestRuntimeCodeIndexRetainedPublicationPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := schemaFS.ReadFile("schema_server_code_index.sql")
-	if _, err = pool.Exec(ctx, string(body)); err != nil {
-		t.Fatal(err)
+	for _, file := range []string{"schema_server_code_index.sql", "schema_server_code_scan_progress.sql"} {
+		body, _ := schemaFS.ReadFile(file)
+		if _, err = pool.Exec(ctx, string(body)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	db := explorationLiveDB{liveQueryer{pool}}
 	call := func(r codeIndexRequest) map[string]any {
@@ -56,16 +59,28 @@ func TestRuntimeCodeIndexRetainedPublicationPostgres(t *testing.T) {
 		if e = json.Unmarshal([]byte(fields[0]), &out); e != nil {
 			t.Fatal(e)
 		}
+		if out["status"] == "error" {
+			t.Fatalf("code operation refused: %v", out)
+		}
 		return out
 	}
-	reject := func(r codeIndexRequest) {
+	// refusal returns the structured refusal code, or "" when the store failed
+	// outright; either way the request was not accepted.
+	refusal := func(r codeIndexRequest) string {
 		t.Helper()
 		b, _ := json.Marshal(r)
-		s, _, e := runtimeCodeIndex(ctx, db, []string{string(b)})
-		if e == nil && s == store.StatusOK {
-			t.Fatal("invalid/stale publication was accepted")
+		s, fields, e := runtimeCodeIndex(ctx, db, []string{string(b)})
+		if e != nil || s != store.StatusOK {
+			return ""
 		}
+		var out map[string]any
+		if len(fields) != 1 || json.Unmarshal([]byte(fields[0]), &out) != nil || out["status"] != "error" {
+			t.Fatalf("invalid/stale publication was accepted: %v", fields)
+		}
+		code, _ := out["code"].(string)
+		return code
 	}
+	reject := func(r codeIndexRequest) { t.Helper(); refusal(r) }
 	scan := func(phase, id string, files ...codeFile) codeIndexRequest {
 		return codeIndexRequest{Route: "/v1/code/scan", Project: "fixture", Root: "/owned/fixture", Phase: phase, ScanID: id, Files: files, ExpectedFiles: len(files)}
 	}
@@ -100,6 +115,25 @@ func TestRuntimeCodeIndexRetainedPublicationPostgres(t *testing.T) {
 	if len(mismatch["hits"].([]any)) != 0 {
 		t.Fatal("foreign vector space used")
 	}
+	// A later scan reuses the stored vector for an unchanged file, under the same
+	// embedder identity only, and never for changed content.
+	lookup := func(serving string, files ...codeFile) map[string]any {
+		return call(codeIndexRequest{Route: "/v1/code/embeddings", Project: "fixture", EmbeddingServing: serving, Files: files})["embeddings"].(map[string]any)
+	}
+	print := func(content string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(content))) }
+	same := codeFile{Path: "engine.c", Fingerprint: print(file.Content)}
+	if got := lookup(file.EmbeddingServing, same); len(got) != 1 || len(got["engine.c"].([]any)) != 2 {
+		t.Fatalf("unchanged file's vector not reused: %v", got)
+	}
+	if got := lookup("other-space", same); len(got) != 0 {
+		t.Fatal("vector reused across embedder identities")
+	}
+	if got := lookup(file.EmbeddingServing, codeFile{Path: "engine.c", Fingerprint: print("changed")}); len(got) != 0 {
+		t.Fatal("vector reused for changed content")
+	}
+	if got := lookup(file.EmbeddingServing, codeFile{Path: "other.c", Fingerprint: print(file.Content)}); len(got) != 0 {
+		t.Fatal("vector reused for another path")
+	}
 	call(scan("begin", "abandoned"))
 	call(scan("stage", "abandoned", changed))
 	call(scan("abort", "abandoned"))
@@ -112,6 +146,23 @@ func TestRuntimeCodeIndexRetainedPublicationPostgres(t *testing.T) {
 	if len(find("engine")) != 0 {
 		t.Fatal("omitted source remains available")
 	}
+	// Concurrent clients join instead of cancelling each other: a scan that is
+	// making progress keeps the project, and a second begin is refused with
+	// scan_in_progress. A scan that stopped making progress is taken over, and
+	// its client learns that from scan_superseded.
+	call(scan("begin", "live"))
+	if code := refusal(scan("begin", "contender")); code != "scan_in_progress" {
+		t.Fatalf("second scan raced the live one: %q", code)
+	}
+	call(scan("stage", "live"))
+	if _, e := pool.Exec(ctx, `UPDATE server_code_scans SET touched_at=now()-interval '10 minutes' WHERE project='fixture' AND scan_id='live'`); e != nil {
+		t.Fatal(e)
+	}
+	call(scan("begin", "takeover"))
+	if code := refusal(scan("stage", "live")); code != "scan_superseded" {
+		t.Fatalf("abandoned scan kept staging: %q", code)
+	}
+	call(scan("abort", "takeover"))
 	call(codeIndexRequest{Route: "/v1/code/project/delete?project=fixture"})
 	reject(scan("begin", "reactivation"))
 	for _, sql := range []string{

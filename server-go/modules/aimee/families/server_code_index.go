@@ -41,6 +41,8 @@ type codeFile struct {
 	Embedding        []float64        `json:"embedding,omitempty"`
 	EmbeddingServing string           `json:"embedding_serving,omitempty"`
 	EmbeddingPolicy  string           `json:"embedding_policy,omitempty"`
+	// Fingerprint is sent only to /v1/code/embeddings; staging computes its own.
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 type codeIndexRequest struct {
 	FilePath         string     `json:"file_path"`
@@ -59,6 +61,18 @@ type codeIndexRequest struct {
 	EmbeddingPolicy  string     `json:"embedding_policy"`
 }
 type codeStore struct{ db store.Queryer }
+
+// codeScanLiveFor is how recently a building scan must have made progress to
+// count as in flight. A client stages a batch every few seconds; one that has
+// been silent this long has gone away, and its scan may be taken over.
+const codeScanLiveFor = "120 seconds"
+
+// codeScanRefusal is an expected outcome of concurrent scans, not a fault. It
+// is returned to the caller as a structured error so the client can act on it
+// (wait for the other scan, or stop uploading) and the server can log why.
+type codeScanRefusal struct{ code, message string }
+
+func (r *codeScanRefusal) Error() string { return r.message }
 
 func validCodePath(p string) bool {
 	if p == "" || len(p) > 4096 || !utf8.ValidString(p) || strings.ContainsAny(p, "\\\x00\r\n") || path.IsAbs(p) || path.Clean(p) != p || p == ".." || strings.HasPrefix(p, "../") {
@@ -103,6 +117,14 @@ func runtimeCodeIndex(ctx context.Context, db store.DB, fields []string) (uint32
 		raw, err = s.publish(ctx, db, r)
 	} else {
 		raw, err = s.queryCode(ctx, route, r)
+	}
+	var refusal *codeScanRefusal
+	if errors.As(err, &refusal) {
+		b, e := json.Marshal(map[string]any{"status": "error", "code": refusal.code, "error": refusal.message})
+		if e != nil {
+			return store.StatusFailed, nil, e
+		}
+		return store.StatusOK, []string{string(b)}, nil
 	}
 	if err != nil {
 		return store.StatusFailed, nil, err
@@ -160,6 +182,19 @@ func (s *codeStore) publish(ctx context.Context, db store.DB, r codeIndexRequest
 		return nil, errors.New("retired code project is unavailable")
 	}
 	if r.Phase == "begin" || r.Phase == "" {
+		// Join, do not race: a scan still making progress keeps the project. The
+		// new client waits for its publication instead of superseding it, which
+		// left concurrent sessions cancelling each other until none sealed. A scan
+		// whose client stopped making progress is taken over below.
+		if active != "" {
+			var live bool
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM server_code_scans WHERE project=$1 AND scan_id=$2 AND state='building' AND touched_at > now() - $3::interval)`, r.Project, active, codeScanLiveFor).Scan(&live); err != nil {
+				return nil, err
+			}
+			if live {
+				return nil, &codeScanRefusal{"scan_in_progress", "another client is indexing this project; it becomes available when that scan publishes"}
+			}
+		}
 		// A scan UUID is never reused or allowed to resurrect an old publication.
 		if _, err = tx.Exec(ctx, `INSERT INTO server_code_scans(project,scan_id,state) VALUES($1,$2,'building')`, r.Project, r.ScanID); err != nil {
 			return nil, err
@@ -175,7 +210,12 @@ func (s *codeStore) publish(ctx context.Context, db store.DB, r codeIndexRequest
 		active = r.ScanID
 	}
 	if active != r.ScanID {
-		return nil, errors.New("stale code scan session")
+		return nil, &codeScanRefusal{"scan_superseded", "this scan stopped making progress and another client took over the project"}
+	}
+	if r.Phase == "stage" {
+		if _, err = tx.Exec(ctx, `UPDATE server_code_scans SET touched_at=now() WHERE project=$1 AND scan_id=$2`, r.Project, r.ScanID); err != nil {
+			return nil, err
+		}
 	}
 	count := 0
 	switch r.Phase {

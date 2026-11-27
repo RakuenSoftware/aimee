@@ -78,6 +78,14 @@ int cli_index_ensure_remote(const char *root)
     * which walks the repository on the client and uploads bounded batches to
     * /v1/index/ingest. It records the canonical root/project rather than the
     * hidden per-session worktree the MCP proxy enters later. */
+   /* A first upload of a large repository takes many minutes; run it as a
+    * detached job so MCP initialize is not held for it. Upload in the
+    * foreground only when no job can be started. */
+   if (cli_index_bootstrap_detached(abs) == 0)
+   {
+      free(abs);
+      return 0;
+   }
    char *scan_argv[] = {abs};
    int previous = cli_ws_output_quiet_bind(1);
    int rc = cli_index_scan_remote(1, scan_argv);

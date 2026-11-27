@@ -30,6 +30,14 @@ int cli_index_investigate_response_is_failure(cJSON *resp);
 char *cli_index_worktree_root(const char *method, const cJSON *req);
 int cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON *response);
 int cli_ws_output_quiet_bind(int quiet);
+/* Start the first upload of an unindexed repository as one detached background
+ * job (`aimee index scan <root>`, one per repository on this host) and tell the
+ * user. Returns 0 when a job was started or is already running, -1 when none
+ * could be started and the caller should upload in the foreground. */
+int cli_index_bootstrap_detached(const char *root);
+/* Refuse (with a message) an index root inside a hidden directory such as a
+ * .aimee/.claude session worktree. Returns 1 when refused. POSIX only. */
+int cli_ws_reject_hidden_root(const char *abs_root);
 int cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root, char *out,
                             size_t out_len);
 void __attribute__((unused)) cli_v1_sleep_ms(int ms);

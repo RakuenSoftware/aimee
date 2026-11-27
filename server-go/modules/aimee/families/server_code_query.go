@@ -42,6 +42,8 @@ func (s *codeStore) queryCode(ctx context.Context, route *url.URL, req codeIndex
 		limit = 128
 	}
 	switch route.Path {
+	case "/v1/code/embeddings":
+		return s.knownEmbeddings(ctx, req)
 	case "/v1/code/span":
 		return s.codeSpan(ctx, project, req)
 	case "/v1/code/projects":
@@ -276,3 +278,30 @@ func (s *codeStore) codeSpan(ctx context.Context, project string, req codeIndexR
 
 // Instance policy is independent of request or client labels.
 func codeFusionEnabled() bool { return !strings.EqualFold(os.Getenv("AIMEE_GRAPH_FUSION"), "off") }
+
+// knownEmbeddings returns stored vectors for files whose path and content are
+// unchanged, under the same embedder identity, so a scan does not recompute
+// them. The embedded text is the path plus the content's first 8 KiB, so an
+// identical (path, content fingerprint, serving identity) has the same vector.
+// The lookup may use any project's retained versions: content is the key, and
+// no source text is returned.
+func (s *codeStore) knownEmbeddings(ctx context.Context, req codeIndexRequest) (json.RawMessage, error) {
+	if req.EmbeddingServing == "" || len(req.EmbeddingServing) > 160 || len(req.Files) > 4096 {
+		return nil, errors.New("invalid embedding lookup")
+	}
+	paths := make([]string, 0, len(req.Files))
+	prints := make([]string, 0, len(req.Files))
+	for _, f := range req.Files {
+		if !validCodePath(f.Path) || len(f.Fingerprint) != 64 {
+			return nil, errors.New("invalid embedding lookup")
+		}
+		paths = append(paths, f.Path)
+		prints = append(prints, f.Fingerprint)
+	}
+	return s.codeJSON(ctx, `SELECT json_build_object('embeddings',COALESCE(json_object_agg(k.path,k.vec),'{}'::json))::text FROM
+(SELECT DISTINCT ON (q.path) q.path, v.embedding::text::json AS vec
+   FROM unnest($1::text[],$2::text[]) AS q(path,fingerprint)
+   JOIN server_code_file_versions v ON v.fingerprint=q.fingerprint AND v.path=q.path
+  WHERE v.embedding IS NOT NULL AND v.embedding_serving=$3
+  ORDER BY q.path) k`, paths, prints, req.EmbeddingServing)
+}
