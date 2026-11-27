@@ -5,6 +5,8 @@
 #include "cJSON.h"
 #include "json_int64.h"
 #include "log.h"
+#include "platform_random.h"
+#include <unistd.h>
 
 #include <stdio.h>
 #include <stdatomic.h>
@@ -206,6 +208,16 @@ static int kb_client_code_scan_request(const char *name, const char *root, int f
          {
             char detail[192] = "";
             cJSON *body = json ? cJSON_Parse(json) : NULL;
+            /* Another client is indexing this project: not a failure. Report it
+             * as busy so callers wait for that scan instead of starting theirs. */
+            if (http_status == 409 && body &&
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "code")) &&
+                !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "code")),
+                        "scan_in_progress"))
+            {
+               snprintf(out->reason, sizeof(out->reason), "busy");
+               out->skipped = 1;
+            }
             if (body)
             {
                const cJSON *error = cJSON_GetObjectItemCaseSensitive(body, "error");
@@ -216,9 +228,8 @@ static int kb_client_code_scan_request(const char *name, const char *root, int f
                            cJSON_IsString(code) && code->valuestring[0] ? code->valuestring : "");
                cJSON_Delete(body);
             }
-            snprintf(out->message, sizeof(out->message),
-                     "code index scan rejected by the knowledge service (HTTP %d)%s", http_status,
-                     detail);
+            snprintf(out->message, sizeof(out->message), "code index scan refused (HTTP %d)%s",
+                     http_status, detail);
          }
          else
             snprintf(out->message, sizeof(out->message),
@@ -370,8 +381,13 @@ static int kb_client_index_scan_v1(const char *name, const char *root, int force
       kb_scan_push_ctx_t s;
       memset(&s, 0, sizeof(s));
       static atomic_ullong sequence = 0;
-      snprintf(s.scan_id, sizeof(s.scan_id), "client-%llu-%llu", (unsigned long long)time(NULL),
-               (unsigned long long)atomic_fetch_add(&sequence, 1) + 1);
+      /* Random suffix: two processes starting in the same second both had
+       * sequence 1 and so the same scan id, which the store refuses as reuse. */
+      char nonce[17] = "";
+      if (platform_random_hex(nonce, 16) != 0)
+         snprintf(nonce, sizeof(nonce), "%d", (int)getpid());
+      snprintf(s.scan_id, sizeof(s.scan_id), "client-%llu-%llu-%s", (unsigned long long)time(NULL),
+               (unsigned long long)atomic_fetch_add(&sequence, 1) + 1, nonce);
       s.name = name;
       s.root = root;
       s.force = force;

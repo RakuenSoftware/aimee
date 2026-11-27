@@ -129,7 +129,8 @@ var schemaHistory = []struct {
 	{55, "schema_original_input_plans.sql"},
 	{56, "schema_session_cache.sql"},
 	{57, "schema_retire_subject_erasure.sql"},
- {58, "schema_server_code_index.sql"},
+	{58, "schema_server_code_index.sql"},
+	{59, "schema_server_code_scan_progress.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

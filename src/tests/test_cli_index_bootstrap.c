@@ -90,6 +90,13 @@ int cli_index_scan_remote(int argc, char **argv)
    return g_scan_rc;
 }
 
+static int g_detached_rc = -1, g_detached_calls;
+int cli_index_bootstrap_detached(const char *root)
+{
+   (void)root;
+   g_detached_calls++;
+   return g_detached_rc;
+}
 #include "../cli_index_bootstrap.c"
 
 static void reset(int mode)
@@ -100,6 +107,8 @@ static void reset(int mode)
    g_scan_calls = 0;
    g_scan_root[0] = '\0';
    g_quiet = g_quiet_binds = g_scan_rc = 0;
+   g_detached_rc = -1;
+   g_detached_calls = 0;
 }
 
 static void test_present_project_skips_upload(void)
@@ -119,6 +128,18 @@ static void test_missing_project_uploads_canonical_root(void)
    assert(g_scan_calls == 1);
    assert(g_quiet == 0 && g_quiet_binds == 2);
    assert(strcmp(g_scan_root, g_root) == 0);
+}
+
+/* A first upload runs as a detached background job: MCP initialize is not held
+ * for the many minutes a large repository takes, and nothing uploads inline. */
+static void test_missing_project_indexes_in_the_background(void)
+{
+   reset(1);
+   g_detached_rc = 0;
+   assert(cli_index_ensure_remote(g_root) == 0);
+   assert(g_detached_calls == 1);
+   assert(g_scan_calls == 0);
+   assert(g_quiet_binds == 0);
 }
 
 static void test_unavailable_list_does_not_start_doomed_upload(void)
@@ -194,6 +215,7 @@ int main(void)
    write_manifest("bootstrap-owner");
    test_present_project_skips_upload();
    test_missing_project_uploads_canonical_root();
+   test_missing_project_indexes_in_the_background();
    test_unavailable_list_does_not_start_doomed_upload();
    test_local_transport_is_untouched();
    test_wrong_index_label_does_not_replace_owner();

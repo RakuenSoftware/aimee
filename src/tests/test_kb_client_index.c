@@ -182,6 +182,25 @@ static void test_format_kb_error_propagates_message(void)
    cJSON_Delete(resp);
 }
 
+/* Another client is indexing the project: the server says so, with its reason,
+ * so the thin client can leave that scan alone instead of reporting a failure
+ * (or, before, superseding it). */
+static void test_format_busy_scan_carries_reason_and_message(void)
+{
+   kb_client_index_scan_result_t res;
+   memset(&res, 0, sizeof(res));
+   res.skipped = 1;
+   snprintf(res.reason, sizeof(res.reason), "busy");
+   snprintf(res.message, sizeof(res.message),
+            "code index scan refused (HTTP 409): another client is indexing this project");
+
+   cJSON *resp = format(-1, &res);
+   assert(strcmp(str_field(resp, "status"), "error") == 0);
+   assert(strcmp(str_field(resp, "reason"), "busy") == 0);
+   assert(strstr(str_field(resp, "message"), "another client is indexing") != NULL);
+   cJSON_Delete(resp);
+}
+
 static void test_format_no_kb_uses_generic_message(void)
 {
    kb_client_index_scan_result_t res;
@@ -407,6 +426,7 @@ int main(void)
    test_format_success_carries_counts();
    test_format_success_carries_inspected();
    test_format_skipped_cooldown();
+   test_format_busy_scan_carries_reason_and_message();
    test_blast_radius_accepts_the_payload_the_kb_actually_sends();
    test_blast_radius_rejects_an_unresolved_lookup_by_name();
    test_blast_radius_names_the_malformed_edge_set();

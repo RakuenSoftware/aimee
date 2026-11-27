@@ -118,6 +118,15 @@ static cJSON *call_code(const char *route, const cJSON *body, const cJSON *file)
    return reply;
 }
 
+/* A structured refusal from the store ({"status":"error","code":...}): a scan
+ * another client holds, or one that was taken over. Not a store failure. */
+static int code_reply_refused(const cJSON *reply)
+{
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status"));
+   return status && strcmp(status, "error") == 0 &&
+          cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "code"));
+}
+
 static cJSON *local_code_span(const char *project, const char *path, int start, int end, int max)
 {
    cJSON *body = cJSON_CreateObject();
@@ -154,10 +163,10 @@ static char *local_code(const char *route, const void *body_v, int *status)
       {
          cJSON_Delete(reply);
          reply = call_code(route, body, cJSON_GetArrayItem(files, i));
-         if (!reply)
+         if (!reply || code_reply_refused(reply))
             break;
       }
-      if (reply)
+      if (reply && !code_reply_refused(reply))
       {
          cJSON_ReplaceItemInObjectCaseSensitive(reply, "files", cJSON_CreateNumber(n));
          cJSON_ReplaceItemInObjectCaseSensitive(reply, "inspected", cJSON_CreateNumber(n));
@@ -165,9 +174,27 @@ static char *local_code(const char *route, const void *body_v, int *status)
    }
    else
       reply = call_code(route, body, NULL);
+   const char *phase = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "phase"));
+   const char *project = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "project"));
    *status = reply ? 200 : 503;
+   if (reply && code_reply_refused(reply))
+   {
+      /* Concurrent scans of one project: expected, and the client acts on it.
+       * Say which scan and why here, where the operator looks. */
+      const char *code = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "code"));
+      const char *why = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "error"));
+      LOG_INFO("code-index", "%s %s of '%s' refused: %s (%s)", route, phase ? phase : "-",
+               project ? project : "?", code ? code : "error", why ? why : "");
+      *status = 409;
+   }
    if (!reply)
    {
+      /* The store failed outright; its own log line (module stderr) has the
+       * cause. Without this the 503 reached the client with nothing logged here. */
+      LOG_WARN("code-index",
+               "%s %s of '%s' failed: the store did not answer (see the store "
+               "module log)",
+               route, phase ? phase : "-", project ? project : "?");
       reply = cJSON_CreateObject();
       cJSON_AddStringToObject(reply, "status", "error");
       cJSON_AddStringToObject(reply, "error", "local code index unavailable or request invalid");

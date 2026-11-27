@@ -1176,48 +1176,6 @@ int cli_ws_output_quiet_bind(int quiet)
    return previous;
 }
 
-/* Keep the thin-client push path aligned with the local/canonical scanners.
- * Hidden-root projects are deliberately excluded from index reads and startup
- * cleanup so temporary .aimee/.claude worktrees cannot pollute the shared code
- * graph.  Accepting one here used to report a successful upload whose symbols
- * were immediately invisible to list/find/callers. */
-static int cli_ws_root_has_hidden_component(const char *path)
-{
-   if (!path)
-      return 0;
-   const char *p = path;
-   while (*p == '/')
-      p++;
-   const char *start = p;
-   for (;;)
-   {
-      if (*p == '/' || *p == '\0')
-      {
-         if (p > start && start[0] == '.')
-            return 1;
-         if (*p == '\0')
-            return 0;
-         start = ++p;
-      }
-      else
-      {
-         p++;
-      }
-   }
-}
-
-static int cli_ws_reject_hidden_root(const char *abs_root)
-{
-   if (!cli_ws_root_has_hidden_component(abs_root))
-      return 0;
-   fprintf(stderr,
-           "aimee: refusing to index hidden root: %s\n"
-           "  Index the non-hidden canonical checkout instead. Temporary .aimee/.claude\n"
-           "  worktrees are intentionally excluded from the shared code index.\n",
-           abs_root);
-   return 1;
-}
-
 /* Pull the human-readable message out of an {"error":...} envelope (object or
  * string form); returns NULL when there is no error. */
 static const char *cli_ws_err_message(cJSON *resp)
@@ -1290,8 +1248,11 @@ static int cli_ws_ingest_phase(const char *remote, const char *bearer, const cha
    if (!resp)
       return 1;
    const char *err = cli_ws_err_message(resp);
+   const char *reason = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "reason"));
    int rc = err ? 1 : 0;
-   if (err)
+   if (err && reason && strcmp(reason, "busy") == 0)
+      rc = 2; /* another client holds the scan; the caller reports it */
+   else if (err)
       fprintf(stderr, "aimee: index ingest %s failed: %s\n", phase, err);
    cJSON_Delete(resp);
    return rc;
@@ -1322,8 +1283,9 @@ static void ws_ingest_flush(ws_ingest_ctx_t *s)
    if (!s->batch)
       return;
    int have = cJSON_GetArraySize(s->batch);
-   if (have == 0)
+   if (have == 0 || s->failed)
    {
+      /* Nothing to send, or the scan already failed and will be aborted. */
       cJSON_Delete(s->batch);
    }
    else
@@ -1347,11 +1309,19 @@ static void ws_ingest_flush(ws_ingest_ctx_t *s)
 static int ws_ingest_collect_cb(const char *rel_path, const char *content, void *ctx)
 {
    ws_ingest_ctx_t *s = (ws_ingest_ctx_t *)ctx;
+   /* One failed batch dooms the scan (it is aborted, never sealed). Stop the
+    * walk instead of uploading every remaining batch into a dead scan. */
+   if (s->failed)
+      return 1;
    size_t flen = strlen(content) + strlen(rel_path) + 64;
 
    if (s->batch && cJSON_GetArraySize(s->batch) > 0 &&
        s->batch_bytes + flen > CLI_INGEST_BATCH_BYTES)
+   {
       ws_ingest_flush(s);
+      if (s->failed)
+         return 1;
+   }
 
    if (!s->batch)
    {
@@ -1394,10 +1364,28 @@ static int cli_ws_ingest_root(const char *remote, const char *bearer, const char
    s.base = project_name;
    s.abs_root = abs_root;
    static atomic_ullong sequence = 0;
-   snprintf(s.scan_id, sizeof(s.scan_id), "thin-%llu-%llu", (unsigned long long)time(NULL),
-            (unsigned long long)atomic_fetch_add(&sequence, 1) + 1);
+   /* Random suffix: two clients starting in the same second both had sequence
+    * 1 and so the same scan id, which the store refuses as reuse. */
+   unsigned char raw[8];
+   char nonce[17] = "";
+   if (platform_random_bytes(raw, sizeof(raw)) == 0)
+      for (size_t i = 0; i < sizeof(raw); i++)
+         snprintf(nonce + 2 * i, 3, "%02x", raw[i]);
+   else
+      snprintf(nonce, sizeof(nonce), "%d", (int)getpid());
+   snprintf(s.scan_id, sizeof(s.scan_id), "thin-%llu-%llu-%s", (unsigned long long)time(NULL),
+            (unsigned long long)atomic_fetch_add(&sequence, 1) + 1, nonce);
 
-   if (cli_ws_ingest_phase(remote, bearer, s.base, abs_root, "begin", s.scan_id, 0, NULL) != 0)
+   int begin = cli_ws_ingest_phase(remote, bearer, s.base, abs_root, "begin", s.scan_id, 0, NULL);
+   if (begin == 2)
+   {
+      fprintf(stderr,
+              "aimee: '%s' is already being indexed by another session; it becomes available "
+              "when that scan publishes\n",
+              project_name);
+      return 2;
+   }
+   if (begin != 0)
       return 1;
 
    code_collect_files_cb(abs_root, ws_ingest_collect_cb, &s);
@@ -2312,9 +2300,18 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
          {
             cJSON_Delete(projects);
             projects = NULL;
-            int previous_json = cli_ws_output_quiet_bind(effective_json_output);
-            int ingest_rc = cli_ws_ingest_tree(remote, bearer, worktree_root);
-            (void)cli_ws_output_quiet_bind(previous_json);
+            /* A first index uploads the whole tree (thousands of files can take
+             * many minutes). Run it detached so discovery answers now instead of
+             * holding the session; fall back to the blocking upload only when no
+             * background job can be started. */
+            int bootstrap = cli_index_bootstrap_detached(worktree_root);
+            int ingest_rc = 1;
+            if (bootstrap < 0)
+            {
+               int previous_json = cli_ws_output_quiet_bind(effective_json_output);
+               ingest_rc = cli_ws_ingest_tree(remote, bearer, worktree_root);
+               (void)cli_ws_output_quiet_bind(previous_json);
+            }
             if (ingest_rc == 0)
             {
                projects =
@@ -2324,9 +2321,11 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
             }
             if (!cJSON_GetObjectItemCaseSensitive(req, "project"))
             {
-               fprintf(stderr,
-                       "aimee: could not register the active repository for index discovery: %s\n",
-                       worktree_root);
+               if (bootstrap < 0)
+                  fprintf(stderr,
+                          "aimee: could not register the active repository for index "
+                          "discovery: %s\n",
+                          worktree_root);
                cJSON_Delete(projects);
                free(worktree_root);
                cJSON_Delete(req);
