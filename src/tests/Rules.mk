@@ -3584,7 +3584,7 @@ $(TESTPREFIX)/unit-test-embed-result: $(OBJDIR)/tests/test_embed_result.o $(OBJD
 
 $(TESTPREFIX)/unit-test-kb-sidecar-admission: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_kb_sidecar_admission.o \
     $(OBJDIR)/kb/kb_ocr_sidecar.o $(OBJDIR)/kb/kb_tsr_sidecar.o \
-    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/util.o $(OBJDIR)/core/codec/base64.o $(OBJDIR)/cJSON.o
+    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/util.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lm
 
 $(TESTPREFIX)/unit-test-cron-runtime: $(OBJDIR)/tests/test_cron_runtime.o \
@@ -6611,8 +6611,8 @@ test-postgres-session-transport: $(TESTPREFIX)/unit-test-postgres-session-transp
 $(TESTPREFIX)/unit-test-server-native-primitive: $(OBJDIR)/tests/test_server_native_primitive.o $(OBJDIR)/server/server_native_primitive.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-server-memory-setup: $(OBJDIR)/tests/test_server_memory_setup.o $(OBJDIR)/server/server_config.o $(OBJDIR)/json_fluent.o $(OBJDIR)/core/connection/endpoint.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+$(TESTPREFIX)/unit-test-server-memory-setup: $(OBJDIR)/tests/test_server_memory_setup.o $(OBJDIR)/server/server_config.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(CORE_CONNECTION_LIB) $(OURO_CONNECTION_LIB) $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-ir-session-event: $(OBJDIR)/tests/test_ir_session_event.o \
     $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o

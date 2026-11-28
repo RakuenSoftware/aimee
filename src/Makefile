@@ -204,26 +204,27 @@ LEAN_SERVER = ../aimee-server-lean
 LEAN_KB = ../aimee-kb-lean
 LEAN_OBJDIR = build/obj-lean
 
-CORE_CODEC_SRCS = core/codec/base64.c
+CORE_CODEC_SRCS = core/codec/ouroboros_codec_compat.c
 CORE_CODEC_OBJS = $(CORE_CODEC_SRCS:%.c=$(OBJDIR)/%.o)
 CORE_CODEC_LIB = $(OBJDIR)/libaimee-core-codec.a
 
 $(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
+	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
 # Linker flag sets (layered -- each level adds to the previous)
-L_MINIMAL = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lpthread $(EXTRA_L_FLAGS) $(CORE_CODEC_LIB)
-L_CORE    = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) $(CORE_CODEC_LIB)
+L_MINIMAL = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lpthread $(EXTRA_L_FLAGS) $(CORE_CODEC_LIB) $(OURO_CODEC_LIB)
+L_CORE    = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) $(OURO_CONNECTION_LIB) $(CORE_CODEC_LIB) $(OURO_CODEC_LIB)
 L_AGENT   = $(L_CORE) -lssl -lcrypto
 L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS)
-L_CLIENT  = $(L_MINIMAL) $(CORE_CONNECTION_LIB) $(TLS_LIBS) -lm -lz
+L_CLIENT  = $(L_MINIMAL) $(CORE_CONNECTION_LIB) $(OURO_CONNECTION_LIB) $(TLS_LIBS) -lm -lz
 L_HTTP    = $(L_MINIMAL) -lssl -lcrypto
 # Server link flags. The daemon owns the store directly: it links libpq and the
 # same postgres + memory modules as aimee-kb, so it no longer routes every
 # store-bound call through the kb client socket. Keep the audit hardening flags
 # on this newer direct-store topology.
-L_SERVER  = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) $(LIBSECRET_LIBS) $(CORE_CODEC_LIB)
-L_KB      = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) $(LIBSECRET_LIBS) $(CORE_CODEC_LIB)
+L_SERVER  = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) $(OURO_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) $(LIBSECRET_LIBS) $(CORE_CODEC_LIB) $(OURO_CODEC_LIB)
+L_KB      = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) $(OURO_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) $(LIBSECRET_LIBS) $(CORE_CODEC_LIB) $(OURO_CODEC_LIB)
 
 # --- Platform sources (posix/ and linux/) ---
 # PLATFORM_AGENT_SRCS: agent-layer platform files that depend on LIB_AGENT functions
@@ -421,7 +422,10 @@ OURO_RING_DRY_RUN := $(findstring n,$(OURO_RING_MAKE_LETTERS))$(findstring q,$(O
 ifneq ($(filter clean distclean,$(MAKECMDGOALS)),)
 else ifneq ($(OURO_RING_DRY_RUN),)
 C_FLAGS += -Ibuild/deps/ouroboros-ring/current/include
+CLIENT_C_FLAGS += -Ibuild/deps/ouroboros-ring/current/include
 OURO_RING_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-ring.a
+OURO_CODEC_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-codec.a
+OURO_CONNECTION_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-connection.a
 else
 OURO_RING_PKGCONFIG := $(shell OURO_RING_CC='$(CC)' OURO_RING_CFLAGS='$(PIC_FLAGS) $(EXTRA_C_FLAGS)' \
                          python3 ../scripts/provide_ouroboros_ring.py build/deps/ouroboros-ring)
@@ -429,8 +433,12 @@ ifeq ($(strip $(OURO_RING_PKGCONFIG)),)
 $(error could not provide an ouroboros ring in the range dependencies/ouroboros-ring.json names; see the message above)
 endif
 OURO_RING_PC = PKG_CONFIG_PATH='$(OURO_RING_PKGCONFIG)' pkg-config
-C_FLAGS += $(shell $(OURO_RING_PC) --cflags ouroboros-ring)
+OURO_RING_CFLAGS_PC := $(shell $(OURO_RING_PC) --cflags ouroboros-ring)
+C_FLAGS += $(OURO_RING_CFLAGS_PC)
+CLIENT_C_FLAGS += $(OURO_RING_CFLAGS_PC)
 OURO_RING_LIB := $(shell $(OURO_RING_PC) --variable=libdir ouroboros-ring)/libouroboros-ring.a
+OURO_CODEC_LIB := $(shell $(OURO_RING_PC) --variable=libdir ouroboros-codec)/libouroboros-codec.a
+OURO_CONNECTION_LIB := $(shell $(OURO_RING_PC) --variable=libdir ouroboros-connection)/libouroboros-connection.a
 endif
 export AIMEE_CORE_REQUIRED_VERSION := $(strip $(shell sed -n '1p' core/VERSION))
 AIMEE_CORE_PREFIX ?=
@@ -444,13 +452,10 @@ CORE_CONNECTION_SRCS :=
 CORE_CONNECTION_OBJS :=
 CORE_CONNECTION_LIB := $(AIMEE_CORE_PREFIX)/lib/libaimee-core-connection.a
 else
-CORE_CONNECTION_SRCS = core/connection/auth.c core/connection/control.c \
-                  core/connection/endpoint.c core/connection/http1.c \
-                  core/connection/socket.c
-CORE_CONNECTION_SRCS += core/connection/tls_openssl.c
+CORE_CONNECTION_SRCS = core/connection/ouroboros_connection_compat.c \
+                       core/connection/ouroboros_tls_openssl_compat.c
 ifeq ($(WITH_TLS),1)
-CORE_CONNECTION_SRCS += core/connection/native_tls_identity.c core/connection/native_tls_path.c
-CORE_CONNECTION_SRCS += core/connection/native_tls_openssl.c
+CORE_CONNECTION_SRCS += core/connection/ouroboros_native_tls_compat.c
 endif
 CORE_CONNECTION_OBJS = $(CORE_CONNECTION_SRCS:%.c=$(OBJDIR)/%.o)
 CORE_CONNECTION_LIB = $(OBJDIR)/libaimee-core-connection.a
@@ -1347,7 +1352,7 @@ $(BINARY): $(CLI_OBJS) $(CLIENT_SUPPORT_OBJS) $(CORE_CONNECTION_LIB)
 THINCLIENT_LIBRARY_INPUTS = $(filter cli_client.c cli_chat_stream.c %/session_event.c,$(CLI_SRCS)) $(IR_BASE_SRCS) aimee_home.c aimee_sha256.c vendor/cJSON.c $(CORE_CONNECTION_SRCS)
 $(THINCLIENT_LIBRARY): Makefile $(THINCLIENT_LIBRARY_INPUTS) $(wildcard headers/*.h modules/ir/include/aimee/ir/*.h core/connection/*.h core/connection/include/aimee/core/connection/*.h vendor/headers/*.h) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB))
 	@mkdir -p $(dir $@)
-	$(CC) $(CLIENT_C_FLAGS) -fPIC -shared -DAIMEE_CLIENT_LIBRARY -o $@ $(THINCLIENT_LIBRARY_INPUTS) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB)) $(TLS_LIBS) -lcrypto -lpthread $(EXTRA_L_FLAGS)
+	$(CC) $(CLIENT_C_FLAGS) -fPIC -shared -DAIMEE_CLIENT_LIBRARY -o $@ $(THINCLIENT_LIBRARY_INPUTS) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB)) $(OURO_CONNECTION_LIB) $(TLS_LIBS) -lcrypto -lpthread $(EXTRA_L_FLAGS)
 $(THINCLIENT_PC): $(THINCLIENT_LIBRARY) Makefile
 	@mkdir -p $(dir $@)
 	@printf '%s\n' 'prefix=$(abspath $(dir $(THINCLIENT_LIBRARY)))' 'libdir=$${prefix}' 'includedir=$(abspath headers)' '' 'Name: aimee-client' 'Description: Shared Aimee thinclient transport' 'Version: 1.0.0' 'Libs: -L$${libdir} -laimee-client' 'Cflags: -I$${includedir}' > $@

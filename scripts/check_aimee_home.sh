@@ -25,7 +25,7 @@ ALLOWLIST=(
   "src/headers/platform_path.h"
   "src/posix/platform_path.c"
   "src/windows/platform_path.c"
-  "src/core/connection/native_tls_path.c"
+  "src/core/connection/ouroboros_native_tls_compat.c"
 )
 
 # Forbidden patterns:
