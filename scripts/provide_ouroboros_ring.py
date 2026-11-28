@@ -94,7 +94,11 @@ def in_range(version: str, compatible: str) -> bool:
 
 def tree_digest(root: Path) -> str:
     entries = []
-    for path in sorted(p for p in root.rglob("*") if p.is_file() and not p.is_symlink()):
+    files = sorted(
+        (p for p in root.rglob("*") if p.is_file() and not p.is_symlink()),
+        key=lambda p: p.relative_to(root).as_posix(),
+    )
+    for path in files:
         rel = path.relative_to(root).as_posix()
         entries.append(f"{rel}\0{hashlib.sha256(path.read_bytes()).hexdigest()}\n")
     return hashlib.sha256("".join(entries).encode()).hexdigest()
@@ -308,7 +312,7 @@ def main(argv: list[str]) -> int:
     if len(argv) == 3 and argv[1] == "--digest":
         print(tree_digest(Path(argv[2])))
     elif len(argv) == 3 and argv[1] == "--source":
-        print(provide_source(Path(argv[2])))
+        print(provide_source(Path(argv[2])).as_posix())
     elif len(argv) == 2 and argv[1] == "--check-go":
         check_go()
     elif len(argv) == 2 and not argv[1].startswith("-"):

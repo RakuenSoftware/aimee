@@ -165,7 +165,7 @@ check_archive() {
 }
 
 check_archive src/build/obj/libaimee-core-connection.a \
-   '^ouroboros_connection_compat\.o$' connection
+   '^ouroboros_(connection|tls_openssl|native_tls)_compat\.o$' connection
 
 # The ring's client package is what module processes link, so it must stay a
 # client: no host entry point (ouro_host_*, the contract's host API) may be

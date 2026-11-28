@@ -390,10 +390,12 @@ target_include_directories(aimee-core-connection PUBLIC ${AIMEE_CORE_CONNECTION_
 target_compile_options(aimee-core-connection PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-core-connection PUBLIC ouroboros-connection)
 if(UNIX AND NOT APPLE)
-    target_compile_definitions(aimee-core-connection PRIVATE AIMEE_CORE_HAS_OPENSSL)
+    target_sources(aimee-core-connection PRIVATE
+        ${AIMEE_SRC_DIR}/core/connection/ouroboros_tls_openssl_compat.c)
 endif()
 if(WITH_TLS)
-    target_compile_definitions(aimee-core-connection PRIVATE AIMEE_CORE_HAS_NATIVE_TLS)
+    target_sources(aimee-core-connection PRIVATE
+        ${AIMEE_SRC_DIR}/core/connection/ouroboros_native_tls_compat.c)
 endif()
 endif()
 

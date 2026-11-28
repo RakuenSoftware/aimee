@@ -422,6 +422,7 @@ OURO_RING_DRY_RUN := $(findstring n,$(OURO_RING_MAKE_LETTERS))$(findstring q,$(O
 ifneq ($(filter clean distclean,$(MAKECMDGOALS)),)
 else ifneq ($(OURO_RING_DRY_RUN),)
 C_FLAGS += -Ibuild/deps/ouroboros-ring/current/include
+CLIENT_C_FLAGS += -Ibuild/deps/ouroboros-ring/current/include
 OURO_RING_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-ring.a
 OURO_CODEC_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-codec.a
 OURO_CONNECTION_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-connection.a
@@ -432,7 +433,9 @@ ifeq ($(strip $(OURO_RING_PKGCONFIG)),)
 $(error could not provide an ouroboros ring in the range dependencies/ouroboros-ring.json names; see the message above)
 endif
 OURO_RING_PC = PKG_CONFIG_PATH='$(OURO_RING_PKGCONFIG)' pkg-config
-C_FLAGS += $(shell $(OURO_RING_PC) --cflags ouroboros-ring)
+OURO_RING_CFLAGS_PC := $(shell $(OURO_RING_PC) --cflags ouroboros-ring)
+C_FLAGS += $(OURO_RING_CFLAGS_PC)
+CLIENT_C_FLAGS += $(OURO_RING_CFLAGS_PC)
 OURO_RING_LIB := $(shell $(OURO_RING_PC) --variable=libdir ouroboros-ring)/libouroboros-ring.a
 OURO_CODEC_LIB := $(shell $(OURO_RING_PC) --variable=libdir ouroboros-codec)/libouroboros-codec.a
 OURO_CONNECTION_LIB := $(shell $(OURO_RING_PC) --variable=libdir ouroboros-connection)/libouroboros-connection.a
@@ -449,10 +452,10 @@ CORE_CONNECTION_SRCS :=
 CORE_CONNECTION_OBJS :=
 CORE_CONNECTION_LIB := $(AIMEE_CORE_PREFIX)/lib/libaimee-core-connection.a
 else
-CORE_CONNECTION_SRCS = core/connection/ouroboros_connection_compat.c
-C_FLAGS += -DAIMEE_CORE_HAS_OPENSSL
+CORE_CONNECTION_SRCS = core/connection/ouroboros_connection_compat.c \
+                       core/connection/ouroboros_tls_openssl_compat.c
 ifeq ($(WITH_TLS),1)
-C_FLAGS += -DAIMEE_CORE_HAS_NATIVE_TLS
+CORE_CONNECTION_SRCS += core/connection/ouroboros_native_tls_compat.c
 endif
 CORE_CONNECTION_OBJS = $(CORE_CONNECTION_SRCS:%.c=$(OBJDIR)/%.o)
 CORE_CONNECTION_LIB = $(OBJDIR)/libaimee-core-connection.a

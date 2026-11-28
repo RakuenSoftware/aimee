@@ -1,29 +1,18 @@
-/* Thin compatibility adapter forwarding aimee/core/connection headers to
- * ouroboros-connection (ouroboros/connection headers), keeping Aimee's own
- * AIMEE_HOME / AIMEE_PROFILE directory resolver and env-var bridges in Aimee. */
+/* Thin compatibility adapter forwarding non-TLS aimee/core/connection headers
+ * (auth, control, endpoint, http1, socket) to ouroboros-connection. */
 #include <aimee/core/connection/auth.h>
 #include <aimee/core/connection/control.h>
 #include <aimee/core/connection/endpoint.h>
 #include <aimee/core/connection/http1.h>
-#include <aimee/core/connection/native_tls.h>
 #include <aimee/core/connection/socket.h>
-#if defined(AIMEE_CORE_HAS_OPENSSL)
-#include <aimee/core/connection/tls_openssl.h>
-#include <ouroboros/connection/tls_openssl.h>
-#endif
 
 #include <ouroboros/connection/auth.h>
 #include <ouroboros/connection/control.h>
 #include <ouroboros/connection/endpoint.h>
 #include <ouroboros/connection/http1.h>
-#include <ouroboros/connection/native_tls.h>
 #include <ouroboros/connection/socket.h>
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-
-/* --- auth ----------------------------------------------------------------- */
 
 int aimee_core_credential_equal(const char *left, const char *right)
 {
@@ -57,8 +46,6 @@ int aimee_core_would_leak_credential(int transport_is_secure, const char *host,
    return ouro_would_leak_credential(transport_is_secure, host, credential);
 }
 
-/* --- control -------------------------------------------------------------- */
-
 static ouro_control_t to_ouro_control(const aimee_core_control_t *c)
 {
    ouro_control_t oc;
@@ -89,9 +76,8 @@ aimee_core_result_t aimee_core_control_init(aimee_core_control_t *control, int64
    if (!control)
       return AIMEE_CORE_INVALID;
    ouro_control_t oc;
-   ouro_result_t r =
-       ouro_control_init(&oc, deadline_ns, cancel_poll_ms, (ouro_cancel_fn)cancelled,
-                         cancel_context);
+   ouro_result_t r = ouro_control_init(&oc, deadline_ns, cancel_poll_ms, (ouro_cancel_fn)cancelled,
+                                       cancel_context);
    if (r == OURO_OK)
       from_ouro_control(control, &oc);
    return (aimee_core_result_t)r;
@@ -105,9 +91,8 @@ aimee_core_result_t aimee_core_control_init_timeout(aimee_core_control_t *contro
    if (!control)
       return AIMEE_CORE_INVALID;
    ouro_control_t oc;
-   ouro_result_t r =
-       ouro_control_init_timeout(&oc, timeout_ms, cancel_poll_ms, (ouro_cancel_fn)cancelled,
-                                 cancel_context);
+   ouro_result_t r = ouro_control_init_timeout(&oc, timeout_ms, cancel_poll_ms,
+                                               (ouro_cancel_fn)cancelled, cancel_context);
    if (r == OURO_OK)
       from_ouro_control(control, &oc);
    return (aimee_core_result_t)r;
@@ -138,8 +123,6 @@ aimee_core_result_t aimee_core_wait_fd(int fd, aimee_core_wait_t events,
    return (aimee_core_result_t)ouro_wait_fd(fd, (ouro_wait_t)events, &oc);
 }
 
-/* --- endpoint ------------------------------------------------------------- */
-
 int aimee_core_endpoint_parse(const char *value, aimee_core_endpoint_t *out)
 {
    if (!out)
@@ -154,8 +137,6 @@ int aimee_core_endpoint_parse(const char *value, aimee_core_endpoint_t *out)
    }
    return rc;
 }
-
-/* --- http1 ---------------------------------------------------------------- */
 
 static void copy_resp_to_ouro(ouro_http1_response_t *dst, const aimee_core_http1_response_t *src)
 {
@@ -232,8 +213,6 @@ void aimee_core_http1_response_free(aimee_core_http1_response_t *response)
    ouro_http1_response_free(&orsp);
    copy_resp_from_ouro(response, &orsp);
 }
-
-/* --- socket --------------------------------------------------------------- */
 
 int aimee_core_socket_connect(const char *host, const char *port, int timeout_ms)
 {
@@ -336,197 +315,3 @@ void aimee_core_socket_close(int fd)
 {
    ouro_socket_close(fd);
 }
-
-/* --- OpenSSL TLS backend -------------------------------------------------- */
-
-#if defined(AIMEE_CORE_HAS_OPENSSL)
-SSL_CTX *aimee_core_tls_client_context(void)
-{
-   return ouro_tls_client_context();
-}
-
-SSL_CTX *aimee_core_tls_server_context(void)
-{
-   return ouro_tls_server_context();
-}
-
-int aimee_core_tls_use_identity_pem(SSL_CTX *ctx, const char *cert_pem, const char *key_pem)
-{
-   return ouro_tls_use_identity_pem(ctx, cert_pem, key_pem);
-}
-
-int aimee_core_tls_trust_pem(SSL_CTX *ctx, const char *ca_pem)
-{
-   return ouro_tls_trust_pem(ctx, ca_pem);
-}
-
-int aimee_core_tls_use_identity_files(SSL_CTX *ctx, const char *cert_path, const char *key_path)
-{
-   return ouro_tls_use_identity_files(ctx, cert_path, key_path);
-}
-
-int aimee_core_tls_trust_file(SSL_CTX *ctx, const char *ca_path)
-{
-   return ouro_tls_trust_file(ctx, ca_path);
-}
-
-int aimee_core_tls_configure_client_session(SSL *ssl, const char *host, int verify_name)
-{
-   return ouro_tls_configure_client_session(ssl, host, verify_name);
-}
-
-SSL *aimee_core_tls_client_session_new(SSL_CTX *ctx, int fd, const char *host, int verify_name)
-{
-   return ouro_tls_client_session_new(ctx, fd, host, verify_name);
-}
-
-int aimee_core_tls_handshake_client(SSL *ssl)
-{
-   return ouro_tls_handshake_client(ssl);
-}
-
-aimee_core_result_t aimee_core_tls_handshake_client_controlled(SSL *ssl,
-                                                               const aimee_core_control_t *control)
-{
-   if (!control)
-      return (aimee_core_result_t)ouro_tls_handshake_client_controlled(ssl, NULL);
-   ouro_control_t oc = to_ouro_control(control);
-   return (aimee_core_result_t)ouro_tls_handshake_client_controlled(ssl, &oc);
-}
-
-int aimee_core_tls_write_all(SSL *ssl, const void *buffer, size_t length)
-{
-   return ouro_tls_write_all(ssl, buffer, length);
-}
-
-aimee_core_result_t aimee_core_tls_write_all_controlled(SSL *ssl, const void *buffer, size_t length,
-                                                        const aimee_core_control_t *control,
-                                                        size_t *bytes_written)
-{
-   if (!control)
-      return (aimee_core_result_t)ouro_tls_write_all_controlled(ssl, buffer, length, NULL,
-                                                                bytes_written);
-   ouro_control_t oc = to_ouro_control(control);
-   return (aimee_core_result_t)ouro_tls_write_all_controlled(ssl, buffer, length, &oc,
-                                                             bytes_written);
-}
-
-long aimee_core_tls_read(SSL *ssl, void *buffer, size_t length)
-{
-   return ouro_tls_read(ssl, buffer, length);
-}
-
-aimee_core_result_t aimee_core_tls_read_controlled(SSL *ssl, void *buffer, size_t length,
-                                                   const aimee_core_control_t *control,
-                                                   size_t *bytes_read)
-{
-   if (!control)
-      return (aimee_core_result_t)ouro_tls_read_controlled(ssl, buffer, length, NULL, bytes_read);
-   ouro_control_t oc = to_ouro_control(control);
-   return (aimee_core_result_t)ouro_tls_read_controlled(ssl, buffer, length, &oc, bytes_read);
-}
-
-int aimee_core_tls_read_exact(SSL *ssl, void *buffer, size_t length)
-{
-   return ouro_tls_read_exact(ssl, buffer, length);
-}
-
-void aimee_core_tls_session_free(SSL *ssl)
-{
-   ouro_tls_session_free(ssl);
-}
-#endif
-
-/* --- Native TLS client ---------------------------------------------------- */
-
-#if defined(AIMEE_CORE_HAS_NATIVE_TLS)
-static const char *aimee_default_tls_home(void)
-{
-   static _Thread_local char path[4096];
-   const char *override = getenv("AIMEE_HOME");
-   if (override && override[0])
-   {
-      int n = snprintf(path, sizeof(path), "%s", override);
-      return n > 0 && (size_t)n < sizeof(path) ? path : NULL;
-   }
-   const char *home = getenv("HOME");
-#ifdef _WIN32
-   if (!home || !home[0])
-      home = getenv("USERPROFILE");
-#endif
-   if (!home || !home[0])
-      return NULL;
-   const char *profile = getenv("AIMEE_PROFILE");
-   int n = profile && profile[0]
-               ? snprintf(path, sizeof(path), "%s/.config/aimee/profiles/%s", home, profile)
-               : snprintf(path, sizeof(path), "%s/.config/aimee", home);
-   return n > 0 && (size_t)n < sizeof(path) ? path : NULL;
-}
-
-static void aimee_tls_bridge_env(void)
-{
-   ouro_native_tls_set_home_resolver(aimee_default_tls_home);
-   const char *insec = getenv("AIMEE_TLS_INSECURE");
-   if (insec && insec[0] && !getenv("OURO_TLS_INSECURE"))
-   {
-#ifdef _WIN32
-      _putenv_s("OURO_TLS_INSECURE", insec);
-#else
-      setenv("OURO_TLS_INSECURE", insec, 0);
-#endif
-   }
-   const char *p12 = getenv("AIMEE_TLS_CLIENT_P12_PASS");
-   if (p12 && p12[0] && !getenv("OURO_TLS_CLIENT_P12_PASS"))
-   {
-#ifdef _WIN32
-      _putenv_s("OURO_TLS_CLIENT_P12_PASS", p12);
-#else
-      setenv("OURO_TLS_CLIENT_P12_PASS", p12, 0);
-#endif
-   }
-}
-
-aimee_tls_t *aimee_tls_connect(int fd, const char *host)
-{
-   aimee_tls_bridge_env();
-   return (aimee_tls_t *)ouro_native_tls_connect(fd, host);
-}
-
-aimee_tls_t *aimee_tls_connect_home(int fd, const char *host, const char *home)
-{
-   aimee_tls_bridge_env();
-   return (aimee_tls_t *)ouro_native_tls_connect_home(fd, host, home);
-}
-
-int aimee_tls_write_all(aimee_tls_t *t, const void *buf, size_t len)
-{
-   return ouro_native_tls_write_all((ouro_native_tls_t *)t, buf, len);
-}
-
-long aimee_tls_read(aimee_tls_t *t, void *buf, size_t len)
-{
-   return ouro_native_tls_read((ouro_native_tls_t *)t, buf, len);
-}
-
-void aimee_tls_free(aimee_tls_t *t)
-{
-   ouro_native_tls_free((ouro_native_tls_t *)t);
-}
-
-int aimee_tls_client_cert_eligible(const char *home, char *crt, size_t crt_n, char *key,
-                                   size_t key_n)
-{
-   return ouro_native_tls_client_cert_eligible(home, crt, crt_n, key, key_n);
-}
-
-void aimee_tls_suppress_client_cert(int on)
-{
-   ouro_native_tls_suppress_client_cert(on);
-}
-
-int aimee_tls_fetch_peer_cert(const char *host, const char *port, char **pem_out, char *fp_out,
-                              size_t fp_n)
-{
-   return ouro_native_tls_fetch_peer_cert(host, port, pem_out, fp_out, fp_n);
-}
-#endif

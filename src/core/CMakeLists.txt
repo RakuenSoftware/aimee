@@ -57,11 +57,11 @@ target_include_directories(aimee-core-connection PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(aimee-core-connection PUBLIC ouroboros-connection)
 if(AIMEE_CORE_WITH_NATIVE_TLS)
-    target_compile_definitions(aimee-core-connection PRIVATE AIMEE_CORE_HAS_NATIVE_TLS)
+    target_sources(aimee-core-connection PRIVATE connection/ouroboros_native_tls_compat.c)
 endif()
 if(UNIX AND NOT APPLE AND AIMEE_CORE_WITH_OPENSSL)
     set(AIMEE_CORE_CONFIG_NEEDS_OPENSSL ON)
-    target_compile_definitions(aimee-core-connection PRIVATE AIMEE_CORE_HAS_OPENSSL)
+    target_sources(aimee-core-connection PRIVATE connection/ouroboros_tls_openssl_compat.c)
 endif()
 
 install(TARGETS aimee-core-connection EXPORT aimee-core-targets
