@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/RakuenSoftware/ouroboros-ring",
-  "compatible": "0.5.0",
-  "release": "v0.5.0",
-  "release_tree_sha256": "6f042c40197cd018422e22fa861e4dd14b767ab34abf3931383c38041014d0fd"
+  "compatible": "0.5.1",
+  "release": "v0.5.1",
+  "release_tree_sha256": "ad7a71c7232181382d145f8626487426ac63198fe3430ef7421497a789941e10"
 }

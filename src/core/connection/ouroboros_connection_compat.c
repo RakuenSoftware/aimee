@@ -46,9 +46,9 @@ int aimee_core_would_leak_credential(int transport_is_secure, const char *host,
    return ouro_would_leak_credential(transport_is_secure, host, credential);
 }
 
-static ouro_control_t to_ouro_control(const aimee_core_control_t *c)
+static ouro_io_control_t to_ouro_control(const aimee_core_control_t *c)
 {
-   ouro_control_t oc;
+   ouro_io_control_t oc;
    oc.deadline_ns = c->deadline_ns;
    oc.cancel_poll_ms = c->cancel_poll_ms;
    oc.cancelled = (ouro_cancel_fn)c->cancelled;
@@ -56,7 +56,7 @@ static ouro_control_t to_ouro_control(const aimee_core_control_t *c)
    return oc;
 }
 
-static void from_ouro_control(aimee_core_control_t *dst, const ouro_control_t *src)
+static void from_ouro_control(aimee_core_control_t *dst, const ouro_io_control_t *src)
 {
    dst->deadline_ns = src->deadline_ns;
    dst->cancel_poll_ms = src->cancel_poll_ms;
@@ -75,9 +75,9 @@ aimee_core_result_t aimee_core_control_init(aimee_core_control_t *control, int64
 {
    if (!control)
       return AIMEE_CORE_INVALID;
-   ouro_control_t oc;
-   ouro_result_t r = ouro_control_init(&oc, deadline_ns, cancel_poll_ms, (ouro_cancel_fn)cancelled,
-                                       cancel_context);
+   ouro_io_control_t oc;
+   ouro_result_t r = ouro_io_control_init(&oc, deadline_ns, cancel_poll_ms,
+                                          (ouro_cancel_fn)cancelled, cancel_context);
    if (r == OURO_OK)
       from_ouro_control(control, &oc);
    return (aimee_core_result_t)r;
@@ -90,9 +90,9 @@ aimee_core_result_t aimee_core_control_init_timeout(aimee_core_control_t *contro
 {
    if (!control)
       return AIMEE_CORE_INVALID;
-   ouro_control_t oc;
-   ouro_result_t r = ouro_control_init_timeout(&oc, timeout_ms, cancel_poll_ms,
-                                               (ouro_cancel_fn)cancelled, cancel_context);
+   ouro_io_control_t oc;
+   ouro_result_t r = ouro_io_control_init_timeout(&oc, timeout_ms, cancel_poll_ms,
+                                                  (ouro_cancel_fn)cancelled, cancel_context);
    if (r == OURO_OK)
       from_ouro_control(control, &oc);
    return (aimee_core_result_t)r;
@@ -102,16 +102,16 @@ aimee_core_result_t aimee_core_control_check(const aimee_core_control_t *control
 {
    if (!control)
       return AIMEE_CORE_OK;
-   ouro_control_t oc = to_ouro_control(control);
-   return (aimee_core_result_t)ouro_control_check(&oc);
+   ouro_io_control_t oc = to_ouro_control(control);
+   return (aimee_core_result_t)ouro_io_control_check(&oc);
 }
 
 int aimee_core_control_remaining_ms(const aimee_core_control_t *control)
 {
    if (!control)
       return -1;
-   ouro_control_t oc = to_ouro_control(control);
-   return ouro_control_remaining_ms(&oc);
+   ouro_io_control_t oc = to_ouro_control(control);
+   return ouro_io_control_remaining_ms(&oc);
 }
 
 aimee_core_result_t aimee_core_wait_fd(int fd, aimee_core_wait_t events,
@@ -119,7 +119,7 @@ aimee_core_result_t aimee_core_wait_fd(int fd, aimee_core_wait_t events,
 {
    if (!control)
       return (aimee_core_result_t)ouro_wait_fd(fd, (ouro_wait_t)events, NULL);
-   ouro_control_t oc = to_ouro_control(control);
+   ouro_io_control_t oc = to_ouro_control(control);
    return (aimee_core_result_t)ouro_wait_fd(fd, (ouro_wait_t)events, &oc);
 }
 
@@ -251,7 +251,7 @@ aimee_core_result_t aimee_core_socket_connect_controlled(const char *host, const
 {
    if (!control)
       return (aimee_core_result_t)ouro_socket_connect_controlled(host, port, flags, NULL, out_fd);
-   ouro_control_t oc = to_ouro_control(control);
+   ouro_io_control_t oc = to_ouro_control(control);
    return (aimee_core_result_t)ouro_socket_connect_controlled(host, port, flags, &oc, out_fd);
 }
 
@@ -263,7 +263,7 @@ aimee_core_result_t aimee_core_socket_connect_addresses(const struct addrinfo *a
 {
    if (!control)
       return (aimee_core_result_t)ouro_socket_connect_addresses(addresses, flags, NULL, out_fd);
-   ouro_control_t oc = to_ouro_control(control);
+   ouro_io_control_t oc = to_ouro_control(control);
    return (aimee_core_result_t)ouro_socket_connect_addresses(addresses, flags, &oc, out_fd);
 }
 #endif
@@ -286,7 +286,7 @@ aimee_core_result_t aimee_core_socket_write_all_controlled(int fd, const void *b
    if (!control)
       return (aimee_core_result_t)ouro_socket_write_all_controlled(fd, buffer, length, NULL,
                                                                    bytes_written);
-   ouro_control_t oc = to_ouro_control(control);
+   ouro_io_control_t oc = to_ouro_control(control);
    return (aimee_core_result_t)ouro_socket_write_all_controlled(fd, buffer, length, &oc,
                                                                 bytes_written);
 }
@@ -302,7 +302,7 @@ aimee_core_result_t aimee_core_socket_read_controlled(int fd, void *buffer, size
 {
    if (!control)
       return (aimee_core_result_t)ouro_socket_read_controlled(fd, buffer, length, NULL, bytes_read);
-   ouro_control_t oc = to_ouro_control(control);
+   ouro_io_control_t oc = to_ouro_control(control);
    return (aimee_core_result_t)ouro_socket_read_controlled(fd, buffer, length, &oc, bytes_read);
 }
 

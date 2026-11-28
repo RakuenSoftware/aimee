@@ -4,9 +4,9 @@
 #include <aimee/core/connection/tls_openssl.h>
 #include <ouroboros/connection/tls_openssl.h>
 
-static ouro_control_t to_ouro_control(const aimee_core_control_t *c)
+static ouro_io_control_t to_ouro_control(const aimee_core_control_t *c)
 {
-   ouro_control_t oc;
+   ouro_io_control_t oc;
    oc.deadline_ns = c->deadline_ns;
    oc.cancel_poll_ms = c->cancel_poll_ms;
    oc.cancelled = (ouro_cancel_fn)c->cancelled;
@@ -64,7 +64,7 @@ aimee_core_result_t aimee_core_tls_handshake_client_controlled(SSL *ssl,
 {
    if (!control)
       return (aimee_core_result_t)ouro_tls_handshake_client_controlled(ssl, NULL);
-   ouro_control_t oc = to_ouro_control(control);
+   ouro_io_control_t oc = to_ouro_control(control);
    return (aimee_core_result_t)ouro_tls_handshake_client_controlled(ssl, &oc);
 }
 
@@ -80,7 +80,7 @@ aimee_core_result_t aimee_core_tls_write_all_controlled(SSL *ssl, const void *bu
    if (!control)
       return (aimee_core_result_t)ouro_tls_write_all_controlled(ssl, buffer, length, NULL,
                                                                 bytes_written);
-   ouro_control_t oc = to_ouro_control(control);
+   ouro_io_control_t oc = to_ouro_control(control);
    return (aimee_core_result_t)ouro_tls_write_all_controlled(ssl, buffer, length, &oc,
                                                              bytes_written);
 }
@@ -96,7 +96,7 @@ aimee_core_result_t aimee_core_tls_read_controlled(SSL *ssl, void *buffer, size_
 {
    if (!control)
       return (aimee_core_result_t)ouro_tls_read_controlled(ssl, buffer, length, NULL, bytes_read);
-   ouro_control_t oc = to_ouro_control(control);
+   ouro_io_control_t oc = to_ouro_control(control);
    return (aimee_core_result_t)ouro_tls_read_controlled(ssl, buffer, length, &oc, bytes_read);
 }
 
