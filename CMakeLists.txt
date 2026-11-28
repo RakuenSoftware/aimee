@@ -326,10 +326,29 @@ find_package(Threads REQUIRED)
 # still require OpenSSL for SHA-256 and signed-manifest verification.
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 
-# The thin client consumes the portable codec.
-add_library(aimee-core-codec STATIC ${AIMEE_SRC_DIR}/core/codec/base64.c)
+# Obtain the pinned ouroboros-ring release (verified against dependencies/ouroboros-ring.json)
+# for the portable ouroboros-codec and ouroboros-connection C11 libraries.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/scripts/provide_ouroboros_ring.py"
+            --source "${CMAKE_CURRENT_BINARY_DIR}/deps/ouroboros-ring"
+    OUTPUT_VARIABLE OURO_SOURCE_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE OURO_SOURCE_RC)
+if(NOT OURO_SOURCE_RC EQUAL 0 OR OURO_SOURCE_DIR STREQUAL "")
+    message(FATAL_ERROR "Failed to provide pinned ouroboros-ring source for codec/connection")
+endif()
+set(OURO_BUILD_RING OFF CACHE BOOL "" FORCE)
+set(OURO_BUILD_CODEC ON CACHE BOOL "" FORCE)
+set(OURO_BUILD_CONNECTION ON CACHE BOOL "" FORCE)
+set(OURO_WITH_NATIVE_TLS ${WITH_TLS} CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+add_subdirectory("${OURO_SOURCE_DIR}/c" "${CMAKE_CURRENT_BINARY_DIR}/ouroboros-ring-build" EXCLUDE_FROM_ALL)
+
+# The thin client consumes the portable codec via ouroboros-codec.
+add_library(aimee-core-codec STATIC ${AIMEE_SRC_DIR}/core/codec/ouroboros_codec_compat.c)
 target_compile_features(aimee-core-codec PUBLIC c_std_11)
 target_include_directories(aimee-core-codec PUBLIC ${AIMEE_SRC_DIR}/core/codec/include)
+target_link_libraries(aimee-core-codec PUBLIC ouroboros-codec)
 
 
 # On Windows (MinGW), link statically so executables don't depend on
@@ -365,19 +384,17 @@ if(AIMEE_USE_INSTALLED_CORE)
     add_library(aimee-core-connection ALIAS aimee::aimee-core-connection)
 else()
 add_library(aimee-core-connection STATIC
-    ${AIMEE_SRC_DIR}/core/connection/auth.c
-    ${AIMEE_SRC_DIR}/core/connection/control.c
-    ${AIMEE_SRC_DIR}/core/connection/endpoint.c
-    ${AIMEE_SRC_DIR}/core/connection/http1.c
-    ${AIMEE_SRC_DIR}/core/connection/socket.c
+    ${AIMEE_SRC_DIR}/core/connection/ouroboros_connection_compat.c
 )
 target_include_directories(aimee-core-connection PUBLIC ${AIMEE_CORE_CONNECTION_INCLUDE_DIR})
 target_compile_options(aimee-core-connection PRIVATE ${AIMEE_COMMON_WARNINGS})
-if(WIN32)
-    target_compile_definitions(aimee-core-connection PRIVATE _WIN32_WINNT=0x0A00)
-    target_link_libraries(aimee-core-connection PUBLIC ws2_32)
+target_link_libraries(aimee-core-connection PUBLIC ouroboros-connection)
+if(UNIX AND NOT APPLE)
+    target_compile_definitions(aimee-core-connection PRIVATE AIMEE_CORE_HAS_OPENSSL)
 endif()
-
+if(WITH_TLS)
+    target_compile_definitions(aimee-core-connection PRIVATE AIMEE_CORE_HAS_NATIVE_TLS)
+endif()
 endif()
 
 add_executable(aimee
@@ -446,42 +463,6 @@ if(WIN32)
 endif()
 if(WITH_TLS)
     target_compile_definitions(aimee PRIVATE WITH_TLS)
-endif()
-if(WITH_TLS AND NOT AIMEE_USE_INSTALLED_CORE)
-    target_sources(aimee-core-connection PRIVATE
-        ${AIMEE_SRC_DIR}/core/connection/native_tls_identity.c
-        ${AIMEE_SRC_DIR}/core/connection/native_tls_path.c)
-    if(APPLE)
-        # macOS: Secure Transport (system frameworks; universal-binary safe; Keychain
-        # trust). Deprecated since 10.15 -> silence the deprecation warning for THIS
-        # TU only (the build is -Werror); never globally.
-        target_sources(aimee-core-connection PRIVATE
-            ${AIMEE_SRC_DIR}/core/connection/native_tls_securetransport.c)
-        set_source_files_properties(
-            ${AIMEE_SRC_DIR}/core/connection/native_tls_securetransport.c
-            PROPERTIES COMPILE_OPTIONS "-Wno-deprecated-declarations")
-        find_library(SECURITY_FRAMEWORK Security REQUIRED)
-        find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
-        target_link_libraries(aimee-core-connection PUBLIC
-            ${SECURITY_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
-    elseif(WIN32)
-        # Windows: Schannel/SSPI (no OpenSSL; Windows certificate store). ncrypt
-        # supplies CNG (NCryptImportKey) for mTLS client-key import. Pin
-        # _WIN32_WINNT>=0x0A00 at the build level too (the schannel TU also sets
-        # it before any include) so the CNG/CERT_NCRYPT_KEY_SPEC symbols are
-        # exposed regardless of header include order.
-        target_sources(aimee-core-connection PRIVATE
-            ${AIMEE_SRC_DIR}/core/connection/native_tls_schannel.c)
-        target_compile_definitions(aimee-core-connection PRIVATE _WIN32_WINNT=0x0A00)
-        target_link_libraries(aimee-core-connection PUBLIC secur32 crypt32 ncrypt)
-    else()
-        # Linux/other POSIX: OpenSSL.
-        find_package(OpenSSL REQUIRED)
-        target_sources(aimee-core-connection PRIVATE
-            ${AIMEE_SRC_DIR}/core/connection/tls_openssl.c
-            ${AIMEE_SRC_DIR}/core/connection/native_tls_openssl.c)
-        target_link_libraries(aimee-core-connection PUBLIC OpenSSL::SSL OpenSSL::Crypto)
-    endif()
 endif()
 
 

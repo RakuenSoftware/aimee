@@ -27,7 +27,10 @@ only the headers.
 """
 from __future__ import annotations
 
-import fcntl
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
 import hashlib
 import io
 import json
@@ -192,8 +195,36 @@ def provide(root: Path) -> Path:
     # Two builds of one tree (make and cmake, or two make runs) must not build
     # or repoint the same installation at once.
     with open(root / ".lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
         return provide_locked(root)
+
+
+def provide_source(root: Path) -> Path:
+    """Return a verified ouroboros-ring source directory (for cross-platform CMake)."""
+    root = root.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    with open(root / ".lock", "w") as lock:
+        if fcntl is not None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        pin = contract()
+        local = os.environ.get("OURO_RING_SOURCE", "").strip()
+        if local:
+            source = Path(local).resolve()
+            version = (source / "VERSION").read_text().strip()
+            if not in_range(version, pin["compatible"]):
+                fail(f"OURO_RING_SOURCE {source} is ring {version}, outside compatible "
+                     f"{pin['compatible']} in {CONTRACT.relative_to(ROOT)}")
+            return source
+        dest = root / f"src-{pin['release']}-{pin['release_tree_sha256'][:12]}"
+        stamp = dest / ".verified"
+        if not stamp.is_file():
+            shutil.rmtree(dest, ignore_errors=True)
+            with tempfile.TemporaryDirectory(dir=root) as scratch:
+                unpacked = release_source(pin, Path(scratch))
+                shutil.move(str(unpacked), str(dest))
+            stamp.write_text(f"{pin['release']} {pin['release_tree_sha256']}\n")
+        return dest
 
 
 def remove_fetched_tree(root: Path) -> None:
@@ -276,6 +307,8 @@ def check_go() -> None:
 def main(argv: list[str]) -> int:
     if len(argv) == 3 and argv[1] == "--digest":
         print(tree_digest(Path(argv[2])))
+    elif len(argv) == 3 and argv[1] == "--source":
+        print(provide_source(Path(argv[2])))
     elif len(argv) == 2 and argv[1] == "--check-go":
         check_go()
     elif len(argv) == 2 and not argv[1].startswith("-"):

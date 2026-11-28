@@ -118,8 +118,9 @@ while IFS= read -r hit; do
    fail=1
 done < <(grep -nE 'ouroboros-ring[^ ]*/c/(src|include)|OURO_RING_[A-Z_]*\)/c/|OURO_RING_NAMES|OURO_RING_SRCS|ouroboros-ring/[a-z_]+\.o' src/Makefile | grep -vE '^[0-9]+:[[:space:]]*#' || true)
 
-# The CMake thin client must not consume the ring.
-if grep -nE 'target_link_libraries\(aimee[^)]*ouroboros' CMakeLists.txt >/dev/null; then
+# The CMake thin client must not consume the local ring (portable
+# ouroboros-codec and ouroboros-connection are permitted).
+if grep -nE 'target_link_libraries\(aimee[^)]*ouroboros-ring' CMakeLists.txt >/dev/null; then
    printf 'FAIL: CMake thin client links the local ring\n' >&2
    fail=1
 fi
@@ -164,7 +165,7 @@ check_archive() {
 }
 
 check_archive src/build/obj/libaimee-core-connection.a \
-   '^(auth|control|endpoint|http1|socket|tls_openssl|native_tls_(identity|path|openssl|securetransport|schannel))\.o$' connection
+   '^ouroboros_connection_compat\.o$' connection
 
 # The ring's client package is what module processes link, so it must stay a
 # client: no host entry point (ouro_host_*, the contract's host API) may be

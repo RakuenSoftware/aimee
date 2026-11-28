@@ -1,6 +1,7 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+find_dependency(ouroboros-ring)
 if(@AIMEE_CORE_CONFIG_NEEDS_OPENSSL@)
     find_dependency(OpenSSL)
 endif()
